@@ -45,6 +45,7 @@
 #include "wolfflight.h"
 #include "wolfgrid.h"
 #include "wolfobjectprops.h"
+#include "wolfskis.h"   // [SKIS 2026-11-06/]
 
 // ════════════════════════════════════════════════════════════════════════════════════════
 // The three vehicles. Every published figure below cites where it was read (researched
@@ -1251,7 +1252,9 @@ void WolfDrive::receiveDashboard(const LLUUID& invoice, const std::vector<std::s
 
     // A script driving the dashboard is the strongest sign this is a vehicle: open it once per
     // seat unless the driver closed it (World > Car Dashboard brings it back).
-    if (!mDashOn && !mAutoDone && gSavedSettings.getBOOL("WolfDashboardAuto") && !WolfFlight::instance().active())
+    // [SKIS 2026-11-06] never for skis / a snowboard: theirs is the Ski HUD (wolfskis.h)
+    if (!mDashOn && !mAutoDone && gSavedSettings.getBOOL("WolfDashboardAuto") && !WolfFlight::instance().active()
+        && !WolfSkis::seatIsSkis(mScript.mVehicle))
     {
         mAutoDone = true;
         mAutoOpened = true;
@@ -1643,8 +1646,10 @@ void WolfDrive::watchSeat()
     // Sitting on something physical is sitting in a vehicle that is being driven: open the
     // dashboard once per seat (WolfDashboardAuto), unless Flight / Sailing Mode is up or the
     // driver closed it. Scripts usually go physical after the sit, so this keeps looking.
+    // [SKIS 2026-11-06] skis and a snowboard go physical too, but theirs is the Ski HUD (wolfskis.h): never the dashboard
     if (!mDashOn && !mAutoDone && onWolf() && root->flagUsePhysics()
-        && gSavedSettings.getBOOL("WolfDashboardAuto") && !WolfFlight::instance().active())
+        && gSavedSettings.getBOOL("WolfDashboardAuto") && !WolfFlight::instance().active()
+        && !WolfSkis::seatIsSkis(root->getID()))
     {
         mAutoDone = true;
         mAutoOpened = true;

@@ -17,6 +17,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfnaturesounds.h"
+#include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
 
 #include <cmath>
 
@@ -357,7 +358,7 @@ void WolfNatureSounds::assess(F64 now)
     }
     for (S32 i = 0; i < LAYER_COUNT; ++i)
     {
-        mLayers[i].mTarget = llclamp(target[i], 0.f, 1.f);
+        mLayers[i].mTarget = llclamp(target[i] * WolfSoundEffects::level(WolfSoundEffects::NATURE), 0.f, 1.f);   // [SOUND EFFECTS 2026-11-06/]
         mLayers[i].mFast = fast;
         if (mLayers[i].mTarget > 0.f) mActive = true;
     }

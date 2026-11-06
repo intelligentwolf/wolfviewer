@@ -228,6 +228,8 @@ export class VRBar {
         this._dirty = true;
     }
     setPageState(id, on) { if (this.pageState[id] !== on) { this.pageState[id] = on; this._dirty = true; } }
+    // [Wolf 2026-11-06] which headset this is and how that was decided (wolfvr.js headsetWords), on the bar's hint line
+    setHeadset(text) { if (this.headsetText !== text) { this.headsetText = text; this._dirty = true; } }
 
     // [VR BAR IN THE ROOM 2026-11-04] Paul: "the MENU itself would be better floating in the air than moving with the
     // headset". The bar stands in the room like the windows: it opens in front of where the resident looks (and comes
@@ -473,14 +475,15 @@ export class VRBar {
             ctx.font = 'bold 24px sans-serif';
             ctx.fillText(this._toast.text.slice(0, 70), W / 2, H - 26);
         } else {
-            let hint = 'Point at a button and pull the trigger \u00b7 Close is top right';
+            let hint = (this.headsetText ? this.headsetText + ' \u00b7 ' : '') + 'Point at a button and pull the trigger \u00b7 Close is top right';
             const h = this.hover;
             if (h && h.kind === 'action') {
                 const a = this.slots[h.i] && this.slots[h.i].action;
                 if (a) hint = a.hint || a.why || this.labelFor(a);
             }
             ctx.fillStyle = '#7f93b5';
-            ctx.font = '22px sans-serif';
+            let px = 22;   // [Wolf 2026-11-06] smaller only if the line would not fit the bar
+            do { ctx.font = `${px}px sans-serif`; px -= 1; } while (px > 16 && ctx.measureText(hint).width > W - 40);
             ctx.fillText(hint, W / 2, H - 26);
         }
         this.tex.needsUpdate = true;

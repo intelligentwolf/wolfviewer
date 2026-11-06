@@ -303,6 +303,25 @@
          lltoolbarview.cpp toggleBottomToolbar). Plane / Boat: the Flight / Sailing Mode deck; hiding it
          keeps the mode and its autopilot running (WolfFlight::toggleDeck). When the bar is hidden this
          panel shrinks to a strip just tall enough for the icons. -->
+    <!-- [SKIS 2026-11-06] Paul: "add it to the bottom row of tiny icons" - skis and poles, left of the toolbar's own
+         icon: opens / closes Wolf World > Skis and Snowboards..., lit while riding (lltoolbarview.cpp mWolfSkisToggle). -->
+    <button layout="topleft"
+            name="wolf_skis_toggle"
+            width="22"
+            height="22"
+            right="-218"
+            top="66"
+            follows="right|bottom"
+            is_toggle="true"
+            image_unselected="WolfTb_Skis_Off"
+            image_selected="WolfTb_Skis_On"
+            image_pressed="WolfTb_Skis_On"
+            image_pressed_selected="WolfTb_Skis_Off"
+            image_hover_unselected="WolfTb_Skis_Off"
+            image_hover_selected="WolfTb_Skis_On"
+            tab_stop="false"
+            chrome="true"
+            tool_tip="Skis and Snowboards: put on skis or a snowboard and ride down the mountain (Wolf Territories)" />
     <button layout="topleft"
             name="wolf_toolbar_toggle"
             width="22"

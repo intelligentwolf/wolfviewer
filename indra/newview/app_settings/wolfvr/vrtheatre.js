@@ -83,6 +83,9 @@ export class VRTheatre {
         const back = ROWS_BEHIND * ROW_GAP + 1.4;
         const half = Math.max(SEATS_PER_SIDE * SEAT_PITCH + 1.6, width / 2 + 2.2);
         const top = Math.max(floorY + 4.2, height / 2 + 1.2);
+        // [Wolf 2026-11-06] the room's inside, in the screen group's frame (the e2e test checks a curved and a flat screen,
+        // near and far, stand inside it)
+        this.bounds = { front, back, half, floor: floorY, top };
         const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); this.room.add(m); return m; };
 
         // floor: flat at the front (the resident's row and the space before the screen), then a step per row behind

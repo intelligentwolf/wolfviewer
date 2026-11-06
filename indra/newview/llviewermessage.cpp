@@ -31,6 +31,7 @@
 #include "wolfdrive.h"    // <WolfViewer 2026-10-11/> the speedboat helm hears its boat's "Speed = N"
 #include "wolfdjchatcontrol.h"   // <WolfViewer 2026-10-19/> Wolf DJ chat control
 #include "wolfhelm.h"            // <WolfViewer 2026-10-28/> the Captain's Helm hears its ship
+#include "wolfskis.h"            // [SKIS 2026-11-06/] skis and snowboards hear their ride
 #include "wolfair.h"             // <WolfViewer 2026-11-01/> Wolf Air: the flight deck's dogfight band hears its plane
 #include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
@@ -164,6 +165,7 @@
 #include "tea.h" // <FS:AW opensim currency support>
 #include "NACLantispam.h"
 #include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/] refusal dialogs
+#include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/] the teleport sound
 #include "chatbar_as_cmdline.h"
 
 extern void on_new_message(const LLSD& msg);
@@ -2870,6 +2872,11 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
         {
             return;
         }
+        // [SKIS 2026-11-06] skis' / a snowboard's "WolfSki1|..." line to the Ski HUD (wolfskis.h), taken the same way.
+        if (WolfSkis::instance().onObjectChat(from_id, type_temp, helm_line))
+        {
+            return;
+        }
     }
     // </WolfViewer>
 
@@ -3584,7 +3591,7 @@ void process_teleport_start(LLMessageSystem *msg, void**)
     {
         gTeleportDisplay = true;
         gAgent.setTeleportState( LLAgent::TELEPORT_START );
-        make_ui_sound("UISndTeleportOut");
+        WolfSoundEffects::playTeleport();   // [SOUND EFFECTS 2026-11-06] the chosen sound at its own volume (was make_ui_sound("UISndTeleportOut"))
 
         LL_INFOS("Messaging") << "Teleport initiated by remote TeleportStart message with TeleportFlags: " <<  teleport_flags << LL_ENDL;
 
@@ -3760,7 +3767,7 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
             gTeleportDisplay = true;
             LLViewerMessage::getInstance()->mTeleportStartedSignal();
             gAgent.setTeleportState(LLAgent::TELEPORT_REQUESTED);
-            make_ui_sound("UISndTeleportOut");
+            WolfSoundEffects::playTeleport();   // [SOUND EFFECTS 2026-11-06] the chosen sound at its own volume (was make_ui_sound("UISndTeleportOut"))
         }
     }
     else if (gAgent.getTeleportState() == LLAgent::TELEPORT_MOVING)

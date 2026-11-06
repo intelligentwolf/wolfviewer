@@ -118,6 +118,7 @@
 #include "llpresetsmanager.h"
 #include "NACLantispam.h"
 #include "wolfswim.h"   // [WOLF SWIM 2026-10-20/] no auto-land while swimming (propagate)
+#include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/] the teleport sound
 
 using namespace LLAvatarAppearanceDefines;
 
@@ -4921,7 +4922,7 @@ bool LLAgent::teleportCore(bool is_local)
         }
         // </FS:Ansariel>
     }
-    make_ui_sound("UISndTeleportOut");
+    WolfSoundEffects::playTeleport();   // [SOUND EFFECTS 2026-11-06] the chosen sound at its own volume (was make_ui_sound("UISndTeleportOut"))
 
     gObjectList.resetDerenderList();
 

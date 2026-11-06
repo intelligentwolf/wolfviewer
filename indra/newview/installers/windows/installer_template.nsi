@@ -391,6 +391,28 @@ ${EndIf}
 
 after_instdir:
 
+# <WolfViewer 2026-11-06> Ticket 574: every release's installer has the same file name, so a
+# Downloads folder fills with "...Setup.exe", "...Setup (1).exe", and opening an old one quietly put
+# the old version back over the new one. The install section writes the version it installed
+# (WriteRegStr ... "Version" "${VERSION_LONG}", e.g. "7.2.4.96"); when that is newer than this
+# installer, say so and offer the download page. A silent run is the viewer's own updater, which
+# only ever offers a newer release (wolfupdate.cpp), so it is never stopped here.
+${IfNot} ${Silent}
+  ReadRegStr $0 SHELL_CONTEXT "${INSTNAME_KEY}" "Version"
+  ${If} $0 != ""
+    ${VersionCompare} "$0" "${VERSION_LONG}" $1   # 1 = the installed one is newer
+    ${If} $1 == "1"
+      MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 \
+        "A newer WolfViewer ($0) is already on this computer.$\n$\nThis installer is an older version (${VERSION_LONG}), probably an old download.$\n$\nDo you want to put the older version back anyway?$\n$\nChoose No to keep the newer one. The download page then opens, in case you want the newest installer." \
+        IDYES wolf_older_anyway
+      ${OpenURL} "https://www.wolf-grid.com/index.php?f=osv"
+      Quit
+      wolf_older_anyway:
+    ${EndIf}
+  ${EndIf}
+${EndIf}
+# </WolfViewer>
+
 Call CheckCPUFlags							# Make sure we have SSE2 support
 
 # Two checks here, if we are an AVX2 build we want to abort if no AVX2 support on this CPU.
@@ -884,6 +906,64 @@ Function RemoveOldReleaseInstalls
 FunctionEnd
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; <WolfViewer 2026-11-06> Ticket 574: may the uninstaller remove this shortcut?
+;; In: the .lnk path on the stack. Out: "0" on the stack when the shortcut starts something outside
+;; this copy's folder ($INSTDIR, the uninstaller's own folder), so it belongs to another WolfViewer
+;; and stays; "1" otherwise. A shortcut whose target cannot be read (no file, no PowerShell, an empty
+;; target) gives "1": the stock behaviour, removing it by name. NSIS has no shortcut reader of its own,
+;; so the target comes from Windows' WScript.Shell through PowerShell (present on every Windows this
+;; installer accepts, CheckWindowsVersion); single quotes in the path are doubled for PowerShell.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+Function un.WolfShortcutIsOurs
+  Exch $0          # the .lnk path (the caller's $0 is kept on the stack)
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  StrCpy $5 "1"    # the answer
+  ${IfNot} ${FileExists} "$0"
+    Goto wolf_lnk_done
+  ${EndIf}
+  ${WordReplace} "$0" "'" "''" "+" $1
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "(New-Object -ComObject WScript.Shell).CreateShortcut('$1').TargetPath"`
+  Pop $2           # exit code, or "error" / "timeout"
+  Pop $3           # what it printed: the target, then a line break
+  ${If} $2 != "0"
+    Goto wolf_lnk_done
+  ${EndIf}
+  # drop the trailing line break(s)
+  ${Do}
+    StrCpy $4 $3 1 -1
+    ${If} $4 == "$\r"
+    ${OrIf} $4 == "$\n"
+      StrCpy $3 $3 -1
+    ${Else}
+      ${ExitDo}
+    ${EndIf}
+  ${Loop}
+  ${If} $3 == ""
+    Goto wolf_lnk_done
+  ${EndIf}
+  # inside this copy's folder? ("$INSTDIR\" so ...\WolfViewerOS-Release-w52 is not taken for
+  # ...\WolfViewerOS-Release; StrCmp, used by ${If} ==, ignores case like Windows paths do)
+  StrLen $4 "$INSTDIR\"
+  StrCpy $1 $3 $4
+  ${If} $1 != "$INSTDIR\"
+    DetailPrint "Keeping $0: it starts $3, another copy of WolfViewer"
+    StrCpy $5 "0"
+  ${EndIf}
+wolf_lnk_done:
+  StrCpy $0 $5
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0          # the answer on the stack, the caller's $0 back
+FunctionEnd
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Uninstall Section
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Section Uninstall
@@ -918,10 +998,25 @@ DeleteRegKey HKEY_CLASSES_ROOT "Applications\$INSTEXE"
 DeleteRegKey HKEY_CLASSES_ROOT "Applications\${VIEWER_EXE}"
 
 # Clean up shortcuts
-Delete "$SMPROGRAMS\$INSTSHORTCUT\*.*"
-RMDir  "$SMPROGRAMS\$INSTSHORTCUT"
+# <WolfViewer 2026-11-06> Ticket 574: another WolfViewer on the same computer has shortcuts with the
+# same names (${SHORTCUT}), so removing one copy took the other's Start Menu entry and desktop icon
+# away ("the shortcut no longer exists"). Each is removed only when it starts a program in THIS
+# copy's folder (un.WolfShortcutIsOurs).
+Push "$SMPROGRAMS\$INSTSHORTCUT\$INSTSHORTCUT.lnk"
+Call un.WolfShortcutIsOurs
+Pop $0
+${If} $0 == "1"
+  Delete "$SMPROGRAMS\$INSTSHORTCUT\*.*"
+  RMDir  "$SMPROGRAMS\$INSTSHORTCUT"
+${EndIf}
 
-Delete "$DESKTOP\$INSTSHORTCUT.lnk"
+Push "$DESKTOP\$INSTSHORTCUT.lnk"
+Call un.WolfShortcutIsOurs
+Pop $0
+${If} $0 == "1"
+  Delete "$DESKTOP\$INSTSHORTCUT.lnk"
+${EndIf}
+# </WolfViewer>
 Delete "$INSTDIR\$INSTSHORTCUT.lnk"
 Delete "$INSTDIR\Uninstall $INSTSHORTCUT.lnk"
 

@@ -53,7 +53,8 @@
         <radio_item height="22" label="Apple Vision Pro" layout="topleft" left="252" name="avp" top="32" value="avp" width="240" />
         <radio_item height="22" label="Other / not listed" layout="topleft" left="252" name="other" top="64" value="other" width="240" />
     </radio_group>
-    <text follows="left|top" height="16" layout="topleft" left="264" name="headset_note" top="256" width="244" wrap="true">You can also choose on the headset page.</text>
+    <!-- [Wolf 2026-11-06] a headset whose browser names it (Meta Quest, PICO) uses its own settings over this choice -->
+    <text follows="left|top" height="40" layout="topleft" left="264" name="headset_note" top="256" width="244" wrap="true">A Meta Quest or PICO names itself and uses its own settings. To choose differently, choose on the headset page.</text>
 
     <!-- [VR AUDIO 2026-11-04] Paul: "don't forget audio ... move it to the headset?" -->
     <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="sound_label" top="302" width="110">Play sound in:</text>

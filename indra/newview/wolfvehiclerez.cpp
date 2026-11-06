@@ -131,6 +131,11 @@ namespace
         return type;
     }
 
+    // [SKIS 2026-11-06] "skis" is a pair: the sentences below say "are" and "them" for it (wolfskis.h).
+    bool plural(const std::string& type) { return type == "skis"; }
+    std::string isAre(const std::string& type) { return plural(type) ? "are" : "is"; }
+    std::string itThem(const std::string& type) { return plural(type) ? "them" : "it"; }
+
     // How far in front of the avatar the vehicle's middle goes, metres: clear of the avatar for its size, and
     // further for the aircraft so they have room.
     F32 aheadFor(const std::string& type)
@@ -143,6 +148,9 @@ namespace
         if (type == "helicopter") return 9.f;
         if (type == "spaceship") return 10.f;
         if (type == "plane") return 12.f;
+        // [SKIS 2026-11-06] skis and a snowboard go just in front of the feet (the root box is 1.8 / 1.6 m long:
+        // region-terrain-work/skis-2026-11-06/tuning.py), so the rider steps straight onto them
+        if (type == "skis" || type == "snowboard") return 1.5f;
         return 5.f;
     }
 
@@ -305,11 +313,11 @@ namespace
     std::string notFoundMessage(const std::string& type)
     {
         const std::string n = niceName(type);
-        std::string msg = "You don't have a free Wolf " + n + " in your inventory yet.\n\n"
+        std::string msg = std::string("You don't have ") + (plural(type) ? "" : "a ") + "free Wolf " + n + " in your inventory yet.\n\n"
                           "Take a free copy on the Sandbox region: it goes into your inventory, and REZ finds it there.";
         if (libraryHasVehicles())
         {
-            msg += "\n\nThe Library has free Wolf vehicles too, but no " + n + " yet.";
+            msg += "\n\nThe Library has free Wolf vehicles too, but no " + n + " yet.";   // ("no skis" reads right too)
         }
         msg += "\n\n(REZ looks for an object whose description starts \"" + DESC_PREFIX + type + "\".)";
         return msg;
@@ -495,7 +503,8 @@ namespace
         // after the inventory search, so a hypergrid teleport in between would have rezzed it on the foreign region.
         if (!WolfGrid::isOnWolfTerritoriesConfirmed())
         {
-            finish("Your free Wolf " + niceName(s.mType) + " is for Wolf Territories regions, so it was not rezzed here.");
+            finish("Your free Wolf " + niceName(s.mType) + " " + isAre(s.mType) + " for Wolf Territories regions, so "
+                   + (plural(s.mType) ? "they were" : "it was") + " not rezzed here.");
             return;
         }
         Spot spot;
@@ -662,8 +671,9 @@ namespace
         State& s = st();
         if (!gAgent.getRegion() || gAgent.getRegion()->getHandle() != s.mRegionHandle)
         {
-            finish("You left the region before your " + niceName(s.mType) + " appeared. If it was rezzed it is where you were; "
-                   "it stays there until you take it back.");
+            finish("You left the region before your " + niceName(s.mType) + " appeared. "
+                   + (plural(s.mType) ? std::string("If they were rezzed they are where you were; they stay there until you take them back.")
+                                      : std::string("If it was rezzed it is where you were; it stays there until you take it back.")));
             return;
         }
         const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -725,7 +735,8 @@ namespace
                 // Two of the same vehicle, both new to the viewer, as near the spot as each other: one may be an
                 // older copy that only now came into view. Neither is chosen.
                 LL_INFOS("WolfVehicleRez") << matches.size() << " matching '" << s.mItemName << "' near the rez point: not sitting" << LL_ENDL;
-                finish("Your " + niceName(s.mType) + " is here, but there is more than one " + niceName(s.mType)
+                finish("Your " + niceName(s.mType) + " " + isAre(s.mType) + " here, but there is more than one "
+                       + (plural(s.mType) ? "pair of " : "") + niceName(s.mType)
                        + " of yours just in front of you, so you weren't sat in one. Right-click yours and choose Sit Here.");
                 return;
             }
@@ -739,15 +750,17 @@ namespace
             // leaves the vehicle exactly as the sim put it
             if (RlvActions::isRlvEnabled() && !RlvActions::canSit(o))
             {
-                finish("Your " + niceName(s.mType) + " is here, but you can't sit on it now: an RLV restriction is on.");
+                finish("Your " + niceName(s.mType) + " " + isAre(s.mType) + " here, but you can't sit on " + itThem(s.mType)
+                       + " now: an RLV restriction is on.");
                 return;
             }
             // Source: llviewermenu.cpp:5955-5961 - under RLV @standtp a Sit while seated only stands the avatar up
             if (RlvActions::isRlvEnabled() && gRlvHandler.hasBehaviour(RLV_BHVR_STANDTP)
                 && isAgentAvatarValid() && gAgentAvatarp->isSitting())
             {
-                finish("Your " + niceName(s.mType) + " is here, but you are sitting on something else and an RLV restriction "
-                       "(standtp) means sitting elsewhere only stands you up. Stand up, then right-click it and choose Sit Here.");
+                finish("Your " + niceName(s.mType) + " " + isAre(s.mType) + " here, but you are sitting on something else and an RLV "
+                       "restriction (standtp) means sitting elsewhere only stands you up. Stand up, then right-click "
+                       + itThem(s.mType) + " and choose Sit Here.");
                 return;
             }
             faceHeading(o, s.mHeading);
@@ -790,7 +803,8 @@ namespace
         }
         if (LLFrameTimer::getElapsedSeconds() > s.mDeadline)
         {
-            finish("Your " + niceName(s.mType) + " is here, but sitting in it didn't work. Right-click it and choose Sit Here.");
+            finish("Your " + niceName(s.mType) + " " + isAre(s.mType) + " here, but sitting " + (plural(s.mType) || s.mType == "snowboard" ? "on " : "in ")
+                   + itThem(s.mType) + " didn't work. Right-click " + itThem(s.mType) + " and choose Sit Here.");
         }
     }
 
@@ -903,9 +917,14 @@ namespace WolfVehicleRez
             case STAGE_FINDING:   return "Finding your free Wolf " + niceName(s.mType) + " in your inventory...";
             case STAGE_COPYING:   return "Copying your free Wolf " + niceName(s.mType) + " from the Library...";
             case STAGE_APPEARING: return "Rezzing your " + niceName(s.mType) + "...";
-            case STAGE_SITTING:   return "Sitting you in your " + niceName(s.mType) + "...";
+            case STAGE_SITTING:   return std::string(plural(s.mType) || s.mType == "snowboard" ? "Putting you on your " : "Sitting you in your ")
+                                         + niceName(s.mType) + "...";
             default:              break;
             }
+        }
+        if (plural(type) || type == "snowboard")
+        {
+            return "Rez your free Wolf " + niceName(type) + " in front of you and get on " + itThem(type) + ".";
         }
         return "Rez your free Wolf " + niceName(type) + " in front of you and sit in it.";
     }

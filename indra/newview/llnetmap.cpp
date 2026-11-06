@@ -464,6 +464,50 @@ void LLNetMap::setScale( F32 scale )
 // sees them. Paul 09-14: "give minimap a thin drag strip of its own".
 static const S32 WOLF_DRAG_STRIP_HEIGHT = 12;
 
+// [Wolf 2026-11-06] Ticket 571 (Maximus Lear): "turn the dot into an arrow pointing the direction the
+// avatar is looking or walking". A pointer on the rim of an avatar's dot, towards the way the avatar
+// faces. The way is given on the map itself (map_dx, map_dy: from the dot to a point a few metres in
+// front of the avatar, put through the same projection as the dot), so it follows the map's
+// rotation, zoom and 3D tilt without any sums of its own. Setting WolfMiniMapFacing (Show menu).
+static void wolf_draw_facing(F32 cx, F32 cy, F32 map_dx, F32 map_dy, F32 dot_radius, const LLColor4& color)
+{
+    const F32 len = sqrtf(map_dx * map_dx + map_dy * map_dy);
+    if (len < 0.01f) return;   // looking straight up or down the 3D view: no way to show
+    const F32 dx = map_dx / len, dy = map_dy / len;
+    const F32 px = -dy, py = dx;   // across the pointer
+    const F32 tip = dot_radius * 2.2f, base = dot_radius * 0.8f, half = dot_radius * 0.8f;
+    const F32 tx = cx + dx * tip, ty = cy + dy * tip;
+    const F32 b1x = cx + dx * base + px * half, b1y = cy + dy * base + py * half;
+    const F32 b2x = cx + dx * base - px * half, b2y = cy + dy * base - py * half;
+    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    gGL.color4fv(color.mV);
+    gGL.begin(LLRender::TRIANGLES);
+    gGL.vertex2f(tx, ty);
+    gGL.vertex2f(b1x, b1y);
+    gGL.vertex2f(b2x, b2y);
+    gGL.end();
+    // the same dark rim the dots have, so a pale pointer still shows on pale ground
+    gGL.color4f(0.f, 0.f, 0.f, 0.85f);
+    gGL.begin(LLRender::LINES);
+    gGL.vertex2f(tx, ty);   gGL.vertex2f(b1x, b1y);
+    gGL.vertex2f(b1x, b1y); gGL.vertex2f(b2x, b2y);
+    gGL.vertex2f(b2x, b2y); gGL.vertex2f(tx, ty);
+    gGL.end();
+}
+
+// The way a loaded avatar faces, flat on the ground (its body's forward, +X, turned by its
+// rotation; llviewerobject.h getRenderRotation is the world rotation, seated avatars included).
+// False for an avatar only known from the region's position list (CoarseLocationUpdate carries no
+// rotation) or one facing straight up or down.
+static bool wolf_avatar_facing(const LLUUID& id, LLVector3& out)
+{
+    LLViewerObject* obj = gObjectList.findObject(id);
+    if (!obj || obj->isDead() || !obj->isAvatar()) return false;
+    out = LLVector3::x_axis * obj->getRenderRotation();
+    out.mV[VZ] = 0.f;
+    return out.normalize() > 0.01f;
+}
+
 S32 LLNetMap::wolfDragStripHeight() const
 {
     // Only where there is nothing else to grab. The same panel is embedded in panel_people and
@@ -927,6 +971,7 @@ void LLNetMap::draw()
         bool unknown_relative_z;
 
         LLWorld::getInstance()->getAvatars(&avatar_ids, &positions, gAgentCamera.getCameraPositionGlobal());
+        static LLCachedControl<bool> wolf_facing(gSavedSettings, "WolfMiniMapFacing", true);   // ticket 571
 
         // Draw avatars
         for (U32 i = 0; i < avatar_ids.size(); i++)
@@ -970,6 +1015,15 @@ void LLNetMap::draw()
                 pos_map.mV[VZ], mDotRadius,
                 unknown_relative_z);
 // [/RLVa:KB]
+            // [Wolf 2026-11-06] ticket 571: which way this avatar faces (wolf_draw_facing)
+            LLVector3 facing;
+            if (wolf_facing && wolf_avatar_facing(uuid, facing))
+            {
+                const LLVector3 ahead = globalPosToView(positions[i] + LLVector3d(facing * 4.f));
+                wolf_draw_facing(pos_map.mV[VX], pos_map.mV[VY], ahead.mV[VX] - pos_map.mV[VX], ahead.mV[VY] - pos_map.mV[VY],
+                                 mDotRadius,
+                                 RlvActions::canShowName(RlvActions::SNC_DEFAULT, uuid) ? color : map_avatar_color.get());
+            }
 //          LLWorldMapView::drawAvatar(
 //              pos_map.mV[VX], pos_map.mV[VY],
 //              color,
@@ -1080,6 +1134,17 @@ void LLNetMap::draw()
                       dot_width,
                       dot_width,
                       self_tag_color);  // <FS:CR> FIRE-1061
+
+            // [Wolf 2026-11-06] ticket 571: which way you face (the body, not the camera: the
+            // camera's way is the pale view cone below)
+            LLVector3 facing = gAgent.getAtAxis();
+            facing.mV[VZ] = 0.f;
+            if (wolf_facing && facing.normalize() > 0.01f)
+            {
+                const LLVector3 ahead = globalPosToView(pos_global + LLVector3d(facing * 4.f));
+                wolf_draw_facing(pos_map.mV[VX], pos_map.mV[VY], ahead.mV[VX] - pos_map.mV[VX], ahead.mV[VY] - pos_map.mV[VY],
+                                 mDotRadius, self_tag_color);
+            }
 
             F32 dist_to_cursor_squared = dist_vec_squared(LLVector2(pos_map.mV[VX], pos_map.mV[VY]),
                                           LLVector2((F32)local_mouse_x, (F32)local_mouse_y));
@@ -1421,6 +1486,7 @@ void LLNetMap::draw3D()
         uuid_vec_t avatar_ids;
         std::vector<LLVector3d> positions;
         LLWorld::getInstance()->getAvatars(&avatar_ids, &positions, gAgentCamera.getCameraPositionGlobal());
+        static LLCachedControl<bool> wolf_facing(gSavedSettings, "WolfMiniMapFacing", true);   // ticket 571
 
         for (U32 i = 0; i < avatar_ids.size(); i++)
         {
@@ -1462,6 +1528,16 @@ void LLNetMap::draw3D()
             gl_circle_2d(dot_x, dot_y, mDotRadius, 16, true);
             gGL.color4f(0.f, 0.f, 0.f, 0.85f);
             gl_circle_2d(dot_x, dot_y, mDotRadius, 16, false);
+
+            // [Wolf 2026-11-06] ticket 571: which way this avatar faces, a point 4 m ahead put
+            // through the same 3D projection as the dot (wolf_draw_facing)
+            LLVector3 facing;
+            if (wolf_facing && wolf_avatar_facing(uuid, facing))
+            {
+                F32 ax, ay, ad;
+                fs3dProject(pos_region.mV[VX] + facing.mV[VX] * 4.f, pos_region.mV[VY] + facing.mV[VY] * 4.f, z + 2.f, cam, ax, ay, ad);
+                wolf_draw_facing(dot_x, dot_y, ax - dot_x, ay - dot_y, mDotRadius, color);
+            }
 
             // A marked avatar gets a ring as well as the colour (minimap.js:506-509).
             if (hasAvatarMarkColor(uuid))
@@ -1561,6 +1637,17 @@ void LLNetMap::draw3D()
             gl_circle_2d(sx, sy, 5.f, 16, true);
             gGL.color4f(0.f, 0.f, 0.f, 1.f);
             gl_circle_2d(sx, sy, 5.f, 16, false);
+
+            // [Wolf 2026-11-06] ticket 571: which way you face (your body, as in the 2D map)
+            LLVector3 facing = gAgent.getAtAxis();
+            facing.mV[VZ] = 0.f;
+            if (wolf_facing && facing.normalize() > 0.01f)
+            {
+                F32 ax, ay, ad;
+                fs3dProject(self_region.mV[VX] + facing.mV[VX] * 4.f, self_region.mV[VY] + facing.mV[VY] * 4.f,
+                            self_region.mV[VZ] + 2.f, cam, ax, ay, ad);
+                wolf_draw_facing(sx, sy, ax - sx, ay - sy, 5.f, LLColor4(1.f, 221.f / 255.f, 0.f, 1.f));   // #ffdd00, the dot's own
+            }
 
             // Self is pickable for the tooltip too (llnetmap.cpp 2D pass).
             if (local_mouse)

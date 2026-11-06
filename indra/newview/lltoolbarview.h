@@ -168,6 +168,7 @@ private:
     LLButton*           mWolfSpaceshipToggle = nullptr; // <WolfViewer 2026-10-11> Spaceship HUD (w65)
     LLButton*           mWolfSubmarineToggle = nullptr; // <WolfViewer 2026-10-11> Submarine Helm (w65)
     LLButton*           mWolfShipToggle = nullptr;      // <WolfViewer 2026-10-28> Captain's Helm (sailing ships)
+    LLButton*           mWolfSkisToggle = nullptr;      // [SKIS 2026-11-06] Skis and Snowboards (wolfskis.h)
     bool                mWolfPanelUp = false;           // <WolfViewer 2026-10-09> a bottom panel (deck, dashboard, game HUD) shows
     bool                mWolfBarWasHidden = false;      // <WolfViewer 2026-10-09> the bar's own state before it did
 

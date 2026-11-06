@@ -15,11 +15,19 @@
  * NOW, every display frame. Turning or moving the head shows real parallax and a still world, even at 20-30 pictures a
  * second. Triangles across a depth jump (an object's edge against what is behind it) are cut, so the gap shows the far
  * shell (the same picture far away) rather than a rubber sheet. Sky and far points sit on that shell.
+ *
+ * [Wolf 2026-11-06] That cut left every outline as a band two grid cells wide (16 picture pixels at 1/8) showing the
+ * far shell 900 m away: the edges of near things carried no depth at all and shimmered against them. Now a grid point
+ * on an edge is put on the FARTHER side of the jump (the most distant of itself and its four neighbours) and nothing is
+ * discarded: the cell beyond the edge lies on the background at the background's own depth, and only the one cell
+ * between the object and its edge stretches (the background stretching, never a hole). EDGE_MODE_CUT keeps the old
+ * behaviour for the before/after measurement only (wolfvr.js __wolfvr.edgeProbe).
  */
 import * as THREE from './three/three.module.js';
 
 const SHELL = 800;          // metres: far points and the sky go no further than this; the shell card is behind it
 const CUT_RATIO = 1.25;     // a grid point whose neighbours are more than 25% nearer / further is on an edge
+const EDGE_MODE_CUT = 0, EDGE_MODE_FAR = 1;   // [Wolf 2026-11-06] see the top of the file
 
 const VERT = `
 uniform sampler2D depthTex;   // metres, both eyes side by side, top row first
@@ -28,6 +36,7 @@ uniform float eyeIndex;       // 0 left half, 1 right half
 uniform float halves;         // 2: two eyes side by side; 1: one centre view for both eyes
 uniform vec2 grid;            // one eye's grid: columns, rows
 uniform mat4 renderEye;       // eye space -> world, for the head pose and the eye the picture was drawn for
+uniform float edgeMode;       // [Wolf 2026-11-06] 1: an edge point goes to the far side of its jump; 0: cut (the old way)
 varying vec2 vUv;
 varying float vCut;
 attribute vec2 gxy;
@@ -39,7 +48,9 @@ void main() {
     float z = zAt(gxy);
     float a = zAt(gxy + vec2(-1.0, 0.0)), b = zAt(gxy + vec2(1.0, 0.0)), c = zAt(gxy + vec2(0.0, -1.0)), d = zAt(gxy + vec2(0.0, 1.0));
     float zmin = min(min(min(a, b), min(c, d)), z), zmax = max(max(max(a, b), max(c, d)), z);
-    vCut = zmax > zmin * ${CUT_RATIO.toFixed(2)} ? 1.0 : 0.0;
+    bool edge = zmax > zmin * ${CUT_RATIO.toFixed(2)};
+    vCut = edge && edgeMode < 0.5 ? 1.0 : 0.0;
+    if (edge && edgeMode > 0.5) z = zmax;   // [Wolf 2026-11-06] on the background, along this point's own view ray
     float u = (gxy.x + 0.5) / grid.x, v = (gxy.y + 0.5) / grid.y;   // v from the top
     float tx = mix(win.x, win.y, u), ty = mix(win.w, win.z, v);
     vec4 world = renderEye * vec4(tx * z, ty * z, -z, 1.0);
@@ -70,6 +81,9 @@ export class DepthEyes {
         this.lut = null; this.lutKey = '';
         this.active = false;
         this.frames = 0;
+        // [Wolf 2026-11-06] CUT is the default again: Paul's Quest test of the far-side mode the same day was "horrible
+        // wobbling" (edge points moving to the far side jump as each picture's depth changes). FAR stays for measurement only.
+        this.edgeMode = EDGE_MODE_CUT;
         this._m = new THREE.Matrix4();
         this._p = new THREE.Vector3();
         this._e = new THREE.Vector3();
@@ -103,7 +117,7 @@ export class DepthEyes {
                 glslVersion: THREE.GLSL3,
                 uniforms: { depthTex: { value: this.tex }, map: { value: null }, decodeVideo: { value: 0 }, win: { value: new THREE.Vector4() },
                             eyeIndex: { value: e }, halves: { value: halves }, grid: { value: new THREE.Vector2(gw, gh) },
-                            renderEye: { value: new THREE.Matrix4() } },
+                            renderEye: { value: new THREE.Matrix4() }, edgeMode: { value: this.edgeMode } },
                 vertexShader: VERT, fragmentShader: FRAG, side: THREE.DoubleSide, toneMapped: false,
             });
             const m = new THREE.Mesh(g, mat);
@@ -163,6 +177,22 @@ export class DepthEyes {
         this.meshes[0].layers.set(presenting ? eyeLayer[0] : 0);
     }
 
+    // [Wolf 2026-11-06] test only (the before/after edge measurement): EDGE_MODE_CUT (the default) or EDGE_MODE_FAR
+    setEdgeMode(m) { this.edgeMode = m; for (const x of this.meshes) x.material.uniforms.edgeMode.value = m; }
+    // the share of the grid's points that are on an edge (a depth jump of more than CUT_RATIO to a neighbour)
+    edgeShare() {
+        if (!this.active) return null;
+        // as VERT's zAt: each eye's own grid, clamped at its edges
+        const gw = this.gw, W = gw * this.halves, H = this.gh;
+        const z = (e, x, y) => Math.min(this.data[Math.min(H - 1, Math.max(0, y)) * W + e * gw + Math.min(gw - 1, Math.max(0, x))], SHELL);
+        let n = 0;
+        for (let e = 0; e < this.halves; e++) for (let y = 0; y < H; y++) for (let x = 0; x < gw; x++) {
+            const v = [z(e, x, y), z(e, x - 1, y), z(e, x + 1, y), z(e, x, y - 1), z(e, x, y + 1)];
+            if (Math.max(...v) > Math.min(...v) * CUT_RATIO) n++;
+        }
+        return n / (W * H);
+    }
+
     hide() {
         for (const m of this.meshes) m.visible = false;
         this.active = false;
@@ -176,4 +206,4 @@ export async function inflateDepth(bytes) {
     return new Uint16Array(buf);
 }
 
-export { SHELL };
+export { SHELL, EDGE_MODE_CUT, EDGE_MODE_FAR };

@@ -68,6 +68,19 @@ console.log('   canvas:', JSON.stringify(rect));
 
 writeFileSync(resolve(OUT, 'canvas.json'), JSON.stringify({ rect: [0, 0, 960, 432, 1], depth: dep }));   // the shots are one eye, 480 x 432
 await pair('depth');
+// [Wolf 2026-11-06] the depth meshes' edges: the same held picture with the old cut edges and the new far-side edges -
+// holes (shares of the eye view nothing covers, where the 900 m shell showed through) with the head still and 10 cm
+// to the side; and the old cut's parallax pair for comparison (parallax_check.py "depthcut")
+await evalJs('window.__wolfvr.freeze(true)'); await sleep(600);
+for (const dx of [0, 0.05, 0.10]) {
+    const e = await evalJs(`window.__wolfvr.edgeProbe(${dx})`);
+    console.log(`   edges, head ${dx * 100} cm to the side:`, JSON.stringify(e));
+    if (dx === 0.10) check(e && e.holes && e.holes.far <= e.holes.cut, `edges: no more holes with the far-side edges (cut ${e && e.holes.cut}, far ${e && e.holes.far})`);
+}
+await evalJs('window.__wolfvr.freeze(false)'); await sleep(1500);
+await evalJs('window.__wolfvr.edgeMode(true)');
+await pair('depthcut');
+await evalJs('window.__wolfvr.edgeMode(false)');
 await evalJs('window.__wolfvr.cards(true)'); await sleep(2500);
 check(!(await evalJs('window.__wolfvr.depth().active')), 'the old flat cards for comparison');
 await pair('cards');

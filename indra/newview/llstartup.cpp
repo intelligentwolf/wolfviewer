@@ -28,6 +28,7 @@
 
 #include "llappviewer.h"
 #include "llstartup.h"
+#include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
 #include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels::init
 
 #if LL_VELOPACK && LL_WINDOWS
@@ -3411,6 +3412,10 @@ bool idle_startup()
         // shows a band for a newer release (FSPanelLogin -> WolfUpdate::loginScreenShown); this
         // uses that same answer, and only starts the check if the login screen was skipped.
         WolfUpdate::loggedIn();
+
+        // [SOUND EFFECTS 2026-11-06] A WolfViewer teleport sound chosen in Wolf World > Sound Effects is decoded into the
+        // sound cache now (off the main thread), so the first teleport already has it (wolfsoundeffects.h prepare).
+        WolfSoundEffects::prepare(LLUUID(gSavedSettings.getString("UISndTeleportOut")));
 
         // [CRASH REPORTS 2026-10-28] Send a crash an earlier run left behind, as a staff ticket (wolfcrashreport.h).
         WolfCrashReport::sendPendingOnce();

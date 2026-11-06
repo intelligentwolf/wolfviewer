@@ -1041,6 +1041,11 @@ set(viewer_SOURCE_FILES
     wolfwavezones.cpp
     wolfweatherprofile.cpp
     wolfweathersound.cpp
+    wolfsoundeffects.cpp   # [SOUND EFFECTS 2026-11-06]
+    wolffloatersoundeffects.cpp   # [SOUND EFFECTS 2026-11-06]
+    wolfskis.cpp   # [SKIS 2026-11-06]
+    wolfskihud.cpp   # [SKIS 2026-11-06]
+    wolffloaterskis.cpp   # [SKIS 2026-11-06]
     wolfai.cpp
     wolfairports.cpp
     wolflslcomplete.cpp
@@ -2062,6 +2067,11 @@ set(viewer_HEADER_FILES
     wolfwavezones.h
     wolfweatherprofile.h
     wolfweathersound.h
+    wolfsoundeffects.h   # [SOUND EFFECTS 2026-11-06]
+    wolffloatersoundeffects.h   # [SOUND EFFECTS 2026-11-06]
+    wolfskis.h   # [SKIS 2026-11-06]
+    wolfskihud.h   # [SKIS 2026-11-06]
+    wolffloaterskis.h   # [SKIS 2026-11-06]
     wolfai.h
     wolfpaint.h  # [LOOK 2026-10-20] the painting kit of the Upload Model and Create with AI windows
     wolfairports.h

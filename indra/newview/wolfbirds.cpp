@@ -14,6 +14,7 @@
  */
 #include "llviewerprecompiledheaders.h"
 #include "wolfbirds.h"
+#include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
 
 #include <cmath>
 
@@ -1883,7 +1884,8 @@ void WolfBirds::playCall(Kind kind, const LLVector3& at_agent, F32 dist)
     WolfWeatherSound& ws = WolfWeatherSound::instance();
     if (!ws.recordingReady(*rec)) return;   // decoding: the next call will play
     const F32 indoors = (WolfWeather::instanceExists() && WolfWeather::instance().cameraUnderRoof()) ? 0.35f : 1.f;
-    const F32 gain = llclamp(base * (full_m / llmax(full_m, dist)) * indoors, 0.f, 1.f);
+    const F32 gain = llclamp(base * (full_m / llmax(full_m, dist)) * indoors * WolfSoundEffects::level(WolfSoundEffects::BIRDS), 0.f, 1.f);   // [SOUND EFFECTS 2026-11-06/]
+    if (gain <= 0.f) return;
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
     LLVector3 dir = at_agent - cam;
     if (dir.isExactlyZero()) dir.setVec(0.f, 0.f, 1.f);

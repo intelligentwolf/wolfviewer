@@ -15,6 +15,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "wolfswimbubbles.h"
+#include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
 
 #include <algorithm>
 #include <cmath>
@@ -365,7 +366,8 @@ void WolfSwimBubbles::puffSound(const LLVector3& mouth, bool self, F64 now)
     WolfWeatherSound& ws = WolfWeatherSound::instance();
     if (!ws.recordingReady(rec)) return;   // decoding: the next puff will play
     if (!self) mNextOtherSound = now + OTHER_SOUND_GAP_S;   // only a puff that is played takes the slot (review)
-    const F32 gain = llclamp(SOUND_BASE * (SOUND_FULL_M / llmax(SOUND_FULL_M, dist)), 0.f, 1.f);
+    const F32 gain = llclamp(SOUND_BASE * (SOUND_FULL_M / llmax(SOUND_FULL_M, dist)) * WolfSoundEffects::level(WolfSoundEffects::BUBBLES), 0.f, 1.f);   // [SOUND EFFECTS 2026-11-06/]
+    if (gain <= 0.f) return;
     LLVector3 dir = mouth - cam;
     const F32 len = dir.length();
     if (len < 1e-3f) dir.setVec(0.f, 0.f, 1.f);

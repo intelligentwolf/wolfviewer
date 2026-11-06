@@ -1931,6 +1931,11 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerSeaLife" />
             <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
         </menu_item_check>
+        <!-- [SOUND EFFECTS 2026-11-06] Paul: "Wolf World -> Sound Effects allows the user to select weather sounds and teleport
+             sounds and volumes" (wolffloatersoundeffects.cpp). Every grid: the teleport sound plays everywhere. -->
+        <menu_item_call label="Sound Effects..." name="WolfSoundEffects">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_sound_effects" />
+        </menu_item_call>
         <!-- [WOLF COMPASS 2026-10-16] wolffloatercompass.cpp: a Victorian compass showing North
              and the way you are moving. Every grid. Paul: "anything wolf viewer should be under wolf world". -->
         <menu_item_check label="Tessa's Compass" name="WolfCompass">
@@ -2135,6 +2140,12 @@
                 <menu_item_check.on_click function="WolfDrive.ToggleDesign" parameter="spaceship" />
                 <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_check>
+            <!-- [SKIS 2026-11-06] wolffloaterskis.cpp: Paul, "build skis and snowboards add a new hud for it"; ticket 556.
+             Put on / take off the free Wolf skis or snowboard; the Ski HUD opens while riding. Wolf Territories only. -->
+            <menu_item_call label="Skis and Snowboards..." name="WolfSkis">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_skis" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <menu_item_separator>
                 <menu_item_separator.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_separator>

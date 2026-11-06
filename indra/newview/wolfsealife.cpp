@@ -14,6 +14,7 @@
  */
 #include "llviewerprecompiledheaders.h"
 #include "wolfsealife.h"
+#include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
 
 #include <algorithm>
 #include <cmath>
@@ -924,7 +925,7 @@ void WolfSeaLife::sound(S32 which, const LLVector3& at, F32 mult, F64 now)
     const Sound& file = s.mFiles[ll_rand(s.mCount)];
     if (!WolfWeatherSound::instance().recordingReady(file.mRec)) return;   // decoding: the next one will play
     const F32 indoors = (WolfWeather::instanceExists() && WolfWeather::instance().cameraUnderRoof()) ? 0.35f : 1.f;
-    const F32 gain = llclamp(base * mult * (s.mFull / llmax(s.mFull, d)) * indoors, 0.f, 1.f);
+    const F32 gain = llclamp(base * mult * (s.mFull / llmax(s.mFull, d)) * indoors * WolfSoundEffects::level(WolfSoundEffects::SEA_LIFE), 0.f, 1.f);   // [SOUND EFFECTS 2026-11-06/]
     LLVector3 dir = at - cam;
     if (dir.isExactlyZero()) dir = camera->getAtAxis();
     dir.normVec();

@@ -24,7 +24,7 @@ def shift(a, b, r0, r1, maxs=120):
         if s == 0: sad0 = sad
         if sad < bsad: bsad, best = sad, s
     return best, round(bsad, 2), round(sad0, 2)
-for tag in ('depth', 'cards'):
+for tag in [t for t in ('depth', 'depthcut', 'cards') if os.path.exists(os.path.join(d, f'p_{t}_0.png'))]:   # [Wolf 2026-11-06] depthcut: the old cut edges
     a, b = eye(f'p_{tag}_0.png'), eye(f'p_{tag}_10cm.png')
     near, far = shift(a, b, 0.80, 0.97), shift(a, b, 0.33, 0.50)
     print(f'{tag:6s}: eye view {a.shape[1]}x{a.shape[0]} px; near band shift {near[0]:+d} px (sad {near[1]} vs {near[2]} unshifted), '

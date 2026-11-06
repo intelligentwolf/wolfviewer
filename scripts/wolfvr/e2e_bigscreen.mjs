@@ -179,6 +179,24 @@ await sleep(300);
 await evalJs("window.__fakeCtl.press('right', 0, true)"); await sleep(200);
 await evalJs("window.__fakeCtl.press('right', 0, false)"); await sleep(300);
 check(since().some(e => e.type === 'down'), 'menu button recentres the screen where the head looks');
+// [Wolf 2026-11-06] the FLAT screen (the page's "Make it flat" button, the same setting as the headset's Screen button):
+// a click aimed at the same place lands at the centre too, and corners map to the picture's corners
+await evalJs("document.getElementById('wvr-shape').click()"); await sleep(300);
+check((await evalJs('window.__wolfvr.big().flat')) === true, 'flat screen: the page button makes the screen flat');
+for (const [x, y] of [[0, 0], [-0.4, 0.25]]) {
+    const b = await evalJs('window.__wolfvr.big()');
+    const p = await evalJs(`window.__wolfvr.screenPoint(${x * b.size}, ${y * b.height})`);
+    const dx = p[0] - 0.2, dy = p[1] - 1.4, dz = p[2] + 0.2, n = Math.hypot(dx, dy, dz);
+    next();
+    await evalJs(`window.__fakeCtl.aim('right', ${Math.atan2(-dx / n, -dz / n)}, ${Math.asin(dy / n)})`); await sleep(300);
+    await evalJs("window.__fakeCtl.press('right', 0, true)"); await sleep(200);
+    await evalJs("window.__fakeCtl.press('right', 0, false)"); await sleep(300);
+    const fd = since().find(e => e.type === 'down');
+    const ue = 0.5 + x, ve = 0.5 - y;
+    check(fd && Math.abs(+fd.u - ue) < 0.02 && Math.abs(+fd.v - ve) < 0.02, `flat screen: a click at ${x}, ${y} of the screen lands at u ${ue}, v ${ve} (${fd ? fd.u + ',' + fd.v : 'none'})`);
+}
+await evalJs("document.getElementById('wvr-shape').click()"); await sleep(300);
+check((await evalJs('window.__wolfvr.big().flat')) === false, 'and curved again');
 await shot('2_vr.jpg');
 // [VR 3D] left stick click switches to VR 3D Mode without reconnecting, and back
 await evalJs("window.__fakeCtl.press('left', 3, true)"); await sleep(150);

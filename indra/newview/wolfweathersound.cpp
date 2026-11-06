@@ -17,6 +17,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfweathersound.h"
+#include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
 
 #include <cerrno>
 #include <cmath>
@@ -680,7 +681,7 @@ void WolfWeatherSound::maybeDrip(F64 now, F32 i, F32 indoors)
     mNextDrip = now + gap();
     const Recording& d = DRIPS[ll_rand(DRIP_COUNT)];
     if (prepare(d) != Prep::READY) return;
-    const F32 vol = (F32)mProfile.mVolume / 100.f;
+    const F32 vol = (F32)mProfile.mVolume / 100.f * WolfSoundEffects::level(WolfSoundEffects::WEATHER);   // [SOUND EFFECTS 2026-11-06/]
     const F32 gain = llclamp(vol * (0.10f + ll_frand(0.20f)) * (1.f - indoors), 0.f, 1.f);
     // 1.5-5 m round the camera, a little above it: off the leaves, a gutter, a ledge.
     const F32 dist = 1.5f + ll_frand(3.5f);
@@ -719,7 +720,9 @@ void WolfWeatherSound::idle()
     if (mWant)
     {
         const WolfWeatherProfile& p = mProfile;
-        const F32 vol = (F32)p.mVolume / 100.f;
+        // [SOUND EFFECTS 2026-11-06] the resident's own Weather switch and volume (Wolf World > Sound Effects): at 0 every
+        // layer eases out like the weather clearing
+        const F32 vol = (F32)p.mVolume / 100.f * WolfSoundEffects::level(WolfSoundEffects::WEATHER);
         const F32 i = intensity(p);
         const F32 k = llclamp(WolfWeather::indoors(), 0.f, 1.f);
 
@@ -820,7 +823,9 @@ void WolfWeatherSound::crack(bool distant)
     if (mProfile.mSoundPreset != "thunder" && mProfile.mSoundPreset != "distant") return;
     const Voice& v = distant ? CRACK_FAR : CRACK_NEAR;
     if (!ensureSound(v)) return;
-    const F32 gain = llclamp((F32)mProfile.mVolume / 100.f * v.mGain, 0.f, 1.f);
+    // [SOUND EFFECTS 2026-11-06] the resident's own Thunder switch and volume (Wolf World > Sound Effects)
+    const F32 gain = llclamp((F32)mProfile.mVolume / 100.f * v.mGain * WolfSoundEffects::level(WolfSoundEffects::THUNDER), 0.f, 1.f);
+    if (gain <= 0.f) return;
     gAudiop->triggerSound(LLUUID(v.mUuid), gAgentID, gain, LLAudioEngine::AUDIO_TYPE_AMBIENT,
                           gAgent.getPositionGlobal());
 }

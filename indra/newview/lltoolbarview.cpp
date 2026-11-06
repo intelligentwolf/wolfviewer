@@ -34,6 +34,7 @@
 #include "wolfgame.h"     // <WolfViewer 2026-10-09/> the Game Mode icon
 #include "wolfdrive.h"    // <WolfViewer 2026-10-09/> the Car Dashboard icon
 #include "wolfhelm.h"     // <WolfViewer 2026-10-28/> the Captain's Helm icon
+#include "wolfskis.h"     // [SKIS 2026-11-06/] the Skis and Snowboards icon; the Ski HUD folds the bar away
 
 #include "llapp.h"
 #include "llappviewer.h"
@@ -215,6 +216,13 @@ bool LLToolBarView::postBuild()
     if (mWolfShipToggle)
     {
         mWolfShipToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfHelm::instance().toggleHud(); });
+    }
+    // [SKIS 2026-11-06] Paul: "add it to the bottom row of tiny icons" - opens / closes Wolf World > Skis and Snowboards...
+    // (the window says why and closes off Wolf, wolffloaterskis.cpp onOpen; the icon is not shown there anyway)
+    mWolfSkisToggle = findChild<LLButton>("wolf_skis_toggle");
+    if (mWolfSkisToggle)
+    {
+        mWolfSkisToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::toggleInstance("wolf_skis"); });
     }
     // </WolfViewer>
 
@@ -1296,6 +1304,12 @@ void LLToolBarView::draw()
             mWolfShipToggle->setVisible(wolf && !hide_icons);
             mWolfShipToggle->setToggleState(WolfHelm::instance().hudShowing());
         }
+        // [SKIS 2026-11-06] the skis icon, lit while riding Wolf skis or a snowboard; Wolf Territories only like the others
+        if (mWolfSkisToggle)
+        {
+            mWolfSkisToggle->setVisible(wolf && !hide_icons);
+            mWolfSkisToggle->setToggleState(WolfSkis::instance().riding());
+        }
         // <WolfViewer 2026-10-11> WolfHideToolbarIcons (Wolf World > Show Wolf Icons): a resident (Spax) asked "how do
         // I disable and completely remove the blue button on the lower right". With it on every bottom-right Wolf
         // icon is gone - toolbar, game, car, plane, spaceship, boat, speedboat, submarine - on every grid. The toolbar's own
@@ -1326,8 +1340,11 @@ void LLToolBarView::draw()
         // deck, the car dashboard, the game HUD - the bar folds away (its hide arrow, as Flight Mode
         // always did); when the last one goes it comes back as the player had it.
         const WolfFlight& wfl = WolfFlight::instance();
+        // [SKIS 2026-11-06] Paul: the Ski HUD "leaves the normal panel there needs to get rid of that" - it folds the bar
+        // away too while it shows, and the bar comes back as it was when they take them off (or the HUD is hidden, or
+        // they leave Wolf); WolfViewerBottomToolbarHidden is reset at every start-up (above), so a crash never leaves it gone
         const bool panel_up = wolf && ((wfl.active() && !wfl.deckHidden()) || WolfDrive::instance().dashboardOn()
-                                       || WolfGame::instance().hudShowing());
+                                       || WolfGame::instance().hudShowing() || WolfSkis::instance().hudShowing());
         if (panel_up != mWolfPanelUp)
         {
             mWolfPanelUp = panel_up;
@@ -1357,10 +1374,10 @@ void LLToolBarView::draw()
         // centre sat half the corner left of the screen's (63 px with five icons, 99 px with eight). Now it is trimmed
         // EQUALLY on both sides about the screen centre, just enough to clear the corner: centred whatever the icons.
         // Panel-local: the screen centre is at (panel_w - strip_w) / 2 (the panel starts strip_w right of the screen's
-        // left edge); the bar may reach left to 0 and right to panel_w - corner. 222: the nine show / hide icons'
-        // corner (9 x 24 + 6, panel_toolbar_view.xml; the ship's joined on 2026-10-28); 0 when the icons are hidden
-        // (WolfHideToolbarIcons).
-        const S32 corner = (mWolfToolbarToggle && mWolfToolbarToggle->getVisible()) ? 222 : 0;
+        // left edge); the bar may reach left to 0 and right to panel_w - corner. 246: the ten show / hide icons'
+        // corner (10 x 24 + 6, panel_toolbar_view.xml; the ship's joined on 2026-10-28, the skis' on 2026-11-06); 0 when
+        // the icons are hidden (WolfHideToolbarIcons).
+        const S32 corner = (mWolfToolbarToggle && mWolfToolbarToggle->getVisible()) ? 246 : 0;
         const S32 centre = (panel_w - strip_w) / 2;
         const S32 half = llmax(0, llmin(centre, panel_w - corner - centre));
         S32 want = 2 * half;

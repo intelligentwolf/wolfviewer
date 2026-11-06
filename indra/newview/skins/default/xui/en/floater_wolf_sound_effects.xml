@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [SOUND EFFECTS 2026-11-06] Wolf World > Sound Effects... (wolffloatersoundeffects.cpp). Paul: "Wolf World -> Sound
+     Effects allows the user to select weather sounds and teleport sounds and volumes because i'm tired of all the 'its too
+     loud its wrong' etc"; ticket 568 (Luke Koda) asked to choose the teleport sound.
+     Who and why: a resident who finds one Wolf sound too loud or annoying wants to turn just that one down or off in under
+     a minute, without hunting through Preferences (many residents are older - memory paul-simple-for-older-disabled-users).
+     Flow: open, untick or slide the one that bothers them, hear the change at once, close. No Save: every tick box and
+     slider is bound straight to its setting (wolfsoundeffects.h). The teleport sound: pick one from the list (it plays so
+     you hear it), or drop a sound of your own from inventory anywhere on the window. "Back to normal" undoes everything. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="566"
+ layout="topleft"
+ name="wolf_sound_effects"
+ save_rect="true"
+ single_instance="true"
+ title="Sound Effects"
+ width="480">
+    <text follows="left|top" font="SansSerif" height="36" layout="topleft" left="16" name="intro" top="26" width="448" wrap="true">Turn any of these sounds down or off. Changes work straight away. Your volume settings in Preferences still apply.</text>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="weather_heading" top="70" width="448">Weather</text>
+    <check_box control_name="WolfSoundWeather" follows="left|top" height="22" label="Rain and wind" layout="topleft" left="24" name="weather_on" top="94" width="200" tool_tip="The rain, wind and dripping of Wolf weather." />
+    <slider control_name="WolfSoundWeatherVolume" enabled_control="WolfSoundWeather" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="weather_volume" show_text="false" top="94" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <check_box control_name="WolfSoundThunder" follows="left|top" height="22" label="Thunder" layout="topleft" left="24" name="thunder_on" top="122" width="200" tool_tip="The thunder claps in a storm." />
+    <slider control_name="WolfSoundThunderVolume" enabled_control="WolfSoundThunder" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="thunder_volume" show_text="false" top="122" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="nature_heading" top="158" width="448">Wildlife and nature</text>
+    <check_box control_name="WolfViewerBirdsSound" follows="left|top" height="22" label="Birds" layout="topleft" left="24" name="birds_on" top="182" width="200" tool_tip="The calls of gulls, terns and other birds." />
+    <slider control_name="WolfSoundBirdsVolume" enabled_control="WolfViewerBirdsSound" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="birds_volume" show_text="false" top="182" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <check_box control_name="WolfViewerNatureSounds" follows="left|top" height="22" label="Nature sounds" layout="topleft" left="24" name="nature_on" top="210" width="200" tool_tip="Insects at night, lapping water and surf, where the region owner has them on." />
+    <slider control_name="WolfSoundNatureVolume" enabled_control="WolfViewerNatureSounds" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="nature_volume" show_text="false" top="210" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <check_box control_name="WolfViewerSeaLifeSound" follows="left|top" height="22" label="Dolphins and whales" layout="topleft" left="24" name="sealife_on" top="238" width="200" tool_tip="The whistles of dolphins and the songs of whales." />
+    <slider control_name="WolfSoundSeaLifeVolume" enabled_control="WolfViewerSeaLifeSound" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="sealife_volume" show_text="false" top="238" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="swim_heading" top="274" width="448">Swimming</text>
+    <check_box control_name="WolfViewerSwimBubblesSound" follows="left|top" height="22" label="Bubbles" layout="topleft" left="24" name="bubbles_on" top="298" width="200" tool_tip="The bubbling when you swim under water." />
+    <slider control_name="WolfSoundBubblesVolume" enabled_control="WolfViewerSwimBubblesSound" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="bubbles_volume" show_text="false" top="298" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="teleport_heading" top="334" width="448">Teleporting</text>
+    <check_box control_name="PlayModeUISndTeleportOut" follows="left|top" height="22" label="Teleport sound" layout="topleft" left="24" name="teleport_on" top="358" width="200" tool_tip="The sound you hear when you teleport. Only you hear it." />
+    <slider control_name="WolfSoundTeleportVolume" enabled_control="PlayModeUISndTeleportOut" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="teleport_volume" show_text="false" top="358" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <text follows="left|top" height="22" layout="topleft" left="24" name="sound_label" top="392" valign="center" width="60">Sound:</text>
+    <combo_box follows="left|top" height="24" layout="topleft" left="88" name="teleport_sound" top="391" width="262" tool_tip="Choose a sound. It plays so you can hear it." />
+    <button follows="left|top" height="24" label="Play" layout="topleft" left="362" name="play_btn" top="391" width="102" tool_tip="Play the teleport sound." />
+    <view_border bevel_style="in" follows="left|top" height="50" layout="topleft" left="24" name="drop_border" top="426" width="440" />
+    <text follows="left|top" font="SansSerif" height="42" layout="topleft" left="32" name="drop_hint" top="430" width="424" wrap="true">To use a sound of your own, drag it from your inventory and drop it anywhere on this window.</text>
+    <text follows="left|top" font="SansSerif" height="34" layout="topleft" left="24" name="status" top="484" width="440" wrap="true" />
+    <button follows="left|top" height="26" label="Back to normal" layout="topleft" left="16" name="reset_btn" top="526" width="150" tool_tip="Every sound on again at full volume, and the standard teleport sound." />
+    <string name="own_sound">Your own: [NAME]</string>
+    <string name="own_sound_unnamed">Your own sound</string>
+    <string name="dropped">Your teleport sound is now "[NAME]".</string>
+    <string name="not_sound">That is not a sound. Drop a sound from your inventory (its icon is a loudspeaker).</string>
+    <string name="no_asset">WolfViewer cannot use that sound: its permissions do not let us read it. Please try another one.</string>
+    <string name="reset_done">Every sound is back to normal.</string>
+    <string name="loading">Getting the sound ready...</string>
+</floater>

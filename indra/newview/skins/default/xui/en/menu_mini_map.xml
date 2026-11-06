@@ -403,6 +403,15 @@
       <menu_item_check.on_enable
        control="MiniMapShowPropertyLines" />
     </menu_item_check>
+    <menu_item_check
+     label="Which Way Avatars Face"
+     name="Which Way Avatars Face">
+      <menu_item_check.on_click
+       function="ToggleControl"
+       parameter="WolfMiniMapFacing" />
+      <menu_item_check.on_check
+       control="WolfMiniMapFacing" />
+    </menu_item_check>
   </menu>
     <menu_item_check
        label="North at top"

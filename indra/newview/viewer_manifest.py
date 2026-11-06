@@ -115,6 +115,8 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 self.path("wolfnature")
                 # [SEA LIFE 2026-11-03] the dolphins' and whales' sounds (wolfsealife.cpp) + SOURCES.md
                 self.path("wolfsealife")
+                # [SOUND EFFECTS 2026-11-06] WolfViewer's own teleport sounds (wolfsoundeffects.cpp) + SOURCES.md
+                self.path("wolfteleport")
                 # [2026-11-02] the clouds' blue noise (wolftkclouds.cpp, cloudsCommon.glsl getSTBN) + its generator and SOURCES.md
                 self.path("wolfnoise")
                 # [VR PIPE 2026-11-03] the headset page WolfViewer serves on the home network (wolfvrpipe.cpp) + three.js r185

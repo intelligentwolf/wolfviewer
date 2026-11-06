@@ -105,6 +105,8 @@
 #include "llfloatermediasettings.h"
 #include "llfloatermemleak.h"
 #include "llfloatermodelpreview.h"
+#include "wolffloatersoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
+#include "wolffloaterskis.h"   // [SKIS 2026-11-06/]
 #include "wolffloatermeshupload.h"
 #include "wolffloaterphotoeffects.h"   // [PAINTERS 2026-09-20/]
 #include "wolffloaterlagdetector.h"   // [LAG DETECTOR 2026-09-29/]
@@ -692,6 +694,8 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_lag_detector", "floater_wolf_lag_detector.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLagDetector>);   // [LAG DETECTOR 2026-09-29/]
     LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
     LLFloaterReg::add("wolf_bug_report", "floater_wolf_bug_report.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBugReport>);   // [WOLF BUG REPORT 2026-10-24/] Report a Problem: ticket + viewer logs
+    LLFloaterReg::add("wolf_sound_effects", "floater_wolf_sound_effects.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSoundEffects>);   // [SOUND EFFECTS 2026-11-06]
+    LLFloaterReg::add("wolf_skis", "floater_wolf_skis.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSkis>);   // [SKIS 2026-11-06] ticket 556
     LLFloaterReg::add("wolf_vr_draw_distance", "floater_wolf_vr_draw_distance.xml", &LLFloaterReg::build<LLFloater>);   // [VR DRAW DISTANCE 2026-11-05]
     LLFloaterReg::add("wolf_vr_stream", "floater_wolf_vr_stream.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterVRStream>);   // [VR PIPE 2026-11-03/] VR in Your Headset Browser
     LLFloaterReg::add("wolf_dob", "floater_wolf_dob.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDob>);   // [DOB IN THE VIEWER 2026-10-26/] Your Date of Birth

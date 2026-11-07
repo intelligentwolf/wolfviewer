@@ -23,7 +23,7 @@
 // [HUD REZ 2026-10-12] Paul: "can we have a rez button on each hud that rezzes the vehicle". His decisions:
 //  - REZ always rezzes the FREE Wolf vehicle for that HUD's type: an inventory object whose description starts
 //    "wolfvehicle:<type>" (car, truck, bike, speedboat, spaceship, submarine, plane, helicopter, sailboat; [SKIS 2026-11-06]
-//    skis, snowboard: wolfskis.h), found in
+//    skis, snowboard; [SLEDGES 2026-11-07] sledge, snowdisc: wolfskis.h), found in
 //    the agent's own inventory first (a folder named "Free Wolf Vehicles" preferred), then in the Library;
 //  - once it is in-world the avatar is sat in it;
 //  - nothing is ever taken back or deleted (Paul 10-12: "dont delete the vehicle then let the user do it").

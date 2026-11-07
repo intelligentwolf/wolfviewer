@@ -128,6 +128,7 @@ namespace
         if (type == "bike") return "motorbike";
         if (type == "plane") return "aeroplane";
         if (type == "sailboat") return "sailing boat";
+        if (type == "snowdisc") return "snow disc";   // [SLEDGES 2026-11-07] wolfskis.h kindNoun
         return type;
     }
 
@@ -135,6 +136,8 @@ namespace
     bool plural(const std::string& type) { return type == "skis"; }
     std::string isAre(const std::string& type) { return plural(type) ? "are" : "is"; }
     std::string itThem(const std::string& type) { return plural(type) ? "them" : "it"; }
+    // [SLEDGES 2026-11-07] you get ON skis, a board, a sledge or a snow disc (IN a car)
+    bool getOn(const std::string& type) { return plural(type) || type == "snowboard" || type == "sledge" || type == "snowdisc"; }
 
     // How far in front of the avatar the vehicle's middle goes, metres: clear of the avatar for its size, and
     // further for the aircraft so they have room.
@@ -150,7 +153,8 @@ namespace
         if (type == "plane") return 12.f;
         // [SKIS 2026-11-06] skis and a snowboard go just in front of the feet (the root box is 1.8 / 1.6 m long:
         // region-terrain-work/skis-2026-11-06/tuning.py), so the rider steps straight onto them
-        if (type == "skis" || type == "snowboard") return 1.5f;
+        // [SLEDGES 2026-11-07] a sledge (1.05 m) and a snow disc (0.8 m) the same: region-terrain-work/sledges-2026-11-07/sled_tuning.py
+        if (type == "skis" || type == "snowboard" || type == "sledge" || type == "snowdisc") return 1.5f;
         return 5.f;
     }
 
@@ -313,8 +317,16 @@ namespace
     std::string notFoundMessage(const std::string& type)
     {
         const std::string n = niceName(type);
-        std::string msg = std::string("You don't have ") + (plural(type) ? "" : "a ") + "free Wolf " + n + " in your inventory yet.\n\n"
-                          "Take a free copy on the Sandbox region: it goes into your inventory, and REZ finds it there.";
+        std::string msg = std::string("You don't have ") + (plural(type) ? "" : "a ") + "free Wolf " + n + " in your inventory yet.\n\n";
+        // [SLEDGES 2026-11-07] the winter rides have no Sandbox givers: the Winter Fun window gives them, once a session
+        // (wolffloaterskis.cpp askForSkis, wolfstorm/php/wolfskis.php)
+        if (getOn(type))
+        {
+            msg += "Log out and back in, then open Wolf World > Winter Fun: it gives you a new one, into Objects.";
+            msg += "\n\n(It looks for an object whose description starts \"" + DESC_PREFIX + type + "\".)";
+            return msg;
+        }
+        msg += "Take a free copy on the Sandbox region: it goes into your inventory, and REZ finds it there.";
         if (libraryHasVehicles())
         {
             msg += "\n\nThe Library has free Wolf vehicles too, but no " + n + " yet.";   // ("no skis" reads right too)
@@ -803,7 +815,7 @@ namespace
         }
         if (LLFrameTimer::getElapsedSeconds() > s.mDeadline)
         {
-            finish("Your " + niceName(s.mType) + " " + isAre(s.mType) + " here, but sitting " + (plural(s.mType) || s.mType == "snowboard" ? "on " : "in ")
+            finish("Your " + niceName(s.mType) + " " + isAre(s.mType) + " here, but sitting " + (getOn(s.mType) ? "on " : "in ")
                    + itThem(s.mType) + " didn't work. Right-click " + itThem(s.mType) + " and choose Sit Here.");
         }
     }
@@ -917,12 +929,12 @@ namespace WolfVehicleRez
             case STAGE_FINDING:   return "Finding your free Wolf " + niceName(s.mType) + " in your inventory...";
             case STAGE_COPYING:   return "Copying your free Wolf " + niceName(s.mType) + " from the Library...";
             case STAGE_APPEARING: return "Rezzing your " + niceName(s.mType) + "...";
-            case STAGE_SITTING:   return std::string(plural(s.mType) || s.mType == "snowboard" ? "Putting you on your " : "Sitting you in your ")
+            case STAGE_SITTING:   return std::string(getOn(s.mType) ? "Putting you on your " : "Sitting you in your ")
                                          + niceName(s.mType) + "...";
             default:              break;
             }
         }
-        if (plural(type) || type == "snowboard")
+        if (getOn(type))
         {
             return "Rez your free Wolf " + niceName(type) + " in front of you and get on " + itThem(type) + ".";
         }

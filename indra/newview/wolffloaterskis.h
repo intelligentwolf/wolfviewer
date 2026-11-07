@@ -1,6 +1,8 @@
 /**
  * @file wolffloaterskis.h
  * [SKIS 2026-11-06] Wolf World > Skis and Snowboards... - pick skis or a snowboard, put them on, take them off (ticket 556).
+ * [SLEDGES 2026-11-07] Now Wolf World > Winter Fun...: skis, a snowboard, a sledge or a snow disc, with how to ride the one
+ * chosen (ticket 556, Indi Moon).
  * See wolfskis.h and floater_wolf_skis.xml. Wolf Territories only: opened elsewhere it says so and closes.
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
@@ -18,6 +20,7 @@
 
 #include "llfloater.h"
 #include "lluuid.h"
+#include "wolfskis.h"
 
 class LLButton;
 class LLTextBox;
@@ -32,7 +35,7 @@ public:
     void draw() override;
 
 private:
-    void pick(bool snowboard);
+    void pick(WolfSkis::EKind kind);
     void onPutOn();
     void onTakeOff();
     void onShowHud();
@@ -45,13 +48,15 @@ private:
     static void giveCoro(LLHandle<LLFloater> h);
     void onGiveReply(S32 status, bool ok, const LLSD& reply, const std::string& transport);
 
-    LLButton* mSkisBtn = nullptr;
-    LLButton* mBoardBtn = nullptr;
+    // [SLEDGES 2026-11-07] the four choices, in WolfSkis' order: skis, snowboard, sledge, snow disc
+    static constexpr S32 NUM_KINDS = 4;
+    LLButton* mKindBtn[NUM_KINDS] = { nullptr, nullptr, nullptr, nullptr };
+    LLTextBox* mHowText = nullptr;
     LLButton* mPutOnBtn = nullptr;
     LLButton* mTakeOffBtn = nullptr;
     LLButton* mShowHudBtn = nullptr;
     LLTextBox* mStatus = nullptr;
-    bool mSnowboard = false;
+    WolfSkis::EKind mKind = WolfSkis::KIND_SKIS;
     bool mWasPending = false;
     bool mAsking = false;                 // the give request is out: Put on waits for it
     static LLUUID sAskedSession;          // the session the give was answered for (asked once per session)

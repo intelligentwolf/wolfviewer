@@ -64,6 +64,7 @@ extern bool gDepthDirty;           // llviewerdisplay.cpp:186
 extern bool gResizeScreenTexture;  // llviewerdisplay.cpp:187 - display() reallocates the pipeline's targets when set
 void render_hud_attachments();     // llviewerdisplay.cpp:209 (defined there, not in its header)
 void render_ui_2d();               // llviewerdisplay.cpp:211
+extern F32 gWolfLodBias;           // [VR TEXTURE BIAS 2026-11-07/] llimagegl.cpp (GL_TEXTURE_LOD_BIAS on mipmapped images)
 
 namespace
 {
@@ -1640,6 +1641,20 @@ void displayFrame()
     // [VR EYE OFFSCREEN 2026-11-07] the picture's eye size (h: WolfVRStream::frameSize, the headset's quality step),
     // drawn offscreen, not capped by the window; WolfVREyeOffscreen off (or no target): the window-capped square
     static LLCachedControl<bool> eye_offscreen(gSavedSettings, "WolfVREyeOffscreen", true);
+    // [VR TEXTURE BIAS 2026-11-07] the mip level the textures are sampled at, shifted (negative = sharper) while the
+    // headset is drawn in 3D (WolfVRTextureLodBias, default 0 = none); back to 0 the frame VR 3D ends. Every image takes
+    // the change at its next bind (LLImageGL::dirtyTexOptions; llrender.cpp apply_wolf_lod_bias). Clamped to the
+    // range a resident could mean (-2 .. 0): a positive bias would only blur.
+    {
+        static LLCachedControl<F32> vr_bias(gSavedSettings, "WolfVRTextureLodBias", 0.f);
+        const F32 want = world ? llclamp((F32)vr_bias(), -2.f, 0.f) : 0.f;
+        if (want != gWolfLodBias)
+        {
+            gWolfLodBias = want;
+            LLImageGL::dirtyTexOptions();
+            LL_INFOS("WolfVR") << "VR texture LOD bias now " << want << LL_ENDL;
+        }
+    }
     const bool offscreen = world && eye_size && eye_offscreen && (S32)h / 8 * 8 >= 256 && eyeTargetFor((S32)h / 8 * 8);
     const S32 side = (offscreen ? (S32)h : llmin((S32)h, real.getHeight(), real.getWidth())) / 8 * 8;
     if (world && eye_size && side >= 256)

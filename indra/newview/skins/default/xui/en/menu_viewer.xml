@@ -2142,7 +2142,9 @@
             </menu_item_check>
             <!-- [SKIS 2026-11-06] wolffloaterskis.cpp: Paul, "build skis and snowboards add a new hud for it"; ticket 556.
              Put on / take off the free Wolf skis or snowboard; the Ski HUD opens while riding. Wolf Territories only. -->
-            <menu_item_call label="Skis and Snowboards..." name="WolfSkis">
+            <!-- [SLEDGES 2026-11-07] ticket 556 (Indi): a sledge and a snow disc too, so "Winter Fun"; the words in brackets
+                 so a resident looking for the skis still finds them -->
+            <menu_item_call label="Winter Fun (Skis and Sledges)..." name="WolfSkis">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_skis" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>

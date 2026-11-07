@@ -342,7 +342,16 @@ namespace
         if (s.mInAir) return "IN THE AIR!";
         if (s.mMode == "water") return "ON THE WATER";
         if (s.mMode == "ready") return "READY - PRESS AN ARROW KEY TO GO";   // held still until the first key (ski_template.lsl go())
-        if (!s.mRunning) return s.mHaveLast ? "RUN OVER - PUSH OFF FOR ANOTHER" : "PUSH OFF TO START (UP, OR POINT DOWNHILL)";
+        if (!s.mRunning) return s.mHaveLast ? "RUN OVER - PUSH OFF FOR ANOTHER" : "PUSH OFF TO START (UP ARROW, OR POINT DOWNHILL)";
+        // [SLEDGES 2026-11-07] a sledge or snow disc (sled_template.lsl modes: brake push carve_l carve_r lean_l lean_r)
+        if (WolfSkis::isSled(kind))
+        {
+            if (s.mMode == "brake") return "HEELS IN - SLOWING DOWN";
+            if (s.mMode == "push") return "PUSHING ALONG";
+            if (s.mMode == "carve_l" || s.mMode == "lean_l") return s.mCombo >= 2 ? llformat("LEANING LEFT  x%d", s.mCombo) : std::string("LEANING LEFT");
+            if (s.mMode == "carve_r" || s.mMode == "lean_r") return s.mCombo >= 2 ? llformat("LEANING RIGHT  x%d", s.mCombo) : std::string("LEANING RIGHT");
+            return kind == WolfSkis::KIND_SNOWDISC ? "SLIDING - ROUND AND ROUND" : "SLIDING";
+        }
         if (s.mMode == "tuck") return "TUCKED - FASTER, WIDER TURNS";
         if (s.mMode == "brake") return kind == WolfSkis::KIND_SNOWBOARD ? "HEEL BRAKE" : "SNOWPLOUGH";
         if (s.mMode == "push") return kind == WolfSkis::KIND_SNOWBOARD ? "PUSHING ALONG" : "SKATING";
@@ -351,6 +360,25 @@ namespace
     }
 
     struct HelpLine { S32 kind; const char* s; };   // 0 heading, 1 line
+
+    // [SLEDGES 2026-11-07] The keys along the bottom of the HUD, for the ride sat on (sled_template.lsl takes the arrows only;
+    // ski_template.lsl: arrows, Page Up / E jump, Page Down / C tuck).
+    std::string keysLine(WolfSkis::EKind kind)
+    {
+        if (WolfSkis::isSled(kind)) return "Steer: Left / Right arrows   -   Slow down: Down arrow   -   Push along: Up arrow";
+        return "Turn: Left / Right   -   Slow down: Down   -   Push: Up   -   Jump: E   -   Crouch (faster): C";
+    }
+
+    const char* hudName(WolfSkis::EKind kind)
+    {
+        switch (kind)
+        {
+            case WolfSkis::KIND_SNOWBOARD: return "WOLF SNOWBOARD";
+            case WolfSkis::KIND_SLEDGE:    return "WOLF SLEDGE";
+            case WolfSkis::KIND_SNOWDISC:  return "WOLF SNOW DISC";
+            default:                       return "WOLF SKIS";
+        }
+    }
 }
 
 WolfSkiHud::WolfSkiHud(const Params& p) : LLUICtrl(p) {}
@@ -393,7 +421,7 @@ void WolfSkiHud::press(EHit id)
     case H_TAKE_OFF: sk.takeOff(); break;
     case H_HIDE:     sk.showHud(false); break;
     case H_PANEL:    gSavedSettings.setBOOL("WolfSkiHudBackground", !gSavedSettings.getBOOL("WolfSkiHudBackground")); break;
-    case H_HELP:     mShowHelp = !mShowHelp; break;
+    case H_HELP:     mShowHelp = !mShowHelp; mHelpAuto = false; break;
     default: break;
     }
 }
@@ -406,15 +434,25 @@ void WolfSkiHud::draw()
     if (!sk.hudShowing() || !WolfSkis::onWolf())
     {
         mShowHelp = false;
+        mHelpAuto = false;
         if (hasMouseCapture()) gFocusMgr.setMouseCapture(nullptr);
         mPressed = H_NONE;
         mResize.hide();
         return;
     }
-    if (!gSavedSettings.getBOOL("WolfSkiHudHelpSeen"))
+    // [SLEDGES 2026-11-07] a sledge's / disc's keys are not the skis', so its help shows by itself the first time too
+    const char* seen = WolfSkis::isSled(sk.kind()) ? "WolfSledHudHelpSeen" : "WolfSkiHudHelpSeen";
+    if (!gSavedSettings.getBOOL(seen))
     {
-        gSavedSettings.setBOOL("WolfSkiHudHelpSeen", true);
+        gSavedSettings.setBOOL(seen, true);
         mShowHelp = true;   // the keys show by themselves the first time (as the dashboards' guides)
+        mHelpAuto = true;
+    }
+    // [SLEDGES 2026-11-07] ... and go again once the rider is off: left up, the help box hid a sitting rider (test sled1)
+    if (mHelpAuto && sk.shown().mRunning)
+    {
+        mShowHelp = false;
+        mHelpAuto = false;
     }
 
     // the band, as wolfhelmhud.cpp draw() (but always one row, below): above the bottom toolbar, 30 % of the window
@@ -560,7 +598,8 @@ void WolfSkiHud::draw()
         T(X(bx + 12.f), YM(752.f), s.mInAir ? "IN THE AIR" : "BIGGEST AIR", 9.f, s.mInAir ? GOLD : GREY, true, false, LLFontGL::LEFT);
         const F32 air = s.mInAir ? s.mAirNow : s.mBigAir;
         T(X(bx + 110.f), YM(800.f), air > 0.f ? llformat("%.1f s", air) : std::string("--"), 26.f, s.mInAir ? GOLD : SNOW, true, true);
-        T(X(bx + 110.f), YM(840.f), s.mBestAir > 0.f ? llformat("best here %.1f s", s.mBestAir) : std::string("Page Up (E) to jump"), 9.f, GREY);
+        T(X(bx + 110.f), YM(840.f), s.mBestAir > 0.f ? llformat("best here %.1f s", s.mBestAir)
+                                                      : std::string(WolfSkis::isSled(sk.kind()) ? "bumps throw you up" : "E to jump"), 9.f, GREY);
     }
 
     // ── CENTRE: the run ──
@@ -572,7 +611,7 @@ void WolfSkiHud::draw()
         fitT(X((C_L + C_R) * 0.5f), YM(624.f), mw, 13.f, 9.f, S(C_R - C_L - 20.f), mc, true);
         if (!sk.answered())
         {
-            fitT(X((C_L + C_R) * 0.5f), YM(652.f), "(these skis do not talk to the HUD: jumps and tricks are not scored)", 8.f, 7.f,
+            fitT(X((C_L + C_R) * 0.5f), YM(652.f), "(this ride does not talk to the HUD: jumps and tricks are not scored)", 8.f, 7.f,
                  S(C_R - C_L - 20.f), GREY);
         }
         // the clock (its own backing when the band is off)
@@ -603,10 +642,9 @@ void WolfSkiHud::draw()
             T(ccx, ccy + cr + S(8.f), "N", 8.f, GREY, true);
         }
         if (!bg) roundRectF(X(C_L + 10.f), YM(898.f), X(C_R - 10.f), YM(878.f), S(6.f), INSET, INSET);
-        T(X((C_L + C_R) * 0.5f), YM(888.f),
-          sk.kind() == WolfSkis::KIND_SNOWBOARD ? "Left/Right carve  -  Down brake  -  Up push  -  E jump  -  C tuck"
-                                                : "Left/Right carve  -  Down snowplough  -  Up skate  -  E jump  -  C tuck",
-          9.f, GREY);
+        // [SLEDGES 2026-11-07] every key said with what it does, in plain words (ticket 556: Indi found the ski keys "a bit
+        // different from what I'm used to"); a sledge and a disc use the arrows only
+        fitT(X((C_L + C_R) * 0.5f), YM(888.f), keysLine(sk.kind()), 9.f, 7.f, S(C_R - C_L - 24.f), GREY);
     }
 
     // ── RIGHT: style, the best here, the buttons ──
@@ -622,7 +660,10 @@ void WolfSkiHud::draw()
             roundRectF(X(R_L + 220.f), YM(752.f), X(R_L + 292.f), YM(718.f), S(8.f), alpha(GOLD, pulse), alpha(AMBER, pulse));
             T(X(R_L + 256.f), YM(735.f), llformat("x%d", s.mCombo), 15.f, NAVY_LO, true);
         }
-        T(X(R_L + 14.f), YM(736.f), s.mRunning ? "points this run" : (s.mHaveLast ? (s.mLastBest ? "last run - a new best!" : "last run") : "jump, spin, carve"),
+        T(X(R_L + 14.f), YM(736.f), s.mRunning ? (sk.kind() == WolfSkis::KIND_SNOWDISC && s.mSpins > 0 ? llformat("points this run  -  %d turns round", s.mSpins)
+                                                                                                 : std::string("points this run"))
+                                   : std::string(s.mHaveLast ? (s.mLastBest ? "last run - a new best!" : "last run")
+                                                             : (WolfSkis::isSled(sk.kind()) ? "bumps, turns, speed" : "jump, spin, carve")),
           9.f, s.mLastBest && !s.mRunning ? GOLD : GREY, false, false, LLFontGL::LEFT);
         // the best here, on this computer
         if (!bg) roundRectF(X(R_L), YM(820.f), X(R_L + 300.f), YM(768.f), S(8.f), INSET, INSET);
@@ -633,19 +674,23 @@ void WolfSkiHud::draw()
         fitT(X(R_L + 150.f), YM(806.f), best, 11.f, 8.f, S(290.f), SNOW, true);
 
         // the buttons: big and clear (memory paul-simple-for-older-disabled-users)
-        button(c, X(R_L + 320.f), YM(700.f), X(1588.f), YM(612.f), sk.kind() == WolfSkis::KIND_SNOWBOARD ? "TAKE IT OFF" : "TAKE THEM OFF",
-               H_TAKE_OFF, "Stand up and take them off. They go back to your inventory, ready for next time.", 14.f,
+        // [SLEDGES 2026-11-07] you get off a sledge or a disc
+        button(c, X(R_L + 320.f), YM(700.f), X(1588.f), YM(612.f),
+               WolfSkis::isSled(sk.kind()) ? "GET OFF" : sk.kind() == WolfSkis::KIND_SNOWBOARD ? "TAKE IT OFF" : "TAKE THEM OFF",
+               H_TAKE_OFF, WolfSkis::isSled(sk.kind()) ? "Stand up and get off. It goes back to your inventory, ready for next time."
+                                                       : "Stand up and take them off. They go back to your inventory, ready for next time.", 14.f,
                LLColor4(0.20f, 0.42f, 0.66f, 0.97f), LLColor4(0.08f, 0.18f, 0.32f, 0.97f));
-        button(c, X(R_L + 320.f), YM(780.f), X(R_L + 395.f), YM(716.f), "KEYS", H_HELP, "Show the keys and how the score works", 11.f,
+        // [SLEDGES 2026-11-07] "HELP" (was "KEYS"): the word older residents look for
+        button(c, X(R_L + 320.f), YM(780.f), X(R_L + 395.f), YM(716.f), "HELP", H_HELP, "How to ride: every key, and how the points work", 11.f,
                LLColor4(0.16f, 0.26f, 0.38f, 0.97f), LLColor4(0.06f, 0.11f, 0.18f, 0.97f));
         // Source: wolfhelmhud.cpp PANEL (WolfHelmHudBackground) - the same switch, for this HUD's own setting
         button(c, X(R_L + 401.f), YM(780.f), X(R_L + 476.f), YM(716.f), "PANEL", H_PANEL,
                bg ? "Background on: click to float the read-outs over the world" : "Background off: click to put the panel back", 11.f,
                bg ? LLColor4(0.20f, 0.42f, 0.66f, 0.97f) : LLColor4(0.16f, 0.26f, 0.38f, 0.97f), LLColor4(0.06f, 0.11f, 0.18f, 0.97f));
         button(c, X(R_L + 482.f), YM(780.f), X(1588.f), YM(716.f), "HIDE", H_HIDE,
-               "Hide this HUD while you ride (Wolf World > Skis and Snowboards... brings it back)", 12.f,
+               "Hide this HUD while you ride (Wolf World > Winter Fun... brings it back)", 12.f,
                LLColor4(0.16f, 0.26f, 0.38f, 0.97f), LLColor4(0.06f, 0.11f, 0.18f, 0.97f));
-        if (bg) T(X(1588.f), YM(860.f), sk.kind() == WolfSkis::KIND_SNOWBOARD ? "WOLF SNOWBOARD" : "WOLF SKIS", 10.f, ICE_DIM, true, false, LLFontGL::RIGHT);
+        if (bg) T(X(1588.f), YM(860.f), hudName(sk.kind()), 10.f, ICE_DIM, true, false, LLFontGL::RIGHT);
     }
 
     drawPopups(g.panelTop, W);
@@ -684,29 +729,51 @@ void WolfSkiHud::drawPopups(F32 band_top, F32 width)
 
 void WolfSkiHud::drawHelp(F32 band_top, F32 width)
 {
-    static const HelpLine LINES[] =
+    // [SLEDGES 2026-11-07] Every key said with what it does, in plain words, for the ride sat on (ticket 556: Indi found the
+    // ski keys "a bit different from what I'm used to" - the old lines named keys by their letters and skiing words).
+    static const HelpLine SKI_LINES[] =
     {
-        { 0, "RIDING" },
-        { 1, "Point them downhill and you go: the steeper, the faster." },
-        { 1, "Left / Right (A / D): carve a turn - at speed, or pivot when slow." },
-        { 1, "Down (S): brake - a snowplough on skis, a heel-side skid on the board." },
-        { 1, "Up (W): push along on the flat.   Page Up / E: jump.   Page Down / C: tuck." },
-        { 1, "Left / Right in the air: spin.  Land along your skis, or you wipe out (and get up)." },
+        { 0, "HOW TO RIDE" },
+        { 1, "Nothing moves until you press an arrow key. Point downhill and off you go - steeper is faster." },
+        { 1, "Left / Right arrow (or A / D): turn.        Down arrow (or S): slow down and stop." },
+        { 1, "Up arrow (or W): push yourself along on the flat. It does not make you go faster downhill." },
+        { 1, "E (or Page Up): jump.        C (or Page Down): crouch low to go faster." },
+        { 1, "In the air, Left / Right spins you. Land facing the way you go, or you fall (and get up)." },
+        { 1, "To take them off: the big button on the right, or stand up." },
         { 0, "STYLE POINTS" },
         { 1, "100 a second in the air, more for a 180, 360 or 540 - landed cleanly." },
-        { 1, "Linked carved turns build a combo: left, right, left... x2, x3 ..." },
+        { 1, "Linked turns build a combo: left, right, left... x2, x3 ..." },
         { 1, "Every second faster than 72 km/h (45 mph). Your best here is kept on this computer." },
-        { 0, "Click KEYS again to close this." },
+        { 0, "Click HELP again to close this." },
     };
+    static const HelpLine SLED_LINES[] =
+    {
+        { 0, "HOW TO RIDE - THE ARROW KEYS ONLY" },
+        { 1, "Nothing moves until you press an arrow key. Point it downhill and off you go - steeper is faster." },
+        { 1, "Left / Right arrow: lean to steer. A sledge turns in a wide curve; a snow disc only drifts." },
+        { 1, "Down arrow: dig your heels in to slow down and stop." },
+        { 1, "Up arrow: push yourself along on the flat. It does not make you go faster downhill." },
+        { 1, "There is no jump key: bumps throw you in the air by themselves." },
+        { 1, "A snow disc turns slowly round as it slides - that is part of the fun." },
+        { 1, "To get off: the GET OFF button, or stand up." },
+        { 0, "STYLE POINTS" },
+        { 1, "100 a second in the air with a clean landing. Sledge: linked turns build a combo." },
+        { 1, "Snow disc: points for every turn round. Every second faster than 72 km/h (45 mph) too." },
+        { 0, "Click HELP again to close this." },
+    };
+    const bool sled = WolfSkis::isSled(WolfSkis::instance().kind());
+    const HelpLine* LINES = sled ? SLED_LINES : SKI_LINES;
+    const size_t n = sled ? sizeof(SLED_LINES) / sizeof(SLED_LINES[0]) : sizeof(SKI_LINES) / sizeof(SKI_LINES[0]);
     use(g.C);
-    const F32 w = S(760.f), lh = S(22.f);
-    const F32 h = lh * (F32)(sizeof(LINES) / sizeof(LINES[0])) + S(20.f);
+    const F32 w = S(820.f), lh = S(22.f);
+    const F32 h = lh * (F32)n + S(20.f);
     const F32 l = width * 0.5f - w * 0.5f, b = band_top + S(14.f);
     roundRectF(l, b, l + w, b + h, S(12.f), alpha(NAVY_HI, 0.96f), alpha(NAVY_LO, 0.96f));
     frameW(l, b, l + w, b + h, 1.5f, alpha(ICE, 0.7f));
     F32 y = b + h - S(20.f);
-    for (const HelpLine& hl : LINES)
+    for (size_t i = 0; i < n; ++i)
     {
+        const HelpLine& hl = LINES[i];
         T(l + S(20.f), y, hl.s, hl.kind == 0 ? 12.f : 11.f, hl.kind == 0 ? ICE : SNOW, hl.kind == 0, false, LLFontGL::LEFT);
         y -= lh;
     }

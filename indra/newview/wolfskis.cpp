@@ -73,6 +73,14 @@ namespace
     const F32 FAST_SPEED = 20.f;            // m/s (72 km/h): every second faster than this ...
     const S32 FAST_POINTS = 5;              // ... is worth this
     const size_t MAX_BEST_REGIONS = 60;     // the bests kept on this computer (the oldest goes first)
+    // [SLEDGES 2026-11-07] (MODEL, our own game)
+    const F32 BUMP_AIR = 0.3f;              // s: the snow disc's shortest air its script reports (sled_tuning.py AIR_MIN)
+    const F32 SPIN_SPEED = 1.f;             // m/s: the disc's turning round counts only while it slides
+    const S32 SPIN_POINTS = 20;             // each whole turn round
+    const S32 SPIN_CHEER = 3;               // a pop-up every this many turns
+    // the four kinds, in the window's order (Source: build_skis.py ORDER, region-terrain-work/sledges-2026-11-07/
+    // build_sleds.py ORDER; the words are the objects' "wolfvehicle:<word>" descriptions)
+    const WolfSkis::EKind KINDS[] = { WolfSkis::KIND_SKIS, WolfSkis::KIND_SNOWBOARD, WolfSkis::KIND_SLEDGE, WolfSkis::KIND_SNOWDISC };
 
     F64 now() { return LLFrameTimer::getTotalSeconds(); }
 
@@ -172,14 +180,36 @@ bool WolfSkis::onWolf()
 bool WolfSkis::seatIsSkis(const LLUUID& root)
 {
     const WolfObjectProps::Props* p = root.notNull() ? WolfObjectProps::instance().get(root) : nullptr;
-    return p && (descIs(p->mDescriptionLower, "skis") || descIs(p->mDescriptionLower, "snowboard"));
+    if (!p) return false;
+    for (EKind k : KINDS)
+    {
+        if (descIs(p->mDescriptionLower, kindWord(k))) return true;   // [SLEDGES 2026-11-07] a sledge / disc too
+    }
+    return false;
 }
 
 // static
 const char* WolfSkis::kindWord(EKind k)
 {
-    return k == KIND_SNOWBOARD ? "snowboard" : "skis";
+    switch (k)
+    {
+        case KIND_SNOWBOARD: return "snowboard";
+        case KIND_SLEDGE:    return "sledge";     // [SLEDGES 2026-11-07] build_sleds.py KINDS keys
+        case KIND_SNOWDISC:  return "snowdisc";
+        default:             return "skis";
+    }
 }
+
+// static
+WolfSkis::EKind WolfSkis::kindFromWord(const std::string& word)
+{
+    for (EKind k : KINDS)
+    {
+        if (word == kindWord(k)) return k;
+    }
+    return KIND_NONE;
+}
+
 
 bool WolfSkis::mph() const
 {
@@ -219,6 +249,9 @@ void WolfSkis::reset(const LLUUID& seat)
     mCarveSince = 0.0;
     mLastTurnAt = 0.0;
     mFastSince = 0.0;
+    mLastYawDeg = 0.f;
+    mTurnedDeg = 0.f;
+    mHaveYaw = false;
 }
 
 void WolfSkis::putOn(EKind k)
@@ -289,8 +322,9 @@ void WolfSkis::loadBests()
     s.mBestTop = 0.f;
     s.mBestAir = 0.f;
     const LLSD all = gSavedSettings.getLLSD("WolfSkiBests");
-    if (!all.isMap() || mRegionName.empty() || !all.has(mRegionName)) return;
-    const LLSD& b = all[mRegionName];
+    const std::string key = bestsKey();
+    if (!all.isMap() || key.empty() || !all.has(key)) return;
+    const LLSD& b = all[key];
     if (!b.isMap()) return;
     // never trust what is on disk either: clamped to what a run can make
     s.mBestScore = llclamp((S32)b["score"].asInteger(), 0, 9999999);
@@ -298,9 +332,18 @@ void WolfSkis::loadBests()
     s.mBestAir = llclamp((F32)b["air"].asReal(), 0.f, 60.f);
 }
 
+// [SLEDGES 2026-11-07] Skis and snowboard share the region's bests as before (W97's are kept under the region's name); a
+// sledge's and a snow disc's are their own, "<region> | sledge" - a sledge run is no rival for a ski run.
+std::string WolfSkis::bestsKey() const
+{
+    if (mRegionName.empty()) return std::string();
+    return isSled(mKind) ? mRegionName + " | " + kindWord(mKind) : mRegionName;
+}
+
 void WolfSkis::saveBests()
 {
-    if (mRegionName.empty()) return;
+    const std::string key = bestsKey();
+    if (key.empty()) return;
     LLSD all = gSavedSettings.getLLSD("WolfSkiBests");
     if (!all.isMap()) all = LLSD::emptyMap();
     LLSD b = LLSD::emptyMap();
@@ -308,7 +351,7 @@ void WolfSkis::saveBests()
     b["top"] = mShownData.mBestTop;
     b["air"] = mShownData.mBestAir;
     b["at"] = (LLSD::Integer)time(nullptr);
-    all[mRegionName] = b;
+    all[key] = b;
     // bounded (memory paul-no-eternal-logs): the region not ridden for longest goes first
     while (all.size() > MAX_BEST_REGIONS)
     {
@@ -381,7 +424,10 @@ void WolfSkis::onMode(const std::string& m)
             if (s.mCombo >= 3)
             {
                 static const char* const CHEER[] = { "Lovely carving!", "Smooth!", "Carving combo!", "Look at those edges!" };
-                popup(llformat("%s x%d", CHEER[s.mCombo % 4], s.mCombo), llformat("+%d", CARVE_POINTS * s.mCombo), 0);
+                // [SLEDGES 2026-11-07] a sledge's turns are leaned, not carved
+                static const char* const CHEER_SLEDGE[] = { "Nicely steered!", "Smooth!", "Lean and turn!", "What a line!" };
+                popup(llformat("%s x%d", (mKind == KIND_SLEDGE ? CHEER_SLEDGE : CHEER)[s.mCombo % 4], s.mCombo),
+                      llformat("+%d", CARVE_POINTS * s.mCombo), 0);
             }
         }
     }
@@ -408,7 +454,9 @@ void WolfSkis::onMode(const std::string& m)
     }
     if (m == "water" && was != "water")
     {
-        popup("Splash!", "Skis and boards stop on the water", 2);
+        // (sled_template.lsl: no push on the water - getting off is the way out, as on skis)
+        popup("Splash!", isSled(mKind) ? "Sledges and discs stop on the water: get off to walk back"
+                                       : "Skis and boards stop on the water", 2);
     }
 }
 
@@ -427,6 +475,12 @@ void WolfSkis::onLand(F32 air, S32 spin, bool clean, F32 impact)
     else if (spin >= 360) { points += 250; trick = "360!"; }
     else if (spin >= 180) { points += 100; trick = "180 - riding backwards!"; }
     addScore(points);
+    // [SLEDGES 2026-11-07] the snow disc's little bumps (its script reports from BUMP_AIR, the skis' from 0.5 s)
+    if (isSled(mKind) && air >= BUMP_AIR && air < SHOW_AIR)
+    {
+        popup(llformat("Bump! %.1f s", air), llformat("+%d", points), 0);
+        return;
+    }
     if (air >= BIG_AIR) popup(llformat("Big air! %.1f s", air), trick.empty() ? llformat("Clean landing  +%d", points) : trick + llformat("  +%d", points), 1);
     else if (air >= SHOW_AIR || !trick.empty()) popup(trick.empty() ? llformat("Nice jump! %.1f s", air) : trick,
                                                      llformat("Clean landing  +%d", points), trick.empty() ? 0 : 1);
@@ -487,7 +541,8 @@ bool WolfSkis::onObjectChat(const LLUUID& source, U8 chat_type, const std::strin
         mLastCarve.clear();
         std::string why = "Up you get - off you go again.";
         if (f[1] == "landing") why = "Too hard a landing. Up you get!";
-        else if (f[1] == "edge") why = "Caught an edge landing sideways. Up you get!";
+        else if (f[1] == "edge") why = mKind == KIND_SLEDGE ? "Landed sideways and tipped over. Up you get!"   // [SLEDGES 2026-11-07]
+                                                            : "Caught an edge landing sideways. Up you get!";
         else if (f[1] == "crash") why = "Ouch, you hit something. Up you get!";
         popup("Wipe out!", why, 2);
     }
@@ -510,6 +565,35 @@ void WolfSkis::measure(F32 dt)
     // compass heading: 0 north (+Y), clockwise (east is +X)
     F32 hdg = atan2f(fwd.mV[VX], fwd.mV[VY]) * RAD_TO_DEG;
     if (hdg < 0.f) hdg += 360.f;
+    // [SLEDGES 2026-11-07] the snow disc turns round as it slides (sled_template.lsl): its turning is counted here, and
+    // the heading it shows is the way it is going, not the way it faces
+    if (mKind == KIND_SNOWDISC)
+    {
+        if (mHaveYaw && s.mRunning && s.mSpeed > SPIN_SPEED)
+        {
+            F32 d = hdg - mLastYawDeg;
+            if (d > 180.f) d -= 360.f;
+            if (d < -180.f) d += 360.f;
+            mTurnedDeg += fabsf(d);
+            while (mTurnedDeg >= 360.f)
+            {
+                mTurnedDeg -= 360.f;
+                s.mSpins = llmin(s.mSpins + 1, 9999);
+                addScore(SPIN_POINTS);
+                if (s.mSpins % SPIN_CHEER == 0)
+                {
+                    popup(llformat("Round and round! x%d", s.mSpins), llformat("+%d a turn", SPIN_POINTS), 0);
+                }
+            }
+        }
+        mLastYawDeg = hdg;
+        mHaveYaw = true;
+        if (vel.mV[VX] * vel.mV[VX] + vel.mV[VY] * vel.mV[VY] > 0.25f)
+        {
+            hdg = atan2f(vel.mV[VX], vel.mV[VY]) * RAD_TO_DEG;
+            if (hdg < 0.f) hdg += 360.f;
+        }
+    }
     s.mHeading = hdg;
     // the steepness under the skis: the support height 1 m either side, both ways (the fall line's gradient)
     const LLVector3d p = root->getPositionGlobal();
@@ -536,6 +620,8 @@ void WolfSkis::measure(F32 dt)
             s.mBigAir = 0.f;
             s.mScore = 0;
             s.mCombo = 0;
+            s.mSpins = 0;
+            mTurnedDeg = 0.f;
             mLastCarve.clear();
             mStillSince = 0.0;
             mFastSince = 0.0;
@@ -608,8 +694,14 @@ void WolfSkis::idle()
             return;
         }
         mDescKnown = true;
-        if (descIs(p->mDescriptionLower, "skis")) mKind = KIND_SKIS;
-        else if (descIs(p->mDescriptionLower, "snowboard")) mKind = KIND_SNOWBOARD;
+        for (EKind k : KINDS)   // [SLEDGES 2026-11-07] skis, snowboard, sledge, snow disc
+        {
+            if (descIs(p->mDescriptionLower, kindWord(k)))
+            {
+                mKind = k;
+                break;
+            }
+        }
         if (mKind == KIND_NONE) return;
         mRegionName = root->getRegion() ? root->getRegion()->getName() : std::string();
         loadBests();

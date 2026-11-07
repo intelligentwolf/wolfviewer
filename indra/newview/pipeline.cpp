@@ -8457,9 +8457,21 @@ void LLPipeline::generateGlow(LLRenderTarget* src)
     }
 }
 
-void LLPipeline::applyCAS(LLRenderTarget* src, LLRenderTarget* dst)
+// [VR SHARPEN 2026-11-07] Paul on the offscreen eyes: "I wonder if we can get it any sharper". The headset's eye gets
+// its own Contrast Adaptive Sharpening strength (WolfVRSharpness; below 0 = the desktop's RenderCASSharpness), the
+// same pass the desktop uses (AMD FidelityFX CAS, CASF.glsl / CasSetup), so both eyes are sharpened alike; the desktop's
+// own frames keep RenderCASSharpness. A VR eye pass = the camera is the headset's (WolfVRScreen::headCamera).
+static F32 wolf_cas_sharpness()
 {
     static LLCachedControl<F32> cas_sharpness(gSavedSettings, "RenderCASSharpness", 0.4f);
+    static LLCachedControl<F32> vr_sharpness(gSavedSettings, "WolfVRSharpness", 0.7f);
+    if (WolfVRScreen::headCamera() && !gCubeSnapshot && vr_sharpness() >= 0.f) return llmin((F32)vr_sharpness(), 1.f);
+    return cas_sharpness();
+}
+
+void LLPipeline::applyCAS(LLRenderTarget* src, LLRenderTarget* dst)
+{
+    const F32 cas_sharpness = wolf_cas_sharpness();   // [VR SHARPEN 2026-11-07/]
     LL_PROFILE_GPU_ZONE("cas");
     if (cas_sharpness == 0.0f || !gCASProgram.isComplete() || !gCASLegacyGammaProgram.isComplete())
     {
@@ -8490,7 +8502,7 @@ void LLPipeline::applyCAS(LLRenderTarget* src, LLRenderTarget* dst)
         varAU4(const0);
         varAU4(const1);
         CasSetup(const0, const1,
-            cas_sharpness(),             // Sharpness tuning knob (0.0 to 1.0).
+            cas_sharpness,               // Sharpness tuning knob (0.0 to 1.0).
             (AF1)src->getWidth(), (AF1)src->getHeight(),  // Input size.
             (AF1)dst->getWidth(), (AF1)dst->getHeight()); // Output size.
 
@@ -9385,7 +9397,7 @@ void LLPipeline::renderFinalize()
 
         generateExposure(&mLuminanceMap, &mExposureMap);
 
-        static LLCachedControl<F32> cas_sharpness(gSavedSettings, "RenderCASSharpness", 0.4f);
+        const F32 cas_sharpness = wolf_cas_sharpness();   // [VR SHARPEN 2026-11-07/]
         bool apply_cas = cas_sharpness != 0.0f && gCASProgram.isComplete() && gCASLegacyGammaProgram.isComplete();
 
         tonemap(&mRT->screen, apply_cas ? &mRT->deferredLight : &mPostPingMap, !apply_cas);

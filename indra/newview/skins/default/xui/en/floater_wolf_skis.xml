@@ -1,45 +1,73 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <!-- [SKIS 2026-11-06] Wolf World > Skis and Snowboards... (wolffloaterskis.cpp, wolfskis.h). Paul: "build skis and
      snowboards add a new hud for it that will be fun"; ticket 556 (Indi Moon).
-     Who and why: a resident on a snowy region wants to ski down the mountain now, without hunting for an object or
-     learning a script's chat commands (many residents are older - memory paul-simple-for-older-disabled-users).
-     Flow: open, pick Skis or Snowboard (one big choice, remembered), press the big "Put them on" button: they appear at
-     your feet and you are standing on them, the Ski HUD opens. Ride. "Take them off" stands you up and they go back to
-     your inventory. No codes, no confirm steps; every failure is said in the status line or a visible alert.
-     [Wolf 2026-11-06] The first open in a session asks wolfstorm/php/wolfskis.php: a resident without the free pair is given
-     what is missing (Objects > Skis and Snowboards, the "has given you" offer) and the status line says where it is; one
-     who has them sees nothing (Paul 2026-11-06: "if the folder is not in their inventory give them what they need"). -->
+     [SLEDGES 2026-11-07] Ticket 556 again (Indi): "Would it be possible to add sledding and snow disk sledding to the winter
+     fun too?" - now Wolf World > Winter Fun: skis, a snowboard, a sledge or a snow disc. Indi also found the ski keys "a bit
+     different from what I'm used to", so the window says how to ride the one chosen, every key with what it does.
+     Who and why: a resident on a snowy region wants to slide down the hill now, without hunting for an object or learning
+     a script's chat commands (many residents are older - memory paul-simple-for-older-disabled-users).
+     Flow: open, pick one of four big buttons (remembered), read the short "how to ride" under it, press the big button: it
+     appears at your feet and you are on it, the Ski HUD opens. Ride. "Get off" stands you up and it goes back to your
+     inventory. No codes, no confirm steps; every failure is said in the status line or a visible alert.
+     [Wolf 2026-11-06] The first open in a session asks wolfstorm/php/wolfskis.php: a resident without the free ones is given
+     what is missing (the "has given you" offer) and the status line says where it is; one who has them sees nothing. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="394"
+ height="548"
  layout="topleft"
  name="wolf_skis"
  save_rect="true"
  single_instance="true"
- title="Skis and Snowboards"
+ title="Winter Fun"
  width="460">
-    <text follows="left|top" font="SansSerif" height="40" layout="topleft" left="16" name="intro" top="26" width="428" wrap="true">Ride down the mountain. The steeper the slope, the faster you go.</text>
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="choose_heading" top="70" width="428">1. Choose</text>
-    <button follows="left|top" font="SansSerifLarge" height="48" is_toggle="true" label="Skis" layout="topleft" left="16" name="skis_btn" top="94" width="208" tool_tip="A pair of skis and poles." />
-    <button follows="left|top" font="SansSerifLarge" height="48" is_toggle="true" label="Snowboard" layout="topleft" left="236" name="board_btn" top="94" width="208" tool_tip="A snowboard. You stand sideways on it." />
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="go_heading" top="156" width="428">2. Go</text>
-    <button follows="left|top" font="SansSerifLarge" height="48" label="Put them on" layout="topleft" left="16" name="put_on_btn" top="180" width="428" tool_tip="They appear at your feet and you stand on them. Your free pair is in your inventory: Objects > Skis and Snowboards." />
-    <button follows="left|top" font="SansSerif" height="34" label="Take them off" layout="topleft" left="16" name="take_off_btn" top="238" width="208" tool_tip="Stand up. They go back to your inventory, ready for next time." />
-    <button follows="left|top" font="SansSerif" height="34" label="Show the Ski HUD" layout="topleft" left="236" name="show_hud_btn" top="238" width="208" tool_tip="Bring back the HUD across the bottom of the screen." visible="false" />
-    <text follows="left|top" font="SansSerif" height="38" layout="topleft" left="16" name="status" top="280" width="428" wrap="true" />
-    <check_box control_name="WolfSkiHudAuto" follows="left|top" height="22" label="Show the Ski HUD while I ride" layout="topleft" left="16" name="hud_auto" top="324" width="428" tool_tip="Speed, steepness, your run time, jumps and style points across the bottom of the screen." />
-    <check_box control_name="WolfSkiHudMph" follows="left|top" height="22" label="Speeds in miles an hour" layout="topleft" left="16" name="hud_mph" top="350" width="428" tool_tip="Unticked: kilometres an hour." />
+    <text follows="left|top" font="SansSerif" height="40" layout="topleft" left="16" name="intro" top="26" width="428" wrap="true">Slide down the snowy hills. The steeper the slope, the faster you go.</text>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="choose_heading" top="64" width="428">1. Choose</text>
+    <button follows="left|top" font="SansSerifLarge" height="44" is_toggle="true" label="Skis" layout="topleft" left="16" name="skis_btn" top="88" width="208" tool_tip="A pair of skis and poles. You stand on them." />
+    <button follows="left|top" font="SansSerifLarge" height="44" is_toggle="true" label="Snowboard" layout="topleft" left="236" name="board_btn" top="88" width="208" tool_tip="A snowboard. You stand sideways on it." />
+    <button follows="left|top" font="SansSerifLarge" height="44" is_toggle="true" label="Sledge" layout="topleft" left="16" name="sledge_btn" top="140" width="208" tool_tip="A wooden sledge. You sit on it and lean to steer." />
+    <button follows="left|top" font="SansSerifLarge" height="44" is_toggle="true" label="Snow disc" layout="topleft" left="236" name="disc_btn" top="140" width="208" tool_tip="A round snow disc. You sit on it; it turns slowly round as it slides." />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="how_heading" top="194" width="428">How to ride</text>
+    <text follows="left|top" font="SansSerif" height="120" layout="topleft" left="16" name="how_text" top="214" width="428" wrap="true" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="go_heading" top="340" width="428">2. Go</text>
+    <button follows="left|top" font="SansSerifLarge" height="48" label="Put them on" layout="topleft" left="16" name="put_on_btn" top="364" width="428" tool_tip="It appears at your feet and you are on it. Your free ones are in your inventory, under Objects." />
+    <button follows="left|top" font="SansSerif" height="34" label="Get off" layout="topleft" left="16" name="take_off_btn" top="422" width="208" tool_tip="Stand up. It goes back to your inventory, ready for next time." />
+    <button follows="left|top" font="SansSerif" height="34" label="Show the Ski HUD" layout="topleft" left="236" name="show_hud_btn" top="422" width="208" tool_tip="Bring back the HUD across the bottom of the screen." visible="false" />
+    <text follows="left|top" font="SansSerif" height="38" layout="topleft" left="16" name="status" top="464" width="428" wrap="true" />
+    <check_box control_name="WolfSkiHudAuto" follows="left|top" height="22" label="Show the Ski HUD while I ride" layout="topleft" left="16" name="hud_auto" top="500" width="428" tool_tip="Speed, steepness, your run time, jumps and style points across the bottom of the screen." />
+    <check_box control_name="WolfSkiHudMph" follows="left|top" height="22" label="Speeds in miles an hour" layout="topleft" left="16" name="hud_mph" top="524" width="428" tool_tip="Unticked: kilometres an hour." />
     <string name="put_on_skis">Put my skis on</string>
     <string name="put_on_board">Put my snowboard on</string>
-    <string name="already_skis">You are on your skis. Point them downhill and off you go!</string>
-    <string name="already_board">You are on your snowboard. Point it downhill and off you go!</string>
-    <string name="on_skis">You are on your skis. Left and Right turn, Down brakes, E jumps.</string>
-    <string name="on_board">You are on your snowboard. Left and Right turn, Down brakes, E jumps.</string>
-    <string name="not_riding">You are not on skis or a snowboard just now.</string>
-    <string name="taken_off">Taken off. They are back in your inventory.</string>
-    <string name="asking">One moment - checking your inventory for your free skis. Press it again in a moment.</string>
+    <string name="put_on_sledge">Get on my sledge</string>
+    <string name="put_on_disc">Get on my snow disc</string>
+    <string name="how_skis">Nothing moves until you press an arrow key.
+Left / Right arrow: turn.   Down arrow: slow down and stop.
+Up arrow: push along on the flat.   E: jump.   C: crouch to go faster.
+In the air, Left / Right spins you round.</string>
+    <string name="how_board">Nothing moves until you press an arrow key. You stand sideways.
+Left / Right arrow: turn.   Down arrow: slow down and stop.
+Up arrow: push along on the flat.   E: jump.   C: crouch to go faster.
+In the air, Left / Right spins you round.</string>
+    <string name="how_sledge">Nothing moves until you press an arrow key. Only the arrow keys are used.
+Left / Right arrow: lean to steer - it turns in a wide curve.
+Down arrow: heels in the snow to slow down and stop.
+Up arrow: push along on the flat. Bumps throw you in the air by themselves.</string>
+    <string name="how_disc">Nothing moves until you press an arrow key. Only the arrow keys are used.
+It turns slowly round as it slides. Left / Right arrow: lean - it drifts a little that way.
+Down arrow: hands and heels in the snow to slow down and stop.
+Up arrow: push along on the flat. Bumps throw you in the air by themselves.</string>
+    <string name="already_skis">You are on your skis. Point them downhill and press an arrow key!</string>
+    <string name="already_board">You are on your snowboard. Point it downhill and press an arrow key!</string>
+    <string name="already_sledge">You are on your sledge. Point it downhill and press an arrow key!</string>
+    <string name="already_disc">You are on your snow disc. Press an arrow key and off you go!</string>
+    <string name="on_skis">You are on your skis. Press an arrow key to go - the keys are above.</string>
+    <string name="on_board">You are on your snowboard. Press an arrow key to go - the keys are above.</string>
+    <string name="on_sledge">You are on your sledge. Press an arrow key to go - the keys are above.</string>
+    <string name="on_disc">You are on your snow disc. Press an arrow key to go - the keys are above.</string>
+    <string name="not_riding">You are not on skis, a snowboard, a sledge or a snow disc just now.</string>
+    <string name="taken_off">Off. It is back in your inventory, ready for next time.</string>
+    <string name="asking">One moment - checking your inventory for your free winter things. Press it again in a moment.</string>
     <string name="given_one">Your free [NAMES] is in your inventory now: Objects > [FOLDER].</string>
-    <string name="given_both">Your free [NAMES] are in your inventory now: Objects > [FOLDER].</string>
+    <string name="given_more">Your free [NAMES] are in your inventory now: Objects > [FOLDER].</string>
 </floater>

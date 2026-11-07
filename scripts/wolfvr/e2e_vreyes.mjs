@@ -46,11 +46,17 @@ await sleep(15000);                                // the region's textures in, 
 const results = [];
 for (const ph of PHASES) {
     const [label, kv, secs] = ph.split(':');
-    for (const pair of (kv || '').split(',').filter(Boolean)) { const [k, v] = pair.split('='); setting(k, v); }
+    for (const pair of (kv || '').split(',').filter(Boolean)) {
+        const [k, v] = pair.split('=');
+        if (k === 'q') await evalJs(`window.__wolfvr.setQuality(${Number(v)})`);   // the page's quality step (eye size)
+        else if (k === 'yaw' || k === 'pitch') await evalJs(`window.__fakeXR.set${k === 'yaw' ? 'Yaw' : 'Pitch'}(${Number(v)})`);   // radians
+        else setting(k, v);
+    }
     await sleep(10000);   // settle: the targets re-made, the textures' new detail in
     await evalJs('window.__wolfvr.resetStages && window.__wolfvr.resetStages()');
+    const t_from = new Date().toISOString();
     await sleep(Number(secs || 25) * 1000);
-    const r = { label, settings: kv, config: await evalJs('window.__wolfvr.config()'), rates: await evalJs('window.__wolfvr.rates()'),
+    const r = { label, settings: kv, from: t_from, to: new Date().toISOString(), config: await evalJs('window.__wolfvr.config()'), rates: await evalJs('window.__wolfvr.rates()'),
                 stages: await evalJs('window.__wolfvr.stages()'), xrLayer: await evalJs('window.__wolfvr.xrLayer()') };
     // the viewer's eye dump: the stereo picture exactly as it goes to the encoder (both eyes)
     const before = existsSync(resolve(LOGS, 'wolfvr_eye_left.png')) ? statSync(resolve(LOGS, 'wolfvr_eye_left.png')).mtimeMs : 0;
@@ -58,6 +64,13 @@ for (const ph of PHASES) {
     r.dump = !!(await waitFor(() => existsSync(resolve(LOGS, 'wolfvr_eye_left.png')) && statSync(resolve(LOGS, 'wolfvr_eye_left.png')).mtimeMs > before, 10000));
     await sleep(1500);
     if (r.dump) for (const e of ['left', 'right']) copyFileSync(resolve(LOGS, `wolfvr_eye_${e}.png`), resolve(OUT, `${label}_pc_${e}.png`));
+    // [VR SHARPEN 2026-11-07] a second dump a moment later, head still: how much the picture changes on its own
+    // (shimmer: sharpening or a negative mip bias that wakes aliasing shows as more change between the two)
+    const before2 = statSync(resolve(LOGS, 'wolfvr_eye_left.png')).mtimeMs;
+    setting('WolfVRDebugEyeDump', 'true');
+    r.dump2 = !!(await waitFor(() => statSync(resolve(LOGS, 'wolfvr_eye_left.png')).mtimeMs > before2, 10000));
+    await sleep(1500);
+    if (r.dump2) copyFileSync(resolve(LOGS, 'wolfvr_eye_left.png'), resolve(OUT, `${label}_pc_left2.png`));
     const l = await evalJs('window.__wolfvr.renderEye(0)');
     if (l) writeFileSync(resolve(OUT, `${label}_headset_left.png`), Buffer.from(l.split(',')[1], 'base64'));
     results.push(r);

@@ -32,11 +32,27 @@ namespace
     // Animator (wolffloateranimator.cpp:57 SERVICE_URL, :818 WolfCaves::serviceRequest: X-Wolf-Agent / X-Wolf-Session,
     // the host verified, no automatic retry of a POST - wolfcave.cpp:141-169 wolfRequest).
     const char* GIVE_URL = "https://wolfstorm.app/php/wolfskis.php";
-    const char* GIVE_BODY = "{\"action\":\"give\"}";
+    // [SLEDGES 2026-11-07] "kinds": the four this window offers (wolfskis.cpp KINDS words; wolfstorm/php/wolfskis_lib.php
+    // wsk_wanted gives a request without it - W97's - only the skis and snowboard)
+    const char* GIVE_BODY = "{\"action\":\"give\",\"kinds\":[\"skis\",\"snowboard\",\"sledge\",\"snowdisc\"]}";
     // A resident who has them is answered in one indexed SELECT; a give is a few Robust calls (wolfskis_lib.php wsk_give).
     constexpr F32 GIVE_TIMEOUT_S = 30.f;
     // wolfstorm/php/wolfskis.php: HTTP 429 = wa_bucket (5 at once, then one a minute per resident)
     constexpr S32 HTTP_TOO_MANY = 429;
+
+    // [SLEDGES 2026-11-07] the choices' buttons and strings (floater_wolf_skis.xml), in WolfSkis' order
+    const WolfSkis::EKind KIND_OF[] = { WolfSkis::KIND_SKIS, WolfSkis::KIND_SNOWBOARD, WolfSkis::KIND_SLEDGE, WolfSkis::KIND_SNOWDISC };
+    const char* const BTN[] = { "skis_btn", "board_btn", "sledge_btn", "disc_btn" };
+    const char* const SUFFIX[] = { "skis", "board", "sledge", "disc" };   // put_on_<s>, how_<s>, already_<s>, on_<s>
+
+    S32 indexOf(WolfSkis::EKind k)
+    {
+        for (S32 i = 0; i < 4; ++i)
+        {
+            if (KIND_OF[i] == k) return i;
+        }
+        return 0;
+    }
 
     // What a failed give says (wolffloateranimator.cpp:78-96 serviceError: the service's own words first; the raw adapter
     // drops a 4xx body, wolfcave.cpp:185-188, so each status gets a line of its own).
@@ -46,13 +62,13 @@ namespace
         switch (status)
         {
             case 401:
-            case 403: return "The grid could not confirm you are signed in. Log out and back in, then open the Skis and Snowboards window again.";
-            case 404: return "The free skis service is not open on this grid yet.";
+            case 403: return "The grid could not confirm you are signed in. Log out and back in, then open the Winter Fun window again.";
+            case 404: return "The free winter things service is not open on this grid yet.";
             case 500:
-            case 503: return "The free skis service is not answering just now. Open the Skis and Snowboards window again in a minute.";
+            case 503: return "The free winter things service is not answering just now. Open the Winter Fun window again in a minute.";
             default:
-                return transport.empty() ? llformat("The free skis service answered HTTP %d. Open the Skis and Snowboards window again in a minute.", status)
-                                         : "Could not reach the free skis service (" + transport + "). Open the Skis and Snowboards window again in a minute.";
+                return transport.empty() ? llformat("The free winter things service answered HTTP %d. Open the Winter Fun window again in a minute.", status)
+                                         : "Could not reach the free winter things service (" + transport + "). Open the Winter Fun window again in a minute.";
         }
     }
 }
@@ -64,14 +80,17 @@ WolfFloaterSkis::WolfFloaterSkis(const LLSD& key) : LLFloater(key) {}
 
 bool WolfFloaterSkis::postBuild()
 {
-    mSkisBtn = getChild<LLButton>("skis_btn");
-    mBoardBtn = getChild<LLButton>("board_btn");
+    for (S32 i = 0; i < NUM_KINDS; ++i)
+    {
+        mKindBtn[i] = getChild<LLButton>(BTN[i]);
+        const WolfSkis::EKind k = KIND_OF[i];
+        mKindBtn[i]->setCommitCallback([this, k](LLUICtrl*, const LLSD&) { pick(k); });
+    }
+    mHowText = getChild<LLTextBox>("how_text");
     mPutOnBtn = getChild<LLButton>("put_on_btn");
     mTakeOffBtn = getChild<LLButton>("take_off_btn");
     mShowHudBtn = getChild<LLButton>("show_hud_btn");
     mStatus = getChild<LLTextBox>("status");
-    mSkisBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { pick(false); });
-    mBoardBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { pick(true); });
     mPutOnBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPutOn(); });
     mTakeOffBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTakeOff(); });
     mShowHudBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onShowHud(); });
@@ -84,11 +103,12 @@ void WolfFloaterSkis::onOpen(const LLSD& key)
     if (!WolfSkis::onWolf())
     {
         LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-            std::string("Skis and snowboards are for Wolf Territories regions: they need the Wolf grid's ski runs and scripts.")));
+            std::string("Winter Fun is for Wolf Territories regions: the skis, sledges and snow discs need the Wolf grid's scripts.")));
         closeFloater();
         return;
     }
-    pick(gSavedSettings.getString("WolfSkiKind") == "snowboard");
+    const WolfSkis::EKind last = WolfSkis::kindFromWord(gSavedSettings.getString("WolfSkiKind"));
+    pick(last == WolfSkis::KIND_NONE ? WolfSkis::KIND_SKIS : last);
     say("");
     askForSkis();
 }
@@ -148,7 +168,7 @@ void WolfFloaterSkis::onGiveReply(S32 status, bool ok, const LLSD& reply, const 
         LLStringUtil::format_map_t a;
         a["[NAMES]"] = names;
         a["[FOLDER]"] = reply["folder"].asString();
-        say(getString(given.size() == 1 ? "given_one" : "given_both", a));
+        say(getString(given.size() == 1 ? "given_one" : "given_more", a));
         return;
     }
     if (status == HTTP_TOO_MANY)
@@ -167,19 +187,23 @@ void WolfFloaterSkis::onGiveReply(S32 status, bool ok, const LLSD& reply, const 
     LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", error));
 }
 
-void WolfFloaterSkis::pick(bool snowboard)
+void WolfFloaterSkis::pick(WolfSkis::EKind kind)
 {
-    mSnowboard = snowboard;
-    mSkisBtn->setToggleState(!snowboard);
-    mBoardBtn->setToggleState(snowboard);
-    gSavedSettings.setString("WolfSkiKind", snowboard ? "snowboard" : "skis");
-    mPutOnBtn->setLabel(getString(snowboard ? "put_on_board" : "put_on_skis"));
+    mKind = kind;
+    const S32 at = indexOf(kind);
+    for (S32 i = 0; i < NUM_KINDS; ++i)
+    {
+        mKindBtn[i]->setToggleState(i == at);
+    }
+    gSavedSettings.setString("WolfSkiKind", WolfSkis::kindWord(kind));
+    mPutOnBtn->setLabel(getString(std::string("put_on_") + SUFFIX[at]));
+    mHowText->setText(getString(std::string("how_") + SUFFIX[at]));
 }
 
 void WolfFloaterSkis::onPutOn()
 {
     WolfSkis& sk = WolfSkis::instance();
-    const WolfSkis::EKind want = mSnowboard ? WolfSkis::KIND_SNOWBOARD : WolfSkis::KIND_SKIS;
+    const WolfSkis::EKind want = mKind;
     if (mAsking)
     {
         say(getString("asking"));   // [Wolf 2026-11-06] the free pair may be on its way into the inventory: wait for it
@@ -187,7 +211,7 @@ void WolfFloaterSkis::onPutOn()
     }
     if (sk.kind() == want)
     {
-        say(getString(mSnowboard ? "already_board" : "already_skis"));
+        say(getString(std::string("already_") + SUFFIX[indexOf(want)]));
         return;
     }
     if (WolfVehicleRez::pending())
@@ -223,12 +247,12 @@ void WolfFloaterSkis::draw()
     // live: what the put-on is doing (WolfVehicleRez says every failure itself, in a visible alert)
     if (WolfVehicleRez::pending())
     {
-        say(WolfVehicleRez::tip(WolfSkis::kindWord(mSnowboard ? WolfSkis::KIND_SNOWBOARD : WolfSkis::KIND_SKIS)));
+        say(WolfVehicleRez::tip(WolfSkis::kindWord(mKind)));
     }
     else if (mWasPending)
     {
         mWasPending = false;
-        say(sk.riding() ? getString(sk.kind() == WolfSkis::KIND_SNOWBOARD ? "on_board" : "on_skis") : "");
+        say(sk.riding() ? getString(std::string("on_") + SUFFIX[indexOf(sk.kind())]) : "");
     }
     mTakeOffBtn->setEnabled(sk.riding());
     mShowHudBtn->setVisible(sk.riding() && !sk.hudShowing());

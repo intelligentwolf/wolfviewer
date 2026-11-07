@@ -139,6 +139,11 @@ U32 LLImageGL::sBindCount               = 0;
 S32 LLImageGL::sCount                   = 0;
 
 bool LLImageGL::sGlobalUseAnisotropic   = false;
+// [VR TEXTURE BIAS 2026-11-07] GL_TEXTURE_LOD_BIAS on mipmapped images (0 = the GL default, as before). WolfViewer VR
+// 3D Mode sets it while a headset is drawn (WolfVRScreen, setting WolfVRTextureLodBias), then dirtyTexOptions() so
+// every image takes it up at its next bind (LLTexUnit::bind, llrender.cpp). Declared where it is used, not in
+// llimagegl.h, so that header (included by most of the viewer) is unchanged.
+F32 gWolfLodBias = 0.f;
 F32 LLImageGL::sLastFrameTime           = 0.f;
 LLImageGL* LLImageGL::sDefaultGLTexture = NULL ;
 bool LLImageGL::sCompressTextures = false;

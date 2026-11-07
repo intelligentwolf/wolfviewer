@@ -294,6 +294,22 @@ void display_update_camera()
     {
         static LLCachedControl<F32> vr_draw_distance(gSavedSettings, "WolfVRDrawDistance", 512.f);
         final_far = llclamp((F32)vr_draw_distance, 64.f, 4096.f);
+        // [VR WHOLE REGION 2026-11-07] Paul in VR on Europa (a large region): "only half of the region rezzed, probably
+        // less". A 512 m eye on a 1024 m region (EUROPA SANDBOX's terrain line: "1024m") stops short of most of it from
+        // anywhere but the middle. The headset now always reaches the far corner of the region the avatar is in
+        // (WolfVRDrawDistanceWholeRegion), never further than the desktop's own draw distance (what the region is asked
+        // to send: llviewermessage.cpp AgentUpdate Far = gAgentCamera.mDrawDistance) and 4096 m.
+        static LLCachedControl<bool> whole_region(gSavedSettings, "WolfVRDrawDistanceWholeRegion", true);
+        LLViewerRegion* region = gAgent.getRegion();
+        if (whole_region && region)
+        {
+            const LLVector3 o = region->getOriginAgent(), p = gAgent.getPositionAgent();
+            const F32 w = region->getWidth();
+            const F32 dx = llmax(p.mV[VX] - o.mV[VX], o.mV[VX] + w - p.mV[VX]);
+            const F32 dy = llmax(p.mV[VY] - o.mV[VY], o.mV[VY] + w - p.mV[VY]);
+            const F32 corner = std::sqrt(dx * dx + dy * dy);
+            final_far = llmax(final_far, llmin(corner, gAgentCamera.mDrawDistance, 4096.f));
+        }
     }
 
     // <FS:TJ> [FIRE-35748] Only enable the LL Draw Distance VRAM optimization when the setting is enabled

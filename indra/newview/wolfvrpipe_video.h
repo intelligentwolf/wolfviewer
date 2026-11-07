@@ -55,6 +55,11 @@ namespace wolfvr
          *  (OpenH264 ForceIntraFrame; JPEG: every picture is whole), false when this encoder cannot (GStreamer
          *  chains), and then the caller reopens it, as the frame thread does today. */
         virtual bool requestKeyFrame() { return false; }
+        /** [VR ENCODER RATE 2026-11-07] Changes the target bitrate of an open encoder without reopening it (no key
+         *  frame, no new config for the page). `kbps` is meant at the frame rate the encoder was opened with, so the
+         *  caller scales it when pictures come slower (each picture's share = kbps / that rate). False when this
+         *  encoder cannot (JPEG has no bitrate; a GStreamer chain without the gobject library). */
+        virtual bool setBitrate(uint32_t kbps) { (void)kbps; return false; }
     };
 
     /** Opens the first encoder that works - or only `which` (nvenc | va | x264 | openh264 | jpeg) when it is not

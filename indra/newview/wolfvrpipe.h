@@ -228,6 +228,7 @@ namespace wolfvr
         double rtt_ms = -1;                // ping round trip (median of the last 16)
         uint64_t frames_sent = 0;
         uint64_t frames_skipped = 0;       // not encoded because the socket still held the previous one
+        uint32_t enc_kbps = 0;             // [VR ENCODER RATE 2026-11-07] the encoder's target now (at cfg.fps)
         // reported by the headset page (JSON "stats"):
         double hs_display_fps = -1;        // XR frames per second
         double hs_new_frame_fps = -1;      // decoded pictures shown per second

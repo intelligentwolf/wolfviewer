@@ -190,6 +190,15 @@ void LLTexUnit::disable(void)
     }
 }
 
+// [VR TEXTURE BIAS 2026-11-07] the bound image's GL_TEXTURE_LOD_BIAS (a texture parameter in core profile: OpenGL 4.6
+// core, glTexParameter TEXTURE_LOD_BIAS), set where an image's options are (re)applied (mTexOptionsDirty), on
+// mipmapped images only; gWolfLodBias is 0 (the GL default) outside WolfViewer VR 3D Mode
+extern F32 gWolfLodBias;   // llimagegl.cpp
+static void apply_wolf_lod_bias(GLenum target, bool mips)
+{
+    if (mips && target != GL_TEXTURE_2D_MULTISAMPLE) glTexParameterf(target, GL_TEXTURE_LOD_BIAS, gWolfLodBias);
+}
+
 void LLTexUnit::bindFast(LLTexture* texture)
 {
     LLImageGL* gl_tex = texture->getGLTexture();
@@ -212,6 +221,7 @@ void LLTexUnit::bindFast(LLTexture* texture)
         gl_tex->mTexOptionsDirty = false;
         setTextureAddressModeFast(gl_tex->mAddressMode, gl_tex->getTarget());
         setTextureFilteringOptionFast(gl_tex->mFilterOption, gl_tex->getTarget());
+        apply_wolf_lod_bias(sGLTextureType[gl_tex->getTarget()], mHasMipMaps);   // [VR TEXTURE BIAS 2026-11-07/]
     }
 }
 
@@ -247,6 +257,7 @@ bool LLTexUnit::bind(LLTexture* texture, bool for_rendering, bool forceBind)
                         gl_tex->mTexOptionsDirty = false;
                         setTextureAddressMode(gl_tex->mAddressMode);
                         setTextureFilteringOption(gl_tex->mFilterOption);
+                        apply_wolf_lod_bias(sGLTextureType[gl_tex->getTarget()], mHasMipMaps);   // [VR TEXTURE BIAS 2026-11-07/]
                     }
                 }
             }
@@ -322,6 +333,7 @@ bool LLTexUnit::bind(LLImageGL* texture, bool for_rendering, bool forceBind, S32
             texture->mTexOptionsDirty = false;
             setTextureAddressMode(texture->mAddressMode);
             setTextureFilteringOption(texture->mFilterOption);
+            apply_wolf_lod_bias(sGLTextureType[texture->getTarget()], mHasMipMaps);   // [VR TEXTURE BIAS 2026-11-07/]
             stop_glerror();
         }
     }

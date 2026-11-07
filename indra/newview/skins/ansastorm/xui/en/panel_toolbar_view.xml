@@ -323,7 +323,7 @@
             image_hover_selected="WolfTb_Skis_On"
             tab_stop="false"
             chrome="true"
-            tool_tip="Skis and Snowboards: put on skis or a snowboard and ride down the mountain (Wolf Territories)" />
+            tool_tip="Winter Fun: skis, a snowboard, a sledge or a snow disc - ride down the snowy hills (Wolf Territories)" />
     <button layout="topleft"
             name="wolf_toolbar_toggle"
             width="22"

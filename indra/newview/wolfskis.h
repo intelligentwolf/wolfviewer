@@ -26,6 +26,11 @@
 // [SKIS 2026-11-06] Paul: "build skis and snowboards add a new hud for it that will be fun". Ticket 556 (Indi Moon): ride
 // down mountain slopes, the speed from the slope.
 //
+// [SLEDGES 2026-11-07] Ticket 556 again (Indi Moon): "Would it be possible to add sledding and snow disk sledding to the
+// winter fun too?" - Paul: yes. Two more rides on the same link and HUD: a sledge (wolfvehicle:sledge) and a snow disc
+// (wolfvehicle:snowdisc), their script region-terrain-work/sledges-2026-11-07/lsl/sled_template.lsl (the skis' protocol,
+// arrow keys only, no jump or tuck). The window became Wolf World > Winter Fun... (wolffloaterskis.cpp).
+//
 // The ride is the object's own script (region-terrain-work/skis-2026-11-06/lsl/ski_template.lsl): every viewer can ride.
 // This viewer adds, on Wolf Territories only:
 //   - Wolf World > Skis and Snowboards... (wolffloaterskis.cpp): put them on (WolfVehicleRez with "skis" / "snowboard":
@@ -45,8 +50,13 @@ class WolfSkis : public LLSingleton<WolfSkis>
     ~WolfSkis();
 
 public:
-    enum EKind { KIND_NONE = 0, KIND_SKIS, KIND_SNOWBOARD };
-    static const char* kindWord(EKind k);          // "skis" / "snowboard": the wolfvehicle: type
+    enum EKind { KIND_NONE = 0, KIND_SKIS, KIND_SNOWBOARD, KIND_SLEDGE, KIND_SNOWDISC };
+    static const char* kindWord(EKind k);          // "skis" / "snowboard" / "sledge" / "snowdisc": the wolfvehicle: type
+    /** "skis" / "snowboard" / "sledge" / "snowdisc" -> the kind; anything else KIND_NONE. */
+    static EKind kindFromWord(const std::string& word);
+    /** [SLEDGES 2026-11-07] a sledge or a snow disc: sat on, steered by leaning, arrow keys only (no jump, no tuck). */
+    static bool isSled(EKind k) { return k == KIND_SLEDGE || k == KIND_SNOWDISC; }
+
 
     void idle();
     /** A chat line from an object (llviewermessage.cpp). True when it was the skis' line to this HUD: shown nowhere. */
@@ -85,6 +95,7 @@ public:
         F32 mBigAir = 0.f;                         // s, this run's longest
         S32 mScore = 0;                            // style points this run
         S32 mCombo = 0;                            // carved turns in a row (left, right, left...)
+        S32 mSpins = 0;                            // [SLEDGES 2026-11-07] the snow disc: whole turns round this run
         bool mInAir = false;
         F32 mAirNow = 0.f;                         // s in the air so far
         std::string mMode;                         // the script's st (ride tuck brake push carve_l carve_r air wipe water stop)
@@ -116,6 +127,7 @@ private:
     void claimBottom();
     void loadBests();
     void saveBests();
+    std::string bestsKey() const;
     void onLand(F32 air, S32 spin, bool clean, F32 impact);
     void onMode(const std::string& m);
 
@@ -143,6 +155,9 @@ private:
     F64 mCarveSince = 0.0;
     F64 mLastTurnAt = 0.0;
     F64 mFastSince = 0.0;
+    F32 mLastYawDeg = 0.f;                         // [SLEDGES 2026-11-07] the snow disc's turning round, counted in measure()
+    F32 mTurnedDeg = 0.f;
+    bool mHaveYaw = false;
 };
 
 #endif // WOLF_SKIS_H

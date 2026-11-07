@@ -524,6 +524,19 @@ namespace
             return mEnc && mEnc->ForceIntraFrame(true) == cmResultSuccess;
         }
 
+        // [VR ENCODER RATE 2026-11-07] ENCODER_OPTION_BITRATE with SPATIAL_LAYER_ALL sets iTargetBitrate and shares it
+        // over the spatial layers (one here) by their old ratio (welsEncoderExt.cpp SetOption, encoder_ext.cpp
+        // WelsEncoderApplyBitRate); scaled for the rate control's 60 fps clamp exactly as open() does
+        bool setBitrate(uint32_t kbps) override
+        {
+            if (!mEnc || !kbps) return false;
+            const uint32_t rc_fps = std::min<uint32_t>(mFps, 60);
+            SBitrateInfo info;
+            info.iLayer = SPATIAL_LAYER_ALL;
+            info.iBitrate = (int)std::min<uint64_t>((uint64_t)kbps * 1000ULL * rc_fps / mFps, 0x7fffffffULL);
+            return mEnc->SetOption(ENCODER_OPTION_BITRATE, &info) == cmResultSuccess;
+        }
+
         std::string name() const override
         {
             return "openh264 (Cisco, " + std::to_string(mThreads) + " threads, " + std::to_string(mSlices) + " slices)";

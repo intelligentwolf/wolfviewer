@@ -64,6 +64,7 @@ private:
     bool mDrawn = false;
     S32 mPressed = H_NONE;
     bool mShowHelp = false;
+    bool mHelpAuto = false;             // [SLEDGES 2026-11-07] shown by itself (first time): it goes when the run starts
     F32 mNeedle = 0.f;                  // the speedometer needle, eased toward the speed (display units)
 
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);

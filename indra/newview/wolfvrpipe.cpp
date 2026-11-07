@@ -1297,6 +1297,20 @@ void Service::Impl::frameLoop()
     uint64_t enc_generation = 0;
     bool config_sent = false;
     uint64_t frame = 0;
+    // [VR ENCODER RATE 2026-11-07] The encoders are opened at cfg.fps (60) and budget cfg.bitrate_kbps / cfg.fps a
+    // picture, but the viewer's pictures come at its own drawing rate: 14-25 a second in VR 3D Mode (Paul's session
+    // 2026-11-07, "pictures in 19-21/s"; the emulator 14-20). Measured: ~40 % of the set bitrate was ever sent, each
+    // picture a third of its share. So the target follows the real picture rate (once a second, over the last
+    // second): cfg.bitrate_kbps * cfg.fps / rate, so cfg.bitrate_kbps is what is really sent, never more than
+    // kEncRateMax times the set value (a picture's share at most 4 times the 60 fps share: 15 pictures a second).
+    constexpr double kEncRateMax = 4.0;
+    double rate_start = 0, rate_last = 0;   // the window's start (nowMs) and the last measured pictures a second
+    uint32_t rate_count = 0, enc_kbps = 0;  // pictures encoded in the window, the target the encoder has now
+    auto rateTarget = [&](double rate) -> uint32_t {
+        if (rate <= 0) return cfg.bitrate_kbps;
+        const double k = (double)cfg.bitrate_kbps * std::clamp((double)cfg.fps / rate, 1.0, kEncRateMax);
+        return (uint32_t)std::min(k, 2048000.0);   // nvh264enc / vah264enc / x264enc "bitrate" maximum (gst-inspect)
+    };
     window_start = last_log = nowMs();
 
     while (!stopping)
@@ -1311,6 +1325,7 @@ void Service::Impl::frameLoop()
                 cfg.height = pending_h;
                 cfg.external_frames = pending_external;
                 if (pending_kbps) cfg.bitrate_kbps = pending_kbps;
+                rate_last = 0;   // [VR ENCODER RATE] a new size: measure its rate afresh
                 cur_w = cfg.width;
                 cur_h = cfg.height;
                 cur_external = cfg.external_frames;
@@ -1341,8 +1356,12 @@ void Service::Impl::frameLoop()
         {
             enc.reset();
             std::string tried;
+            // [VR ENCODER RATE] opened at the share the last measured rate gives (the set bitrate before any)
+            enc_kbps = rateTarget(cfg.external_frames ? rate_last : 0);
+            rate_start = 0;
+            rate_count = 0;
             enc = openEncoder(c->webcodecs ? cfg.encoder : std::string("jpeg"), cfg.width, cfg.height, cfg.fps,
-                              cfg.bitrate_kbps, tried);
+                              enc_kbps, tried);
             enc_generation = c->generation;
             config_sent = false;
             if (!enc)
@@ -1448,6 +1467,25 @@ void Service::Impl::frameLoop()
             continue;
         }
         const double t2 = nowMs();
+        if (cfg.external_frames)
+        {
+            // [VR ENCODER RATE] the real picture rate, and the target that gives each picture its share of the set rate
+            if (rate_start <= 0) rate_start = t2;
+            rate_count++;
+            if (t2 - rate_start >= 1000.0)
+            {
+                rate_last = rate_count * 1000.0 / (t2 - rate_start);
+                rate_start = t2;
+                rate_count = 0;
+                const uint32_t want = rateTarget(rate_last);
+                if (enc_kbps == 0 || std::fabs((double)want - enc_kbps) > 0.1 * enc_kbps)
+                {
+                    if (enc->setBitrate(want)) enc_kbps = want;
+                }
+                std::lock_guard<std::mutex> lk(stats_mutex);
+                st.enc_kbps = enc_kbps;
+            }
+        }
 
         if (!config_sent)
         {
@@ -1593,17 +1631,17 @@ void Service::Impl::frameLoop()
                 if (now_ms - last_log >= 10000)
                 {
                     last_log = now_ms;
-                    char line[512];
+                    char line[640];
                     std::snprintf(line, sizeof(line),
                                   "VR pipe numbers: %s %ux%u send %.1f fps %.0f kbit/s render %.2f ms encode %.2f ms "
                                   "(p95 %.2f) poses %.1f/s pose->viewer %.1f ms rtt %.1f ms skipped %llu | headset: "
                                   "display %.1f fps new pictures %.1f fps decode %.2f ms pose->photon %.1f ms (p95 "
-                                  "%.1f) viewer->photon %.1f ms",
+                                  "%.1f) viewer->photon %.1f ms | encoder target %u kbit/s at its %u fps",
                                   st.encoder.c_str(), cfg.width, cfg.height, st.send_fps, st.kbps, st.render_ms,
                                   st.encode_ms, st.encode_ms_p95, st.pose_hz, st.pose_latency_ms, st.rtt_ms,
                                   (unsigned long long)st.frames_skipped, st.hs_display_fps, st.hs_new_frame_fps,
                                   st.hs_decode_ms, st.hs_pose_to_photon_ms, st.hs_pose_to_photon_p95,
-                                  st.hs_viewer_to_photon_ms);
+                                  st.hs_viewer_to_photon_ms, st.enc_kbps, cfg.fps);
                     log(LogLevel::INFO, line);
                 }
             }

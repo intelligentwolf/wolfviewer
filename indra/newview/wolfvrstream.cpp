@@ -96,7 +96,12 @@ namespace
     // Quest 3 start, 1728 px at 80 Mbit/s (Wi-Fi 6 carries it); the old Quest 3 start (1152 at 40) is now step 3.
     struct QualityStep { U32 eye; U32 stereo_kbps; U32 flat_kbps; };
     constexpr int kSteps = 5;
-    constexpr QualityStep kQuality[kSteps] = {{1920, 100000, 40000}, {1728, 80000, 32000}, {1440, 55000, 25000},
+    // [VR EYE SIZE 2026-11-07] Step 0 is now a 2048 px eye (4096 x 2048: 32,768 macroblocks a frame, 1,966,080 a second
+    // at 60 - inside H.264 level 5.2, Table A-1; 4096 wide is NVENC's H.264 limit) at 110 Mbit/s (1728's 80 scaled by
+    // the pixels, 1.40x). Paul's Quest 3 layer (device line 2026-11-07: 1680 x 1760 per eye at scale 1.0, its own eye
+    // window untouched by our 4-degree widening) needs a ~1946 x 2040 picture eye to match it pixel for pixel. Still
+    // capped by WolfVREyeSize (1920 by default), so nothing changes until that is raised.
+    constexpr QualityStep kQuality[kSteps] = {{2048, 110000, 40000}, {1728, 80000, 32000}, {1440, 55000, 25000},
                                               {1152, 35000, 18000}, {896, 20000, 12000}};
     S32 gQuality = 1;   // gMutex
 

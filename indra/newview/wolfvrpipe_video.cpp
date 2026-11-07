@@ -399,6 +399,9 @@ namespace
         int  (*app_src_push_buffer)(gptr, gptr) = nullptr;
         gptr (*app_sink_try_pull_sample)(gptr, GstClockTime) = nullptr;
         void (*error_free)(GErrorView*) = nullptr;
+        // [VR ENCODER RATE 2026-11-07] gobject/gobject.h: void g_object_set(gpointer object, const gchar* first_property_name,
+        // ...) - NULL-terminated name/value pairs. Optional: without it the bitrate is only set when the chain opens.
+        void (*object_set)(gptr, const char*, ...) = nullptr;
     };
 
     GstApi& gst()
@@ -436,6 +439,11 @@ namespace
         sym(app, "gst_app_src_push_buffer", api.app_src_push_buffer);
         sym(app, "gst_app_sink_try_pull_sample", api.app_sink_try_pull_sample);
         sym(glib, "g_error_free", api.error_free);
+        // [VR ENCODER RATE 2026-11-07] optional (not part of `ok`): only the live bitrate change needs it
+        if (void* gobj = dlopen("libgobject-2.0.so.0", RTLD_NOW | RTLD_GLOBAL))
+        {
+            api.object_set = reinterpret_cast<decltype(api.object_set)>(dlsym(gobj, "g_object_set"));
+        }
         if (!ok) return api;
         GErrorView* err = nullptr;
         if (!api.init_check(nullptr, nullptr, &err))
@@ -487,6 +495,7 @@ namespace
             if (!mPipe) { error = element + ": no pipeline"; return false; }
             mSrc = g.bin_get_by_name(mPipe, "src");
             mSink = g.bin_get_by_name(mPipe, "sink");
+            mEnc = g.bin_get_by_name(mPipe, "venc");   // [VR ENCODER RATE] the encoder element (kChains: name=venc)
             if (!mSrc || !mSink) { error = element + ": appsrc/appsink missing"; close(); return false; }
             if (g.element_set_state(mPipe, kGstStatePlaying) == kGstStateChangeFailure)
             {
@@ -504,8 +513,9 @@ namespace
             if (mPipe) g.element_set_state(mPipe, kGstStateNull);
             if (mSrc) g.object_unref(mSrc);
             if (mSink) g.object_unref(mSink);
+            if (mEnc) g.object_unref(mEnc);
             if (mPipe) g.object_unref(mPipe);
-            mSrc = mSink = mPipe = nullptr;
+            mSrc = mSink = mEnc = mPipe = nullptr;
         }
 
         bool encode(const uint8_t* rgba, EncodedFrame& out, std::string& error) override
@@ -539,12 +549,21 @@ namespace
         }
         std::string name() const override { return mElement; }
         std::string codec() const override { return "h264"; }
+        // [VR ENCODER RATE 2026-11-07] nvh264enc, vah264enc / vah264lpenc and x264enc all have a "bitrate" property in
+        // kbit/s (guint) that may be changed while PLAYING (gst-inspect-1.0 1.28: "changeable in ... PLAYING state")
+        bool setBitrate(uint32_t kbps) override
+        {
+            GstApi& g = gst();
+            if (!g.object_set || !mEnc || !kbps) return false;
+            g.object_set(mEnc, "bitrate", (unsigned int)kbps, static_cast<const char*>(nullptr));
+            return true;
+        }
 
     private:
         std::string mElement;
         uint32_t mW = 0, mH = 0;
         bool mFirst = true;
-        gptr mPipe = nullptr, mSrc = nullptr, mSink = nullptr;
+        gptr mPipe = nullptr, mSrc = nullptr, mSink = nullptr, mEnc = nullptr;
     };
 
     // Encoder chains. Every property name and enum nick was read with gst-inspect-1.0 1.28 (nvh264enc, x264enc)
@@ -555,17 +574,17 @@ namespace
     struct Chain { const char* family; const char* element; const char* fmt; };
     const Chain kChains[] = {
         {"nvenc", "nvh264enc",
-         "nvh264enc preset=p1 tune=ultra-low-latency zerolatency=true rc-mode=cbr bitrate=%u gop-size=%u"},
+         "nvh264enc name=venc preset=p1 tune=ultra-low-latency zerolatency=true rc-mode=cbr bitrate=%u gop-size=%u"},
         {"nvenc", "nvautogpuh264enc",
-         "nvautogpuh264enc preset=p1 tune=ultra-low-latency zerolatency=true rc-mode=cbr bitrate=%u gop-size=%u"},
+         "nvautogpuh264enc name=venc preset=p1 tune=ultra-low-latency zerolatency=true rc-mode=cbr bitrate=%u gop-size=%u"},
         {"va", "vah264enc",
-         "videoconvert n-threads=4 ! video/x-raw,format=NV12 ! vah264enc rate-control=cbr bitrate=%u key-int-max=%u "
+         "videoconvert n-threads=4 ! video/x-raw,format=NV12 ! vah264enc name=venc rate-control=cbr bitrate=%u key-int-max=%u "
          "b-frames=0 target-usage=7"},
         {"va", "vah264lpenc",
-         "videoconvert n-threads=4 ! video/x-raw,format=NV12 ! vah264lpenc rate-control=cbr bitrate=%u key-int-max=%u "
+         "videoconvert n-threads=4 ! video/x-raw,format=NV12 ! vah264lpenc name=venc rate-control=cbr bitrate=%u key-int-max=%u "
          "b-frames=0 target-usage=7"},
         {"x264", "x264enc",
-         "videoconvert n-threads=4 ! video/x-raw,format=I420 ! x264enc tune=zerolatency speed-preset=ultrafast "
+         "videoconvert n-threads=4 ! video/x-raw,format=I420 ! x264enc name=venc tune=zerolatency speed-preset=ultrafast "
          "bitrate=%u key-int-max=%u bframes=0 threads=4 sliced-threads=true byte-stream=true"},
     };
 }

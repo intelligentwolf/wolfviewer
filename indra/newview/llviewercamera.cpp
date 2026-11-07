@@ -719,13 +719,19 @@ LLVector3 LLViewerCamera::roundToPixel(const LLVector3 &pos_agent)
 
 bool LLViewerCamera::cameraUnderWater() const
 {
-    LLViewerRegion* regionp = LLWorld::instance().getRegionFromPosAgent(getOrigin());
-
     if (gPipeline.mHeroProbeManager.isMirrorPass())
     {
         // TODO: figure out how to handle this case
         return false;
     }
+    // [t613 2026-11-07] the level itself moved to underwaterLevel(), unchanged, so the weather reads the same rule
+    F32 level = 0.f;
+    return underwaterLevel(level) && getOrigin().mV[VZ] < level;
+}
+
+bool LLViewerCamera::underwaterLevel(F32& level) const
+{
+    LLViewerRegion* regionp = LLWorld::instance().getRegionFromPosAgent(getOrigin());
 
     if (!regionp)
     {
@@ -756,7 +762,8 @@ bool LLViewerCamera::cameraUnderWater() const
             trough = (F32)hu->stormSwellAmp((F64)(getOrigin().mV[VX] - o.mV[VX]), (F64)(getOrigin().mV[VY] - o.mV[VY]), cx, cy, T);
         }
     }
-    return getOrigin().mV[VZ] < regionp->getWaterHeight() - trough;
+    level = regionp->getWaterHeight() - trough;
+    return true;
     // </WolfViewer>
 }
 

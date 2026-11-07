@@ -1445,6 +1445,27 @@ for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i
     }
 
     LLUICtrl::draw();
+
+    // [t622 2026-11-07] Buzzy walked at half speed for hours with Game Mode on and never knew: the paw is lit only
+    // while the game HUD shows (Paul 2026-10-09, kept), so Game Mode on with the HUD closed looked exactly like off.
+    // A small green "on" dot with a dark ring in the paw's top-right corner says Game Mode is running whatever the HUD
+    // does (Paul 2026-11-07 "do 1 and 2"). Drawn after the buttons so it sits on top; the tooltip (above) says why.
+    if (mWolfGameToggle && mWolfGameToggle->getVisible() && WolfGrid::isOnWolfTerritories())
+    {
+        const WolfGame& g = WolfGame::instance();
+        if (g.gameModeShownOn() && !g.hudShowing())
+        {
+            LLRect r;
+            mWolfGameToggle->localRectToOtherView(mWolfGameToggle->getLocalRect(), &r, this);
+            const F32 radius = llmax(3.f, (F32)llmin(r.getWidth(), r.getHeight()) * 0.16f);
+            const F32 cx = (F32)r.mRight - radius - 1.f, cy = (F32)r.mTop - radius - 1.f;
+            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+            gGL.color4f(0.05f, 0.1f, 0.05f, 0.9f);
+            gl_circle_2d(cx, cy, radius + 1.5f, 16, true);
+            gGL.color4f(0.25f, 0.85f, 0.3f, 1.f);
+            gl_circle_2d(cx, cy, radius, 16, true);
+        }
+    }
 }
 
 

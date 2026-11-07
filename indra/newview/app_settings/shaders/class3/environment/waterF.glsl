@@ -139,6 +139,7 @@ uniform float     blend_factor;
 #ifdef TRANSPARENT_WATER
 uniform sampler2D screenTex;
 uniform sampler2D depthMap;
+uniform float wolfEarlyDepthReject;   // [WATER EARLY REJECT 2026-11-07] 1: depthMap is the depth test's own buffer (lldrawpoolwater.cpp)
 #endif
 
 uniform sampler2D exclusionTex;
@@ -521,6 +522,16 @@ float swellWhitecap(vec2 p, float back)
 void main()
 {
 #ifdef WOLF_WATER_FULL
+    // [WATER EARLY REJECT 2026-11-07] gl_FragDepth is written below, so the GPU cannot test depth before running this shader.
+    // The depth written is never nearer than gl_FragCoord.z (wolfFragDepth starts there and is only moved back:
+    // clamp(..., gl_FragCoord.z, 1.0) at the shore rule), so where the scene's depth (depthMap: this frame's copy of the very
+    // depth buffer the test reads, texel for texel - lldrawpoolwater.cpp sets wolfEarlyDepthReject only then) is already
+    // nearer than this fragment by more than the depth buffer's rounding (24-bit: 2 steps of 1/16777215), the LESS / LEQUAL
+    // test would discard it anyway. Dropping it here changes no pixel.
+    if (wolfEarlyDepthReject > 0.5 && texelFetch(depthMap, ivec2(gl_FragCoord.xy), 0).r < gl_FragCoord.z - 2.0 / 16777215.0)
+    {
+        discard;
+    }
     float wolfFragDepth = gl_FragCoord.z;   // [T358 SHORE HOLES 2026-10-29] written as gl_FragDepth at the end of main()
 #endif
     mirrorClip(vary_position);

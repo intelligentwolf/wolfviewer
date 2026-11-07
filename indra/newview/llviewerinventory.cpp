@@ -1605,6 +1605,36 @@ void update_inventory_item(
 // Note this only supports updating an existing item. Goes through AISv3
 // code path where available. Not all uses of item->updateServer() can
 // easily be switched to this paradigm.
+// [WOLF THUMBNAILS 2026-11-07, ticket 607] Without AIS the only messages for these updates (UpdateInventoryItem /
+// UpdateInventoryFolder) have no thumbnail field, so "Use texture", paste, drag-and-drop and Remove in the Change Item /
+// Folder Image floater never reached the region. WolfSim's WolfInventoryThumbnail cap (WolfInventoryThumbnailModule.cs
+// SetRequest) takes {item_id | category_id, thumbnail_id}; a zero thumbnail_id clears it. The region checks the owner
+// and that the image is a texture, and alerts the resident itself when it refuses; other grids have no such cap and
+// nothing is sent. The thumbnail shape is the one LLFloaterChangeItemThumbnail::setThumbnailId writes
+// (llfloaterchangeitemthumbnail.cpp:1074-1084: "thumbnail" {"asset_id": string} or an undefined "thumbnail").
+static void wolf_post_inventory_thumbnail(const char* id_key, const LLUUID& id, const LLSD& updates)
+{
+    if (!updates.has("thumbnail"))
+    {
+        return;
+    }
+    std::string url = gAgent.getRegionCapability("WolfInventoryThumbnail");
+    if (url.empty())
+    {
+        return;
+    }
+    const LLSD& thumbnail = updates["thumbnail"];
+    LLUUID thumbnail_id;
+    if (thumbnail.isMap() && thumbnail.has("asset_id"))
+    {
+        thumbnail_id = thumbnail["asset_id"].asUUID();
+    }
+    LLSD body;
+    body[id_key] = id;
+    body["thumbnail_id"] = thumbnail_id;
+    LLCoreHttpUtil::HttpCoroutineAdapter::callbackHttpPost(url, body);
+}
+
 void update_inventory_item(
     const LLUUID& item_id,
     const LLSD& updates,
@@ -1627,6 +1657,7 @@ void update_inventory_item(
             LLPointer<LLViewerInventoryItem> new_item(new LLViewerInventoryItem);
             new_item->copyViewerItem(obj);
             new_item->fromLLSD(updates,false);
+            wolf_post_inventory_thumbnail("item_id", item_id, updates);   // [WOLF THUMBNAILS 2026-11-07]
 
             LLMessageSystem* msg = gMessageSystem;
             msg->newMessageFast(_PREHASH_UpdateInventoryItem);
@@ -1680,6 +1711,7 @@ void update_inventory_category(
         {
             LLPointer<LLViewerInventoryCategory> new_cat = new LLViewerInventoryCategory(obj);
             new_cat->fromLLSD(updates);
+            wolf_post_inventory_thumbnail("category_id", cat_id, updates);   // [WOLF THUMBNAILS 2026-11-07]
             LLMessageSystem* msg = gMessageSystem;
             msg->newMessageFast(_PREHASH_UpdateInventoryFolder);
             msg->nextBlockFast(_PREHASH_AgentData);

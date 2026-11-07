@@ -3568,6 +3568,7 @@ void LLViewerRegionImpl::buildCapabilityNames(LLSD& capabilityNames)
     capabilityNames.append("WolfSkyLevels");   // [WOLF SKY LEVELS 2026-11-05] WolfSim WolfSkyLevelsModule.cs CAP (wolfterrainlevels.cpp); other sims ignore an unknown name
     capabilityNames.append("WolfTunnels");   // [WOLF TUNNELS 2026-10-21] WolfSim WolfTunnelsModule.cs CAP (wolffloatertunnels.cpp); other sims ignore an unknown name
     capabilityNames.append("WolfTerraform");   // [WOLF TERRAFORM 2026-10-23] WolfSim WolfTerraformModule.cs CAP (wolfterraincap.cpp); other sims ignore an unknown name
+    capabilityNames.append("WolfInventoryThumbnail");   // [WOLF THUMBNAILS 2026-11-07] WolfSim WolfInventoryThumbnailModule.cs SET_CAP (llviewerinventory.cpp wolf_post_inventory_thumbnail); other sims ignore an unknown name
 
     // <FS:Ansariel> Force HTTP features on SL
     if (use_http_inventory()) {

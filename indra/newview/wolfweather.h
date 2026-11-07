@@ -152,6 +152,9 @@ private:
     F32  mCarry = 0.f;   // fractional particles carried to the next frame
     F32  mBudgetSize = 1.f;   // [HURRICANE 2026-10-30/] each new drop's size x this: 1 / sqrt(the frame budget) (update())
     WolfRoofGrid mRoofs;   // <WolfViewer 2026-10-02/> was mLandingZ / mLandingNext / mLandingInit
+    // [t613 2026-11-07] Jimmy: rain and snow fell under the sea. The water surface this frame (LLViewerCamera::underwaterLevel,
+    // the same level cameraUnderWater uses): pathLife ends every drop there, as at a roof or the ground. -1e9 = no region.
+    F32  mWaterFloor = -1.e9f;
 };
 
 class WolfWeather : public LLSingleton<WolfWeather>

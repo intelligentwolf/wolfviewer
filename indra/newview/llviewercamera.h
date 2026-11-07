@@ -94,6 +94,10 @@ public:
     bool isDefaultFOVChanged();
 
     bool cameraUnderWater() const;
+    // [t613 2026-11-07] the height below which the camera counts as under the water (cameraUnderWater): the water height
+    // of the camera's region less the storm swell's trough there. Weather (wolfweather.cpp pathLife) stops rain and snow at it.
+    // Returns false when there is no region.
+    bool underwaterLevel(F32& level) const;
     bool areVertsVisible(LLViewerObject* volumep, bool all_verts);
 
     const LLVector3& getPointOfInterest() const { return mLastPointOfInterest; }

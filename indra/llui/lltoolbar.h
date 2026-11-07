@@ -295,6 +295,9 @@ public:
     void setHandleDragCallback(tool_handledrag_callback_t cb) { mHandleDragItemCallback = cb; }
     void setHandleDropCallback(tool_handledrop_callback_t cb) { mHandleDropCallback     = cb; }
     bool isReadOnly() const { return mReadOnly; }
+    // [t625 2026-11-07] a button's label changed after layout (WolfGame::updateGameModeButtons): lay the bar out again so
+    // the button is resized to its new label (autoResize in updateLayoutRect, lltoolbar.cpp) instead of the text spilling out
+    void setNeedsLayout() { mNeedsLayout = true; }
     LLCenterLayoutPanel * getCenterLayoutPanel() const { return mCenterPanel; }
 
     LLToolBarButton* createButton(const LLCommandId& id);

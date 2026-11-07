@@ -257,9 +257,11 @@ F32 WolfWeatherPartSource::pathLife(const LLVector3& pos, const LLVector3& vel, 
     {
         const F32 t = llmin((F32)i * dt, max_age);
         const LLVector3 p = pos + vel * t;
-        const F32 land = mRoofs.landingAt(p.mV[VX], p.mV[VY]);
+        F32 land = mRoofs.landingAt(p.mV[VX], p.mV[VY]);
         // Unknown ground, or out of the box: the drop ends here (at birth: not born at all).
         if (land >= WolfRoofGrid::UNKNOWN) return t;
+        // [t613 2026-11-07] the water surface is a floor too: no drop goes on down through the sea (update(): mWaterFloor)
+        land = llmax(land, mWaterFloor);
         const F32 gap = p.mV[VZ] - land;
         if (gap <= 0.f)
         {
@@ -314,6 +316,16 @@ void WolfWeatherPartSource::update(const F32 dt)
     // The level's rate at the profile's density. The viewer's own particle cap
     // (RenderMaxPartCount) is still the ceiling — shouldAddPart() below refuses when it is near
     // — so extreme weather still respects the resident's chosen rendering budget.
+    // [t613 2026-11-07] Jimmy: "when precipitation goes on in a SIM, one can't see it when underwater". The surface for this
+    // frame's drops (pathLife), and none at all while the camera is under the water - the rule the underwater fog uses
+    // (LLViewerCamera::cameraUnderWater). Drops already falling above the surface keep falling to it.
+    F32 water = -1.e9f;
+    mWaterFloor = LLViewerCamera::getInstance()->underwaterLevel(water) ? water : -1.e9f;
+    if (LLViewerCamera::getInstance()->cameraUnderWater())
+    {
+        mCarry = 0.f;
+        return;
+    }
     const F32 base_rate = (mMode == RAIN) ? RAIN_RATE_BY_LEVEL[mLevel] : SNOW_RATE_BY_LEVEL[mLevel];
     // [HURRICANE 2026-10-30] x the frame budget (wolfframegovernor.h): Paul under the storm at 11-12 fps, the rain at level 3 x
     // density 3000 % = 27,000 drops a second filling the whole particle cap (RenderMaxPartCount 16384) every frame. On a slow

@@ -31,6 +31,8 @@
 #include <map>
 #include <vector>
 
+#include <glm/gtc/packing.hpp>   // [LIGHT METER 2026-11-07] glm::unpackHalf1x16: the meter's reading in the texture's own half floats
+
 #include "llagent.h"
 #include "lldate.h"
 #include "lldir.h"
@@ -76,6 +78,96 @@ extern bool gSnapshot;   // llviewerdisplay.cpp:141
 
 namespace
 {
+    // [2026-11-07 READ-BACKS] read-backs ask for the source texture's own format and are widened on the CPU here. Asking the
+    // driver for GL_FLOAT from an RGBA16F or RGBA8 source made it convert on the CPU, and so first wait for every GPU command
+    // queued before the read (NVIDIA 615.78: the light meter waited 5-48 ms a frame in the viewer; a standalone reproduction of
+    // the once-a-second cloud reading, 631 x 380, waited 1.4-2.3 ms as GL_FLOAT and 36-43 us in the source's own type).
+    // The widening tables are the driver's OWN GL_FLOAT conversion of every half (65536) and every byte (256), read back once,
+    // so every value is exactly what the old GL_FLOAT read gave on this driver. (Checked exhaustively 2026-11-07: NVIDIA's
+    // equals IEEE half -> float and c / 255 bit for bit; Mesa radeonsi's byte conversion differs from c / 255 in the last
+    // bits, so a formula would not have kept AMD's numbers.) If the one-off read fails, the formulas stand in.
+    struct DriverWiden
+    {
+        std::vector<F32> half;   // 65536: half bit pattern -> float
+        F32 byte[256] = {};      // unsigned normalised byte -> float
+    };
+    const DriverWiden& driverWiden()
+    {
+        static const DriverWiden s_w = []()
+        {
+            DriverWiden w;
+            w.half.resize(65536);
+            for (U32 i = 0; i < 65536; ++i) w.half[i] = glm::unpackHalf1x16((U16)i);
+            for (U32 i = 0; i < 256; ++i) w.byte[i] = (F32)i / 255.f;   // OpenGL 4.6 core 2.3.5.1: c / (2^b - 1)
+            // the driver's own conversion: an RGBA16F texture holding every half and an RGBA8 one holding every byte, read as
+            // GL_FLOAT (synchronous, once). The state touched is put back exactly (the texture-unit cache stays true).
+            GLint prevTex = 0, prevPack = 0, prevUnpack = 0, packAlign = 4, unpackAlign = 4, unpackRow = 0;
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex);
+            glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &prevPack);
+            glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &prevUnpack);
+            glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+            glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpackAlign);
+            glGetIntegerv(GL_UNPACK_ROW_LENGTH, &unpackRow);
+            while (glGetError() != GL_NO_ERROR) {}
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+            glPixelStorei(GL_PACK_ALIGNMENT, 4);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            GLuint tex = 0;
+            glGenTextures(1, &tex);
+            glBindTexture(GL_TEXTURE_2D, tex);
+            std::vector<U16> halves(65536), back(65536);
+            for (U32 i = 0; i < 65536; ++i) halves[i] = (U16)i;
+            std::vector<F32> hf(65536);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 128, 128, 0, GL_RGBA, GL_HALF_FLOAT, halves.data());   // 128 x 128 x 4
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_HALF_FLOAT, back.data());
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, hf.data());
+            const bool halfOk = glGetError() == GL_NO_ERROR;
+            std::vector<U8> bytes(256 * 4);
+            for (U32 i = 0; i < 256 * 4; ++i) bytes[i] = (U8)(i % 256);
+            std::vector<F32> bf(256 * 4);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE, bytes.data());
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, bf.data());
+            const bool byteOk = glGetError() == GL_NO_ERROR;
+            glBindTexture(GL_TEXTURE_2D, (GLuint)prevTex);
+            glDeleteTextures(1, &tex);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)prevPack);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (GLuint)prevUnpack);
+            glPixelStorei(GL_PACK_ALIGNMENT, packAlign);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, unpackAlign);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, unpackRow);
+            S32 halfFromDriver = 0, byteDiffers = 0, halfDiffers = 0;
+            if (halfOk)
+            {
+                // a pattern the upload kept (a driver may canonicalise NaNs) takes the driver's float for it
+                for (U32 i = 0; i < 65536; ++i)
+                {
+                    if (back[i] != (U16)i) continue;
+                    if (memcmp(&w.half[i], &hf[i], sizeof(F32)) != 0 && !(std::isnan(w.half[i]) && std::isnan(hf[i]))) ++halfDiffers;
+                    w.half[i] = hf[i];
+                    ++halfFromDriver;
+                }
+            }
+            if (byteOk)
+            {
+                for (U32 i = 0; i < 256; ++i)
+                {
+                    if (memcmp(&w.byte[i], &bf[i], sizeof(F32)) != 0) ++byteDiffers;
+                    w.byte[i] = bf[i];
+                }
+            }
+            LL_INFOS("WolfEnv") << "read-back widening tables: " << halfFromDriver << " halves and " << (byteOk ? 256 : 0)
+                                << " bytes from the driver's own GL_FLOAT conversion (" << halfDiffers << " halves and " << byteDiffers
+                                << " bytes differ from the IEEE / c/255 formulas)" << (halfOk && byteOk ? "" : "; a read failed, formulas kept")
+                                << LL_ENDL;
+            return w;
+        }();
+        return s_w;
+    }
+    F32 halfToF32(U16 h) { return driverWiden().half[h]; }
+    F32 unorm8ToF32(U8 c) { return driverWiden().byte[c]; }
+
     // ── WolfViewer's own bodies (kept by Paul's decisions D5 / D12) ─────────────────────────────────
     // The Moon's mean angular diameter, 31.1 arcmin (0.5181 deg; Hillaire 2016 4.2 gives 0.488-0.568).
     const F64 WOLF_MOON_RADIUS = 0.5181 * 0.5 * DEG_TO_RAD;
@@ -108,7 +200,7 @@ namespace
         LLRenderTarget fogSigma;
         U32    fogFrame = U32_MAX;
         GLuint fogOverlay = 0;
-        GLuint lumPbo[2] = {};        // the mean read back a frame apart, as camShadow
+        GLuint lumPbo[2] = {};        // the mean read back a frame apart, as camShadow (RGBA half floats, 8 bytes)
         bool   lumPboPending[2] = {};
         F32    lumPboExposure[2] = { 1.f, 1.f };   // the pre-exposure of the frame each reading was taken from
         U32    lumPboIndex = 0;
@@ -250,6 +342,7 @@ namespace
     bool sStockRTEmissive = false;
     GLuint sStockPbo = 0;
     size_t sStockPboBytes = 0;
+    bool   sStockPboHalf = false;   // [2026-11-07] the probe read-back in its target's own format: RGBA16F halves, else RGBA8 bytes
     bool sStockPending = false;
     S32  sStockPW = 0, sStockPH = 0;
     bool sStockValid = false;          // the thinning below comes from the stock layer
@@ -2737,14 +2830,14 @@ namespace
         {
             glGenBuffers(1, &s_pbo);
             glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
-            glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(F32), nullptr, GL_STREAM_READ);
+            glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(U16), nullptr, GL_STREAM_READ);   // [2026-11-07 READ-BACKS] halves
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
         if (!s_pboGained)
         {
             glGenBuffers(1, &s_pboGained);
             glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pboGained);
-            glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(F32), nullptr, GL_STREAM_READ);
+            glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(U16), nullptr, GL_STREAM_READ);   // [2026-11-07 READ-BACKS] halves
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
         auto render = [&](bool gainsOn, F32* out, GLuint pbo)   // out == nullptr: into the pack buffer `pbo`
@@ -2766,8 +2859,10 @@ namespace
                 }
                 else
                 {
+                    // [2026-11-07 READ-BACKS] the probe target is RGBA16F (Source: probeSkyTarget, sProbeRT.allocate):
+                    // read in its own format (GL_FLOAT made the driver wait for the GPU), widened when mapped below
                     glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
-                    glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_FLOAT, nullptr);
+                    glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_HALF_FLOAT, nullptr);
                     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
                 }
             }
@@ -2800,9 +2895,9 @@ namespace
             if (s_pending)
             {
                 glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
-                if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(F32), GL_MAP_READ_BIT))
+                if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(U16), GL_MAP_READ_BIT))
                 {
-                    memcpy(px, mapped, sizeof(px));
+                    for (S32 k = 0; k < NDIR * 4; ++k) px[k] = halfToF32(((const U16*)mapped)[k]);
                     glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
                     haveReading = true;
                 }
@@ -2811,9 +2906,9 @@ namespace
                 if (haveReading && s_pendGained)
                 {
                     glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pboGained);
-                    if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(F32), GL_MAP_READ_BIT))
+                    if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(U16), GL_MAP_READ_BIT))
                     {
-                        memcpy(gx, mapped, sizeof(gx));
+                        for (S32 k = 0; k < NDIR * 4; ++k) gx[k] = halfToF32(((const U16*)mapped)[k]);
                         glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
                         haveGained = true;
                     }
@@ -3063,7 +3158,9 @@ namespace
         static glm::mat4 s_pinv(1.f);
         static LLVector3 s_pref = LLVector3::z_axis;   // [2026-10-25] the stock light the reading in flight was taken round
         static F32 s_phor = 0.f;                       // .. and its horizon row (eepHorizonRowDeg)
-        const size_t bytes = (size_t)w * h * 4 * sizeof(F32);
+        // [2026-11-07 READ-BACKS] both march targets are RGBA16F (Source: wolftkclouds.cpp:1322-1323 alloc cColor /
+        // cDepthVelocity): read as GL_HALF_FLOAT, widened below (halfToF32)
+        const size_t bytes = (size_t)w * h * 4 * sizeof(U16);
         if (!s_pbo[0]) glGenBuffers(2, s_pbo);
         if (bytes != s_pboBytes)
         {
@@ -3080,7 +3177,7 @@ namespace
         std::vector<F32> buf, col;
         S32 rw = 0, rh = 0;
         glm::mat4 inv(1.f);
-        if (s_pending && (size_t)s_pw * s_ph * 4 * sizeof(F32) == s_pboBytes)
+        if (s_pending && (size_t)s_pw * s_ph * 4 * sizeof(U16) == s_pboBytes)
         {
             buf.resize((size_t)s_pw * s_ph * 4); col.resize(buf.size());
             bool ok = true;
@@ -3088,7 +3185,14 @@ namespace
             {
                 glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[i]);
                 const void* m = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, s_pboBytes, GL_MAP_READ_BIT);
-                if (m) { memcpy(i == 0 ? buf.data() : col.data(), m, s_pboBytes); glUnmapBuffer(GL_PIXEL_PACK_BUFFER); } else ok = false;
+                if (m)
+                {
+                    const U16* hp = (const U16*)m;
+                    std::vector<F32>& out = i == 0 ? buf : col;
+                    for (size_t k = 0; k < out.size(); ++k) out[k] = halfToF32(hp[k]);
+                    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                }
+                else ok = false;
             }
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
             if (ok) { rw = s_pw; rh = s_ph; inv = s_pinv; }
@@ -3098,11 +3202,18 @@ namespace
         // [round 16] the stock layer drawn for that reading (renderStockCloudProbe), same size, same camera a frame later
         std::vector<F32> stock;
         if (rw > 0 && sStockPending && sStockSeqRead == s_seq && sStockPW == rw && sStockPH == rh && sStockPbo
-            && sStockPboBytes == (size_t)rw * rh * 4 * sizeof(F32))
+            && sStockPboBytes == (size_t)rw * rh * 4 * (sStockPboHalf ? sizeof(U16) : sizeof(U8)))
         {
             glBindBuffer(GL_PIXEL_PACK_BUFFER, sStockPbo);
             const void* m = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, sStockPboBytes, GL_MAP_READ_BIT);
-            if (m) { stock.resize((size_t)rw * rh * 4); memcpy(stock.data(), m, sStockPboBytes); glUnmapBuffer(GL_PIXEL_PACK_BUFFER); }
+            if (m)
+            {
+                // [2026-11-07 READ-BACKS] widened from the probe target's own format (renderStockCloudProbe)
+                stock.resize((size_t)rw * rh * 4);
+                if (sStockPboHalf) { const U16* hp = (const U16*)m; for (size_t k = 0; k < stock.size(); ++k) stock[k] = halfToF32(hp[k]); }
+                else { const U8* bp = (const U8*)m; for (size_t k = 0; k < stock.size(); ++k) stock[k] = unorm8ToF32(bp[k]); }
+                glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+            }
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
         sStockPending = false;
@@ -3110,10 +3221,10 @@ namespace
         // start the next
         glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[0]);
         gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, tex);
-        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
         glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[1]);
         gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, sClouds->marchColorTex());
-        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
         glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
         s_pending = true; s_pw = w; s_ph = h;
@@ -3824,7 +3935,10 @@ void WolfEnvironmentRender::renderStockCloudProbe(const std::function<void()>& d
         if (!ok) { sStockRT.release(); return; }
         sStockRTEmissive = em;
     }
-    const size_t bytes = (size_t)w * h * 4 * sizeof(F32);
+    // [2026-11-07 READ-BACKS] read in the attachment's own format (allocated just above): RGBA16F halves from the emissive
+    // attachment, RGBA8 bytes from the colour one; widened in measureCloudCover
+    const size_t bytes = (size_t)w * h * 4 * (em ? sizeof(U16) : sizeof(U8));
+    sStockPboHalf = em;
     if (!sStockPbo) glGenBuffers(1, &sStockPbo);
     if (bytes != sStockPboBytes)
     {
@@ -3845,7 +3959,7 @@ void WolfEnvironmentRender::renderStockCloudProbe(const std::function<void()>& d
     gGL.flush();
     glReadBuffer(GL_COLOR_ATTACHMENT0 + (em ? 3 : 0));
     glBindBuffer(GL_PIXEL_PACK_BUFFER, sStockPbo);
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_FLOAT, nullptr);
+    glReadPixels(0, 0, w, h, GL_RGBA, em ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, nullptr);
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
     sStockRT.flush();
@@ -4804,9 +4918,16 @@ void WolfEnvironmentRender::postPassInner()
             if (sGpu.lumPboPending[prev])
             {
                 F32 v[4] = { 0.f, 0.f, 0.f, 0.f };   // (mean log(delta + L), mean L x sky, mean L, 1)
+                // [LIGHT METER 2026-11-07] the reading is the texture's own RGBA16F halves (queued below), widened here: the
+                // same numbers bit for bit as the driver's GL_FLOAT conversion gave (half -> float is exact)
+                U16 h[4] = { 0, 0, 0, 0 };
                 glBindBuffer(GL_PIXEL_PACK_BUFFER, sGpu.lumPbo[prev]);
-                glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, sizeof(v), v);
+                glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, sizeof(h), h);
                 glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                for (S32 i = 0; i < 4; ++i)
+                {
+                    v[i] = halfToF32(h[i]);
+                }
                 sGpu.lumPboPending[prev] = false;
                 const F32 e = sGpu.lumPboExposure[prev];
                 sNext.frameLogAvg = (std::isfinite(v[0]) && e > 0.f) ? expf(v[0]) / e : -1.f;
@@ -4838,11 +4959,18 @@ void WolfEnvironmentRender::postPassInner()
             WolfTk::unbindUnit(WolfTk::NAMED_UNIT_BASE + 2, GL_TEXTURE_2D);
             ll.unbind();
             sGpu.logLum.flush();   // TMG_AUTO: the mipmaps are generated here (llrendertarget.cpp:511-515)
-            // the 1 x 1 mip (level 6 of 64) through a pixel-pack buffer: no wait for the GPU
+            // the 1 x 1 mip (level 6 of 64) through a pixel-pack buffer: no wait for the GPU.
+            // [LIGHT METER 2026-11-07] read in the texture's own format: RGBA16F (Source: this file, sGpu.logLum.allocate above),
+            // so GL_RGBA + GL_HALF_FLOAT, 8 bytes; its mips come from LLRenderTarget::flush (Source: llrendertarget.cpp:511-515).
+            // Asking for GL_FLOAT made the NVIDIA driver convert on the CPU, so the call waited for the whole frame queued
+            // before it to finish on the GPU: 16.4 ms a frame at The Caribbean (glcount timing, 615.78 driver). A standalone
+            // reproduction of this sequence (same driver) waited for any read of this 16F level as GL_FLOAT (glGetTexImage,
+            // glGetTextureSubImage, glReadPixels; with or without re-specifying the buffer; level 0 too) and never for
+            // GL_HALF_FLOAT, which gave the same values
             gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, sGpu.logLum.getTexture());
             glBindBuffer(GL_PIXEL_PACK_BUFFER, sGpu.lumPbo[cur]);
-            glBufferData(GL_PIXEL_PACK_BUFFER, 4 * sizeof(F32), nullptr, GL_STREAM_READ);
-            glGetTexImage(GL_TEXTURE_2D, 6, GL_RGBA, GL_FLOAT, nullptr);
+            glBufferData(GL_PIXEL_PACK_BUFFER, 4 * sizeof(U16), nullptr, GL_STREAM_READ);
+            glGetTexImage(GL_TEXTURE_2D, 6, GL_RGBA, GL_HALF_FLOAT, nullptr);
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
             gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
             sGpu.lumPboPending[cur] = true;

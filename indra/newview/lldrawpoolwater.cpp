@@ -278,6 +278,30 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
 
     gPipeline.bindDeferredShader(*shader, nullptr, &gPipeline.mWaterDis);
 
+    // [WATER EARLY REJECT 2026-11-07] waterF.glsl writes gl_FragDepth (WOLF_WATER_FULL), which switches the GPU's early depth
+    // test off: every water fragment behind a dock, a ship or the land ran the whole sea shader before the depth test threw it
+    // away (2.5-4 ms a frame at 4096 m for 24-68k visible water samples, GPU timers 2026-11-07). The shader may now drop such a
+    // fragment itself, before any work, when it is certain the depth test would fail. That needs depthMap (mWaterDis, copied
+    // from mRT->deferredScreen's depth in beginPostDeferredPass, this frame, this pass) to be the depth the test uses, texel for
+    // texel: the copy was made (sRenderTransparentWater), the depth buffer bound now is that one (deferredScreen shares it with
+    // the screen: pipeline.cpp allocateScreenBuffer shareDepthBuffer), the viewport is the copy's whole size from 0,0 (not a
+    // probe face, not a tile), and the test is on with LESS or LEQUAL. Otherwise 0: the shader runs as before.
+    {
+        static LLStaticHashedString s_early_reject("wolfEarlyDepthReject");
+        bool reject_ok = !underwater && LLPipeline::sRenderTransparentWater && !gCubeSnapshot
+            && gGLViewport[0] == 0 && gGLViewport[1] == 0
+            && gGLViewport[2] == (S32)gPipeline.mWaterDis.getWidth() && gGLViewport[3] == (S32)gPipeline.mWaterDis.getHeight()
+            && gPipeline.mRT && gGLViewport[2] == (S32)gPipeline.mRT->deferredScreen.getWidth()
+            && gGLViewport[3] == (S32)gPipeline.mRT->deferredScreen.getHeight();
+        if (reject_ok)
+        {
+            GLint func = 0;
+            glGetIntegerv(GL_DEPTH_FUNC, &func);
+            reject_ok = glIsEnabled(GL_DEPTH_TEST) && (func == GL_LEQUAL || func == GL_LESS);
+        }
+        shader->uniform1f(s_early_reject, reject_ok ? 1.f : 0.f);
+    }
+
     LLViewerTexture* tex_a = mWaterNormp[0];
     LLViewerTexture* tex_b = mWaterNormp[1];
 

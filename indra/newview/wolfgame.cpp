@@ -1478,15 +1478,18 @@ void WolfGame::updateGameModeButtons()
     if (mForced)
     {
         // [FORCED] §6: ON and LOCKED - a padlock on the button, the reason in its words.
-        label = "Game Mode: Locked on";
-        tip = label + ". " + mForcedText + ".";
+        // [t625 2026-11-07] Buzzy: the label did not fit the toolbar button. Every label is now no longer than
+        // "Animation override", the longest the toolbar is sized for (widgets/toolbar.xml button_width.max 132); the
+        // tooltip keeps the full words.
+        label = "Game Mode: Locked";
+        tip = "Game Mode: Locked on. " + mForcedText + ".";
     }
     else
     {
         label = gameModeConnecting()
-            ? std::string("Game Mode: connecting...")
+            ? std::string("Game Mode: Joining")
             : std::string(shown_on ? "Game Mode: On" : "Game Mode: Off");
-        tip = label + (gameModeConnecting() ? std::string()
+        tip = (gameModeConnecting() ? std::string("Game Mode: connecting...") : label) + (gameModeConnecting() ? std::string()
             : std::string(shown_on ? ". Click to turn Game Mode off." : ". Click to play the region's roleplay game wherever you go."));
     }
     mButtonsShownState = label;
@@ -1496,7 +1499,12 @@ void WolfGame::updateGameModeButtons()
         if (!tb) continue;
         if (LLButton* b = tb->findChild<LLButton>("wolf_gamemode"))
         {
-            b->setLabel(label);
+            // [t625 2026-11-07] the bar sized the button for its old label: lay it out again when the label changes
+            if (b->getLabelUnselected() != label)
+            {
+                b->setLabel(label);
+                tb->setNeedsLayout();
+            }
             b->setToolTip(tip);
             // The command's own icon (commands.xml wolf_gamemode), or the skin's padlock
             // (textures.xml "Lock") while the region forces it; the same alignment either way.

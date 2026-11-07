@@ -51,6 +51,14 @@ namespace WolfVRScreen
     /** [VR DRAW DISTANCE 2026-11-05] True while the camera is the headset's (applyHeadCamera took it this frame):
      *  display_update_camera then uses WolfVRDrawDistance in place of the desktop's draw distance. */
     bool headCamera();
+    /** [VR CAMERA CONTROLS 2026-11-07] The Camera Controls window in VR 3D Mode (wolfvrscreen.cpp gView). cameraKeys:
+     *  LLAgentCamera::updateCamera's held orbit / pan inputs (each the + key minus the - key) for dt seconds; true when
+     *  the headset's view took them (the caller then drops them). cameraZoomSlider / setCameraZoomSlider: the zoom
+     *  slider's value (0 out .. 1 in) in VR; false when not in VR. cameraPreset: a camera preset was just chosen. */
+    bool cameraKeys(float orbit_up, float orbit_left, float orbit_in, float pan_in, float pan_left, float pan_up, float dt);
+    bool cameraZoomSlider(float& value);
+    bool setCameraZoomSlider(float value);
+    void cameraPreset();
     /** [VR SHARED CULL 2026-11-04] The right eye's pass reuses the left eye's cull and state sort (WolfVRShareCull). */
     bool shareCull();
     /** [VR SHADOWS 2026-11-04] The left eye keeps last frame's shadow maps this frame (WolfVRShadowEvery). */

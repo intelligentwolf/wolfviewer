@@ -299,7 +299,7 @@ function depthLine() {
     const h = screen.userData.hdr;
     const sep = (e) => (e ? Math.hypot(e[3] - e[0], e[4] - e[1], e[5] - e[2]) * 1000 : NaN);
     const tan = eyeTan ? `L ${eyeTan.slice(0, 4).join(',')} R ${eyeTan.slice(4, 8).join(',')}` : '-';
-    return `${disparityProbe()}; ${shownProbe()}; 3D: depth ${depthEyes.active ? 'on' : 'off'} (grid ${depthEyes.gw}x${depthEyes.gh}, ${depthEyes.frames} pictures), ` +
+    return `${disparityProbe()}; ${shownProbe()}; XR ${xrLayerLine()}; 3D: depth ${depthEyes.active ? 'on' : 'off'} (grid ${depthEyes.gw}x${depthEyes.gh}, ${depthEyes.frames} pictures), ` +
         `eyes drawn ${fmt(sep(h && h.eyes), 1)} mm apart, headset ${fmt(sep(lastXrEyes), 1)} mm, picture ${h ? (h.stereo ? 'stereo' : h.centre ? 'centre view' : 'mono') : '-'}, ` +
         `cards at ${depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE} m, head ${fmt(_pos.y, 2)} m above the floor, eye windows ${tan}`;
 }
@@ -1004,6 +1004,56 @@ $('wvr-mic').addEventListener('click', () => {
 // window), each widened by EYE_MARGIN_DEG so a quick head turn does not show the picture's edge before the next one
 // comes (reprojection); the square field of view covering both ("f") stays for a viewer drawing one view.
 const EYE_MARGIN_DEG = 4;
+// [VR EYE OFFSCREEN 2026-11-07] Paul's 3D Mode "feels flat even standing still": the picture was soft. The headset's
+// own layer (what the picture is drawn into, then shown on the panels) was made at three's default scale 1.0, the
+// browser's recommended size, which may hold fewer pixels than the panels have. WebXR's native scale factor
+// (XRWebGLLayer.getNativeFramebufferScaleFactor: what the recommended resolution "must each be multiplied by" for "a 1:1
+// ratio between the pixels of a framebuffer ... and the physical screen pixels", immersive-web.github.io/webxr; width
+// and height each, so 1.5 is 2.25 times the pixels) is used instead when it is above 1, at most
+// LAYER_SCALE_MAX (bounds the headset GPU's cost; the device line shows the native value, so a cap that bites shows).
+// Must be set before renderer.xr.setSession (three r185 WebXRManager.setFramebufferScaleFactor).
+const LAYER_SCALE_MAX = 1.5;
+const xrLayer = { seen: false, native: 0, used: 1, head: 'not measured yet', eyes: [] };
+function xrLayerScale(session) {
+    xrLayer.native = 0;
+    try {
+        if (typeof XRWebGLLayer !== 'undefined' && XRWebGLLayer.getNativeFramebufferScaleFactor) {
+            xrLayer.native = Number(XRWebGLLayer.getNativeFramebufferScaleFactor(session)) || 0;
+        }
+    } catch (e) { xrLayer.native = 0; }
+    xrLayer.used = xrLayer.native > 1 ? Math.min(xrLayer.native, LAYER_SCALE_MAX) : 1;
+    return xrLayer.used;
+}
+// In the first XR frame: the layer three made (an XRProjectionLayer where the browser has WebXR Layers, else an
+// XRWebGLLayer), each eye's viewport in it, and the centre pixels per degree of the layer against the picture's (the
+// picture covers the widened window, the layer the eye's own): the layer below the picture throws its detail away.
+function noteXrLayer(pose) {
+    xrLayer.seen = true;
+    xrLayer.eyes = [];
+    try {
+        const pl = renderer.xr.getBaseLayer();
+        if (!pl || !pose.views || pose.views.length < 2) { xrLayer.head = 'no layer'; return; }
+        const proj = typeof XRProjectionLayer !== 'undefined' && pl instanceof XRProjectionLayer;
+        const binding = proj ? renderer.xr.getBinding() : null;
+        const size = proj ? `${pl.textureWidth}x${pl.textureHeight}${pl.textureArrayLength > 1 ? ' x' + pl.textureArrayLength : ''}` : `${pl.framebufferWidth}x${pl.framebufferHeight}`;
+        for (const v of pose.views) {
+            const vp = proj ? binding.getViewSubImage(pl, v).viewport : pl.getViewport(v);
+            // R - L of the eye's own window: (m8 + 1) / m0 - (m8 - 1) / m0 (column-major, as eyesOf)
+            xrLayer.eyes.push({ eye: v.eye, x: vp.x, y: vp.y, w: vp.width, h: vp.height, span: 2 / v.projectionMatrix[0] });
+        }
+        xrLayer.head = `${proj ? 'projection' : 'webgl'} layer ${size}, scale ${fmt(xrLayer.used, 2)} (native ${xrLayer.native ? fmt(xrLayer.native, 2) : 'not given'})`;
+    } catch (e) { xrLayer.head = 'error ' + e.message; }
+}
+// in the report: the layer's centre pixels per degree against the picture's now (the picture covers the eye's widened
+// window, eyeTan; the layer the eye's own): a layer below the picture throws the picture's detail away
+function xrLayerLine() {
+    const parts = xrLayer.eyes.map((e) => {
+        const r = e.eye === 'right' ? 4 : 0, wide = eyeTan ? eyeTan[r + 1] - eyeTan[r] : NaN;
+        const pic = config && config.mode === 'world' && config.h ? config.h / wide * Math.PI / 180 : NaN;
+        return `${e.eye} ${e.x},${e.y} ${e.w}x${e.h}: centre ${fmt(e.w / e.span * Math.PI / 180, 1)} px/deg (picture ${fmt(pic, 1)})`;
+    });
+    return xrLayer.head + (parts.length ? '; ' + parts.join('; ') : '');
+}
 const _hinv = new THREE.Matrix4(), _ev = new THREE.Vector3();
 let eyeFov = 0, eyeTan = null, lastViews = null;
 function widen(t, sign) { return Math.tan(Math.atan(t) + sign * EYE_MARGIN_DEG * Math.PI / 180); }
@@ -1505,6 +1555,7 @@ async function toggleVR() {
             session.addEventListener('end', onSessionEnd);
             session.addEventListener('visibilitychange', () => tellXR(false));   // [VR IMMERSIVE] headset menu / asleep
             session.addEventListener('select', onSelect);   // [VR CONTROLS] hands / look-and-pinch
+            renderer.xr.setFramebufferScaleFactor(xrLayerScale(session));   // [VR EYE OFFSCREEN 2026-11-07]
             await renderer.xr.setSession(session);
             // As WolfStorm's updateTargetFrameRate: the supported display rate nearest the viewer's frame rate.
             const want = HEADSETS[headsetKind()].hz || (config && config.fps) || 72;   // [VR HEADSETS] Quest 2: 72 Hz
@@ -1565,7 +1616,7 @@ function restoreAfterVR() {
     dolly.quaternion.identity();
     resize();
 }
-function onSessionEnd() { restoreAfterVR(); }
+function onSessionEnd() { xrLayer.seen = false; restoreAfterVR(); }
 $('vr-btn').addEventListener('click', toggleVR);
 // [VR MOVE 2026-11-03] Where the browser offers it (WebXR "sessiongranted", e.g. Quest Browser after a navigation from
 // another VR page), go straight back into VR with no tap at all.
@@ -2115,6 +2166,7 @@ function animate(time, frame) {
         if (pose) {
             eyes = eyesOf(pose);
             if (eyes) lastXrEyes = eyes;   // [VR 3D CHECK]
+            if (!xrLayer.seen) noteXrLayer(pose);   // [VR EYE OFFSCREEN 2026-11-07] once a session
             dolly.updateMatrixWorld();
             _m.fromArray(pose.transform.matrix).premultiply(dolly.matrixWorld);
             _m.decompose(_pos, _quat, _scl);
@@ -2326,6 +2378,7 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
     rates: () => ({ display: num.fps, gotFps: num.gotFps, decodedFps: num.decodedFps, newFps: num.newFps, p2p: num.p2p.avg(), v2p: num.v2p.avg() }),
     stages: () => Object.fromEntries(STAGES.map((k) => [k, { p50: stages[k].pct(0.5), p95: stages[k].pct(0.95), n: stages[k].v.length }])),
     numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-20), v2p: num.v2p.v.slice(-20) }), toggleVR, config: () => config,
+    xrLayer: () => xrLayerLine(),   // [VR EYE OFFSCREEN 2026-11-07] the XR layer's size and pixels per degree
     big: () => ({ on: BIG(), size: screenWidth, visible: bigMesh.visible, ptr: { u: ptr.u, v: ptr.v }, theatre: theatreOn && theatre.group.visible,
                   knobs: knobs.map((k) => k.visible), buttons: ctlButtons.map((b) => b.visible), drag: !!bigDrag,
                   hot: knobs.findIndex((k) => k.material === knobHotMat), hotBtn: ctlButtons.findIndex((b) => b.userData.hot),

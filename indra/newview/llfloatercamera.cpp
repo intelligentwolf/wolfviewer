@@ -50,6 +50,7 @@
 // [RLVa:KB] - @setcam
 #include "rlvactions.h"
 // [/RLVa:KB]
+#include "wolfvrscreen.h"   // <WolfViewer 2026-11-07/> VR camera controls
 
 static LLDefaultChildRegistry::Register<LLPanelCameraItem> r("panel_camera_item");
 
@@ -204,6 +205,11 @@ bool LLPanelCameraZoom::postBuild()
 
 void LLPanelCameraZoom::draw()
 {
+    // <WolfViewer 2026-11-07> [VR CAMERA CONTROLS] in VR 3D Mode the slider shows (and sets) the headset view's zoom
+    F32 vr_zoom = 0.f;
+    if (WolfVRScreen::cameraZoomSlider(vr_zoom)) mSlider->setValue(vr_zoom);
+    else
+    // </WolfViewer>
     mSlider->setValue(gAgentCamera.getCameraZoomFraction());
     LLPanel::draw();
 }
@@ -272,6 +278,7 @@ F32 LLPanelCameraZoom::getOrbitRate(F32 time)
 void  LLPanelCameraZoom::onSliderValueChanged()
 {
     F32 zoom_level = mSlider->getValueF32();
+    if (WolfVRScreen::setCameraZoomSlider(zoom_level)) return;   // <WolfViewer 2026-11-07/> [VR CAMERA CONTROLS]
     gAgentCamera.setCameraZoomFraction(zoom_level);
 }
 
@@ -938,6 +945,7 @@ void LLFloaterCamera::switchToPreset(const std::string& name)
         }
     }
     gAgentCamera.resetCameraZoomFraction();
+    WolfVRScreen::cameraPreset();   // <WolfViewer 2026-11-07/> [VR CAMERA CONTROLS] the headset view too (VR 3D Mode only)
 
     LLFloaterCamera* camera_floater = LLFloaterCamera::findInstance();
     if (camera_floater)

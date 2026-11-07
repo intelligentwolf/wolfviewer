@@ -395,7 +395,10 @@ void shutdown()
         std::lock_guard<std::mutex> lk(gMutex);
         stopLocked();
     }
-    // The GPU objects of the big screen go with the GL context at exit; nothing to free here.
+    // [VR EYE OFFSCREEN 2026-11-07] the GPU objects (capture, HUD layer, the offscreen eye's LLRenderTarget) freed here,
+    // on the main thread while its GL context is still current (LLAppViewer::cleanup calls this long before
+    // shutdownGL), not by the static LLRenderTargets' destructors after the context has gone
+    WolfVRScreen::release();
 }
 
 bool bigScreenWanted()

@@ -59,6 +59,7 @@
 #include "wolfcamerafx.h"   // <WolfViewer 2026-10-10/>
 #include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels: the camera in a tunnel
 #include "lltrans.h"
+#include "wolfvrscreen.h"   // <WolfViewer 2026-11-07/> VR camera controls
 
 using namespace LLAvatarAppearanceDefines;
 
@@ -1401,6 +1402,17 @@ void LLAgentCamera::updateCamera()
 // <FS:Chanayane> Camera roll (from Alchemy)
     const F32 ROLL_RATE = 45.f * DEG_TO_RAD;                // radians per second
 // </FS:Chanayane>
+
+    // [VR CAMERA CONTROLS 2026-11-07] In VR 3D Mode the headset's view takes these inputs (wolfvrscreen.cpp cameraKeys);
+    // dropped here they leave the desktop camera, which the headset does not show, where it was. Roll is dropped too:
+    // a rolled horizon in a headset is a nausea trigger.
+    if (WolfVRScreen::cameraKeys(getOrbitUpKey() - getOrbitDownKey(), getOrbitLeftKey() - getOrbitRightKey(),
+                                 getOrbitInKey() - getOrbitOutKey(), getPanInKey() - getPanOutKey(),
+                                 getPanLeftKey() - getPanRightKey(), getPanUpKey() - getPanDownKey(), 1.f / gFPSClamped))
+    {
+        clearOrbitKeys();
+        clearPanKeys();
+    }
 
     if (gAgentCamera.getOrbitUpKey() || gAgentCamera.getOrbitDownKey())
     {

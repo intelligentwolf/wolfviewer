@@ -12490,7 +12490,9 @@ void LLPipeline::generateImpostor(LLVOAvatar* avatar, bool preview_avatar, bool 
         gGL.setColorMask(true, true);
 
         // get the number of pixels per angle
-        F32 pa = gViewerWindow->getWindowHeightRaw() / (RAD_TO_DEG * viewer_camera->getView());
+        // [VR EYE OFFSCREEN 2026-11-07/] the world view's height when it is taller than the window (a VR eye drawn
+        // offscreen at the headset's size, WolfVRScreen displayFrame); never smaller than before on the desktop
+        F32 pa = (F32)llmax(gViewerWindow->getWindowHeightRaw(), gViewerWindow->getWorldViewHeightRaw()) / (RAD_TO_DEG * viewer_camera->getView());
 
         //get resolution based on angle width and height of impostor (double desired resolution to prevent aliasing)
         resY = llmin(nhpo2((U32) (fov*pa)), (U32) 512);

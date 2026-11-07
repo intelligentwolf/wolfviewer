@@ -154,13 +154,67 @@ namespace
     // same pixels the headset gets, sharper than the squeeze, at 40 % of the cost in pixels. The pipeline's targets
     // follow it (gResizeScreenTexture, once when it starts or changes); the real area is given back after each frame,
     // so the desktop's UI, picks and the pointer never see it.
-    struct EyeRect { bool active = false; LLRect real, over; };
+    // [VR EYE OFFSCREEN 2026-11-07] Paul's Quest 3 3D Mode "feels flat even standing still": the eye's square was capped
+    // by the window (2522 x 1520 window, ~1300-1520 px world view) and then stretched to the picture's 1728 px with a
+    // linear blit, so the fine texture detail that makes stereo read as solid was never drawn. `offscreen`: the eye is
+    // drawn into gEyeTarget at the picture's own eye size instead, whatever the window's size (the world view is then
+    // a square at the origin, as LLViewerWindow's 360 snapshot draws a whole display() into its own bound target,
+    // llviewerwindow.cpp scratch_space); the pipeline's targets follow it as before (LLPipeline::resizeScreenTexture
+    // reads the world view's size), and the capture copies it 1:1.
+    struct EyeRect { bool active = false; bool offscreen = false; LLRect real, over; };
     EyeRect gEyeRect;
     void useEyeRect(bool on)
     {
         if (!gViewerWindow) return;
         if (on) gViewerWindow->wolfVRSetWorldViewRaw(gEyeRect.over);
         else if (gEyeRect.active) gViewerWindow->wolfVRSetWorldViewRaw(gEyeRect.real);
+    }
+    LLRenderTarget gEyeTarget;       // [VR EYE OFFSCREEN] the eye's own picture, RGBA8 + depth like the window's back buffer
+    bool gEyeBound = false;          // gEyeTarget is bound for this eye's display() (bindEyeTarget .. unbindEyeTarget)
+    bool gEyeTargetFailed = false;   // refused once (driver limit or memory): the window-sized path from then on
+    // An eye target of side x side, made (or remade) when the size changes; false = draw in the window as before.
+    bool eyeTargetFor(S32 side)
+    {
+        if (gEyeTargetFailed) return false;
+        if (gEyeTarget.isComplete() && (S32)gEyeTarget.getWidth() == side && (S32)gEyeTarget.getHeight() == side) return true;
+        gEyeTarget.release();
+        GLint dims[2] = {0, 0};
+        glGetIntegerv(GL_MAX_VIEWPORT_DIMS, dims);
+        if (side > dims[0] || side > dims[1] || side > gGLManager.mGLMaxTextureSize ||
+            !gEyeTarget.allocate((U32)side, (U32)side, GL_RGBA8, true))
+        {
+            gEyeTarget.release();
+            gEyeTargetFailed = true;
+            LL_WARNS("WolfVR") << "VR eye: could not make a " << side << " px eye target (viewport limit " << dims[0] << "x"
+                               << dims[1] << ", texture limit " << gGLManager.mGLMaxTextureSize
+                               << "); the eyes are drawn in the window" << LL_ENDL;
+            return false;
+        }
+        return true;
+    }
+    void bindEyeTarget()
+    {
+        if (!gEyeRect.active || !gEyeRect.offscreen || gEyeBound || !gEyeTarget.isComplete() || gEyeTarget.isBoundInStack()) return;
+        gEyeTarget.bindTarget();
+        gEyeBound = true;
+    }
+    // After the capture (captureWorld), or after a display() that returned before reaching it. Flushed only while it is
+    // the innermost bound target (LLRenderTarget::flush pops exactly one level of the target stack).
+    void unbindEyeTarget()
+    {
+        if (!gEyeBound) return;
+        gEyeBound = false;
+        if (LLRenderTarget::getCurrentBoundTarget() == &gEyeTarget)
+        {
+            gEyeTarget.flush();
+            return;
+        }
+        static bool s_warned = false;
+        if (!s_warned)
+        {
+            s_warned = true;
+            LL_WARNS("WolfVR") << "VR eye: another target was still bound over the eye's at the end of its pass" << LL_ENDL;
+        }
     }
     // [VR STAGES 2026-11-04] this frame's start and the end of its left eye (wolfvr::clockMs), put on the picture
     struct Stamp { double frame = 0, eye0 = 0; };
@@ -238,6 +292,34 @@ namespace
     struct Rig { bool set = false; LLVector3 fwd = LLVector3::x_axis; LLVector3 at; bool vehicle = false; F32 vehOff = 0.f; };
     Rig gRig;
 
+    // [VR CAMERA CONTROLS 2026-11-07] Paul: "the camera controls dont work in vr" ... "if 3 was working then 1 and 2 would
+    // not be such a problem" (seated in a train coach the headset view was in the roof). The head camera is placed by
+    // buildMap from the avatar's eyes alone, so the Camera Controls window (orbit, pan, zoom, presets), which moves only
+    // the desktop camera (LLAgentCamera::updateCamera), changed nothing in the headset. In VR 3D Mode its inputs now move
+    // the head's anchor instead:
+    //   orbit left/right  - the rig turns about the avatar (on foot: the rig's heading, so the avatar stays in front;
+    //                       on a seat: vehOff, the look to the side the right stick also turns)
+    //   orbit up/down and pan up/down - the view rises or sinks (no pitch: a tilted horizon is a nausea trigger)
+    //   pan left/right and pan in/out - the view slides sideways / forwards
+    //   zoom (+/- and the slider) - the distance behind and above the avatar (kBehind, kAbove), scaled as the desktop
+    //                       scales its rear-view offset (LLAgentCamera::calcCameraPositionTargetGlobal: mCameraZoomFraction
+    //                       x getCameraOffsetInitial(), slider <-> fraction as getCameraZoomFraction/setCameraZoomFraction)
+    //   presets (Rear, Front, Side, Third Person, Reset View) - back to the default place, facing the avatar from the
+    //                       preset's own direction (its CameraOffsetRearView, loaded by LLFloaterCamera::switchToPreset)
+    // A sit or a stand, and leaving VR, put it all back (gView.sit), so a nudge made in a train seat is not carried off.
+    struct View { F32 fwd = 0.f, left = 0.f, up = 0.f, zoom = 1.f; S32 sit = -1; };
+    View gView;
+    // Source: llagentcamera.cpp:68-70 MIN_ZOOM_FRACTION 0.25, MAX_ZOOM_FRACTION 8 (the desktop's zoom range, file-static)
+    constexpr F32 kZoomMin = 0.25f, kZoomMax = 8.f;
+    // the VR's own rates: slower than the desktop's 5 m/s pan and 90 deg/s orbit (llagentcamera.cpp:1398-1400), for
+    // fine steps out of a carriage roof and a gentle turn in a headset
+    constexpr F32 kNudgeRate = 1.f;                     // metres per second at full key
+    constexpr F32 kOrbitRate = 45.f * DEG_TO_RAD;       // radians per second at full key
+    constexpr F32 kNudgeFlat = 10.f, kNudgeUp = 5.f;    // metres the anchor may be moved, sideways/forwards and up/down
+    void resetView() { const S32 sit = gView.sit; gView = View(); gView.sit = sit; }
+    const char* gViewLog = nullptr;   // a camera-controls change to log once the next head is placed (logView)
+    void logView(const char* why);
+
     LLVector3 avatarHeading()
     {
         LLVector3 fwd = gAgent.getAtAxis();
@@ -301,8 +383,10 @@ namespace
         // avatar is near); hidden (WolfVRHideAvatar), at its eyes. The headset adds its own lean from where it was when
         // VR started (a step of more than a metre re-centres it), so leaning still gives real parallax.
         constexpr F32 kBehind = 1.75f, kAbove = 0.45f;
+        if (gView.sit != sit) { resetView(); gView.sit = sit; }   // [VR CAMERA CONTROLS] a sit or a stand starts afresh
         LLVector3 base = avatarEyes();
-        if (!hide_me) base += gMap.fwd * -kBehind + gMap.up * kAbove;
+        if (!hide_me) base += gMap.fwd * (-kBehind * gView.zoom) + gMap.up * (kAbove * gView.zoom);
+        base += gMap.fwd * gView.fwd + gMap.left * gView.left + gMap.up * gView.up;   // [VR CAMERA CONTROLS]
         if (hp.has_pos)
         {
             if (!gLean.set || gLean.sit != sit) { std::memcpy(gLean.p0, hp.pos, sizeof gLean.p0); gLean.set = true; gLean.sit = sit; }
@@ -314,6 +398,19 @@ namespace
         }
         gMap.base = base;
         gMap.valid = true;
+        if (gViewLog) { logView(gViewLog); gViewLog = nullptr; }   // [VR CAMERA CONTROLS] with this frame's head
+    }
+
+    // one line in the log when a camera-controls move ends or a preset is chosen (not per frame): what the resident did,
+    // and where the head now is against the avatar's eyes, so a "still in the roof" report can be read from the log
+    void logView(const char* why)
+    {
+        const LLVector3 head = gMap.base - avatarEyes();
+        const F32 look = onVehicle() ? gRig.vehOff : std::atan2((avatarHeading() % gRig.fwd).mV[VZ], avatarHeading() * gRig.fwd);
+        LL_INFOS("WolfVR") << llformat("VR camera controls (%s): view moved forward %.2f m, left %.2f m, up %.2f m, zoom x%.2f, "
+                                       "looking %.0f degrees left of the %s; head %.2f m above the avatar's eyes, %.2f m from them",
+                                       why, gView.fwd, gView.left, gView.up, gView.zoom, look * RAD_TO_DEG,
+                                       onVehicle() ? "seat's facing" : "avatar's facing", head.mV[VZ], head.length()) << LL_ENDL;
     }
 
     // [VR WORLD POINTER 2026-11-04] Paul: "I couldn't point and sit on anything". The right controller's ray, when it
@@ -669,6 +766,8 @@ void release()
 {
     freeGl();
     freeLayer();
+    if (!gEyeBound) gEyeTarget.release();   // [VR EYE OFFSCREEN] (never while bound: release() runs between frames)
+    gEyeTargetFailed = false;
     if (gParts.q[0])   // [VR FRAME PARTS]
     {
         glDeleteQueries(FrameParts::kQ, gParts.q);
@@ -1021,6 +1120,23 @@ void maybeDumpEyes(const std::vector<uint8_t>& rgba, U32 w, U32 h, const wolfvr:
                        << gAgent.getPosAgentFromGlobal(gAgentCamera.calcCameraPositionTargetGlobal()) << ", "
                        << (gAgent.getPosAgentFromGlobal(gAgentCamera.calcCameraPositionTargetGlobal()) - gMap.base).length()
                        << " m from the eyes (not used in the headset)" << LL_ENDL;
+    // [VR EYE OFFSCREEN 2026-11-07] the sharpness in numbers: pixels per degree at each eye's optical centre (where the
+    // tangent is 0, d(tan)/d(angle) = 1 per radian), for the size each eye was really drawn at and the picture's
+    if (hp.has_tan)
+    {
+        const S32 drawn = gEyeRect.active ? gEyeRect.over.getHeight() : 0;
+        for (int e = 0; e < 2; ++e)
+        {
+            const F32* t = hp.tan + 4 * e;
+            const F32 sx = t[1] - t[0], sy = t[3] - t[2];
+            if (sx <= 0.f || sy <= 0.f) continue;
+            LL_INFOS("WolfVR") << "eye dump: " << (e ? "right" : "left") << " eye drawn " << drawn << " px "
+                               << (gEyeRect.offscreen ? "offscreen" : "in the window") << ", picture " << ew << " px; window "
+                               << sx << " x " << sy << " (tan); centre px/deg drawn " << (F32)drawn / sx * DEG_TO_RAD
+                               << " across, " << (F32)drawn / sy * DEG_TO_RAD << " up; picture " << (F32)ew / sx * DEG_TO_RAD
+                               << " across, " << (F32)h / sy * DEG_TO_RAD << " up" << LL_ENDL;
+        }
+    }
 }
 
 // [VR READBACK 2026-11-04] Measured (scripts/wolfvr/e2e_stages.mjs): a picture used to wait in its pixel buffer until
@@ -1095,6 +1211,10 @@ void captureInto(bool world)
     const bool stereo = world && gEye >= 0;
     if (stereo && w != 2 * h) return;   // the stream is switching size: wait for the new picture size
     if (stereo && gEye == 1 && !gCap.eye0) return;
+    // [VR EYE OFFSCREEN 2026-11-07] an offscreen eye whose target is not bound was drawn nowhere this capture can read
+    // (the world view is then bigger than the window): no picture rather than a wrong one
+    const bool from_eye = world && gEyeBound;
+    if (world && gEyeRect.active && gEyeRect.offscreen && !from_eye) return;
     // At most 75 pictures a second (the stream is 60): a viewer running faster does not need to copy every frame.
     const F64 now = LLTimer::getTotalSeconds();
     if (!(stereo && gEye == 1))
@@ -1124,8 +1244,9 @@ void captureInto(bool world)
     if (scissor) glDisable(GL_SCISSOR_TEST);
 
     // 1. back buffer -> picture texture, scaled, upside down (so the read below comes out top row first)
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glReadBuffer(GL_BACK);
+    // [VR EYE OFFSCREEN] or the eye's own target, the same size as the picture's eye: copied 1:1
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, from_eye ? gEyeTarget.getFBO() : 0);
+    glReadBuffer(from_eye ? GL_COLOR_ATTACHMENT0 : GL_BACK);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gCap.fbo);
     if (refit)
     {
@@ -1251,6 +1372,83 @@ bool uiSkipped() { return gEye == 0 || gPaused; }
 bool secondEye() { return gEye == 1; }
 bool stereoEye() { return gEye >= 0; }
 bool headCamera() { return gCameraOverridden; }
+
+// [VR CAMERA CONTROLS 2026-11-07] (see gView) The Camera Controls window's held inputs, as LLAgentCamera::updateCamera
+// reads them (llagentcamera.cpp:1405-1442, each "key" 0..1, the + one minus the - one), for dt seconds. In VR 3D Mode
+// they move the headset's anchor and the caller drops them; otherwise false and the desktop camera takes them as always.
+bool cameraKeys(F32 orbit_up, F32 orbit_left, F32 orbit_in, F32 pan_in, F32 pan_left, F32 pan_up, F32 dt)
+{
+    static bool s_moving = false;
+    if (!gCameraOverridden || !gMap.valid) { s_moving = false; return false; }
+    const bool moving = orbit_up != 0.f || orbit_left != 0.f || orbit_in != 0.f || pan_in != 0.f || pan_left != 0.f || pan_up != 0.f;
+    if (!moving)
+    {
+        if (s_moving) gViewLog = "move ended";
+        s_moving = false;
+        return true;
+    }
+    s_moving = true;
+    if (orbit_left != 0.f)
+    {
+        const F32 a = orbit_left * kOrbitRate * dt;   // + = left, as LLAgentCamera::cameraOrbitAround and the stick's turn
+        if (onVehicle())
+        {
+            gRig.vehOff += a;
+        }
+        else
+        {
+            gRig.fwd.rotVec(a, LLVector3::z_axis);
+            gRig.fwd.mV[VZ] = 0.f;
+            gRig.fwd.normVec();
+        }
+    }
+    gView.up = llclamp(gView.up + (orbit_up + pan_up) * kNudgeRate * dt, -kNudgeUp, kNudgeUp);
+    gView.fwd = llclamp(gView.fwd + pan_in * kNudgeRate * dt, -kNudgeFlat, kNudgeFlat);
+    gView.left = llclamp(gView.left + pan_left * kNudgeRate * dt, -kNudgeFlat, kNudgeFlat);
+    // zoom in: closer by its own distance per second at full key, as the desktop's orbit-in (llagentcamera.cpp:1417-1425)
+    if (orbit_in != 0.f) gView.zoom = llclamp(gView.zoom * std::exp(-orbit_in * dt), kZoomMin, kZoomMax);
+    return true;
+}
+
+// [VR CAMERA CONTROLS] the zoom slider (0 = all the way out, 1 = all the way in): the fraction <-> slider rules are the
+// desktop's (llagentcamera.cpp:800 getCameraZoomFraction, :848 setCameraZoomFraction)
+bool cameraZoomSlider(F32& value)
+{
+    if (!gCameraOverridden || !gMap.valid) return false;
+    value = clamp_rescale(gView.zoom, kZoomMin, kZoomMax, 1.f, 0.f);
+    return true;
+}
+
+bool setCameraZoomSlider(F32 value)
+{
+    if (!gCameraOverridden || !gMap.valid) return false;
+    gView.zoom = llclamp(rescale(value, 0.f, 1.f, kZoomMax, kZoomMin), kZoomMin, kZoomMax);
+    gViewLog = "zoom slider";
+    return true;
+}
+
+// [VR CAMERA CONTROLS] a camera preset was chosen (LLFloaterCamera::switchToPreset, after it loaded the preset): the
+// default place again, looking at the avatar from the preset's side - its camera offset (avatar frame: +X ahead, +Y
+// left; Rear -3,0 / Front 2.2,0 / Side -1,0.7, app_settings/camera/*.xml) seen from the camera, i.e. the rig faces -offset.
+void cameraPreset()
+{
+    if (!gCameraOverridden || !gMap.valid) return;
+    resetView();
+    const LLVector3 off = gAgentCamera.getCameraOffsetInitial();
+    const F32 a = (off.mV[VX] * off.mV[VX] + off.mV[VY] * off.mV[VY]) > 1e-4f ? std::atan2(-off.mV[VY], -off.mV[VX]) : 0.f;
+    if (onVehicle())
+    {
+        gRig.vehOff = a;
+    }
+    else
+    {
+        gRig.fwd = avatarHeading();
+        gRig.fwd.rotVec(a, LLVector3::z_axis);
+        gRig.fwd.mV[VZ] = 0.f;
+        gRig.fwd.normVec();
+    }
+    gViewLog = "preset";
+}
 // [VR SHARED CULL 2026-11-04] The eyes are 6.4 cm apart and the left eye is culled with the smallest SYMMETRIC frustum
 // that holds its window (applyHeadCamera), which on a headset whose eyes mirror each other also holds the right eye's
 // window: what the left eye's cull and state sort found is what the right eye sees, less a 6.4 cm sliver at the far
@@ -1439,12 +1637,25 @@ void displayFrame()
     // [VR RENDER SIZE] the world's area for this frame: the eye's own square while in VR 3D Mode
     static LLCachedControl<bool> eye_size(gSavedSettings, "WolfVREyeRenderSize", true);
     const LLRect real = gViewerWindow->getWorldViewRectRaw();
-    const S32 side = llmin((S32)h, real.getHeight(), real.getWidth()) / 8 * 8;
+    // [VR EYE OFFSCREEN 2026-11-07] the picture's eye size (h: WolfVRStream::frameSize, the headset's quality step),
+    // drawn offscreen, not capped by the window; WolfVREyeOffscreen off (or no target): the window-capped square
+    static LLCachedControl<bool> eye_offscreen(gSavedSettings, "WolfVREyeOffscreen", true);
+    const bool offscreen = world && eye_size && eye_offscreen && (S32)h / 8 * 8 >= 256 && eyeTargetFor((S32)h / 8 * 8);
+    const S32 side = (offscreen ? (S32)h : llmin((S32)h, real.getHeight(), real.getWidth())) / 8 * 8;
     if (world && eye_size && side >= 256)
     {
-        const LLRect over(real.mLeft, real.mBottom + side, real.mLeft + side, real.mBottom);
-        if (!gEyeRect.active || over != gEyeRect.over) gResizeScreenTexture = true;   // the targets follow, once
+        const LLRect over = offscreen ? LLRect(0, side, side, 0) : LLRect(real.mLeft, real.mBottom + side, real.mLeft + side, real.mBottom);
+        if (!gEyeRect.active || over != gEyeRect.over || offscreen != gEyeRect.offscreen)
+        {
+            gResizeScreenTexture = true;   // the targets follow, once
+            // [VR EYE OFFSCREEN] measured, once per change: what each eye is really drawn at
+            LL_INFOS("WolfVR") << "VR eye: drawn at " << side << " px " << (offscreen ? "offscreen" : "in the window")
+                               << " for a " << h << " px picture eye (window world view " << real.getWidth() << "x"
+                               << real.getHeight() << ")" << LL_ENDL;
+        }
+        if (!offscreen && gEyeTarget.isComplete()) gEyeTarget.release();   // [VR EYE OFFSCREEN] switched off: not kept
         gEyeRect.active = true;
+        gEyeRect.offscreen = offscreen;
         gEyeRect.real = real;
         gEyeRect.over = over;
         useEyeRect(true);
@@ -1452,26 +1663,34 @@ void displayFrame()
     else if (gEyeRect.active)
     {
         gEyeRect.active = false;
+        gEyeRect.offscreen = false;
         gResizeScreenTexture = true;   // back to the window's own size
+        gEyeTarget.release();          // [VR EYE OFFSCREEN] not bound here (unbound after every pass below)
     }
     if (!stereo)
     {
         if (gPaused) gDisplaySwapBuffers = false;   // not shown; swap() sets it back
+        bindEyeTarget();     // [VR EYE OFFSCREEN] (only while offscreen)
         display();
+        unbindEyeTarget();   // [VR EYE OFFSCREEN] a pass that returned before captureWorld
         gDisplaySwapBuffers = true;
     }
     else
     {
         gEye = 0;
         gDisplaySwapBuffers = false;
+        bindEyeTarget();     // [VR EYE OFFSCREEN]
         display();
+        unbindEyeTarget();
         t1 = LLTimer::getTotalSeconds();
         gStamp.eye0 = wolfvr::clockMs();   // [VR STAGES]
         gEye = 1;
         // set again (an early return in the left eye's display() skips swap()); paused: the right eye is not shown either
         gDisplaySwapBuffers = !gPaused;
         gDepthDirty = true;           // the depth buffer is the other eye's; do not trust it for occlusion
+        bindEyeTarget();     // [VR EYE OFFSCREEN]
         display();
+        unbindEyeTarget();
         gEye = -1;
         gDisplaySwapBuffers = true;
         if (gParts.since > 0)   // [VR FRAME PARTS] counting this frame
@@ -1519,6 +1738,23 @@ void captureWorld()
     if (gSnapshot || gCubeSnapshot) return;   // a snapshot or reflection-probe pass is not the headset's view
     captureInto(true);
     gCrop.on = false;   // the headset's window is for the world only: the HUDs and the UI after it are drawn as always
+    // [VR EYE OFFSCREEN 2026-11-07] the eye's target is finished with: the HUDs and UI after it go to the window as
+    // always, and a pass that shows the desktop (uiSkipped false) puts the eye's picture in the window's world view
+    // first, as the in-window square was before
+    if (!gEyeBound) return;
+    unbindEyeTarget();
+    if (uiSkipped() || !gEyeTarget.isComplete()) return;
+    const LLRect& r = gEyeRect.real;
+    const S32 s = llmin(r.getWidth(), r.getHeight());
+    if (s <= 0) return;
+    LLGLDisable scissor(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, gEyeTarget.getFBO());
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, (GLint)gEyeTarget.getWidth(), (GLint)gEyeTarget.getHeight(), r.mLeft, r.mBottom, r.mLeft + s,
+                      r.mBottom + s, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
 }
 
 // [VR 3D 2026-11-03] Turn this frame's camera to the headset's pose: the avatar's heading (yaw only) plus the head's
@@ -1545,6 +1781,7 @@ void applyHeadCamera()
         gMap.valid = false;
         gLean.set = false;
         gRig.set = false;   // out of VR: the next session takes the avatar's facing again
+        gView = View();     // [VR CAMERA CONTROLS] and the default place
         return;
     }
     if (!gCameraOverridden)

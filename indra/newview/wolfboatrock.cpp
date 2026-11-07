@@ -475,7 +475,11 @@ void WolfBoatRock::step()
 // restoring is: forget the rocker, run updateXform once more.
 void WolfBoatRock::evict(std::map<const LLViewerObject*, Rocker>::iterator it)
 {
-    LLViewerObject* objectp = it->second.mObject;
+    // [t628 2026-11-07] Luke Koda's W97 crash (0xc0000005 in WolfBoatRock::sweep -> evict, wolfboatrock.cpp:336, on
+    // arriving in Sandbox): the Rocker's LLPointer could be the LAST reference to the hull (its region's objects were
+    // just killed), so erasing the entry deleted the object and the old raw pointer below read freed memory. Keep our
+    // own reference until we are done with it.
+    LLPointer<LLViewerObject> objectp = it->second.mObject;
     const bool applied = it->second.mApplied;
     mRockers.erase(it);
     if (applied && objectp && !objectp->isDead() && objectp->mDrawable.notNull() && !objectp->mDrawable->isDead())

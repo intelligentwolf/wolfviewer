@@ -683,6 +683,20 @@ U32 LLVertexBuffer::sGLRenderIndices = 0;
 U32 LLVertexBuffer::sLastMask = 0;
 U32 LLVertexBuffer::sVertexCount = 0;
 
+// <WolfViewer 2026-11-07 tickets 589/619> the buffer and the shader attribute mask the vertex attribute pointers were
+// last specified for (setupVertexBuffer). sGLRenderBuffer only says which buffer is bound to GL_ARRAY_BUFFER: the pool's
+// allocate() (LLDefaultVBOPool::allocate, the glBindBuffer on a miss) and _unmapBuffer() bind a buffer without
+// specifying any pointer, so setBuffer() could skip setupVertexBuffer for a buffer the pointers do not point into, and a
+// pool name reused by a new buffer looked "set up" with the old buffer's offsets. An attribute left pointing at a buffer
+// the pool has since deleted (delete_buffers) is read from address 0 by the NVIDIA driver: the crash of tickets 589/619
+// and Paul's 2026-11-06 crash (nvoglv64.dll+0xb8b680 / libnvidia-eglcore+0xa6cbf0, avatar "clothing" attribute 11).
+namespace
+{
+    U32 sAttribBuffer = 0;
+    U32 sAttribMask = 0;
+}
+// </WolfViewer>
+
 
 //NOTE: each component must be AT LEAST 4 bytes in size to avoid a performance penalty on AMD hardware
 const U32 LLVertexBuffer::sTypeSize[LLVertexBuffer::TYPE_MAX] =
@@ -996,6 +1010,8 @@ void LLVertexBuffer::cleanupClass()
 
     delete sVBOPool;
     sVBOPool = nullptr;
+    sAttribBuffer = 0;   // <WolfViewer 2026-11-07 tickets 589/619/> the pool's names are gone
+    sAttribMask = 0;
 
 #if ENABLE_GL_WORK_QUEUE
     sQueue->close();
@@ -1188,6 +1204,14 @@ void LLVertexBuffer::destroyGLBuffer()
     if (mGLBuffer || mMappedData)
     {
         LL_PROFILE_ZONE_SCOPED_CATEGORY_VERTEX;
+        // <WolfViewer 2026-11-07 tickets 589/619> the name goes back to the pool (a later buffer may get it, with other
+        // offsets) and is deleted from there later: the pointers into it are no longer anyone's
+        if (mGLBuffer != 0 && mGLBuffer == sAttribBuffer)
+        {
+            sAttribBuffer = 0;
+            sAttribMask = 0;
+        }
+        // </WolfViewer>
         //llassert(sVBOPool);
         if (sVBOPool)
         {
@@ -1444,6 +1468,13 @@ void LLVertexBuffer::_unmapBuffer()
         {
             if (mGLBuffer)
             {
+                // <WolfViewer 2026-11-07 tickets 589/619> as destroyGLBuffer: the old name is deleted, its pointers go
+                if (mGLBuffer == sAttribBuffer)
+                {
+                    sAttribBuffer = 0;
+                    sAttribMask = 0;
+                }
+                // </WolfViewer>
                 delete_buffers(1, &mGLBuffer);
             }
             mGLBuffer = gen_buffer();
@@ -1712,6 +1743,13 @@ void LLVertexBuffer::setBuffer()
         setupVertexBuffer();
         sLastMask = data_mask;
     }
+    // <WolfViewer 2026-11-07 tickets 589/619> bound already, but the attribute pointers were last specified for another
+    // buffer (or for fewer of this shader's attributes): specify them for this one, as a fresh bind above would
+    else if (mGLBuffer != sAttribBuffer || (data_mask & ~sAttribMask) != 0)
+    {
+        setupVertexBuffer();
+    }
+    // </WolfViewer>
 
     if (mGLIndices != sGLRenderIndices)
     {
@@ -1822,6 +1860,10 @@ void LLVertexBuffer::setupVertexBuffer()
         void* ptr = (void*)(base + mOffsets[TYPE_VERTEX]);
         glVertexAttribPointer(loc, 3, GL_FLOAT, GL_FALSE, LLVertexBuffer::sTypeSize[TYPE_VERTEX], ptr);
     }
+    // <WolfViewer 2026-11-07 tickets 589/619> every caller has this buffer bound to GL_ARRAY_BUFFER (setBuffer)
+    sAttribBuffer = mGLBuffer;
+    sAttribMask = data_mask;
+    // </WolfViewer>
     STOP_GLERROR;
 }
 

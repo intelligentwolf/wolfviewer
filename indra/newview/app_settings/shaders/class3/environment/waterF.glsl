@@ -528,10 +528,16 @@ void main()
     // depth buffer the test reads, texel for texel - lldrawpoolwater.cpp sets wolfEarlyDepthReject only then) is already
     // nearer than this fragment by more than the depth buffer's rounding (24-bit: 2 steps of 1/16777215), the LESS / LEQUAL
     // test would discard it anyway. Dropping it here changes no pixel.
+    // [T643 2026-11-08] Only with TRANSPARENT_WATER: depthMap and wolfEarlyDepthReject are declared under it (above), and
+    // lldrawpoolwater.cpp sets wolfEarlyDepthReject to 1 only when LLPipeline::sRenderTransparentWater, so without it this
+    // test never ran anyway. W99 had it outside, so with Transparent Water off (Graphics presets Low to Mid-High,
+    // featuretable.txt "RenderTransparentWater 1 0") the Water Shader would not compile and the viewer stopped at start-up.
+#ifdef TRANSPARENT_WATER
     if (wolfEarlyDepthReject > 0.5 && texelFetch(depthMap, ivec2(gl_FragCoord.xy), 0).r < gl_FragCoord.z - 2.0 / 16777215.0)
     {
         discard;
     }
+#endif
     float wolfFragDepth = gl_FragCoord.z;   // [T358 SHORE HOLES 2026-10-29] written as gl_FragDepth at the end of main()
 #endif
     mirrorClip(vary_position);

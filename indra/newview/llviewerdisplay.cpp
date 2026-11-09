@@ -1908,7 +1908,7 @@ void swap()
     LLPerfStats::RecordSceneTime T ( LLPerfStats::StatType_t::RENDER_SWAP ); // render time capture - Swap buffer time - can signify excessive data transfer to/from GPU
     LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Swap");
     LL_PROFILE_GPU_ZONE("swap");
-    WolfVkBridge::LoopTimer wolf_loop_swap(WolfVkBridge::LoopStage::SWAP);   // [AMD PERF 2026-11-09/] WolfLogFrameRate
+    WolfVkBridge::LoopTimer wolf_loop_swap(WolfVkBridge::LoopStage::kSwap);   // [AMD PERF 2026-11-09/] WolfLogFrameRate
     if (gDisplaySwapBuffers)
     {
         WolfVRScreen::captureFrame();   // [VR BIG SCREEN 2026-11-03/] the finished frame, UI and all, to the headset

@@ -66,6 +66,10 @@ namespace
 #endif
     }
 
+#if !LL_DARWIN
+    // [CI 2026-11-09] not built on macOS: WolfVkShare::available() returns before any extension check there (Apple's
+    // OpenGL has no GL_EXT_memory_object), and an unused static function fails the macOS build (-Werror,
+    // -Wunused-function; CI run 42603917436).
     bool glHasExtension(const char* name)
     {
 #if LL_WINDOWS
@@ -80,6 +84,7 @@ namespace
         }
         return false;
     }
+#endif
 
     void loadGLFunctions()
     {

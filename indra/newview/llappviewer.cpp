@@ -1751,7 +1751,7 @@ bool LLAppViewer::doFrame()
     {
         {
             LLPerfStats::RecordSceneTime T(LLPerfStats::StatType_t::RENDER_IDLE); // ensure we have the entire top scope of frame covered (input event and coro)
-            WolfVkBridge::LoopTimer wolf_loop_input(WolfVkBridge::LoopStage::INPUT);   // [AMD PERF 2026-11-09/] WolfLogFrameRate
+            WolfVkBridge::LoopTimer wolf_loop_input(WolfVkBridge::LoopStage::kInput);   // [AMD PERF 2026-11-09/] WolfLogFrameRate
             LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df processMiscNativeEvents");
             pingMainloopTimeout("Main:MiscNativeWindowEvents");
 
@@ -1849,7 +1849,7 @@ bool LLAppViewer::doFrame()
                 {
                     LLPerfStats::RecordSceneTime T (LLPerfStats::StatType_t::RENDER_IDLE);
                     LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df idle");
-                    WolfVkBridge::LoopTimer wolf_loop_idle(WolfVkBridge::LoopStage::IDLE);   // [AMD PERF 2026-11-09/]
+                    WolfVkBridge::LoopTimer wolf_loop_idle(WolfVkBridge::LoopStage::kIdle);   // [AMD PERF 2026-11-09/]
                     WolfVRScreen::framePart(WolfVRScreen::FramePart::Idle, true);   // [VR FRAME PARTS 2026-11-05/]
                     idle();
                     WolfVRScreen::framePart(WolfVRScreen::FramePart::Idle, false);
@@ -1883,7 +1883,7 @@ bool LLAppViewer::doFrame()
             if (!LLApp::isExiting() && !gHeadlessClient && gViewerWindow)
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df Display");
-                WolfVkBridge::LoopTimer wolf_loop_display(WolfVkBridge::LoopStage::DISPLAY);   // [AMD PERF 2026-11-09/] incl. probes, snapshots
+                WolfVkBridge::LoopTimer wolf_loop_display(WolfVkBridge::LoopStage::kDisplay);   // [AMD PERF 2026-11-09/] incl. probes, snapshots
                 pingMainloopTimeout("Main:Display");
                 gGLActive = true;
 
@@ -1922,7 +1922,7 @@ bool LLAppViewer::doFrame()
         {
             //LL_RECORD_BLOCK_TIME(SLEEP2);
             LL_PROFILE_ZONE_WARN("Sleep2");
-            WolfVkBridge::LoopTimer wolf_loop_sleep(WolfVkBridge::LoopStage::SLEEP);   // [AMD PERF 2026-11-09/] yields, limiter, texture/mesh updates
+            WolfVkBridge::LoopTimer wolf_loop_sleep(WolfVkBridge::LoopStage::kSleep);   // [AMD PERF 2026-11-09/] yields, limiter, texture/mesh updates
 
             // yield some time to the os based on command line option
             static LLCachedControl<S32> yield_time(gSavedSettings, "YieldTime", -1);

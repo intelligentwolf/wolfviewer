@@ -112,8 +112,8 @@ namespace WolfVkBridge
     // [AMD PERF 2026-11-09] WolfLogFrameRate, both renderers: the main loop's stages (LLAppViewer::doFrame), each timed as
     // wall time AND as the main thread's own CPU time; wall minus CPU is where the thread was blocked or asleep. One
     // "main loop per frame" line a second (log tag WolfVulkanFrame), written by loopFrameEnd() at the end of doFrame.
-    // SWAP (swap(): glFrameStamp + present / swapBuffers) runs inside DISPLAY and is shown on its own and taken out of it.
-    enum class LoopStage { INPUT, IDLE, DISPLAY, SWAP, SLEEP, COUNT };
+    // kSwap (swap(): glFrameStamp + present / swapBuffers) runs inside kDisplay and is shown on its own and taken out of it.
+    enum class LoopStage { kInput, kIdle, kDisplay, kSwap, kSleep, kCount };   // [CI 2026-11-09] prefixed, like NativeHandles::Kind: no clash with platform macros
     struct LoopTimer
     {
         explicit LoopTimer(LoopStage stage);

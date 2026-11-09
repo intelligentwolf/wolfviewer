@@ -766,7 +766,7 @@ namespace
         return static_cast<double>(ts.tv_sec) * 1.0e3 + static_cast<double>(ts.tv_nsec) / 1.0e6;
 #endif
     }
-    constexpr int kLoopStages = static_cast<int>(LoopStage::COUNT);
+    constexpr int kLoopStages = static_cast<int>(LoopStage::kCount);
     const char* const kLoopStageName[kLoopStages] = { "input", "idle", "display", "swap/present", "sleep block" };
     double sLoopWall[kLoopStages] = {}, sLoopCpu[kLoopStages] = {};
     double sLoopFrameWall = 0.0, sLoopFrameCpu = 0.0;   // whole frames, end to end
@@ -807,7 +807,7 @@ void loopFrameEnd()
     if (wall - sLoopWindow < 1000.0) return;
     sLoopWindow = wall;
     const double n = static_cast<double>(sLoopFrames);
-    const int disp = static_cast<int>(LoopStage::DISPLAY), swp = static_cast<int>(LoopStage::SWAP);
+    const int disp = static_cast<int>(LoopStage::kDisplay), swp = static_cast<int>(LoopStage::kSwap);
     // DISPLAY without the swap inside it
     double wall_k[kLoopStages], cpu_k[kLoopStages];
     for (int k = 0; k < kLoopStages; ++k) { wall_k[k] = sLoopWall[k]; cpu_k[k] = sLoopCpu[k]; }

@@ -70,11 +70,15 @@ uniform vec4 SMAA_RT_METRICS;
 
 /**
  *                  _______  ___  ___       ___           ___
- *                 /       ||   \/   |     /   \         /   \
- *                |   (---- |  \  /  |    /  ^  \       /  ^  \
- *                 \   \    |  |\/|  |   /  /_\  \     /  /_\  \
- *              ----)   |   |  |  |  |  /  _____  \   /  _____  \
- *             |_______/    |__|  |__| /__/     \__\ /__/     \__\
+ *                 /       ||   \/   |     /   \         /   \   .
+ *                |   (---- |  \  /  |    /  ^  \       /  ^  \  .
+ *                 \   \    |  |\/|  |   /  /_\  \     /  /_\  \ .
+ *              ----)   |   |  |  |  |  /  _____  \   /  _____  \  .
+ *             |_______/    |__|  |__| /__/     \__\ /__/     \__\ .
+ *
+ * ([SHADER CHECK 2026-11-08] the full stops above end lines that ended in a backslash: before GLSL 4.20 a
+ *  backslash-newline is not a line continuation, and glslang rejects it at "#version 400" (the GL 4.1 Macs)
+ *  even inside a comment - "'line continuation' : not supported for this version". Comment only, no code.)
  *
  *                               E N H A N C E D
  *       S U B P I X E L   M O R P H O L O G I C A L   A N T I A L I A S I N G

@@ -2562,6 +2562,22 @@ void *LLWindowMacOSX::getPlatformWindow()
     return (void*)mWindow;
 }
 
+// [VULKAN BACKEND 2026-11-08] The Vulkan surface on a Mac is a VkMetalSurfaceCreateInfoEXT::pLayer (vulkan_metal.h:33-37),
+// a CAMetalLayer that llrender/vk/wolfvksurface_macosx.mm attaches to this NSView. mGLView is the LLOpenGLView
+// (an NSOpenGLView, so an NSView) createOpenGLView made the window's content view (llwindowmacosx-objc.mm:234-239).
+// UNTESTED: no Mac here; the macOS CI build compiles it.
+bool LLWindowMacOSX::getNativeHandles(NativeHandles& handles)
+{
+    handles = NativeHandles();
+    if (!mGLView)
+    {
+        return false;
+    }
+    handles.mKind = NativeHandles::COCOA;
+    handles.mHandle = mGLView;
+    return true;
+}
+
 // get a double value from a dictionary
 /*
 static double getDictDouble (CFDictionaryRef refDict, CFStringRef key)

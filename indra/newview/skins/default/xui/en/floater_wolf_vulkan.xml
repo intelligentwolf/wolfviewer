@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [VULKAN BACKEND 2026-11-08] Wolf World > Vulkan Renderer... (wolffloatervulkan.cpp). Paul: "any settings for vulcan
+     should be in a floater attached to wolf world menu".
+     Who and why: a resident who has heard WolfViewer has a Vulkan renderer wants to see whether their computer can use it,
+     switch it on or off, and know what is drawing their window right now - in plain words, no codes or countdowns (many
+     residents are older or disabled; memory paul-simple-for-older-disabled-users).
+     Flow: open, read the status line and the graphics card found, pick OpenGL or Vulkan, read the one-line note that the
+     change happens at the next start, close. The validation tick box is for debugging with the support team only. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="408"
+ layout="topleft"
+ name="wolf_vulkan"
+ save_rect="true"
+ single_instance="true"
+ title="Vulkan Renderer"
+ width="500">
+    <text follows="left|top" font="SansSerif" height="48" layout="topleft" left="16" name="intro" top="26" width="468" wrap="true">WolfViewer can draw your window with OpenGL, as it always has, or with its own Vulkan renderer. Vulkan is being built in stages; today it draws part of the scene and OpenGL draws the rest.</text>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="status_heading" top="80" width="468">Right now</text>
+    <text follows="left|top" font="SansSerif" height="34" layout="topleft" left="24" name="status" top="102" width="460" wrap="true">...</text>
+    <text follows="left|top" font="SansSerif" height="18" layout="topleft" left="24" name="renderer_line" top="138" width="460">Renderer: ...</text>
+    <text follows="left|top" font="SansSerif" height="34" layout="topleft" left="24" name="vulkan_line" top="158" width="460" wrap="true">Vulkan: ...</text>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="choice_heading" top="200" width="468">Which renderer would you like?</text>
+    <radio_group follows="left|top" height="48" layout="topleft" left="24" name="backend" top="224" width="460" draw_border="false">
+        <radio_item type="string" follows="left|top" height="20" layout="topleft" left="0" top="0" width="440" label="OpenGL (as before)" name="opengl" value="opengl" />
+        <radio_item type="string" follows="left|top" height="20" layout="topleft" left="0" top="24" width="440" label="Vulkan renderer (restart needed)" name="vulkan" value="vulkan" />
+    </radio_group>
+    <text follows="left|top" font="SansSerif" height="18" layout="topleft" left="24" name="restart_note" top="274" width="460" wrap="true">Your choice takes effect the next time you start WolfViewer.</text>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="debug_heading" top="300" width="468">For the support team</text>
+    <check_box control_name="WolfVulkanValidation" follows="left|top" height="22" label="Check every Vulkan call (validation layer; slower, next start)" layout="topleft" left="24" name="validation" top="322" width="460" tool_tip="Runs the Vulkan renderer with the Khronos validation layer when it is installed. Every warning goes into the log. Only when the support team asks." />
+    <text follows="left|top" font="SansSerif" height="50" layout="topleft" left="24" name="frame_line" top="346" width="460" wrap="true">...</text>
+    <string name="renderer_prefix">Renderer: </string>
+    <string name="vulkan_prefix">Vulkan: </string>
+    <string name="vulkan_none">Vulkan: not available on this computer</string>
+    <string name="frame_active">Vulkan is drawing [GBUFFER] parts of the world into the shared picture buffers and [DRAWS] unlit parts on its own layer each frame. The picture is handed over [HANDOVER]; Vulkan's part of each frame takes [MS] ms.</string>
+    <string name="frame_validation">Validation messages this session: [COUNT].</string>
+    <string name="frame_idle"> </string>
+</floater>

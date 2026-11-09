@@ -1933,7 +1933,8 @@
         </menu_item_check>
         <!-- [SOUND EFFECTS 2026-11-06] Paul: "Wolf World -> Sound Effects allows the user to select weather sounds and teleport
              sounds and volumes" (wolffloatersoundeffects.cpp). Every grid: the teleport sound plays everywhere. -->
-        <menu_item_call label="Sound Effects..." name="WolfSoundEffects">
+        <!-- [TICKET 673 2026-11-08] "Wolf Sound Effects": the stock Preferences slider for object sounds is also called Sound Effects -->
+        <menu_item_call label="Wolf Sound Effects..." name="WolfSoundEffects">
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_sound_effects" />
         </menu_item_call>
         <!-- [WOLF COMPASS 2026-10-16] wolffloatercompass.cpp: a Victorian compass showing North
@@ -2467,6 +2468,12 @@
              graphics feature, and a diagnostic file with the logs. Every grid (also Help on the login screen). -->
             <menu_item_call label="Graphics Helper..." name="WolfGraphicsHelper">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_graphics_helper" />
+            </menu_item_call>
+            <!-- [VULKAN BACKEND 2026-11-08] Paul: "any settings for vulcan should be in a floater attached to wolf world menu".
+             floater_wolf_vulkan.xml / wolffloatervulkan.cpp: OpenGL or Vulkan renderer (next start), the Vulkan device found,
+             what is drawing now, the validation tick box for the support team. Every grid. -->
+            <menu_item_call label="Vulkan Renderer..." name="WolfVulkanRenderer">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_vulkan" />
             </menu_item_call>
             <!-- WolfViewer 2026-09-18 / PAINTERS 2026-09-20: World > Photo Effects… opens the floater
            (floater_wolf_photo_effects.xml: a tile per style, strength slider). The WolfPhoto.*

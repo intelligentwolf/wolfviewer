@@ -52,6 +52,8 @@
 #include "wolfvrstream.h"
 #include "wolfvrui.h"
 #include "pipeline.h"
+#include "wolfvkbridge.h"   // [VR BIG SCREEN VULKAN 2026-11-09] WolfVkBridge::isActive
+#include "llframetimer.h"
 
 #include <cmath>
 #include <cstring>
@@ -101,6 +103,29 @@ namespace
         std::vector<float> dbuf;
     };
     Capture gCap;
+
+    // [VR BIG SCREEN VULKAN 2026-11-09] Big Screen in Vulkan mode (docs/VULKAN_BACKEND.md 8.2i, 8.2p). There the window's
+    // picture is not in GL's back buffer at swap: WolfVkBridge::captureWorld blits the finished world into the shared
+    // world layer and clears the back buffer to (0,0,0,0), GL draws the HUD and UI onto that, and Vulkan composites
+    // world + UI into the swapchain (wolfvk/compositeF.glsl: out = ui.rgb + world.rgb * (1 - ui.a); the UI is drawn
+    // with BT_ALPHA onto a cleared buffer, so it is premultiplied). The reverted 11-08 attempt changed the hand-over
+    // itself; this one never touches the shared layers or their semaphores: GL keeps its OWN copy of the world
+    // (keepWorldForBigScreen, before the clear) and, at swap, rebuilds the same composite in GL from that copy and the
+    // back buffer (the UI), then the usual Big Screen copy reads that instead of the back buffer. The textures follow
+    // the window's size every frame, so a resize needs nothing else. Only while Big Screen streams in Vulkan mode.
+    // Not reproduced: the debug views WolfVulkanDebugTint / WolfVulkanShowSceneOnly and the debug overlay
+    // WolfVulkanOverlayFullbright (off by default), which draw in Vulkan only.
+    struct VkBigScreen
+    {
+        GLuint world_tex = 0, world_fbo = 0, ui_tex = 0, ui_fbo = 0, out_tex = 0, out_fbo = 0;
+        GLuint prog = 0, vao = 0;
+        GLint loc_world = -1, loc_ui = -1;
+        S32 w = 0, h = 0;
+        U32 kept_frame = 0;
+        bool kept = false;
+        bool failed = false;       // the program would not build: Big Screen in Vulkan mode stays UI-only, said once
+    };
+    VkBigScreen gVkBig;
 
     // [VR MOVE 2026-11-03] Paul: "left controller must move him". The headset's left stick, held now, and jump/fly
     // up/down held, applied every frame like held movement keys (llviewerinput.cpp agent_push_forwardbackward:
@@ -606,6 +631,184 @@ namespace
         gCap = Capture();
     }
 
+    // [VR BIG SCREEN VULKAN 2026-11-09] the three window-sized textures; the program is kept across sizes
+    void freeVkBigTextures()
+    {
+        GLuint fbos[3] = { gVkBig.world_fbo, gVkBig.ui_fbo, gVkBig.out_fbo };
+        GLuint texs[3] = { gVkBig.world_tex, gVkBig.ui_tex, gVkBig.out_tex };
+        for (int i = 0; i < 3; ++i)
+        {
+            if (fbos[i]) glDeleteFramebuffers(1, &fbos[i]);
+            if (texs[i]) glDeleteTextures(1, &texs[i]);
+        }
+        gVkBig.world_fbo = gVkBig.ui_fbo = gVkBig.out_fbo = 0;
+        gVkBig.world_tex = gVkBig.ui_tex = gVkBig.out_tex = 0;
+        gVkBig.w = gVkBig.h = 0;
+        gVkBig.kept = false;
+    }
+
+    void freeVkBig()
+    {
+        freeVkBigTextures();
+        if (gVkBig.prog) glDeleteProgram(gVkBig.prog);
+        if (gVkBig.vao) glDeleteVertexArrays(1, &gVkBig.vao);
+        gVkBig = VkBigScreen();
+    }
+
+    // one RGBA8 texture + framebuffer of the window's size (GL 4.6 core 8.5 glTexImage2D, 9.2.8 glFramebufferTexture2D)
+    bool makeVkBigTarget(GLuint& tex, GLuint& fbo, S32 w, S32 h)
+    {
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glGenFramebuffers(1, &fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+        const bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return ok;
+    }
+
+    // the composite program: compositeF.glsl's arithmetic for the world and UI layers (its scene layer is empty unless
+    // the debug overlay is on), one texel per pixel (texelFetch: the Vulkan composite samples each layer at its texel
+    // centres, compositeV.glsl), on a full-screen triangle from gl_VertexID (GLSL 3.30 core: the viewer's context)
+    bool makeVkBigProgram()
+    {
+        if (gVkBig.prog) return true;
+        if (gVkBig.failed) return false;
+        static const char* const vert =
+            "#version 330 core\n"
+            "void main()\n"
+            "{\n"
+            "    vec2 p = vec2((gl_VertexID == 1) ? 3.0 : -1.0, (gl_VertexID == 2) ? 3.0 : -1.0);\n"
+            "    gl_Position = vec4(p, 0.0, 1.0);\n"
+            "}\n";
+        static const char* const frag =
+            "#version 330 core\n"
+            "uniform sampler2D worldTex;\n"
+            "uniform sampler2D uiTex;\n"
+            "out vec4 frag_color;\n"
+            "void main()\n"
+            "{\n"
+            "    ivec2 p = ivec2(gl_FragCoord.xy);\n"
+            "    vec4 world = texelFetch(worldTex, p, 0);\n"
+            "    vec4 ui = texelFetch(uiTex, p, 0);\n"
+            "    frag_color = vec4(ui.rgb + world.rgb * (1.0 - ui.a), 1.0);\n"
+            "}\n";
+        auto compile = [](GLenum type, const char* src) -> GLuint
+        {
+            GLuint s = glCreateShader(type);
+            glShaderSource(s, 1, &src, nullptr);
+            glCompileShader(s);
+            GLint ok = GL_FALSE;
+            glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+            if (ok != GL_TRUE)
+            {
+                char log[512] = { 0 };
+                glGetShaderInfoLog(s, sizeof(log) - 1, nullptr, log);
+                LL_WARNS("WolfVR") << "Big Screen (Vulkan mode) composite shader: " << log << LL_ENDL;
+                glDeleteShader(s);
+                return 0;
+            }
+            return s;
+        };
+        const GLuint vs = compile(GL_VERTEX_SHADER, vert);
+        const GLuint fs = vs ? compile(GL_FRAGMENT_SHADER, frag) : 0;
+        GLint linked = GL_FALSE;
+        if (vs && fs)
+        {
+            gVkBig.prog = glCreateProgram();
+            glAttachShader(gVkBig.prog, vs);
+            glAttachShader(gVkBig.prog, fs);
+            glLinkProgram(gVkBig.prog);
+            glGetProgramiv(gVkBig.prog, GL_LINK_STATUS, &linked);
+        }
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        if (linked != GL_TRUE)
+        {
+            if (gVkBig.prog) glDeleteProgram(gVkBig.prog);
+            gVkBig.prog = 0;
+            gVkBig.failed = true;
+            LL_WARNS("WolfVR") << "Big Screen (Vulkan mode): the composite program would not build; the headset gets the interface without the world" << LL_ENDL;
+            return false;
+        }
+        gVkBig.loc_world = glGetUniformLocation(gVkBig.prog, "worldTex");
+        gVkBig.loc_ui = glGetUniformLocation(gVkBig.prog, "uiTex");
+        glGenVertexArrays(1, &gVkBig.vao);   // core profile: a vertex array must be bound to draw, even with no arrays
+        return true;
+    }
+
+    // the window-sized textures for this frame's window size (false: not available, Big Screen reads the back buffer)
+    bool ensureVkBigTextures(S32 w, S32 h)
+    {
+        if (w <= 0 || h <= 0) return false;
+        if (gVkBig.w == w && gVkBig.h == h && gVkBig.out_fbo) return true;
+        freeVkBigTextures();
+        if (!makeVkBigTarget(gVkBig.world_tex, gVkBig.world_fbo, w, h) || !makeVkBigTarget(gVkBig.ui_tex, gVkBig.ui_fbo, w, h)
+            || !makeVkBigTarget(gVkBig.out_tex, gVkBig.out_fbo, w, h))
+        {
+            freeVkBigTextures();
+            return false;
+        }
+        gVkBig.w = w;
+        gVkBig.h = h;
+        return true;
+    }
+
+    // [VR BIG SCREEN VULKAN] at swap: out = composite(kept world, back buffer's UI), as compositeF.glsl. Returns the
+    // framebuffer to read the Big Screen picture from, or 0 (the back buffer, as in OpenGL mode) when there is no kept
+    // world for this very frame (the login screen: the whole frame is then in the back buffer, as Vulkan composites it
+    // over an empty world) or the program is not available. The caller has saved the read/draw framebuffers and turned
+    // GL_FRAMEBUFFER_SRGB and the scissor test off (captureInto).
+    GLuint composeVkBigScreen(S32 ww, S32 wh)
+    {
+        const bool kept = gVkBig.kept && gVkBig.kept_frame == LLFrameTimer::getFrameCount();
+        gVkBig.kept = false;
+        if (!kept || ww != gVkBig.w || wh != gVkBig.h || !makeVkBigProgram()) return 0;
+        // the UI: the back buffer as it is at swap (GL 4.6 core 18.3.1 glBlitFramebuffer, same size, so 1:1)
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        glReadBuffer(GL_BACK);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gVkBig.ui_fbo);
+        glBlitFramebuffer(0, 0, ww, wh, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        // the pass, with every state it touches put back afterwards
+        GLint prog = 0, vao = 0, active = 0, tex0 = 0, tex1 = 0, vp[4] = { 0, 0, 0, 0 };
+        glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+        glGetIntegerv(GL_VIEWPORT, vp);
+        glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex0);
+        glActiveTexture(GL_TEXTURE1); glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex1);
+        const GLboolean blend = glIsEnabled(GL_BLEND), depth = glIsEnabled(GL_DEPTH_TEST), cull = glIsEnabled(GL_CULL_FACE);
+        GLboolean mask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+        glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gVkBig.out_fbo);
+        glDisable(GL_BLEND); glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glViewport(0, 0, ww, wh);
+        glUseProgram(gVkBig.prog);
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, gVkBig.world_tex);
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, gVkBig.ui_tex);
+        glUniform1i(gVkBig.loc_world, 0);
+        glUniform1i(gVkBig.loc_ui, 1);
+        glBindVertexArray(gVkBig.vao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray((GLuint)vao);
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, (GLuint)tex1);
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, (GLuint)tex0);
+        glActiveTexture((GLenum)active);
+        glUseProgram((GLuint)prog);
+        glViewport(vp[0], vp[1], vp[2], vp[3]);
+        glColorMask(mask[0], mask[1], mask[2], mask[3]);
+        if (blend) glEnable(GL_BLEND);
+        if (depth) glEnable(GL_DEPTH_TEST);
+        if (cull) glEnable(GL_CULL_FACE);
+        return gVkBig.out_fbo;
+    }
+
     bool makeGl(U32 w, U32 h)
     {
         freeGl();
@@ -642,7 +845,8 @@ namespace
             gCap.dh = h / 8;
             glGenRenderbuffers(1, &gCap.drb);
             glBindRenderbuffer(GL_RENDERBUFFER, gCap.drb);
-            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, (GLsizei)gCap.dw, (GLsizei)gCap.dh);
+            // the scene depth's own format (llrendertarget.cpp:100/:334: 32F under WolfDebugGLDepth32F), as the blit needs
+            glRenderbufferStorage(GL_RENDERBUFFER, LLRenderTarget::sWolfDepth32F ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT24, (GLsizei)gCap.dw, (GLsizei)gCap.dh);
             glBindRenderbuffer(GL_RENDERBUFFER, 0);
             glGenFramebuffers(1, &gCap.dfbo);
             glBindFramebuffer(GL_FRAMEBUFFER, gCap.dfbo);
@@ -766,6 +970,7 @@ namespace WolfVRScreen
 void release()
 {
     freeGl();
+    freeVkBig();   // [VR BIG SCREEN VULKAN 2026-11-09]
     freeLayer();
     if (!gEyeBound) gEyeTarget.release();   // [VR EYE OFFSCREEN] (never while bound: release() runs between frames)
     gEyeTargetFailed = false;
@@ -1244,10 +1449,12 @@ void captureInto(bool world)
     if (srgb) glDisable(GL_FRAMEBUFFER_SRGB);       // copy the pixels as they are on screen
     if (scissor) glDisable(GL_SCISSOR_TEST);
 
+    // [VR BIG SCREEN VULKAN 2026-11-09] Vulkan mode: the window's composite rebuilt in GL (composeVkBigScreen); 0 = back buffer
+    const GLuint vk_big = (!world && WolfVkBridge::isActive()) ? composeVkBigScreen(ww, wh) : 0;
     // 1. back buffer -> picture texture, scaled, upside down (so the read below comes out top row first)
     // [VR EYE OFFSCREEN] or the eye's own target, the same size as the picture's eye: copied 1:1
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, from_eye ? gEyeTarget.getFBO() : 0);
-    glReadBuffer(from_eye ? GL_COLOR_ATTACHMENT0 : GL_BACK);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, from_eye ? gEyeTarget.getFBO() : vk_big);
+    glReadBuffer((from_eye || vk_big) ? GL_COLOR_ATTACHMENT0 : GL_BACK);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gCap.fbo);
     if (refit)
     {
@@ -1747,6 +1954,35 @@ void displayFrame()
 }
 
 void captureFrame() { captureInto(false); }
+
+void keepWorldForBigScreen()
+{
+    // [VR BIG SCREEN VULKAN 2026-11-09] see VkBigScreen. Only what captureInto(false) would use this frame: Vulkan mode,
+    // Big Screen streaming, a real frame (not a snapshot or reflection-probe pass)
+    if (!WolfVkBridge::isActive() || gSnapshot || gCubeSnapshot || !gViewerWindow || !WolfVRStream::bigScreenWanted()) return;
+    const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
+    if (!ensureVkBigTextures(ww, wh)) return;
+    GLint read_fb = 0, draw_fb = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
+    const GLboolean srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (srgb) glDisable(GL_FRAMEBUFFER_SRGB);   // the pixels as they are, as WolfVkShare::glCaptureWorld copies them
+    if (scissor) glDisable(GL_SCISSOR_TEST);
+    // the same copy WolfVkShare::glCaptureWorld makes into the shared world layer (default framebuffer, GL_BACK, the
+    // window's rectangle from 0,0), into GL's own texture
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gVkBig.world_fbo);
+    glBlitFramebuffer(0, 0, ww, wh, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fb);
+    if (read_fb == 0) glReadBuffer(GL_BACK);
+    if (srgb) glEnable(GL_FRAMEBUFFER_SRGB);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    gVkBig.kept = true;
+    gVkBig.kept_frame = LLFrameTimer::getFrameCount();
+}
 
 void captureWorld()
 {

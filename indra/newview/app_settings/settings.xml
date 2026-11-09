@@ -20155,6 +20155,293 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfRenderBackend</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Which renderer draws the window: "opengl" (as always) or "vulkan" (WolfViewer's own Vulkan renderer, indra/llrender/vk + wolfvkbridge.cpp). Read once at start-up, so a change takes effect at the next start (Wolf World > Vulkan Renderer). If Vulkan cannot be set up, or the last Vulkan start never reached the login screen (WolfVulkanStartOK), the viewer runs on OpenGL, sets this back to "opengl" and says so.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string>opengl</string>
+		</map>
+		<key>WolfVulkanStartOK</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] First-run marker for the Vulkan renderer: false from the moment a Vulkan start begins until the login screen has been drawn (like RenderInitError for OpenGL). Found false at the next start = that start crashed or hung, so the viewer starts on OpenGL instead and tells the resident (WolfVulkanFellBackLastStart).</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfVulkanValidation</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: run the Vulkan renderer with the Khronos validation layer (VK_LAYER_KHRONOS_validation) when it is installed; every warning and error goes to the log under "VulkanValidation" and is counted in the Vulkan Renderer window. Slower. Takes effect at the next start.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDevice</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Part of a graphics card name to use for Vulkan on a PC with more than one, e.g. "radeon" or "nvidia" (not case sensitive). Empty = automatic: the card OpenGL draws with (matched by its device UUID), else the same make, else the first separate (discrete) card. Takes effect at the next start.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string></string>
+		</map>
+		<key>WolfLogFrameRate</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: write the real frame rate (frames presented over wall-clock time, the top-right figure) to the log once a second under "WolfFrameRate", so OpenGL and Vulkan runs can be compared by the test rig. Off by default.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanShowSceneOnly</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: show only what the Vulkan renderer draws itself over a plain dark background (the OpenGL world layer hidden; the interface still shown). Off = the normal composite.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugNoDepth</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: the Vulkan scene pass draws without a depth test (and without writing depth), to tell a depth problem from a geometry problem.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugNoScenePass</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: Vulkan draws nothing of the scene itself; only the hand-over of OpenGL's picture and the composite run.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugNoShare</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: never share images with OpenGL; the picture is copied through the processor as in the first cut.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugNoGBuffer</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: do not share the G-buffer with Vulkan; the deferred geometry passes stay on OpenGL and Vulkan draws only its own layer.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanOverlayFullbright</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Vulkan draws the unlit (fullbright) surfaces again onto its own layer after OpenGL's post-processing (the first proof stage). Off: those surfaces are drawn once, by whoever owns that pass. The layer lacks the viewer's tone map, so it is for pictures and debugging only.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugDumpGBuffer</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: write the five G-buffer attachments to the logs folder as raw files after the next Vulkan geometry pass, then switch itself off (for comparing Vulkan's and OpenGL's G-buffer).</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugGBufferGLOnly</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: keep the G-buffer shared with Vulkan but let OpenGL draw the geometry passes into it (for comparing the two renderers' results with WolfVulkanDebugDumpGBuffer).</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanGLDepthRewrite</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Vulkan mode (8.2n): after the Vulkan G-buffer pass OpenGL writes the shared depth again from a copy of itself (depth test ALWAYS, gl_FragDepth), so OpenGL's own depth-test state for that buffer matches its contents before its later passes. Without it, later OpenGL passes showed the water and sky through ships (blue dashes, run nv-dz1). On by default; off only for testing.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfVulkanPresentMode</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Testing (8.2o): the Vulkan swapchain's present mode - immediate, mailbox or fifo - in place of the RenderVSyncEnable rule, when the window offers it; anything else (default auto) keeps the rule. Read when the swapchain is made.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string>auto</string>
+		</map>
+		<key>WolfVulkanShareGBuffer</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-09] Vulkan renderer (8.2o option A1): share OpenGL's picture buffers (the G-buffer) with Vulkan so Vulkan can draw part of the world into them. on (default): always; off: never (OpenGL draws the world itself); auto: yes, except on AMD integrated graphics with Mesa's RADV driver, where shared buffers lose their compression. Read when the Vulkan renderer starts.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string>on</string>
+		</map>
+		<key>WolfLogFrameRateOnly</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-09] Testing (8.2o): with WolfLogFrameRate on, log only the frame rate - every timing instrument (Vulkan timestamps, OpenGL time and timestamp queries, the CPU step and main loop timers, the depth rewrite timer) stays off, so the frame rate is measured without their cost.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugCompressionQuery</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-09] Testing (8.2o): enable VK_EXT_image_compression_control when the device offers it and log the compression of every Vulkan attachment image, shared with OpenGL or not. Read when the Vulkan device is made.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDebugGLDepth32F</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Testing (8.2o): OpenGL's own depth buffers as GL_DEPTH_COMPONENT32F (the format of the Vulkan-shared G-buffer depth) instead of GL_DEPTH_COMPONENT24, to measure that format's cost in OpenGL mode. Read when the render targets are made.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugPoseCheck</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging (8.2n, boats): checks that the Vulkan G-buffer pass and OpenGL's later passes of the same frame see the same model matrices and vertex data; a summary line a second in the log (WolfVulkanPose).</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugNoCull</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: the Vulkan scene pass draws both faces of every triangle (no back-face culling).</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugProbe</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: once a second, log how many pixels the Vulkan scene layer wrote and where the first batch's first vertex lands (reads the layer back; slow).</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugTint</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-08] Debugging: tint everything the Vulkan renderer draws itself (first cut: the fullbright surfaces) so it can be told apart from what OpenGL drew. Off = the same colours as OpenGL.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfVRStreamEnabled</key>
 		<map>
 			<key>Comment</key>
@@ -29374,7 +29661,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundWeather</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: play the Wolf weather sounds (rain, wind, drips)</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: play the Wolf weather sounds (rain, wind, drips)</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29385,7 +29672,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundThunder</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: play the thunder claps of Wolf storms</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: play the thunder claps of Wolf storms</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29396,7 +29683,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundWeatherVolume</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: volume of the Wolf weather sounds (rain, wind, drips), 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: volume of the Wolf weather sounds (rain, wind, drips), 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29407,7 +29694,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundThunderVolume</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: volume of the thunder claps, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: volume of the thunder claps, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29418,7 +29705,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundBirdsVolume</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: volume of the birds' calls, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: volume of the birds' calls, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29429,7 +29716,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundNatureVolume</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: volume of the nature sounds, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: volume of the nature sounds, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29440,7 +29727,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundSeaLifeVolume</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: volume of the dolphins and whales, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: volume of the dolphins and whales, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29451,7 +29738,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundBubblesVolume</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: volume of the bubbles when swimming, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: volume of the bubbles when swimming, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29462,7 +29749,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundTeleportVolume</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Sound Effects: volume of the teleport sound, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
+      <string>[SOUND EFFECTS 2026-11-06] Wolf World &gt; Wolf Sound Effects: volume of the teleport sound, 0 to 1, on top of the viewer's own Ambient (UI for the teleport) volume</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -29473,7 +29760,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfSoundTeleportOwnName</key>
     <map>
       <key>Comment</key>
-      <string>[SOUND EFFECTS 2026-11-06] The inventory name of the resident's own teleport sound (dropped on Wolf World &gt; Sound Effects), shown in its list; the sound itself is UISndTeleportOut</string>
+      <string>[SOUND EFFECTS 2026-11-06] The inventory name of the resident's own teleport sound (dropped on Wolf World &gt; Wolf Sound Effects), shown in its list; the sound itself is UISndTeleportOut</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>

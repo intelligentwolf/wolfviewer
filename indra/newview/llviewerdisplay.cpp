@@ -28,6 +28,7 @@
 
 #include "llviewerdisplay.h"
 #include "wolfvrscreen.h"   // [VR BIG SCREEN 2026-11-03/] WolfVRScreen::captureFrame
+#include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/] WolfVkBridge::present in place of swapBuffers in Vulkan mode
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> far clip grows with height
 #include "wolfbuilder.h"       // [WOLF BUILDER 2026-10-13/] the builder's grid on the ground
 
@@ -176,6 +177,20 @@ namespace
         sFpsPrevBucketFrames = bucket_frames;
         sFpsPrevBucketSecs = usual_bucket ? bucket_secs : 0.0;
         sRealFps = (F32)(frames / secs);   // secs >= 0.5 here
+        // [VULKAN BACKEND 2026-11-08] WolfLogFrameRate: the same real frame rate in the log once a second, for the test rig's
+        // OpenGL-against-Vulkan measurements (the GL-call counter cannot see Vulkan's presents; this counts both).
+        static LLCachedControl<bool> log_rate(gSavedSettings, "WolfLogFrameRate", false);
+        if (log_rate)
+        {
+            static F64 last_log = 0.0;
+            const F64 now = LLTimer::getTotalSeconds();
+            if (now - last_log >= 1.0)
+            {
+                last_log = now;
+                LL_INFOS("WolfFrameRate") << "presented " << gPresentedFrameCount << " frames, real fps " << sRealFps
+                                          << ", frame ms " << (sRealFps > 0.f ? 1000.f / sRealFps : 0.f) << LL_ENDL;
+            }
+        }
     }
 }
 
@@ -270,8 +285,13 @@ void display_startup()
     if (gViewerWindow && gViewerWindow->getWindow())
     {
         WolfVRScreen::captureFrame();   // [VR BIG SCREEN 2026-11-03/] the login screen goes to the headset too
-        gViewerWindow->getWindow()->swapBuffers();
+        // [VULKAN BACKEND 2026-11-08] in Vulkan mode the swapchain presents the frame and GL's swap is skipped
+        if (!WolfVkBridge::present())
+        {
+            gViewerWindow->getWindow()->swapBuffers();
+        }
         wolf_frame_presented();   // [WolfViewer 2026-10-16]
+        WolfVkBridge::onLoginScreenShown();   // [VULKAN BACKEND 2026-11-08/] a frame of the login screen is on the screen: the first-run marker
     }
 
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -605,7 +625,10 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Resize Window");
         gGL.flush();
         glClear(GL_COLOR_BUFFER_BIT);
-        gViewerWindow->getWindow()->swapBuffers();
+        if (!WolfVkBridge::present())   // [VULKAN BACKEND 2026-11-08/]
+        {
+            gViewerWindow->getWindow()->swapBuffers();
+        }
         wolf_frame_presented();   // [WolfViewer 2026-10-16]
         LLPipeline::refreshCachedSettings();
         gPipeline.resizeScreenTexture();
@@ -1790,6 +1813,8 @@ void render_ui(F32 zoom_factor, int subfield)
     { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui finalize R" : "ui finalize L");   // [VR FRAME PARTS 2026-11-05]
       gPipeline.renderFinalize(); }
     WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
+    WolfVRScreen::keepWorldForBigScreen();   // [VR BIG SCREEN VULKAN 2026-11-09/] Vulkan mode: GL's own copy before the clear below
+    WolfVkBridge::captureWorld();   // [VULKAN BACKEND 2026-11-08/] the world layer for the Vulkan composite; the UI then lands on a clear layer
     if (WolfVRScreen::uiSkipped())   // [VR STEREO 2026-11-04/] the left eye's pass (or a paused desktop): no HUD or UI
     {
         WolfVRScreen::captureLayer();   // [VR LEAN 2026-11-04/] the headset's HUDs layer still (a no-op for the left eye)
@@ -1883,10 +1908,15 @@ void swap()
     LLPerfStats::RecordSceneTime T ( LLPerfStats::StatType_t::RENDER_SWAP ); // render time capture - Swap buffer time - can signify excessive data transfer to/from GPU
     LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Swap");
     LL_PROFILE_GPU_ZONE("swap");
+    WolfVkBridge::LoopTimer wolf_loop_swap(WolfVkBridge::LoopStage::SWAP);   // [AMD PERF 2026-11-09/] WolfLogFrameRate
     if (gDisplaySwapBuffers)
     {
         WolfVRScreen::captureFrame();   // [VR BIG SCREEN 2026-11-03/] the finished frame, UI and all, to the headset
-        gViewerWindow->getWindow()->swapBuffers();
+        WolfVkBridge::glFrameStamp();   // [AMD PERF 2026-11-08/] WolfLogFrameRate: OpenGL's GPU time a frame, both renderers
+        if (!WolfVkBridge::present())   // [VULKAN BACKEND 2026-11-08/] Vulkan presents; GL's swap is skipped
+        {
+            gViewerWindow->getWindow()->swapBuffers();
+        }
         wolf_frame_presented();   // [WolfViewer 2026-10-16] a snapshot's render (gDisplaySwapBuffers false) is not shown
     }
     gDisplaySwapBuffers = true;

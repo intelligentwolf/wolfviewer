@@ -859,6 +859,7 @@ void LLPipeline::resizeScreenTexture()
 bool LLPipeline::allocateScreenBuffer(U32 resX, U32 resY)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_DISPLAY;
+    LLRenderTarget::sWolfDepth32F = gSavedSettings.getBOOL("WolfDebugGLDepth32F");   // [AMD PERF 2026-11-08/] testing (llrendertarget.h)
     eFBOStatus ret = doAllocateScreenBuffer(resX, resY);
 
     return ret == FBO_SUCCESS_FULLRES;
@@ -1437,6 +1438,7 @@ void LLPipeline::releaseSpotShadowTargets()
 void LLPipeline::createGLBuffers()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_PIPELINE;
+    LLRenderTarget::sWolfDepth32F = gSavedSettings.getBOOL("WolfDebugGLDepth32F");   // [AMD PERF 2026-11-08/] testing (llrendertarget.h)
     stop_glerror();
     assertInitialized();
 

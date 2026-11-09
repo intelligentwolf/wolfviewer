@@ -50,6 +50,15 @@
 #include "lltoolgrab.h"
 #include "llhudeffectlookat.h"
 #include "llviewercamera.h"
+#include "llcallbacklist.h"     // <WolfViewer> doAfterInterval (WolfLeap teleports)
+#include "llregionhandle.h"     // <WolfViewer> from_region_handle
+#include "llworldmapmessage.h"  // <WolfViewer> sendNamedRegionRequest
+#ifdef OPENSIM
+#include "fsworldmapmessage.h"  // <WolfViewer> hypergrid::sendExactNamedRegionRequest (names with "(")
+#endif
+#include <cmath>                // <WolfViewer> std::isfinite
+#include <memory>               // <WolfViewer> std::shared_ptr
+#include <set>                  // <WolfViewer> pending lookups
 // [RLVa:KB] - Checked: 2011-05-22 (RLVa-1.3.1a)
 #include "rlvactions.h"
 #include "rlvhandler.h"
@@ -61,10 +70,17 @@ LLAgentListener::LLAgentListener(LLAgent &agent)
                "LLAgent listener to (e.g.) teleport, sit, stand, etc."),
     mAgent(agent)
 {
+    // <WolfViewer 2026-10-31> WolfLeap teleports (Paul: they "never work"). See requestTeleport().
     add("requestTeleport",
-        "Teleport: [\"regionname\"], [\"x\"], [\"y\"], [\"z\"]\n"
-        "If [\"skip_confirmation\"] is true, use LLURLDispatcher rather than LLCommandDispatcher.",
+        "Teleport: [\"regionname\"], [\"x\"], [\"y\"], [\"z\"] (region-local metres, any size of region;\n"
+        "default 128, 128, 0).\n"
+        "If [\"skip_confirmation\"] is true: look the region up by name and teleport straight there, then\n"
+        "reply once with [\"success\"] and either [\"region\"], [\"position\"], [\"global\"] or [\"error\"]\n"
+        "(region not found, teleport failed: <reason>, no answer in time).\n"
+        "Otherwise dispatch a SLURL as a click would (place details or teleport, by SLURLTeleportDirectly)\n"
+        "and reply at once.",
         &LLAgentListener::requestTeleport);
+    // </WolfViewer>
     add("requestSit",
         "[\"obj_uuid\"]: id of object to sit on, use this or [\"position\"] to indicate the sit target"
         "[\"position\"]: region position {x, y, z} where to find closest object to sit on",
@@ -208,28 +224,298 @@ LLAgentListener::LLAgentListener(LLAgent &agent)
         llsd::map("reply", LLSD()));
 }
 
+// <WolfViewer 2026-10-31> WolfLeap teleports. Paul: teleports requested through WolfLeap "never work".
+// The stock skip_confirmation path handed [region, x, y, z] to the "teleport" command handler, but in an OPENSIM
+// build that handler (llurldispatcher.cpp LLTeleportHandler::handle) reads the tokens as [grid, region, x, y, z]
+// (dispatchApp puts the grid first) and builds "hop://<tokens>/" from them (fsslurl.cpp LLSLURL(const LLSD&, bool)),
+// so the x coordinate became the region name, y became x, z became y - TROMSO/924/1152/47 went to a region
+// called "924" at 1152,47 (WolfViewer.log 31 Oct 06:00:19: "pos_global { 1152, 47, 0 }") - and it still asked for
+// a click (TeleportViaSLAPP). It never replied either, so the caller only ever saw a time-out.
+// Now: look the region up by name (the same map-name search the world map uses), teleport to its origin plus the
+// region-local position (var regions: the simulator maps the 256 m tile back to the region,
+// EntityTransferModule.GetTeleportDestinationRegion), and reply once with the outcome.
+namespace
+{
+    // A region lookup that gets no answer in this time is reported as failed.
+    constexpr F32 LEAP_TP_LOOKUP_TIMEOUT = 20.f;
+    // A started teleport that has neither finished nor failed in this time is reported as failed. The viewer's own
+    // give-up (llviewerdisplay.cpp update_tp_display, TELEPORT_EXPIRY) sends no event at all.
+    constexpr F32 LEAP_TP_RESULT_TIMEOUT = 60.f;
+    // Bigger region-local values are refused (they would not survive the cast to F32 and no region is that big).
+    constexpr F64 LEAP_TP_MAX_METRES = 1000000.0;
+
+    // Names (lower case) with a WolfLeap lookup waiting for its answer. The exact-name search keeps one callback per
+    // name and silently drops a second one (fsworldmapmessage.cpp sendExactNamedRegionRequest: try_emplace), so a
+    // second request for the same name is refused instead of left to time out.
+    std::set<std::string> sLeapTpLookups;
+
+    struct LeapTeleport
+    {
+        LLSD request;               // the LEAP request: its ["reply"] pump and ["reqid"] address the one reply
+        std::string region_name;    // as asked for
+        LLVector3 local_pos;        // region-local metres
+        std::string lookup_key;     // its entry in sLeapTpLookups while the lookup is waiting, else empty
+        bool looked_up{ false };    // the region search answered (the lookup time-out no longer applies)
+        bool done{ false };
+        LLTempBoundListener finished_conn;  // "LLTeleport" {success: true} (llviewerparcelmgr.cpp postTeleportFinished)
+        LLTempBoundListener failed_conn;    // "WolfTeleportFailed" {reason, message_id} (llviewermessage.cpp)
+    };
+    using LeapTeleportPtr = std::shared_ptr<LeapTeleport>;
+    using LeapTeleportWeak = std::weak_ptr<LeapTeleport>;
+
+    // The region name as the simulator spells a plain one: a hypergrid "grid:port:Region" or ".../Region" ends in it.
+    std::string leap_tp_plain_name(const std::string& name)
+    {
+        const std::string::size_type cut = name.find_last_of(":/");
+        std::string plain = (cut == std::string::npos) ? name : name.substr(cut + 1);
+        LLStringUtil::trim(plain);
+        return plain;
+    }
+
+    void leap_tp_end_lookup(const LeapTeleportPtr& tp)
+    {
+        if (!tp->lookup_key.empty())
+        {
+            sLeapTpLookups.erase(tp->lookup_key);
+            tp->lookup_key.clear();
+        }
+    }
+
+    void leap_tp_finish(const LeapTeleportPtr& tp, LLSD reply)
+    {
+        if (tp->done)
+        {
+            return;
+        }
+        tp->done = true;
+        leap_tp_end_lookup(tp);
+        tp->finished_conn.disconnect();
+        tp->failed_conn.disconnect();
+        if (reply.has("error"))
+        {
+            reply["success"] = false;
+            LL_WARNS("WolfLeap") << "requestTeleport " << tp->region_name << " " << tp->local_pos << ": "
+                                 << reply["error"].asString() << LL_ENDL;
+        }
+        else
+        {
+            reply["success"] = true;
+            LL_INFOS("WolfLeap") << "requestTeleport " << tp->region_name << " " << tp->local_pos << ": "
+                                 << reply["message"].asString() << LL_ENDL;
+        }
+        sendReply(reply, tp->request);
+    }
+
+    LLSD leap_tp_error(const std::string& text)
+    {
+        LLSD reply(LLSD::emptyMap());
+        reply["error"] = text;
+        return reply;
+    }
+
+    // Where the agent is now, for every reply after a teleport was started.
+    void leap_tp_add_location(LLSD& reply)
+    {
+        LLViewerRegion* regionp = gAgent.getRegion();
+        reply["region"] = regionp ? regionp->getName() : std::string();
+        reply["position"] = ll_sd_from_vector3(gAgent.getPositionRegion());
+        reply["global"] = ll_sd_from_vector3d(gAgent.getPositionGlobal());
+    }
+
+    void leap_tp_start(const LeapTeleportPtr& tp, U64 region_handle)
+    {
+        if (tp->done)
+        {
+            return;     // the lookup already timed out and was reported
+        }
+        tp->looked_up = true;
+        leap_tp_end_lookup(tp);
+        // The simulator ends a name search with a block named as the search at grid 0,0
+        // (MapSearchModule.cs OnMapNameRequestHandler / AddFinalBlock), and the exact-name matcher
+        // (fsworldmapmessage.cpp processExactNamedRegionResponse) hands that block on when no region matched:
+        // handle 0 means "no such region", not "the region at 0,0".
+        if (region_handle == 0)
+        {
+            leap_tp_finish(tp, leap_tp_error("region not found: " + tp->region_name));
+            return;
+        }
+        if (gAgent.getTeleportState() != LLAgent::TELEPORT_NONE)
+        {
+            leap_tp_finish(tp, leap_tp_error("teleport failed: another teleport is already in progress"));
+            return;
+        }
+
+        LeapTeleportWeak weak(tp);
+        tp->finished_conn = LLEventPumps::instance().obtain("LLTeleport").listen(
+            LLEventPump::inventName("WolfLeapTeleport"),
+            [weak](const LLSD& event)
+            {
+                LeapTeleportPtr self = weak.lock();
+                // {success: false} comes first on every TeleportFailed, even one that is retried
+                // (llviewermessage.cpp process_teleport_failed), so failures are taken from WolfTeleportFailed.
+                if (self && event["success"].asBoolean())
+                {
+                    LLSD reply(LLSD::emptyMap());
+                    leap_tp_add_location(reply);
+                    const std::string arrived = reply["region"].asString();
+                    const std::string wanted = leap_tp_plain_name(self->region_name);
+                    if (!wanted.empty() && LLStringUtil::compareInsensitive(arrived, wanted) != 0)
+                    {
+                        // Past the far edge of the region the simulator picks whatever region holds that spot.
+                        reply["error"] = "teleport failed: arrived in " + arrived + ", not " + self->region_name
+                                         + " - is the position inside that region?";
+                    }
+                    else
+                    {
+                        reply["message"] = "Teleported to " + arrived;
+                    }
+                    leap_tp_finish(self, reply);
+                }
+                return false;
+            });
+        tp->failed_conn = LLEventPumps::instance().obtain("WolfTeleportFailed").listen(
+            LLEventPump::inventName("WolfLeapTeleport"),
+            [weak](const LLSD& event)
+            {
+                if (LeapTeleportPtr self = weak.lock())
+                {
+                    LLSD reply = leap_tp_error("teleport failed: " + event["reason"].asString());
+                    reply["message_id"] = event["message_id"];
+                    leap_tp_add_location(reply);
+                    leap_tp_finish(self, reply);
+                }
+                return false;
+            });
+
+        const LLVector3d global_pos = from_region_handle(region_handle) + LLVector3d(tp->local_pos);
+        gAgent.teleportViaLocation(global_pos);
+        if (gAgent.getTeleportState() == LLAgent::TELEPORT_NONE)
+        {
+            // teleportViaLocation / doTeleportViaLocation return without a word when RLVa forbids it or the agent
+            // has no region.
+            LLSD reply = leap_tp_error("teleport failed: the viewer did not start it (RLV restrictions, or no region)");
+            leap_tp_add_location(reply);
+            leap_tp_finish(tp, reply);
+            return;
+        }
+
+        doAfterInterval([tp]()
+            {
+                // Not necessarily a failure: the viewer's own give-up and a cancelled teleport post nothing, and a
+                // slow one may still arrive. "region"/"position" say where the agent is now.
+                LLSD reply = leap_tp_error(llformat("teleport result unknown: nothing after %.0f seconds"
+                                                    " (it may still finish - check region/position)",
+                                                    LEAP_TP_RESULT_TIMEOUT));
+                reply["timeout"] = true;
+                leap_tp_add_location(reply);
+                leap_tp_finish(tp, reply);
+            }, LEAP_TP_RESULT_TIMEOUT);
+    }
+}
+
 void LLAgentListener::requestTeleport(LLSD const & event_data) const
 {
     if(event_data["skip_confirmation"].asBoolean())
     {
-        LLSD params(LLSD::emptyArray());
-        params.append(event_data["regionname"]);
-        params.append(event_data["x"]);
-        params.append(event_data["y"]);
-        params.append(event_data["z"]);
-        LLCommandDispatcher::dispatch("teleport", params, LLSD(), LLGridManager::getInstance()->getGrid(), NULL, LLCommandHandler::NAV_TYPE_CLICKED, true);
-        // *TODO - lookup other LLCommandHandlers for "agent", "classified", "event", "group", "floater", "parcel", "login", login_refresh", "balance", "chat"
-        // should we just compose LLCommandHandler and LLDispatchListener?
+        LeapTeleportPtr tp = std::make_shared<LeapTeleport>();
+        tp->request = event_data;
+        tp->region_name = event_data["regionname"].asString();
+        LLStringUtil::trim(tp->region_name);
+        if (tp->region_name.empty())
+        {
+            leap_tp_finish(tp, leap_tp_error("requestTeleport needs [\"regionname\"]"));
+            return;
+        }
+        // Region-local metres; the stock defaults (llurldispatcher.cpp LLTeleportHandler::from_event).
+        static const char* const AXES[3] = { "x", "y", "z" };
+        static const F32 DEFAULTS[3] = { 128.f, 128.f, 0.f };
+        for (S32 i = 0; i < 3; ++i)
+        {
+            const LLSD& value = event_data[AXES[i]];
+            if (value.isUndefined())
+            {
+                tp->local_pos.mV[i] = DEFAULTS[i];
+                continue;
+            }
+            const F64 metres = value.asReal();
+            if (!(value.isReal() || value.isInteger()) || !std::isfinite(metres) || metres < 0.0
+                || metres > LEAP_TP_MAX_METRES)
+            {
+                leap_tp_finish(tp, leap_tp_error(std::string("requestTeleport: [\"") + AXES[i]
+                                                 + "\"] must be a number of metres from 0 to 1000000"));
+                return;
+            }
+            tp->local_pos.mV[i] = (F32)metres;
+        }
+        if (!gAgent.getRegion())
+        {
+            leap_tp_finish(tp, leap_tp_error("teleport failed: not logged in to a region"));
+            return;
+        }
+
+        std::string key = tp->region_name;
+        LLStringUtil::toLower(key);
+        if (!sLeapTpLookups.insert(key).second)
+        {
+            leap_tp_finish(tp, leap_tp_error("a WolfLeap lookup of " + tp->region_name
+                                             + " is still waiting for its answer - try again when it ends"));
+            return;
+        }
+        tp->lookup_key = key;
+
+        LeapTeleportWeak weak(tp);
+        const LLWorldMapMessage::url_callback_t on_found =
+            [weak](U64 region_handle, const std::string& /*url*/, const LLUUID& /*snapshot_id*/, bool /*teleport*/)
+            {
+                if (LeapTeleportPtr self = weak.lock())
+                {
+                    leap_tp_start(self, region_handle);
+                }
+            };
+        bool sent = false;
+#ifdef OPENSIM
+        // OpenSim's name search ends a region name at "(" (RegionURI.cs Parse takes "(x,y,z)" as coordinates), so
+        // "Sandbox 2 (water)" finds nothing (live test 31 Oct). Search for the part before "(" and match the full name.
+        const std::string::size_type paren = tp->region_name.find('(');
+        if (paren != std::string::npos && paren > 0)
+        {
+            std::string search_name = tp->region_name.substr(0, paren);
+            LLStringUtil::trim(search_name);
+            if (!search_name.empty())
+            {
+                sent = hypergrid::sendExactNamedRegionRequest(tp->region_name, search_name, on_found, std::string(), false);
+            }
+        }
+#endif
+        if (!sent)
+        {
+            LLWorldMapMessage::getInstance()->sendNamedRegionRequest(tp->region_name, on_found,
+                std::string(),  // no SLURL: the callback above does the teleport
+                false);
+        }
+        doAfterInterval([tp]()
+            {
+                if (tp->looked_up)
+                {
+                    return;     // the teleport has its own time-out
+                }
+                leap_tp_finish(tp, leap_tp_error(llformat("region lookup got no answer in %.0f seconds: ",
+                                                          LEAP_TP_LOOKUP_TIMEOUT) + tp->region_name));
+            }, LEAP_TP_LOOKUP_TIMEOUT);
     }
     else
     {
+        Response response(LLSD(), event_data);
         std::string url = LLSLURL(event_data["regionname"],
                                   LLVector3((F32)event_data["x"].asReal(),
                                             (F32)event_data["y"].asReal(),
                                             (F32)event_data["z"].asReal())).getSLURLString();
         LLURLDispatcher::dispatch(url, LLCommandHandler::NAV_TYPE_CLICKED, NULL, false);
+        response["message"] = "Dispatched " + url + " as a click: SLURLTeleportDirectly decides whether it teleports"
+                              " or shows the place details, and no result follows - use skip_confirmation for one";
     }
 }
+// </WolfViewer>
 
 void LLAgentListener::requestSit(LLSD const & event_data) const
 {

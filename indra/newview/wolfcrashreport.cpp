@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfcrashreport.h"
+#include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/]
 
 #include <algorithm>
 #include <ctime>
@@ -789,6 +790,14 @@ namespace
         if (info.has("CurrentRegion")) fields.emplace_back("crashed_region", one_line(info["CurrentRegion"].asString(), 128));
         if (info.has("StartupState")) fields.emplace_back("startup_state", one_line(info["StartupState"].asString(), 64));
         if (info.has("GraphicsCard")) fields.emplace_back("crashed_gpu", one_line(info["GraphicsCard"].asString(), 200));
+        // [VULKAN BACKEND 2026-11-08] gDebugInfo["WolfVulkan"] (llappviewer.cpp): which renderer drew, and the Vulkan device
+        if (info.has("WolfVulkan"))
+        {
+            fields.emplace_back("crashed_renderer", one_line(info["WolfVulkan"]["renderer"].asString(), 16));
+            fields.emplace_back("crashed_vulkan_device", one_line(info["WolfVulkan"]["vulkan_device"].asString(), 120));
+            fields.emplace_back("crashed_vulkan_driver", one_line(info["WolfVulkan"]["vulkan_driver"].asString(), 120));
+            fields.emplace_back("crashed_vulkan_api", one_line(info["WolfVulkan"]["vulkan_api"].asString(), 32));
+        }
         if (info.has("FatalMessage"))
         {
             fields.emplace_back("fatal", one_line(WolfLogScrub::wolf_scrub_log(info["FatalMessage"].asString(), secrets), 500));
@@ -969,6 +978,14 @@ void WolfCrashReport::sendPendingOnce()
     common.emplace_back("viewer", LLVersionInfo::instance().getChannelAndVersion());
     common.emplace_back("os", LLOSInfo::instance().getOSString());
     common.emplace_back("gpu", gGLManager.getRawGLString());
+    {   // [VULKAN BACKEND 2026-11-08] the renderer now, and the Vulkan device of this PC
+        const LLSD vk = WolfVkBridge::reportFields();
+        common.emplace_back("renderer", vk["renderer"].asString());
+        common.emplace_back("vulkan_device", vk["vulkan_device"].asString());
+        common.emplace_back("vulkan_driver", vk["vulkan_driver"].asString());
+        common.emplace_back("vulkan_api", vk["vulkan_api"].asString());
+        common.emplace_back("vulkan_hand_over", vk["vulkan_hand_over"].asString());   // [SHARED IMAGES 2026-11-08/]
+    }
 #if LL_WINDOWS
     common.emplace_back("platform", "windows");
 #elif LL_DARWIN

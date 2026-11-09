@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolffloaterbugreport.h"
+#include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/]
 
 #include <ctime>
 
@@ -1256,6 +1257,14 @@ void WolfFloaterBugReport::onSend()
     fields["viewer"] = LLVersionInfo::instance().getChannelAndVersion();
     fields["os"] = LLOSInfo::instance().getOSString();
     fields["gpu"] = gGLManager.getRawGLString();
+    {   // [VULKAN BACKEND 2026-11-08] renderer + Vulkan device with every problem report
+        const LLSD vk = WolfVkBridge::reportFields();
+        fields["renderer"] = vk["renderer"].asString();
+        fields["vulkan_device"] = vk["vulkan_device"].asString();
+        fields["vulkan_driver"] = vk["vulkan_driver"].asString();
+        fields["vulkan_api"] = vk["vulkan_api"].asString();
+        fields["vulkan_hand_over"] = vk["vulkan_hand_over"].asString();   // [SHARED IMAGES 2026-11-08/]
+    }
     if (LLViewerRegion* region = gAgent.getRegion())
     {
         fields["region"] = region->getName();

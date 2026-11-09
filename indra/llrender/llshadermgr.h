@@ -458,6 +458,13 @@ public:
     std::map<std::string, GLuint> mVertexShaderObjects;
     std::map<std::string, GLuint> mFragmentShaderObjects;
 
+    // [VULKAN BACKEND 2026-11-08] The "recipe" of every shader object loadShaderFile compiled, keyed "vert|file" / "frag|file"
+    // (WolfVkShaderMirror::unitRecipe): the Vulkan backend names a program's SPIR-V by the MD5 of its units' recipes.
+    std::map<std::string, std::string> mWolfVkUnitRecipes;
+    // The class directory loadShaderFile would open filename from (its search from shader_level down to 1, :600-627): true and
+    // found_level when the file exists; the Vulkan backend needs it for a program whose objects came from the binary cache.
+    bool wolfVkFindShaderClass(const std::string& filename, S32 shader_level, S32& found_level);
+
     //global (reserved slot) shader parameters
     std::vector<std::string> mReservedAttribs;
 

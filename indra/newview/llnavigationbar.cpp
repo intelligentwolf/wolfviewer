@@ -60,6 +60,8 @@
 #include "llviewercontrol.h"
 #include "llcallbacklist.h"   // [WOLF VISITOR SEES 2026-10-18/] gIdleCallbacks: the WE button
 #include "wolfgrid.h"   // [WolfViewer 2026-10-13] the WE button, Wolf Territories only
+#include "wolfvkbridge.h"   // [V BUTTON 2026-11-08] the V button: Vulkan available, choose the renderer
+#include "lltrans.h"
 #include "lluicolortable.h"   // [WE BUTTON GREEN 2026-10-28/] the toolbar's face colour for the WE button
 #include "llweb.h"
 #include "llhints.h"
@@ -309,6 +311,23 @@ LLNavigationBar::~LLNavigationBar()
     // </FS:Ansariel>
 }
 
+// [WE BUTTON GREEN 2026-10-28] ticket 313 (Chad): "WE button does not turn Green when clicking like the EEP and Weather
+// buttons do". Those are toolbar commands, whose faces take the skin's toolbar image_color
+// (skins/wolfglass/xui/en/widgets/toolbar.xml: WolfGlassButton; other skins: the stock ButtonImageColor,
+// skins/default/xui/en/widgets/button.xml). The WE and V buttons are navigation-bar buttons with the stock grey face,
+// and LLButton has no selected-only image colour (llbutton.h image_color), so the face is tinted here while the button
+// is on, and given back the stock colour while it is off. `tinted` remembers the last state applied (-1 = none yet).
+static void tintWolfNavButton(LLButton* btn, bool on, int& tinted)
+{
+    const int now = on ? 1 : 0;
+    if (now == tinted) return;
+    tinted = now;
+    const LLUIColorTable& colors = LLUIColorTable::instance();
+    btn->setImageColor(on && colors.colorExists("WolfGlassButton")
+                           ? colors.getColor("WolfGlassButton")
+                           : colors.getColor("ButtonImageColor"));
+}
+
 // <FS:Zi> Make navigation bar part of the UI
 // bool LLNavigationBar::postBuild()
 void LLNavigationBar::setupPanel()
@@ -356,25 +375,59 @@ void LLNavigationBar::setupPanel()
                 {
                     const bool wolf = WolfGrid::showsBasicWolfSky();   // [BASIC WOLF SKY 2026-10-19/]
                     if (b->getVisible() != wolf) b->setVisible(wolf);
-                    // [WE BUTTON GREEN 2026-10-28] ticket 313 (Chad): "WE button does not turn Green when clicking like the EEP
-                    // and Weather buttons do". Those are toolbar commands, whose faces take the skin's toolbar image_color
-                    // (skins/wolfglass/xui/en/widgets/toolbar.xml: WolfGlassButton; other skins: the stock ButtonImageColor,
-                    // skins/default/xui/en/widgets/button.xml). The WE button is a navigation-bar button with the stock
-                    // grey face, and LLButton has no selected-only image colour (llbutton.h image_color), so its face is
-                    // tinted here while it is on, and given back the stock colour while it is off.
+                    // [WE BUTTON GREEN 2026-10-28] green while on (tintWolfNavButton above)
                     if (LLButton* btn = dynamic_cast<LLButton*>(b))
                     {
                         static int s_tinted = -1;
-                        const int on = btn->getToggleState() ? 1 : 0;
-                        if (on != s_tinted)
-                        {
-                            s_tinted = on;
-                            const LLUIColorTable& colors = LLUIColorTable::instance();
-                            btn->setImageColor(on && colors.colorExists("WolfGlassButton")
-                                                   ? colors.getColor("WolfGlassButton")
-                                                   : colors.getColor("ButtonImageColor"));
-                        }
+                        tintWolfNavButton(btn, btn->getToggleState(), s_tinted);
                     }
+                }
+            }, nullptr);
+        }
+    }
+    // [V BUTTON 2026-11-08] Paul: "next to the WE button we add a V button with a 'Use Vulkan shaders' tooltip; when it's
+    // on it goes green like the WE button next to it". WolfVulkanBtn (panel_navigation_bar.xml): lit while WolfRenderBackend
+    // is "vulkan"; a click chooses the other renderer for the next start through WolfVkBridge::chooseBackend, the same path
+    // as Wolf World > Vulkan Renderer, with its notice (the renderer cannot change while the viewer runs); greyed out with
+    // its own tooltip where no Vulkan device was found at this start; shown on Wolf Territories (the login grid) only,
+    // like the status bar's Wolf buttons (llstatusbar.cpp:1442). The face follows the setting every idle, so a choice made
+    // in the floater lights or dims the button too.
+    if (LLButton* v = mView->findChild<LLButton>("WolfVulkanBtn"))
+    {
+        static LLHandle<LLView> s_v;
+        s_v = v->getHandle();
+        const bool available = WolfVkBridge::vulkanAvailable();
+        v->setEnabled(available);
+        if (!available)
+        {
+            v->setToolTip(LLTrans::getString("WolfVulkanButtonUnavailable"));
+        }
+        v->setToggleState(gSavedSettings.getString("WolfRenderBackend") == "vulkan");
+        v->setVisible(WolfGrid::isWolfTerritories());
+        v->setCommitCallback([](LLUICtrl* ctrl, const LLSD&)
+        {
+            // is_toggle: LLButton flips its state before it commits (llbutton.cpp onMouseUp), so the face already shows the
+            // choice; the setting follows it, and the idle below keeps the two in step from then on
+            if (LLButton* btn = dynamic_cast<LLButton*>(ctrl))
+            {
+                WolfVkBridge::chooseBackend(btn->getToggleState() ? "vulkan" : "opengl");
+            }
+        });
+        static bool s_v_idle_added = false;
+        if (!s_v_idle_added)
+        {
+            s_v_idle_added = true;
+            gIdleCallbacks.addFunction([](void*)
+            {
+                if (LLButton* btn = dynamic_cast<LLButton*>(s_v.get()))
+                {
+                    const bool wolf = WolfGrid::isWolfTerritories();
+                    if (btn->getVisible() != wolf) btn->setVisible(wolf);
+                    static LLCachedControl<std::string> backend(gSavedSettings, "WolfRenderBackend", "opengl");
+                    const bool on = (std::string(backend) == "vulkan");
+                    if (btn->getToggleState() != on) btn->setToggleState(on);
+                    static int s_tinted = -1;
+                    tintWolfNavButton(btn, on, s_tinted);
                 }
             }, nullptr);
         }

@@ -59,6 +59,8 @@ U32 wpo2(U32 i);
 
 
 U32 LLImageGL::sFrameCount = 0;
+void (*LLImageGL::sWolfVkOnTexelsChanged)(LLGLuint) = nullptr;   // [VULKAN BACKEND 2026-11-08/]
+void (*LLImageGL::sWolfVkOnDelete)(LLGLuint) = nullptr;          // [VULKAN BACKEND 2026-11-08/]
 
 
 // texture memory accounting (for macOS)
@@ -343,6 +345,10 @@ S32 LLImageGL::dataFormatBits(S32 dataformat)
     case GL_BGRA:                                   return 32;      // Used for QuickTime media textures on the Mac
     case GL_DEPTH_COMPONENT:                        return 24;
     case GL_DEPTH_COMPONENT24:                      return 24;
+    // WolfDebugGLDepth32F (llrendertarget.cpp) allocates this; 0x8CAC per /usr/include/GL/glcorearb.h:1083,
+    // one 32-bit float depth component per texel (the sized depth format table of the OpenGL 4.6 core spec, 8.5;
+    // the same texel as the Vulkan-shared VK_FORMAT_D32_SFLOAT it mirrors, 4 bytes in vk/wolfvkimage.cpp texel sizes).
+    case GL_DEPTH_COMPONENT32F:                     return 32;
     case GL_RGBA16:                                 return 64;
     case GL_R16F:                                   return 16;
     case GL_RG16F:                                  return 32;
@@ -1033,7 +1039,7 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
     }
     stop_glerror();
     mGLTextureCreated = true;
-    return true;
+    { wolfVkTexelsChanged(); return true; }   // [VULKAN BACKEND 2026-11-08/]
 }
 
 U32 type_width_from_pixtype(U32 pixtype)
@@ -1132,7 +1138,7 @@ bool LLImageGL::setSubImage(const U8* datap, S32 data_width, S32 data_height, S3
     LL_PROFILE_ZONE_SCOPED_CATEGORY_TEXTURE;
     if (!width || !height)
     {
-        return true;
+        { wolfVkTexelsChanged(); return true; }   // [VULKAN BACKEND 2026-11-08/]
     }
     LLGLuint tex_name = use_name != 0 ? use_name : mTexName;
     if (0 == tex_name)
@@ -1233,7 +1239,7 @@ bool LLImageGL::setSubImage(const U8* datap, S32 data_width, S32 data_height, S3
         stop_glerror();
         mGLTextureCreated = true;
     }
-    return true;
+    { wolfVkTexelsChanged(); return true; }   // [VULKAN BACKEND 2026-11-08/]
 }
 
 bool LLImageGL::setSubImage(const LLImageRaw* imageraw, S32 x_pos, S32 y_pos, S32 width, S32 height, bool force_fast_update /* = false */, LLGLuint use_name)
@@ -1250,7 +1256,7 @@ bool LLImageGL::setSubImageFromFrameBuffer(S32 fb_x, S32 fb_y, S32 x_pos, S32 y_
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, fb_x, fb_y, x_pos, y_pos, width, height);
         mGLTextureCreated = true;
         stop_glerror();
-        return true;
+        { wolfVkTexelsChanged(); return true; }   // [VULKAN BACKEND 2026-11-08/]
     }
     else
     {
@@ -1316,6 +1322,7 @@ void LLImageGL::deleteTextures(S32 numTextures, const U32 *textures)
         U32 idx = sFrameCount % (DELETE_DELAY+1);
         for (S32 i = 0; i < numTextures; ++i)
         {
+            if (sWolfVkOnDelete) { sWolfVkOnDelete(textures[i]); }   // [VULKAN BACKEND 2026-11-08/]
             sFreeList[idx].push_back(textures[i]);
         }
     }
@@ -1745,7 +1752,7 @@ bool LLImageGL::createGLTexture(S32 discard_level, const U8* data_in, bool data_
     mLastBindTime = sLastFrameTime;
 
     checkActiveThread();
-    return true;
+    { wolfVkTexelsChanged(); return true; }   // [VULKAN BACKEND 2026-11-08/]
 }
 
 void LLImageGL::syncToMainThread(LLGLuint new_tex_name)
@@ -2647,7 +2654,7 @@ bool LLImageGL::scaleDown(S32 desired_discard)
 
     mCurrentDiscardLevel = desired_discard;
 
-    return true;
+    { wolfVkTexelsChanged(); return true; }   // [VULKAN BACKEND 2026-11-08/] the levels changed
 }
 
 

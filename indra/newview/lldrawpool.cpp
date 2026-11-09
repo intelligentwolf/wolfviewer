@@ -53,6 +53,7 @@
 #include "llglcommonfunc.h"
 #include "llvoavatar.h"
 #include "llviewershadermgr.h"
+#include "wolfvkbridge.h"   // [VULKAN ONE RENDERER PER BATCH 2026-11-08] batches Vulkan drew this frame are skipped here
 
 S32 LLDrawPool::sNumDrawPools = 0;
 
@@ -440,6 +441,11 @@ void LLRenderPass::pushBatches(U32 type, bool texture, bool batch_textures)
             LLDrawInfo* pparams = *i;
             LLCullResult::increment_iterator(i, end);
 
+            // [VULKAN ONE RENDERER PER BATCH 2026-11-08] a batch is drawn by one renderer: when Vulkan drew this one
+            // into the shared targets this frame, GL leaves it alone (drawing it twice at equal depth z-fights, which
+            // showed as textures flashing, Paul 2026-11-08); the batches Vulkan could not draw are GL's as always
+            if (WolfVkBridge::batchDrawnByVulkan(pparams)) continue;
+
             pushBatch(*pparams, texture, batch_textures);
         }
     }
@@ -566,6 +572,7 @@ void LLRenderPass::applyModelMatrix(const LLMatrix4* model_matrix)
         {
             gGL.multMatrix((GLfloat*) model_matrix->mMatrix);
         }
+        WolfVkBridge::poseCheckModelMatrix(model_matrix);   // [POSE CHECK 2026-11-08/] debug: Vulkan pass vs GL, same frame
         gPipeline.mMatrixOpCount++;
     }
 }

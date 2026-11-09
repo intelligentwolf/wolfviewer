@@ -261,6 +261,8 @@ public:
     U8* getMappedData() const               { return mMappedData; }
     U8* getMappedIndices() const            { return mMappedIndexData; }
     U32 getOffset(AttributeType type) const { return mOffsets[type]; }
+    U32 getGLBuffer() const                 { return mGLBuffer; }    // [VULKAN BACKEND 2026-11-08/] for the Vulkan copy's glGetBufferSubData
+    U32 getGLIndices() const                { return mGLIndices; }   // [VULKAN BACKEND 2026-11-08/]
 
     // these functions assume (and assert on) the current VBO being bound
     // Detailed error checking can be enabled by setting gDebugGL to true
@@ -334,6 +336,12 @@ public:
     static U32 sGLRenderIndices;
     static U32 sLastMask;
     static U32 sVertexCount;
+
+    // [VULKAN BACKEND 2026-11-08] The Vulkan backend keeps a device-local copy of each buffer it draws (llrender/vk mirror,
+    // newview/wolfvkmirror.cpp). flush_vbo tells it which bytes changed (start..end inclusive, as flush_vbo gets them) and
+    // the destructor tells it the buffer is gone. Null when the OpenGL renderer runs alone.
+    static void (*sWolfVkOnFlush)(LLVertexBuffer* buffer, bool indices, U32 start, U32 end, const U8* data);
+    static void (*sWolfVkOnDestroy)(LLVertexBuffer* buffer);
 };
 
 #if LL_PROFILER_ENABLE_RENDER_DOC

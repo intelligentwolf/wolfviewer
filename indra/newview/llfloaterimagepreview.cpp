@@ -690,7 +690,35 @@ bool LLFloaterImagePreview::loadImage(const std::string& src_filename)
         LLNotificationsUtil::add("ImageUploadResized", subs);
     }
 
-    raw_image->biasedScaleToPowerOfTwo(LLViewerFetchedTexture::MAX_IMAGE_SIZE_DEFAULT);
+    // [T658 2026-11-08] Keep the picture's shape. LLImageRaw::biasedScaleToPowerOfTwo (llimage.cpp:1189) rounds each side
+    // to a power of two on its own, biased downwards (a side only rounds up above 1.75x the power of two below it,
+    // llimage.cpp:1150), so a 3:2 picture such as 1536 x 1024 became 1024 x 1024. The pre-shrink above keeps the shape
+    // but only runs when the picture is over max_texture_dimension_X/Y, which our grid sets to 2048
+    // (llviewerregion.cpp:2710, SimulatorFeatures MaxTextureResolution), so on Wolf Territories most pictures skipped
+    // it and were squared. Paul: "keep the pictures shape". Round the longer side as before, then scale the shorter
+    // side by the same factor and take the nearest power of two to that, so the result is the power-of-two shape
+    // closest to the original (1536 x 1024 -> 1024 x 512, 1920 x 1080 -> 2048 x 1024, 1000 x 1000 -> 1024 x 1024).
+    {
+        const S32 max_dim = LLViewerFetchedTexture::MAX_IMAGE_SIZE_DEFAULT;
+        const S32 w = raw_image->getWidth();
+        const S32 h = raw_image->getHeight();
+        const bool wide = w >= h;
+        const S32 long_side  = wide ? w : h;
+        const S32 short_side = wide ? h : w;
+        const S32 new_long = LLImageRaw::biasedDimToPowerOfTwo(long_side, max_dim);
+        // the shorter side at the same scale, then the nearest power of two to it by ratio (683 -> 512, 1152 -> 1024)
+        const F32 scaled_short = (F32)short_side * (F32)new_long / (F32)long_side;
+        S32 below = LLImageRaw::contractDimToPowerOfTwo((S32)scaled_short, MIN_IMAGE_SIZE); // 2^n <= scaled_short
+        if (below > max_dim) { below = max_dim; }
+        const S32 above = llmin(below * 2, max_dim);
+        const S32 new_short = (scaled_short / (F32)below > (F32)above / scaled_short) ? above : below;
+        const S32 new_width  = wide ? new_long : new_short;
+        const S32 new_height = wide ? new_short : new_long;
+        if (new_width != w || new_height != h)
+        {
+            raw_image->scale(new_width, new_height);
+        }
+    }
     mRawImagep = raw_image;
     }
     catch (...)

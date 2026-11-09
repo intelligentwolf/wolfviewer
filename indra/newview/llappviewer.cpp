@@ -84,6 +84,7 @@
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
 #include "wolfvrstream.h"       // [VR PIPE 2026-11-03/] WolfVRStream::shutdown, [VR STAGES 2026-11-04/] headsetInVR
 #include "wolfvrscreen.h"       // [VR STEREO 2026-11-04/] WolfVRScreen::displayFrame
+#include "wolfvkbridge.h"       // [VULKAN BACKEND 2026-11-08/] WolfRenderBackend decision, About lines, report fields
 #include "wolfaimode.h"         // [AI MODE 2026-11-05/]
 #include "wolfvraudio.h"        // [VR AUDIO 2026-11-04/] WolfVRAudio::shutdown
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
@@ -903,6 +904,35 @@ public:
     }
 };
 
+// [T676 2026-11-08] The viewer's name and version in static_debug_info.log, which wolfcrashreport.cpp
+// debug_info_text reads back as "crashed_viewer" when the crash is reported at the next login. Source: this file's
+// writeSystemInfo() (the ClientInfo block, moved here unchanged), which runs only after initWindow(). A fatal
+// error inside initWindow (LLViewerShaderMgr::setShaders, llviewershadermgr.cpp:1011 "Unable to load ... shaders")
+// wrote static_debug_info.log from errorCallback with no ClientInfo at all, so viewercrashreport.php fell back
+// to the version of the viewer SENDING the report: tickets 643 (labelled 7.2.4.97) and 667/676 (labelled
+// 7.2.4.100) were W99 crashes. LLVersionInfo is ready by then: initConfiguration() already reads it
+// (getShortVersion for fsdata_defaults, resetChannel for --channel).
+static void wolf_write_client_info()
+{
+    gDebugInfo["ClientInfo"]["Name"] = LLVersionInfo::instance().getChannel();
+// [SL:KB] - Patch: Viewer-CrashReporting | Checked: 2011-05-08 (Catznip-2.6.0a) | Added: Catznip-2.6.0a
+    gDebugInfo["ClientInfo"]["Version"] = LLVersionInfo::instance().getVersion();
+    gDebugInfo["ClientInfo"]["Platform"] = LLVersionInfo::instance().getBuildPlatform();
+// [/SL:KB]
+    gDebugInfo["ClientInfo"]["MajorVersion"] = LLVersionInfo::instance().getMajor();
+    gDebugInfo["ClientInfo"]["MinorVersion"] = LLVersionInfo::instance().getMinor();
+    gDebugInfo["ClientInfo"]["PatchVersion"] = LLVersionInfo::instance().getPatch();
+    gDebugInfo["ClientInfo"]["BuildVersion"] = std::to_string(LLVersionInfo::instance().getBuild());
+    gDebugInfo["ClientInfo"]["AddressSize"] = LLVersionInfo::instance().getAddressSize();
+
+// <FS:ND> Add which flavor of FS generated an error
+#ifdef OPENSIM
+    gDebugInfo["ClientInfo"]["Flavor"] = "oss";
+#else
+    gDebugInfo["ClientInfo"]["Flavor"] = "hvk";
+#endif
+// </FS:ND>
+}
 
 bool LLAppViewer::init()
 {
@@ -1248,6 +1278,7 @@ bool LLAppViewer::init()
     // Initialize the window
     //
     gGLActive = true;
+    wolf_write_client_info();   // [T676 2026-11-08] before initWindow: a start-up fatal in it must still name this version
     initWindow();
     LL_INFOS("InitInfo") << "Window is initialized." << LL_ENDL ;
     WolfSpanScreens::startup();    // <WolfViewer 2026-10-10/> spread across all screens again if it was
@@ -1378,6 +1409,7 @@ bool LLAppViewer::init()
 
     // save the graphics card
     gDebugInfo["GraphicsCard"] = LLFeatureManager::getInstance()->getGPUString();
+    gDebugInfo["WolfVulkan"] = WolfVkBridge::reportFields();   // [VULKAN BACKEND 2026-11-08/] renderer + Vulkan device, for the crash report
 
     // Save the current version to the prefs file
     gSavedSettings.setString("LastRunVersion",
@@ -1719,6 +1751,7 @@ bool LLAppViewer::doFrame()
     {
         {
             LLPerfStats::RecordSceneTime T(LLPerfStats::StatType_t::RENDER_IDLE); // ensure we have the entire top scope of frame covered (input event and coro)
+            WolfVkBridge::LoopTimer wolf_loop_input(WolfVkBridge::LoopStage::INPUT);   // [AMD PERF 2026-11-09/] WolfLogFrameRate
             LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df processMiscNativeEvents");
             pingMainloopTimeout("Main:MiscNativeWindowEvents");
 
@@ -1816,6 +1849,7 @@ bool LLAppViewer::doFrame()
                 {
                     LLPerfStats::RecordSceneTime T (LLPerfStats::StatType_t::RENDER_IDLE);
                     LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df idle");
+                    WolfVkBridge::LoopTimer wolf_loop_idle(WolfVkBridge::LoopStage::IDLE);   // [AMD PERF 2026-11-09/]
                     WolfVRScreen::framePart(WolfVRScreen::FramePart::Idle, true);   // [VR FRAME PARTS 2026-11-05/]
                     idle();
                     WolfVRScreen::framePart(WolfVRScreen::FramePart::Idle, false);
@@ -1849,6 +1883,7 @@ bool LLAppViewer::doFrame()
             if (!LLApp::isExiting() && !gHeadlessClient && gViewerWindow)
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df Display");
+                WolfVkBridge::LoopTimer wolf_loop_display(WolfVkBridge::LoopStage::DISPLAY);   // [AMD PERF 2026-11-09/] incl. probes, snapshots
                 pingMainloopTimeout("Main:Display");
                 gGLActive = true;
 
@@ -1887,6 +1922,7 @@ bool LLAppViewer::doFrame()
         {
             //LL_RECORD_BLOCK_TIME(SLEEP2);
             LL_PROFILE_ZONE_WARN("Sleep2");
+            WolfVkBridge::LoopTimer wolf_loop_sleep(WolfVkBridge::LoopStage::SLEEP);   // [AMD PERF 2026-11-09/] yields, limiter, texture/mesh updates
 
             // yield some time to the os based on command line option
             static LLCachedControl<S32> yield_time(gSavedSettings, "YieldTime", -1);
@@ -2008,6 +2044,7 @@ bool LLAppViewer::doFrame()
             }
             pingMainloopTimeout("Main:End");
         }
+        WolfVkBridge::loopFrameEnd();   // [AMD PERF 2026-11-09/] WolfLogFrameRate: the "main loop per frame" line once a second
     }
 
     if (LLApp::isExiting())
@@ -3753,6 +3790,9 @@ bool LLAppViewer::initConfiguration()
     }
 // [/RLVa:KB]
 
+    // [VULKAN BACKEND 2026-11-08] WolfRenderBackend read once, with the first-run check (wolfvkbridge.h)
+    WolfVkBridge::decideBackend();
+
     return true; // Config was successful.
 }
 
@@ -4225,6 +4265,10 @@ LLSD LLAppViewer::getViewerInfo() const
     info["RLV_VERSION"] = (rlv_handler_t::isEnabled()) ? RlvStrings::getVersionAbout() : LLTrans::getString("RLVaStatusDisabled");
 // [/RLVa:KB]
     info["OPENGL_VERSION"] = ll_safe_string((const char*)(glGetString(GL_VERSION)));
+    // [VULKAN BACKEND 2026-11-08] strings.xml AboutRenderer; the same fields the hardware statistics and crash reports carry
+    info["RENDERER"] = WolfVkBridge::rendererLine();
+    info["VULKAN_INFO"] = WolfVkBridge::vulkanLine();
+    info["WolfVulkan"] = WolfVkBridge::reportFields();
     info["LIBCURL_VERSION"] = LLCore::LLHttp::getCURLVersion();
     // Settings
     // <FS:Beq> gViewerWindow can be null on shutdown. Crashes if bugsplatt uses the info
@@ -4472,6 +4516,7 @@ std::string LLAppViewer::getViewerInfoString(bool default_string) const
         support << "\n" << LLTrans::getString("AboutDriver", args, default_string);
     }
     support << "\n" << LLTrans::getString("AboutOGL", args, default_string);
+    support << "\n" << LLTrans::getString("AboutRenderer", args, default_string);   // [VULKAN BACKEND 2026-11-08/]
     //support << "\n\n" << LLTrans::getString("AboutSettings", args, default_string); // <FS> Custom sysinfo
 #if LL_DARWIN
     support << "\n" << LLTrans::getString("AboutOSXHiDPI", args, default_string);
@@ -4571,24 +4616,7 @@ void LLAppViewer::writeSystemInfo()
 //#endif
     // </FS:ND>
 
-    gDebugInfo["ClientInfo"]["Name"] = LLVersionInfo::instance().getChannel();
-// [SL:KB] - Patch: Viewer-CrashReporting | Checked: 2011-05-08 (Catznip-2.6.0a) | Added: Catznip-2.6.0a
-    gDebugInfo["ClientInfo"]["Version"] = LLVersionInfo::instance().getVersion();
-    gDebugInfo["ClientInfo"]["Platform"] = LLVersionInfo::instance().getBuildPlatform();
-// [/SL:KB]
-    gDebugInfo["ClientInfo"]["MajorVersion"] = LLVersionInfo::instance().getMajor();
-    gDebugInfo["ClientInfo"]["MinorVersion"] = LLVersionInfo::instance().getMinor();
-    gDebugInfo["ClientInfo"]["PatchVersion"] = LLVersionInfo::instance().getPatch();
-    gDebugInfo["ClientInfo"]["BuildVersion"] = std::to_string(LLVersionInfo::instance().getBuild());
-    gDebugInfo["ClientInfo"]["AddressSize"] = LLVersionInfo::instance().getAddressSize();
-
-// <FS:ND> Add which flavor of FS generated an error
-#ifdef OPENSIM
-    gDebugInfo["ClientInfo"]["Flavor"] = "oss";
-#else
-    gDebugInfo["ClientInfo"]["Flavor"] = "hvk";
-#endif
-// </FS:ND>
+    wolf_write_client_info();   // [T676 2026-11-08] the ClientInfo block, now shared with init() (see above it)
 
     //  gDebugInfo["CAFilename"] = gDirUtilp->getCAFile();
 

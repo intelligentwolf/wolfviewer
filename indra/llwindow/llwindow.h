@@ -191,6 +191,21 @@ public:
 // return a platform-specific window reference (HWND on Windows, WindowRef on the Mac, Gtk window on Linux)
     virtual void *getPlatformWindow() = 0;
 
+    // [VULKAN BACKEND 2026-11-08] The native handles a Vulkan window surface is made from (llrender/vk/wolfvksurface.cpp):
+    // X11 Display* + Window, Wayland wl_display* + wl_surface*, Win32 HINSTANCE + HWND, Cocoa NSView*. Each window
+    // layer fills what it has; false when it has nothing (headless, or a window layer without the information).
+    struct NativeHandles
+    {
+        enum Kind { NONE, X11, WAYLAND, WIN32, COCOA };
+        Kind mKind = NONE;
+        void* mDisplay = nullptr;        // X11: Display*; Wayland: struct wl_display*
+        unsigned long mWindow = 0;       // X11: Window (an XID)
+        void* mSurface = nullptr;        // Wayland: struct wl_surface*
+        void* mInstance = nullptr;       // Win32: HINSTANCE
+        void* mHandle = nullptr;         // Win32: HWND; Cocoa: NSView* (the GL content view)
+    };
+    virtual bool getNativeHandles(NativeHandles& handles) { handles = NativeHandles(); return false; }
+
 // return the platform-specific window reference we use to initialize llmozlib (HWND on Windows, WindowRef on the Mac, Gtk window on Linux)
     virtual void *getMediaWindow();
 

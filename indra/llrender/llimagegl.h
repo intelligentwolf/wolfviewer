@@ -74,6 +74,12 @@ public:
     // These 2 functions replace glGenTextures() and glDeleteTextures()
     static void generateTextures(S32 numTextures, U32 *textures);
     static void deleteTextures(S32 numTextures, const U32 *textures);
+    // [VULKAN BACKEND 2026-11-08] The Vulkan backend keeps copies of the textures it draws (newview/wolfvkmirror.cpp): told when
+    // a texture's texels changed (setImage, setSubImage, createGLTexture, scaleDown, setSubImageFromFrameBuffer) and when a GL
+    // name is deleted. Null when the OpenGL renderer runs alone.
+    static void (*sWolfVkOnTexelsChanged)(LLGLuint tex_name);
+    static void (*sWolfVkOnDelete)(LLGLuint tex_name);
+    void wolfVkTexelsChanged(LLGLuint name = 0) const { if (sWolfVkOnTexelsChanged) { sWolfVkOnTexelsChanged(name ? name : mTexName); } }
 
     // Size calculation
     static S32 dataFormatBits(S32 dataformat);

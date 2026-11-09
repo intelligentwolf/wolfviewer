@@ -51,6 +51,7 @@
 #include "llregionhandle.h"
 #include "llsd.h"
 #include "llsdserialize.h"
+#include "llsdutil.h"           // <WolfViewer> llsd::map (WolfTeleportFailed)
 #include "llteleportflags.h"
 #include "lltoastnotifypanel.h"
 #include "lltransactionflags.h"
@@ -7932,6 +7933,10 @@ void process_teleport_failed(LLMessageSystem *msg, void**)
                 // change notification name in this special case
                 if (handle_teleport_access_blocked(llsd_block, message_id, args["REASON"]))
                 {
+                    // <WolfViewer 2026-10-31> the final outcome, with its reason, for WolfLeap (llagentlistener.cpp)
+                    LLEventPumps::instance().obtain("WolfTeleportFailed").post(
+                        llsd::map("reason", big_reason, "message_id", message_id));
+                    // </WolfViewer>
                     if( gAgent.getTeleportState() != LLAgent::TELEPORT_NONE )
                     {
                         LL_WARNS("Teleport") << "called handle_teleport_access_blocked, setting state to TELEPORT_NONE" << LL_ENDL;
@@ -7977,6 +7982,12 @@ void process_teleport_failed(LLMessageSystem *msg, void**)
     }
     // </WolfViewer>
     LL_WARNS("Teleport") << "Displaying CouldNotTeleportReason string, REASON= " << args["REASON"] << LL_ENDL;
+    // <WolfViewer 2026-10-31> The final outcome, with its reason, for WolfLeap (llagentlistener.cpp requestTeleport).
+    // LLViewerParcelMgr::onTeleportFailed() above posts "LLTeleport" {success: false} before the reason is known and
+    // also for the failure that is retried just above, so it cannot say why, or whether, the teleport failed.
+    LLEventPumps::instance().obtain("WolfTeleportFailed").post(
+        llsd::map("reason", args["REASON"].asString(), "message_id", message_id));
+    // </WolfViewer>
 
     // <FS:Ansariel> Stop typing after teleport (possible fix for FIRE-7273)
     gAgent.stopTyping();

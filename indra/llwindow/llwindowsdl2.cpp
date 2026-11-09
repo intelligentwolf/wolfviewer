@@ -3291,6 +3291,47 @@ void *LLWindowSDL::getPlatformWindow()
     return NULL;
 }
 
+// [VULKAN BACKEND 2026-11-08] The Vulkan window surface (llrender/vk/wolfvksurface.cpp) needs the X11 Display and
+// Window, or the Wayland display and wl_surface, of the SDL window. SDL 2.28 (packages/include/SDL2/SDL_version.h:60-62)
+// gives both through SDL_GetWindowWMInfo: SDL_syswm.h:174 info.x11 { display, window } and :295-296 info.wl { display,
+// surface }, the subsystem telling which (SDL_SYSWM_X11 :139, SDL_SYSWM_WAYLAND :143). The same call createContext
+// uses for the X11 clipboard (above, "Grab the window manager specific information").
+bool LLWindowSDL::getNativeHandles(NativeHandles& handles)
+{
+    handles = NativeHandles();
+    if (!mWindow)
+    {
+        return false;
+    }
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(mWindow, &info))
+    {
+        LL_WARNS("Vulkan") << "SDL_GetWindowWMInfo: " << SDL_GetError() << LL_ENDL;
+        return false;
+    }
+#if LL_X11
+    if (info.subsystem == SDL_SYSWM_X11)
+    {
+        handles.mKind = NativeHandles::X11;
+        handles.mDisplay = info.info.x11.display;
+        handles.mWindow = info.info.x11.window;
+        return true;
+    }
+#endif
+#if defined(SDL_VIDEO_DRIVER_WAYLAND)
+    if (info.subsystem == SDL_SYSWM_WAYLAND)
+    {
+        handles.mKind = NativeHandles::WAYLAND;
+        handles.mDisplay = info.info.wl.display;
+        handles.mSurface = info.info.wl.surface;
+        return true;
+    }
+#endif
+    LL_WARNS("Vulkan") << "SDL window subsystem " << int(info.subsystem) << " is neither X11 nor Wayland" << LL_ENDL;
+    return false;
+}
+
 // [VR KEYBOARD 2026-11-05] (llwindow.h). SDL_RaiseWindow: on Wayland an xdg-activation request for this window's own
 // surface (SDL-release-2.28.0 src/video/wayland/SDL_waylandwindow.c Wayland_RaiseWindow / Wayland_activate_window),
 // which the compositor grants or turns into an "urgent" mark by its own rules (Hyprland: misc:focus_on_activate); on

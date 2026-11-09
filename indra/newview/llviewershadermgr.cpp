@@ -174,6 +174,15 @@ static const ShaderFallbackStep sShaderFallbackSteps[] =
     { "RenderMirrors",                false, 0,                       "mirrors" },
     { "RenderScreenSpaceReflections", false, 0,                       "screen-space reflections" },
     { "RenderReflectionsEnabled",     false, 0,                       "reflection probes (the sky's light inside buildings)" },
+    // <WolfViewer 2026-11-09> Paul: see-through water joins the ladder. Off, the water programs are built without the
+    // TRANSPARENT_WATER permutation (gWaterProgram / gUnderWaterProgram, loadShadersWater) and the sea is drawn opaque
+    // without waves (floater_wolf_graphics_helper.xml t_water tool tip; settings.xml RenderTransparentWater). Placed
+    // before shadows: it costs the look only where there is water, shadows cost it everywhere. The resident is told by
+    // WolfGraphicsDegraded (one notice listing every step, notify_graphics_degraded, queued with doOnIdleOneTime so it
+    // appears once the UI is up), named as in Preferences > Graphics > General ("Transparent Water",
+    // panel_preferences_graphics1.xml:257); that check box and Graphics Helper's t_water row
+    // (wolffloatergraphicshelper.cpp:68) put it back.
+    { "RenderTransparentWater",       false, 0,                       "Transparent Water (the sea is drawn solid, without waves)" },
     { "RenderShadowDetail",           true,  0,                       "shadows" },
     { "RenderTerrainPBRDetail",       true,  TERRAIN_PBR_DETAIL_MIN,  "detailed terrain textures" },
 };
@@ -212,6 +221,15 @@ static void apply_shader_fallback_step(const ShaderFallbackStep& step)
     else
     {
         gSavedSettings.setBOOL(step.setting, step.value != 0);
+    }
+    // <WolfViewer 2026-11-09> RenderTransparentWater is the one step the loader does not read from gSavedSettings: the
+    // water programs test the cached LLPipeline::sRenderTransparentWater (loadShadersWater). Its listener
+    // (llviewercontrol.cpp handleRenderTransparentWaterChanged) refreshes that only once the pipeline is initialised
+    // and the listeners are connected (settings_setup_listeners, llappviewer.cpp), so it is refreshed here as well;
+    // otherwise the retry would build the same failing programs and the notice would name a feature never given up.
+    if (!strcmp(step.setting, "RenderTransparentWater"))
+    {
+        LLPipeline::updateRenderTransparentWater();
     }
 }
 
@@ -272,6 +290,18 @@ static void notify_graphics_degraded()
     LLSD args;
     args["FEATURES"] = list;
     args["GPU"] = gGLManager.mGLRenderer;
+    // <WolfViewer 2026-11-09> Paul: "as long as we tell the user what's happened" - where Transparent Water is put back
+    // on, named as Preferences shows it (panel_preferences_graphics1.xml: tab "Graphics", sub-tab "General", check box
+    // "Transparent Water"); empty unless this start-up's ladder took the water step
+    bool water_lost = false;
+    for (const ShaderFallbackStep& step : sShaderFallbackSteps)
+    {
+        if (!strcmp(step.setting, "RenderTransparentWater"))
+        {
+            water_lost = std::find(lost.begin(), lost.end(), std::string(step.lost)) != lost.end();
+        }
+    }
+    args["WATER_HINT"] = water_lost ? std::string(" Transparent Water is also in Preferences > Graphics > General.") : std::string();
     LLNotificationsUtil::add("WolfGraphicsDegraded", args);
 }
 // </WolfViewer>

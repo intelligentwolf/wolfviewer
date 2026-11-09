@@ -3,7 +3,7 @@
 	<layout_stack name="navigation_favorites_bar_visibility_stack">
 		<layout_panel name="navigation_bar_visibility_panel">
 			<layout_stack name="location_search_layout">
-				<layout_panel name="navigation_buttons_visibility_panel" right="253">
+				<layout_panel name="navigation_buttons_visibility_panel" right="292">
 					<pull_button name="back_btn" tool_tip="Zum vorherigen Standort zurückgehen"/>
 					<pull_button name="forward_btn" tool_tip="Einen Standort weiter gehen"/>
 					<button name="home_btn" tool_tip="Zu meinem Zuhause teleportieren"/>

@@ -66,7 +66,7 @@
 	 mouse_opaque="false"
 	 name="navigation_buttons_visibility_panel"
 	 layout="topleft"
-	 right="223"
+	 right="262"
 	 height="22"
 	 auto_resize="false">
 
@@ -139,6 +139,27 @@
 	     image_pressed_selected="PushButton_Selected_Press"
 	     control_name="WolfEnvironmentNativeSky"
 	     tool_tip="Wolf Environment (Experimental): Wolf Territories' own physical sky, clouds you can fly through, and weather. Click to switch it on or off."
+	     top_delta="0"
+	     width="32" />
+
+          <!-- [V BUTTON 2026-11-08] V: the Vulkan renderer for the next start. Paul: "next to the WE button we add a V button
+               with a 'Use Vulkan shaders' tooltip; when it's on it goes green like the WE button next to it". Lit while
+               WolfRenderBackend is "vulkan" (llnavigationbar.cpp keeps the face in step with the setting, tints it green
+               like WE, greys it out with its own tooltip where no Vulkan device was found, and shows it on Wolf
+               Territories only like the other Wolf buttons). No control_name: the setting is a string, the click goes
+               through WolfVkBridge::chooseBackend and its restart notice. -->
+	    <button
+	     follows="left|top"
+	     height="23"
+	     layout="topleft"
+	     left_pad="7"
+	     name="WolfVulkanBtn"
+	     label="V"
+	     is_toggle="true"
+	     tab_stop="false"
+	     image_selected="PushButton_Selected_Press"
+	     image_pressed_selected="PushButton_Selected_Press"
+	     tool_tip="Use Vulkan shaders"
 	     top_delta="0"
 	     width="32" />
 

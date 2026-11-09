@@ -34,7 +34,7 @@ public:
 
 private:
     void onChoice();
-    void refresh();
+    void refresh() override;   // [CI 2026-11-09] overrides LLFloater::refresh() (clang -Winconsistent-missing-override is an error on macOS, run 42608973078)
 
     LLRadioGroup* mBackend = nullptr;
     LLTextBox* mStatus = nullptr;

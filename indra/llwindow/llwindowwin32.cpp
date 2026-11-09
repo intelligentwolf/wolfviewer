@@ -4362,7 +4362,7 @@ bool LLWindowWin32::getNativeHandles(NativeHandles& handles)
     {
         return false;
     }
-    handles.mKind = NativeHandles::WIN32;
+    handles.mKind = NativeHandles::KIND_WIN32;
     handles.mInstance = mhInstance;
     handles.mHandle = mWindowHandle;
     return true;

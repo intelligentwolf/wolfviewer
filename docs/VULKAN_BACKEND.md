@@ -1221,6 +1221,26 @@ GL 4.0).
   push without it).
 - Windows-only code in this branch: the win32 handle import (wolfvkshare.cpp, wolfvkdevice exportMemory) and
   `GetThreadTimes` (wolfvkbridge.cpp loop timers). macOS: wolfvksurface_macosx.mm and the read-back hand-over.
+- **First CI check (Paul's OK, 2026-11-09).** A snapshot (3544adab0c) was pushed to branch vulkan-ci-check: Windows run
+  42595764440 and macOS run 42595767793 both failed.
+  - Windows: `LLWindow::NativeHandles::Kind` had an enumerator named `WIN32`, which is a predefined macro under MSVC
+    (C2143). The enumerators are now `KIND_NONE/X11/WAYLAND/WIN32/COCOA` (llwindow.h, llwindowsdl2.cpp,
+    llwindowwin32.cpp, llwindowmacosx.cpp, wolfvksurface.cpp).
+  - macOS: the vendored Vulkan-Headers lacked `include/vk_video/`, which vulkan_core.h includes (:9805). All twelve
+    files from tag v1.4.363 (the vendored vulkan_core.h's version; byte-identical to that tag) now sit in
+    `third_party/vulkan-headers/include/vk_video/`. `include/` is already the include directory (Vulkan.cmake).
+- **Macro sweep for the next CI run.** Every identifier in this branch's added code (comments and strings removed)
+  was matched against the 157,708 macro names `#define`d in Wine's Windows headers (/usr/include/wine/windows,
+  msvcrt) and a list of known macOS names.
+  - Hits: `INT` (wintab.h `#define INT(x)`), in `WolfVkSpirv::BaseType`, whose enumerators are now
+    `Unknown/Bool/Int/UInt/Float/Double`; `GetCurrentThread`, deliberately the Win32 call; `min`/`max` (NOMINMAX is
+    defined, 00-Common.cmake:90); standard names (NULL, bool, true/false, UINT32_MAX, isfinite).
+  - No `near`/`far`/`interface`/`ERROR`/`TRANSPARENT`/`OPAQUE` in code.
+  - Objective-C `id`, `nil`, `YES` appear only in .cpp parameter names (`id`, not compiled as Objective-C) and in the
+    .mm file where they are meant.
+- **MSVC builds with /W3 /WX** (00-Common.cmake:101/128), so level-3 warnings such as C4267 and C4244 are errors.
+  GCC -Wconversion/-Wsign-conversion is clean on all 16 Vulkan files, which covers those conversions as far as GCC
+  sees them. MSVC itself is only proved by the CI re-run.
 
 **Memory, leaks, quitting.**
 - chain35 part 5: 10 minutes in world in Vulkan per GPU with `memsample.sh` (RSS; whole-card VRAM/GTT on the Radeon,

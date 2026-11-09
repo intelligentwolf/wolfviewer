@@ -2573,7 +2573,7 @@ bool LLWindowMacOSX::getNativeHandles(NativeHandles& handles)
     {
         return false;
     }
-    handles.mKind = NativeHandles::COCOA;
+    handles.mKind = NativeHandles::KIND_COCOA;
     handles.mHandle = mGLView;
     return true;
 }

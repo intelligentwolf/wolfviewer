@@ -3313,7 +3313,7 @@ bool LLWindowSDL::getNativeHandles(NativeHandles& handles)
 #if LL_X11
     if (info.subsystem == SDL_SYSWM_X11)
     {
-        handles.mKind = NativeHandles::X11;
+        handles.mKind = NativeHandles::KIND_X11;
         handles.mDisplay = info.info.x11.display;
         handles.mWindow = info.info.x11.window;
         return true;
@@ -3322,7 +3322,7 @@ bool LLWindowSDL::getNativeHandles(NativeHandles& handles)
 #if defined(SDL_VIDEO_DRIVER_WAYLAND)
     if (info.subsystem == SDL_SYSWM_WAYLAND)
     {
-        handles.mKind = NativeHandles::WAYLAND;
+        handles.mKind = NativeHandles::KIND_WAYLAND;
         handles.mDisplay = info.info.wl.display;
         handles.mSurface = info.info.wl.surface;
         return true;

@@ -196,8 +196,9 @@ public:
     // layer fills what it has; false when it has nothing (headless, or a window layer without the information).
     struct NativeHandles
     {
-        enum Kind { NONE, X11, WAYLAND, WIN32, COCOA };
-        Kind mKind = NONE;
+        // [CI 2026-11-09] prefixed: WIN32 is a predefined macro on Windows (MSVC C2143 in CI run 42595764440)
+        enum Kind { KIND_NONE, KIND_X11, KIND_WAYLAND, KIND_WIN32, KIND_COCOA };
+        Kind mKind = KIND_NONE;
         void* mDisplay = nullptr;        // X11: Display*; Wayland: struct wl_display*
         unsigned long mWindow = 0;       // X11: Window (an XID)
         void* mSurface = nullptr;        // Wayland: struct wl_surface*

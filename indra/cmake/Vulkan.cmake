@@ -12,8 +12,12 @@
 #
 # Pattern: like OpenXR.cmake / VulkanGltf.cmake this defines one imported interface target, ll::vulkan_headers, but
 # from the in-tree copy instead of an autobuild package, because a header set needs no per-platform binary.
+# [CI 2026-11-09] include/vk_video/ too (all twelve vulkan_video_codec*.h of the same tag, v1.4.363, byte-identical to
+# github.com/KhronosGroup/Vulkan-Headers at that tag): vulkan_core.h includes "vk_video/vulkan_video_codec_h264std.h"
+# (vulkan_core.h:9805 and on), found through the include/ directory below; the macOS CI build failed without them
+# (run 42595767793), Linux had only been finding them in /usr/include.
 # To update the headers: copy vk_platform.h, vulkan.h, vulkan_core.h, vulkan_beta.h, vulkan_xlib.h, vulkan_wayland.h,
-# vulkan_win32.h, vulkan_metal.h and the licence from a Vulkan-Headers release, then re-run
+# vulkan_win32.h, vulkan_metal.h, include/vk_video/*.h and the licence from one Vulkan-Headers release, then re-run
 # scripts/vulkan/wolfvk_cite.py to refresh the line citations (it fails the build check if a cited line moved).
 
 include_guard()

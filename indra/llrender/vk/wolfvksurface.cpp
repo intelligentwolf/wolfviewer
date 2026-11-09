@@ -68,7 +68,7 @@ VkSurfaceKHR create(VkInstance instance, LLWindow* window, std::string& error)
     VkResult res = VK_ERROR_INITIALIZATION_FAILED;
 
 #if LL_WINDOWS
-    if (handles.mKind != LLWindow::NativeHandles::WIN32)
+    if (handles.mKind != LLWindow::NativeHandles::KIND_WIN32)
     {
         error = "expected Win32 window handles";
         return VK_NULL_HANDLE;
@@ -86,7 +86,7 @@ VkSurfaceKHR create(VkInstance instance, LLWindow* window, std::string& error)
     res = create_fn(instance, &info, nullptr, &surface);
     sKind = "Win32";
 #elif LL_DARWIN
-    if (handles.mKind != LLWindow::NativeHandles::COCOA)
+    if (handles.mKind != LLWindow::NativeHandles::KIND_COCOA)
     {
         error = "expected a Cocoa view handle";
         return VK_NULL_HANDLE;
@@ -108,7 +108,7 @@ VkSurfaceKHR create(VkInstance instance, LLWindow* window, std::string& error)
     res = create_fn(instance, &info, nullptr, &surface);
     sKind = "Metal";
 #else
-    if (handles.mKind == LLWindow::NativeHandles::X11)
+    if (handles.mKind == LLWindow::NativeHandles::KIND_X11)
     {
         PFN_vkCreateXlibSurfaceKHR create_fn = reinterpret_cast<PFN_vkCreateXlibSurfaceKHR>(gVk.vkGetInstanceProcAddr(instance, "vkCreateXlibSurfaceKHR"));
         if (!create_fn)
@@ -123,7 +123,7 @@ VkSurfaceKHR create(VkInstance instance, LLWindow* window, std::string& error)
         res = create_fn(instance, &info, nullptr, &surface);
         sKind = "X11";
     }
-    else if (handles.mKind == LLWindow::NativeHandles::WAYLAND)
+    else if (handles.mKind == LLWindow::NativeHandles::KIND_WAYLAND)
     {
         PFN_vkCreateWaylandSurfaceKHR create_fn = reinterpret_cast<PFN_vkCreateWaylandSurfaceKHR>(gVk.vkGetInstanceProcAddr(instance, "vkCreateWaylandSurfaceKHR"));
         if (!create_fn)

@@ -91,10 +91,10 @@ namespace
         {
             switch (t.mOp)
             {
-            case OpTypeBool: return WolfVkSpirv::BaseType::BOOL;
-            case OpTypeInt: return t.mSigned ? WolfVkSpirv::BaseType::INT : WolfVkSpirv::BaseType::UINT;
-            case OpTypeFloat: return t.mWidth == 64 ? WolfVkSpirv::BaseType::DOUBLE : WolfVkSpirv::BaseType::FLOAT;
-            default: return WolfVkSpirv::BaseType::UNKNOWN;
+            case OpTypeBool: return WolfVkSpirv::BaseType::Bool;
+            case OpTypeInt: return t.mSigned ? WolfVkSpirv::BaseType::Int : WolfVkSpirv::BaseType::UInt;
+            case OpTypeFloat: return t.mWidth == 64 ? WolfVkSpirv::BaseType::Double : WolfVkSpirv::BaseType::Float;
+            default: return WolfVkSpirv::BaseType::Unknown;
             }
         }
 
@@ -189,7 +189,7 @@ namespace WolfVkSpirv
 
 uint32_t memberElementSize(const BlockMember& m)
 {
-    const uint32_t scalar = (m.mBase == BaseType::DOUBLE) ? 8 : 4;
+    const uint32_t scalar = (m.mBase == BaseType::Double) ? 8 : 4;
     if (m.mColumns > 1)
     {
         // a matrix element spans (columns - 1) strides plus one column vector

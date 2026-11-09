@@ -40,14 +40,14 @@
 
 namespace WolfVkSpirv
 {
-    enum class BaseType { UNKNOWN, BOOL, INT, UINT, FLOAT, DOUBLE };
+    enum class BaseType { Unknown, Bool, Int, UInt, Float, Double };   // [CI 2026-11-09] not BOOL/INT/...: Windows headers define those names
 
     // One member of a uniform block, flattened: "name" for scalars/vectors/matrices/arrays of those; struct members
     // are flattened as "outer.inner" (GLSL's own naming for glGetUniformLocation).
     struct BlockMember
     {
         std::string mName;
-        BaseType mBase = BaseType::UNKNOWN;
+        BaseType mBase = BaseType::Unknown;
         uint32_t mColumns = 1;        // matrix columns (1 for non-matrices)
         uint32_t mRows = 1;           // vector size / matrix rows
         uint32_t mArraySize = 1;      // 1 when not an array
@@ -83,7 +83,7 @@ namespace WolfVkSpirv
     {
         std::string mName;
         uint32_t mLocation = 0;
-        BaseType mBase = BaseType::FLOAT;
+        BaseType mBase = BaseType::Float;
         uint32_t mComponents = 1;     // 1..4; a matrix input counts columns x rows
         uint32_t mLocations = 1;      // locations consumed (matrices, arrays)
     };

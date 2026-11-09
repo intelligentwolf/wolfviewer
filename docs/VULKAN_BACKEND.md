@@ -1232,12 +1232,23 @@ GL 4.0).
 - **Macro sweep for the next CI run.** Every identifier in this branch's added code (comments and strings removed)
   was matched against the 157,708 macro names `#define`d in Wine's Windows headers (/usr/include/wine/windows,
   msvcrt) and a list of known macOS names.
-  - Hits: `INT` (wintab.h `#define INT(x)`), in `WolfVkSpirv::BaseType`, whose enumerators are now
-    `Unknown/Bool/Int/UInt/Float/Double`; `GetCurrentThread`, deliberately the Win32 call; `min`/`max` (NOMINMAX is
+  - Hits: `INT` (wintab.h `#define INT(x)`), in `WolfVkSpirv::BaseType`. Its enumerators became
+    `Unknown/Bool/Int/...`, which broke Linux CI (run 42603921168: Xlib.h `#define Bool int`); the coordinator made them
+    `kUnknown/kBool/kInt/kUInt/kFloat/kDouble`; `GetCurrentThread`, deliberately the Win32 call; `min`/`max` (NOMINMAX is
     defined, 00-Common.cmake:90); standard names (NULL, bool, true/false, UINT32_MAX, isfinite).
   - No `near`/`far`/`interface`/`ERROR`/`TRANSPARENT`/`OPAQUE` in code.
   - Objective-C `id`, `nil`, `YES` appear only in .cpp parameter names (`id`, not compiled as Objective-C) and in the
     .mm file where they are meant.
+- **Second sweep, against the real Linux header set.** `g++ -E -dM` of X11/Xlib.h, Xutil.h, extensions/Xrandr.h,
+  SDL2/SDL.h + SDL_syswm.h (X11 on), GL/gl.h, glext.h, glx.h, dlfcn.h, time.h and unistd.h gives 15,043 macros. The
+  identifiers in this branch's code that match them are only those meant: `CLOCK_THREAD_CPUTIME_ID`, `RTLD_NOW`,
+  `RTLD_LOCAL`, `NULL`, `UINT32_MAX`.
+  - Still prefixed, for safety: `WolfVkBridge::LoopStage` (`INPUT, IDLE, DISPLAY, SWAP, SLEEP, COUNT`; `COUNT` is a
+    macro in X11/extensions/XI.h, and the others are common platform names) is now
+    `kInput/kIdle/kDisplay/kSwap/kSleep/kCount`.
+  - macOS: no SDK on this machine. Names checked by hand: `check`/`verify`/`require` (AssertMacros.h) occur only in
+    comments; `nil`/`YES` only in wolfvksurface_macosx.mm, where they are meant; `id` only as a parameter name in C++
+    files.
 - **MSVC builds with /W3 /WX** (00-Common.cmake:101/128), so level-3 warnings such as C4267 and C4244 are errors.
   GCC -Wconversion/-Wsign-conversion is clean on all 16 Vulkan files, which covers those conversions as far as GCC
   sees them. MSVC itself is only proved by the CI re-run.

@@ -90,7 +90,7 @@ void WolfFloaterVulkan::refresh()
 
 void WolfFloaterVulkan::draw()
 {
-    const F32 now = LLFrameTimer::getElapsedSeconds();
+    const F32 now = static_cast<F32>(LLFrameTimer::getElapsedSeconds());   // [CI 2026-11-09] MSVC C4244 (double -> F32) is an error here (/WX), run 42603913776
     if (now >= mNextRefresh)
     {
         mNextRefresh = now + 1.f;   // the frame numbers once a second; nothing to poll otherwise

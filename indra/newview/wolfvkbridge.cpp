@@ -34,11 +34,13 @@
 #include "llglslshader.h"     // every program's Vulkan mirror goes before the device
 #include "vk/wolfvkshader.h"
 #include "llwindow.h"
+#include "llappviewer.h"   // [RUN-TIME STOP 2026-11-09] requestQuit
 #include "llviewercontrol.h"
 #include "llnotificationsutil.h"
 #include "lltrans.h"
 #include "lltimer.h"
 #include <chrono>   // [AMD PERF] frame step timing
+#include <cstring>  // [VULKAN WAYLAND 2026-11-09] memcmp
 #if LL_WINDOWS
 #include <windows.h>          // GetThreadTimes (main loop timing)
 #else
@@ -53,7 +55,9 @@
 
 namespace
 {
-    enum class State { OPENGL, VULKAN_STARTING, VULKAN_ACTIVE, FELL_BACK };
+    // STOPPED [RUN-TIME STOP 2026-11-09]: Vulkan failed after the first frame; nothing more is presented (by either API)
+    // until the viewer has quit (stopAtRunTime)
+    enum class State { OPENGL, VULKAN_STARTING, VULKAN_ACTIVE, FELL_BACK, STOPPED };
 
     State sState = State::OPENGL;
     bool sRequested = false;            // WolfRenderBackend == "vulkan" at start, after the first-run check
@@ -316,11 +320,9 @@ namespace
         }
     }
 
-    void fallBack(const std::string& reason, const char* notice)
+    // Everything Vulkan made goes, in the order the hand-over needs (both fall-back paths below).
+    void tearDown()
     {
-        LL_WARNS("Vulkan") << "Falling back to OpenGL: " << reason << LL_ENDL;
-        sLastError = reason;
-        sState = State::FELL_BACK;
         // the G-buffer first: the render target stops being shared and gets ordinary GL textures at its next allocation
         if (gPipeline.mRT) gPipeline.mMainRT.deferredScreen.setWolfVkShared(false);
         LLRenderTarget::sWolfVkProvider = nullptr;
@@ -352,10 +354,56 @@ namespace
             sSurface = VK_NULL_HANDLE;
         }
         gWolfVkDevice.destroy();
+    }
+
+    // START-UP fall-back: Vulkan could not start before its first frame. OpenGL draws this very start in the same window
+    // (nothing of Vulkan has reached the window yet) and the notice says why.
+    void fallBack(const std::string& reason, const char* notice)
+    {
+        LL_WARNS("Vulkan") << "Falling back to OpenGL: " << reason << LL_ENDL;
+        sLastError = reason;
+        sState = State::FELL_BACK;
+        tearDown();
         // the setting follows what is running, so the floater and About tell the truth; the resident can ask again
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
         rememberNotice(notice, reason);
+    }
+
+    // [RUN-TIME STOP 2026-11-09] RUN-TIME failure (after Vulkan has drawn the window): Paul, "we force the user to relog if
+    // they switch to opengl". Handing a window Vulkan has been presenting to OpenGL in the same session made the screen
+    // flash on a native Wayland window (chain36 amd-wl-forced, 12:55Z), so it is not attempted: Vulkan is torn down, the
+    // next start is set to OpenGL (saved at once, in case the quit itself fails), one plain-English message box says so,
+    // and the viewer quits by the normal path after OK. The message box is the operating system's own
+    // (OSMessageBox, llwindow.cpp:72 -> SDL_ShowMessageBox / MessageBox / NSAlert), which needs no renderer. From here
+    // present() shows nothing more, Vulkan or OpenGL (State::STOPPED), until the viewer has gone.
+    void stopAtRunTime(const std::string& reason)
+    {
+        if (sState == State::STOPPED) return;
+        LL_WARNS("Vulkan") << "Vulkan renderer stopped while running; next start in OpenGL, quitting: " << reason << LL_ENDL;
+        sLastError = reason;
+        sState = State::STOPPED;
+        tearDown();
+        gSavedSettings.setString("WolfRenderBackend", "opengl");
+        gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+        // The reason is saved with the rest BEFORE the box, so a viewer that never comes back from it (killed, or ended
+        // from the desktop's "not responding" dialog while the box blocks the main thread: chain42 amd-r49-wlstop) still
+        // tells the resident at the next start (decideBackend, WolfVulkanStoppedLastRun). It is cleared once the box has
+        // been seen.
+        gSavedSettings.setString("WolfVulkanStoppedReason", reason);
+        gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+        LLStringUtil::format_map_t args;
+        args["[REASON]"] = reason;
+        // A one-button box answers OSBTN_CANCEL only when it could not be shown: OSMessageBoxSDL when SDL_ShowMessageBox
+        // fails (llwindowsdl2.cpp; e.g. no zenity on a Wayland desktop, SDL_waylandmessagebox.c), OSMessageBoxWin32 when
+        // MessageBoxW fails (its default case). Shown and closed without OK is -1 (SDL) or NSAlertFirstButtonReturn
+        // (macOS showAlert), not OSBTN_CANCEL.
+        if (OSMessageBox(LLTrans::getString("WolfVulkanStoppedRestart", args), LLTrans::getString("WolfVulkanStoppedTitle"), OSMB_OK) != OSBTN_CANCEL)
+        {
+            gSavedSettings.setString("WolfVulkanStoppedReason", "");
+            gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+        }
+        LLAppViewer::instance()->requestQuit();
     }
 
     bool createSwapchain(std::string& error)
@@ -428,6 +476,13 @@ namespace WolfVkBridge
 
 void decideBackend()
 {
+    // [RUN-TIME STOP 2026-11-09] the last run's Vulkan stop when its message box could not be shown (stopAtRunTime)
+    const std::string stopped = gSavedSettings.getString("WolfVulkanStoppedReason");
+    if (!stopped.empty())
+    {
+        gSavedSettings.setString("WolfVulkanStoppedReason", "");
+        rememberNotice("WolfVulkanStoppedLastRun", stopped);
+    }
     const std::string backend = gSavedSettings.getString("WolfRenderBackend");
     sRequested = false;
     if (backend != "vulkan")
@@ -447,6 +502,8 @@ void decideBackend()
     }
     sRequested = true;
     sState = State::VULKAN_STARTING;
+    // [VULKAN WAYLAND 2026-11-09] the window this start makes goes through XWayland, not native Wayland (llwindow.h)
+    LLWindow::sWolfAvoidNativeWayland = true;
     // Like RenderInitError (llappviewer.cpp:3952): the marker is false until the login screen has been drawn, and
     // written to disk at once in case this start crashes.
     gSavedSettings.setBOOL("WolfVulkanStartOK", false);
@@ -473,6 +530,43 @@ void initAfterGL(LLWindow* window)
     {
         fallBack(sLastError.empty() ? std::string("Vulkan is not available on this computer") : sLastError, "WolfVulkanFellBack");
         return;
+    }
+    // [VULKAN WAYLAND 2026-11-09] A native Wayland window (only when SDL_VIDEODRIVER forced it: a Vulkan start otherwise
+    // runs through XWayland, llwindow.h sWolfAvoidNativeWayland): its wl_surface already carries SDL's EGL window surface
+    // (SDL 2.28.0 SDL_waylandwindow.c:2082-2087). Only Mesa's RADV has been seen to share it (amd-wl-vk, 8.2o); NVIDIA
+    // failed vkCreateSwapchainKHR with VK_ERROR_SURFACE_LOST_KHR. Proven by the protocol trace (chain39 nv-paul-repro,
+    // WAYLAND_DEBUG=client): the compositor answered NVIDIA's Vulkan swapchain with `wl_display#1.error(nil, 0, "Surface
+    // already has a fifo")` - NVIDIA's EGL window surface had already given the wl_surface its wp_fifo_v1 object, a
+    // second one is a protocol error, and a protocol error ends the client's connection. SDL then either quits
+    // (SDL_waylandevents.c:372-385, reconnect compiled out at SDL_waylandvideo.c:1118 - Paul's 12:06Z run) or spins
+    // for ever in Wayland_ShowWindow waiting for a configure on the dead connection (SDL_waylandwindow.c:1422-1426 - the
+    // frozen splash of nv-paul-repro). Mesa's EGL takes no fifo object (platform_wayland.c), which is why RADV shares the
+    // surface. Any driver but RADV therefore stays on OpenGL here, before a Vulkan surface
+    // touches the window - the window and its connection are then untouched and OpenGL carries on in it.
+    {
+        LLWindow::NativeHandles nh;
+        if (window && window->getNativeHandles(nh) && nh.mKind == LLWindow::NativeHandles::KIND_WAYLAND)
+        {
+            const WolfVkDevice::Config& cfg = gWolfVkDevice.config();
+            bool radv = false;
+            for (const WolfVkPhysicalDeviceInfo& d : gWolfVkDevice.physicalDevices())
+            {
+                // the device OpenGL runs on (VkPhysicalDeviceIDProperties::deviceUUID = GL_DEVICE_UUID_EXT), and its
+                // driver (VkPhysicalDeviceDriverProperties::driverID, VK_DRIVER_ID_MESA_RADV vulkan_core.h:6357)
+                if (cfg.mHaveGLDeviceUUID && memcmp(d.mIds.deviceUUID, cfg.mGLDeviceUUID, VK_UUID_SIZE) == 0)
+                {
+                    radv = d.mDriver.driverID == VK_DRIVER_ID_MESA_RADV;
+                }
+            }
+            // test only: WolfVulkanDebugWaylandAnyDriver lets the rig reproduce the failure (with WAYLAND_DEBUG=client)
+            static LLCachedControl<bool> any_driver(gSavedSettings, "WolfVulkanDebugWaylandAnyDriver", false);
+            if (!radv && !any_driver)
+            {
+                fallBack("on a native Wayland window this graphics driver cannot show Vulkan and OpenGL in the same window "
+                         "(start WolfViewer without SDL_VIDEODRIVER=wayland to use Vulkan)", "WolfVulkanFellBack");
+                return;
+            }
+        }
     }
     sSurface = WolfVkSurface::create(gWolfVkDevice.instance(), window, error);
     if (sSurface == VK_NULL_HANDLE)
@@ -596,7 +690,7 @@ bool ensureFrameBegun()
     // may have marked the device hung since the last frame began: the same fall-back as a frame that never finished
     if (gWolfVkDevice.hung())
     {
-        fallBack("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")", "WolfVulkanLost");
+        stopAtRunTime("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")");
         return false;
     }
     if (sFrameBegun) return true;
@@ -606,7 +700,7 @@ bool ensureFrameBegun()
     }
     if (gWolfVkDevice.hung())
     {
-        fallBack("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")", "WolfVulkanLost");
+        stopAtRunTime("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")");
         return false;
     }
     prof::readSlot();                // [AMD PERF] this slot's timestamps from its last use are final now
@@ -650,18 +744,18 @@ void dumpGBufferIfAsked()
     if (!sGBuffer->glHandToVulkan())
     {
         gWolfVkDevice.discardMidFrame(cmd);
-        if (sGBuffer->broken()) fallBack("G-buffer hand-over: " + sGBuffer->brokenReason(), "WolfVulkanLost");
+        if (sGBuffer->broken()) stopAtRunTime("G-buffer hand-over: " + sGBuffer->brokenReason());
         return;
     }
     const bool recorded = sGBuffer->recordDump(cmd, error);   // releases the images back to GL even when it fails
     if (!gWolfVkDevice.submitMidFrame(cmd, sGBuffer->sync(), error))
     {
-        fallBack("G-buffer dump submit: " + error, "WolfVulkanLost");
+        stopAtRunTime("G-buffer dump submit: " + error);
         return;
     }
     if (!sGBuffer->glTakeBack())
     {
-        fallBack("G-buffer hand-back: " + sGBuffer->brokenReason(), "WolfVulkanLost");
+        stopAtRunTime("G-buffer hand-back: " + sGBuffer->brokenReason());
         return;
     }
     if (!gWolfVkDevice.waitIdle()) return;   // debug: the host buffers are read now (bounded; hung -> next frame falls back)
@@ -867,7 +961,7 @@ bool drawPassSimple()
         gWolfVkDevice.discardMidFrame(cmd);
         if (sGBuffer->broken())
         {
-            fallBack("G-buffer hand-over: " + sGBuffer->brokenReason(), "WolfVulkanLost");
+            stopAtRunTime("G-buffer hand-over: " + sGBuffer->brokenReason());
         }
         return false;
     }
@@ -894,7 +988,7 @@ bool drawPassSimple()
     }
     if (!submitted)
     {
-        fallBack("G-buffer pass: " + error, "WolfVulkanLost");
+        stopAtRunTime("G-buffer pass: " + error);
         return false;
     }
     // Vulkan -> GL: GL's queue waits for the pass before the next pool draws
@@ -907,7 +1001,7 @@ bool drawPassSimple()
     if (!taken)
     {
         // GL did not wait: it must not draw into images Vulkan may still be writing, and the semaphore state is unknown
-        fallBack("G-buffer hand-back: " + sGBuffer->brokenReason(), "WolfVulkanLost");
+        stopAtRunTime("G-buffer hand-back: " + sGBuffer->brokenReason());
         return false;
     }
     // [BLUE DASHES 2026-11-08] OpenGL rewrites the shared depth itself before its later passes (wolfvkgbuffer.h glRewriteDepth).
@@ -945,7 +1039,27 @@ static bool closeFrameWithoutImage(std::string& error)
     return gWolfVkDevice.endFrame(false, VK_NULL_HANDLE, sync, error);
 }
 
+namespace
+{
+bool presentFrame();
+}
+
 bool present()
+{
+    // [RUN-TIME STOP 2026-11-09] after a run-time failure nothing more reaches the window, by Vulkan or by OpenGL's own
+    // swap (the caller swaps only on false), until the viewer has quit (stopAtRunTime) - also for the frame in which the
+    // failure happened: every path out of presentFrame that stopped Vulkan returns false, which here becomes true
+    if (sState == State::STOPPED)
+    {
+        return true;
+    }
+    const bool presented = presentFrame();
+    return presented || sState == State::STOPPED;
+}
+
+namespace
+{
+bool presentFrame()
 {
     if (sState != State::VULKAN_ACTIVE || !sScene)
     {
@@ -968,16 +1082,25 @@ bool present()
     const F64 t0 = LLTimer::getTotalSeconds();
     std::string error;
 
+    // [VULKAN WAYLAND 2026-11-09] test only (WolfVulkanDebugFallBack, switches itself off): the run-time stop, as a lost
+    // device takes it (stopAtRunTime: message box, next start in OpenGL, quit), so the rig can prove it on every window
+    static LLCachedControl<bool> test_fallback(gSavedSettings, "WolfVulkanDebugFallBack", false);
+    if (test_fallback)
+    {
+        gSavedSettings.setBOOL("WolfVulkanDebugFallBack", false);
+        stopAtRunTime("test: WolfVulkanDebugFallBack");
+        return false;
+    }
     // [HANG GUARD / HAND-OVER 2026-11-08 8.2k] a device marked hung or a hand-over broken earlier in this frame (GL
     // capture, G-buffer pass, a bounded wait): fall back before anything else is waited on or submitted
     if (gWolfVkDevice.hung())
     {
-        fallBack("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")", "WolfVulkanLost");
+        stopAtRunTime("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")");
         return false;
     }
     if (sScene->handOverBroken())
     {
-        fallBack("hand-over: " + sScene->handOverBrokenReason(), "WolfVulkanLost");
+        stopAtRunTime("hand-over: " + sScene->handOverBrokenReason());
         return false;
     }
 
@@ -988,7 +1111,7 @@ bool present()
         {
             if (gWolfVkDevice.hung())
             {
-                fallBack("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")", "WolfVulkanLost");
+                stopAtRunTime("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")");
                 return false;
             }
             // a minimised window has no size: skip this frame, try again next time. A slot opened mid-frame by a G-buffer
@@ -1001,7 +1124,7 @@ bool present()
                 std::string close_error;
                 if (!closeFrameWithoutImage(close_error))
                 {
-                    fallBack(close_error, "WolfVulkanLost");
+                    stopAtRunTime(close_error);
                     return false;
                 }
             }
@@ -1010,8 +1133,8 @@ bool present()
         sScene->onSwapchainChanged(sSwapchain);
         if (gWolfVkDevice.hung() || sScene->handOverBroken())   // the shared layers' resize ran out of time / failed
         {
-            fallBack(gWolfVkDevice.hung() ? "the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")"
-                                          : "hand-over: " + sScene->handOverBrokenReason(), "WolfVulkanLost");
+            stopAtRunTime(gWolfVkDevice.hung() ? "the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")"
+                                          : "hand-over: " + sScene->handOverBrokenReason());
             return false;
         }
     }
@@ -1035,13 +1158,13 @@ bool present()
     {
         if (gWolfVkDevice.hung())   // VK_ERROR_DEVICE_LOST from the acquire: nothing more may be submitted
         {
-            fallBack("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")", "WolfVulkanLost");
+            stopAtRunTime("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")");
             return false;
         }
         std::string close_error;
         if (!closeFrameWithoutImage(close_error))
         {
-            fallBack(close_error, "WolfVulkanLost");
+            stopAtRunTime(close_error);
             return false;
         }
         if (out_of_date)
@@ -1056,7 +1179,7 @@ bool present()
             LL_DEBUGS("Vulkan") << "frame skipped: " << error << LL_ENDL;
             return true;
         }
-        fallBack(error, "WolfVulkanLost");
+        stopAtRunTime(error);
         return false;
     }
 
@@ -1078,7 +1201,7 @@ bool present()
     if (!recorded)
     {
         // GL's UI capture did not signal gl_done: this frame's submit would wait on a signal that never happened
-        fallBack("hand-over: " + sScene->handOverBrokenReason(), "WolfVulkanLost");
+        stopAtRunTime("hand-over: " + sScene->handOverBrokenReason());
         return false;
     }
 
@@ -1091,7 +1214,7 @@ bool present()
     }
     if (!ended)
     {
-        fallBack(error, "WolfVulkanLost");
+        stopAtRunTime(error);
         return false;
     }
     bool present_out_of_date = false;
@@ -1108,7 +1231,7 @@ bool present()
         }
         else
         {
-            fallBack(error, "WolfVulkanLost");
+            stopAtRunTime(error);
             return false;
         }
     }
@@ -1178,6 +1301,7 @@ bool present()
     }
     return true;
 }
+} // namespace (presentFrame)
 
 void onLoginScreenShown()
 {
@@ -1291,6 +1415,7 @@ std::string statusLine()
         // [A1 2026-11-09] the automatic AMD choice is said in plain words; a setting someone chose is not explained
         return LLTrans::getString(sGBufferAutoAMD ? "WolfVulkanStatusActiveAMD" : "WolfVulkanStatusActive");
     case State::FELL_BACK:
+    case State::STOPPED:
     {
         LLStringUtil::format_map_t args;
         args["[REASON]"] = sLastError;

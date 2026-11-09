@@ -53,7 +53,7 @@ time (`wolfvkloader.cpp`) and every entry point is fetched through `vkGetInstanc
 | `wolfvkshare.h/.cpp` | [SHARED IMAGES] `WolfVkSharedImage` (a Vulkan image with exported memory + the GL texture imported over it) and the three layers (world RGBA8, UI RGBA8, depth D32F), the two exported semaphores, the GL copies (blit + depth pass) and the Vulkan acquire/release barriers |
 | `wolfvkgbuffer.h/.cpp` | [VULKAN G-BUFFER] the provider behind `LLRenderTarget::sWolfVkProvider`: `mRT->deferredScreen`'s four colour attachments and depth as shared images, the pass semaphores, and the Vulkan render target over them (`WolfVkScene::drawGBufferSimple` draws `PASS_SIMPLE` into it from `LLDrawPoolSimple::renderDeferred` through `WolfVkBridge::drawPassSimple`) |
 | `wolfvkmirror.h/.cpp` | Vulkan copies of the GL vertex buffers (`glGetBufferSubData` once, then kept current by `LLVertexBuffer::sWolfVkOnFlush`) and textures (`glGetTexImage` per level, re-made on `LLImageGL::sWolfVkOnTexelsChanged`) |
-| `wolffloatervulkan.h/.cpp`, `skins/default/xui/en/floater_wolf_vulkan.xml` | Wolf World > Vulkan Renderer... |
+| `wolffloatervulkan.h/.cpp`, `skins/default/xui/en/floater_wolf_vulkan.xml` | Wolf World > Tools > Vulkan Renderer... |
 | `llnavigationbar.cpp`, `skins/default/xui/en/panel_navigation_bar.xml` | the V button next to WE (section 3) |
 | `app_settings/shaders/class1/wolfvk/compositeV.glsl`, `compositeF.glsl` | the composite pass (Vulkan GLSL) |
 
@@ -1121,6 +1121,164 @@ layers, their semaphores or the frame protocol at all.
   - The same check is repeated after two window resizes.
   - Vulkan with validation and OpenGL run on both GPUs, then `vrbigcheck.py` compares Vulkan against OpenGL.
   - Paul tests on the Quest 3.
+
+### 8.2q NVIDIA on native Wayland: the swapchain failed and the viewer quit (Paul, r44, 2026-11-09 12:06Z)
+
+**What Paul's log shows** (`WolfViewer.old`): native Wayland ("SDL video driver: wayland", NVIDIA by PRIME render
+offload), then "Window surface created (Wayland)" on the RTX 5090, "Device created", then
+`Falling back to OpenGL: vkCreateSwapchainKHR: VK_ERROR_SURFACE_LOST_KHR`. OpenGL went on (Wayland EGL 1.5, the window
+2560x1600 / 4096x2560 pixels), and about a second later came "User requested quit", the clean shutdown and "quitCursors:
+mWindow already gone". The next start's `WolfVulkanStartOK` check then chose OpenGL, so Vulkan never ran for him.
+
+**Cause, from the code read.**
+- SDL 2.28.0 (the viewer's SDL, packages SDL_version.h:60-62) gives every OpenGL window on Wayland a `wl_egl_window` and
+  an EGL window surface on the window's own `wl_surface` when it creates it (src/video/wayland/SDL_waylandwindow.c:
+  2082-2087). The Vulkan surface (wolfvksurface.cpp, `vkCreateWaylandSurfaceKHR` on the same `wl_surface` from
+  `SDL_GetWindowWMInfo`) therefore asks a second presentation API to own a surface EGL already owns. The Vulkan spec
+  makes a native window in use by another API an error of `vkCreateSwapchainKHR` (VK_ERROR_NATIVE_WINDOW_IN_USE_KHR);
+  NVIDIA answered VK_ERROR_SURFACE_LOST_KHR.
+- In SDL 2.28 a Wayland viewer is only told to quit by a broken connection (SDL_waylandevents.c:372-385: a failed
+  `wl_display_dispatch_pending`, then `Wayland_VideoReconnect`, which is compiled out, SDL_waylandvideo.c:1118, so
+  `SDL_SendQuit`) or by a window close. So the Vulkan attempt very likely broke the Wayland connection (a protocol error
+  from the compositor ends it). That is inferred, not yet seen: chain36's nv-wl-repro records the protocol traffic
+  (WAYLAND_DEBUG=client). Once the connection is gone no window can carry on, which is why the fall-back could not
+  keep the viewer running.
+- Mesa's RADV shared the surface without trouble (amd-wl-vk, 8.2o); every NVIDIA Vulkan test before ran through
+  XWayland, where GLX and the Vulkan Xlib surface share an X window.
+
+**Fix (r45).**
+- A start that tries Vulkan never makes a native Wayland window. `WolfVkBridge::decideBackend` (before the window
+  exists) sets `LLWindow::sWolfAvoidNativeWayland`. `LLWindowSDL::createContext` then does not ask SDL for Wayland,
+  logs "Native Wayland not used this start: the Vulkan renderer is chosen, and it shares the window with OpenGL through
+  XWayland", and the window runs through XWayland - the proven path on both GPUs. A start in OpenGL keeps native
+  Wayland as before.
+- If the window is native Wayland anyway (SDL_VIDEODRIVER=wayland set by the user), `initAfterGL` checks, before any
+  Vulkan surface is made, which driver the OpenGL device's Vulkan twin uses (`deviceUUID` = GL_DEVICE_UUID_EXT,
+  `driverID`). Only VK_DRIVER_ID_MESA_RADV goes on; any other driver falls back to OpenGL with `WolfVulkanFellBack`
+  ("on a native Wayland window this graphics driver cannot show Vulkan and OpenGL in the same window ..."). The window
+  and its connection are untouched, so OpenGL carries on in it.
+- Test switches (hidden, off): `WolfVulkanDebugFallBack` takes the run-time fall-back at the next frame (as a lost
+  device does) and switches itself off; `WolfVulkanDebugWaylandAnyDriver` bypasses the driver check, to reproduce the
+  failure.
+- Cost for a Wayland desktop: Vulkan mode runs through XWayland, so scaling follows the compositor's XWayland rules
+  rather than native fractional scaling.
+- **Untested until chain36 runs.**
+
+**Proven (chain39 nv-paul-repro, 13:07Z).** The session used Paul's own window and graphics settings, native Wayland
+on the RTX 5090 (`SDL_VIDEODRIVER=wayland` and `__NV_PRIME_RENDER_OFFLOAD=1`, which LLWindowSDL itself sets on his
+desktop) and `WAYLAND_DEBUG=client`, with the driver check bypassed.
+- The protocol trace shows `wl_display#1.error(nil, 0, "Surface already has a fifo")` at 13:07:09.445, then
+  `vkCreateSwapchainKHR: VK_ERROR_SURFACE_LOST_KHR` (run-nv-paul-repro.out:3076-3078). NVIDIA's EGL window surface had
+  already taken the window's wp_fifo_v1 object and the Vulkan swapchain asked for a second. A protocol error ends the
+  client's Wayland connection.
+- SDL then spun for ever in `Wayland_ShowWindow`, waiting for the first configure on the dead connection
+  (SDL_waylandwindow.c:1422-1426; perf of the main thread: pthread_mutex_lock / libc and wl_display_dispatch under
+  Wayland_ShowWindow, state R). On Paul's start the window was shown before the swapchain, so SDL quit instead
+  (SDL_waylandevents.c:372-385).
+- Mesa's EGL takes no fifo object (src/egl/drivers/dri2/platform_wayland.c has none), which is why RADV shares the
+  surface.
+- Why the earlier repros did not reproduce it: chain36's nv-wl-repro and nv-wl-forced set SDL_VIDEODRIVER, and that
+  skips LLWindowSDL's whole native-Wayland block, the PRIME request included. OpenGL, and so the Vulkan device chosen by
+  its UUID, was then the Radeon (log: "Device chosen by the OpenGL device UUID: AMD Radeon 890M"). The driver check
+  correctly let RADV through, so it did not "fail to fire".
+
+**Run-time failures: stop and quit (r46, Paul's decision 2026-11-09: "we force the user to relog if they switch to
+opengl").**
+- Background: the in-session Vulkan-to-OpenGL hand-over flashed on a native Wayland window (chain36 amd-wl-forced,
+  12:55Z; Paul saw it). A diagnosis repeat (amd-wlfb-diag, 13:01Z, bursts before and after) did not reproduce it,
+  so its cause is not proven - but the path is gone.
+- What happens now: any failure after the first Vulkan frame calls `stopAtRunTime` (wolfvkbridge.cpp). That covers a
+  device lost or hung, a broken hand-over, a swapchain failure, and the `WolfVulkanDebugFallBack` test switch. It:
+  - tears Vulkan down;
+  - sets and saves `WolfRenderBackend=opengl` (and `WolfVulkanStartOK`) at once;
+  - shows one operating-system message box (`OSMessageBox`, llwindow.cpp:72, no renderer needed; strings.xml
+    `WolfVulkanStoppedRestart`: "WolfViewer's Vulkan renderer stopped working on your graphics card ([REASON]).
+    WolfViewer will use OpenGL from now on. Please restart WolfViewer to carry on.");
+  - quits by the normal path (`LLAppViewer::requestQuit`) after OK.
+  - The reason is saved in `WolfVulkanStoppedReason` (hidden) with the rest, BEFORE the box, and cleared once the box
+    has been seen. The one-button box answers `OSBTN_CANCEL` only when it could not be shown (`OSMessageBoxSDL` when
+    `SDL_ShowMessageBox` fails; `OSMessageBoxWin32` when `MessageBoxW` fails). So when no box could be shown, or the
+    viewer never came back from it, the next start (`decideBackend`) clears it and shows the `WolfVulkanStoppedLastRun`
+    notice on the login screen once (r48-r50).
+- From the failure on, `present()` reports the frame as shown, so OpenGL never swaps into the window (State::STOPPED).
+  Nothing switches presenters in a live window any more.
+- The `WolfVulkanLost` notice is removed. Start-up fall-backs are unchanged: OpenGL in the same start, and the
+  `WolfVulkanFellBack` notice.
+
+**The message box on Linux (r48-r50, chain40-43).**
+- chain40 amd-r47-wlstop hung in SDL's `waitpid` on zenity. chain42 amd-r49-wlstop showed why the rig could not
+  answer it: on a native Wayland window the blocked main thread stops answering the compositor, Hyprland opens its
+  "Application Not Responding" dialog (Terminate / Wait), and that dialog took the focus. Return and a pointer click
+  did not reach the box. A resident can still click OK. Only a test can reach this case: Vulkan always uses XWayland
+  (section 8.2q) unless `SDL_VIDEODRIVER=wayland` is forced from outside.
+- chain41/42 showed a second fault: a box that was shown and answered was still reported as failed. r49 logged
+  `SDL_ShowMessageBox failed: Waiting on zenity failed: No child processes` (nv-r49-stop; the zenity wrapper logged
+  `zenity ended rc 1` at the same second). The cause: `LLVivoxVoiceClient`'s constructor sets SIGCHLD to SIG_IGN
+  (llvoicevivox.cpp, "Ignoring SIGCHLD should prevent zombies"). The kernel then reaps zenity itself, so SDL's
+  `waitpid` fails (SigIgn mask of the running viewer: 0x11000 = SIGPIPE + SIGCHLD). This affects every OSMessageBox
+  on Linux once voice has started, not only Vulkan's.
+- Fix (r50, llwindowsdl2.cpp `OSMessageBoxSDL`): SIGCHLD goes back to its default action only while the box is up,
+  and the previous action is restored afterwards. `SDL_GetError` is logged whenever the box fails.
+- chain43 (r50, XWayland, Return on the box): nv-r50-stop and amd-r50-stop. zenity ended rc 1 at the Return; there
+  was no `SDL_ShowMessageBox failed`; the reason was cleared (absent from the saved file); the viewer quit by itself
+  within a second; no leftover box or process.
+- nv-r48-next (the next start with a saved reason): the `WolfVulkanStoppedLastRun` notice was on the login screen,
+  the reason was cleared, and the session reached the world in OpenGL.
+- amd-r48-nobox (no X display, zenity failing): no box. The viewer quit within a second with OpenGL and the reason
+  saved.
+
+**Native Wayland across monitors of different scale (found, not a Vulkan fault; parked for after the release).**
+Paul (2026-11-09): "this has been an issue for a long time, I normally just move the viewer to my laptop screen". It
+happens in OpenGL mode with WolfNativeWayland on, which is his normal start. Vulkan mode always uses XWayland.
+- Reproduced every time: nv-paul50-gl and nv-wlscale-gl (chain44/45, r50). The window is made at 2560x1600 for the
+  1.6-scale panel and placed by Hyprland on a scale-1 monitor (DP-2). The picture filled 0.63 x 0.63 of the window
+  (fillcheck.py: 1201x676 of 1920x1080, 589x644 of 941x1030, 876x563 of 1400x900, 688x438 of 1100x700) and the rest
+  was edge streaks. This was after the first placement, after both resizes and after re-tiling.
+- The viewer side is right. Every resize reached `LLWindowSDL` with matching drawable pixels ("Handling a resize event:
+  1400x900 (1400x900 pixels)"), and the GL viewport followed (sky dome viewport 1897x1004 etc.).
+- Protocol trace (WAYLAND_DEBUG=client, run-nv-wlscale-gl.out):
+  - At the 1.6 start, SDL 2.28.0 made a viewport, `wp_viewport#43.set_source(0,0,4096,2560)` and
+    `set_destination(2560,1600)` (SDL_waylandwindow.c ConfigureWindowGeometry, NeedViewport: fractional scale +
+    SDL_WINDOW_ALLOW_HIGHDPI).
+  - On `preferred_scale(120)` (1.0) it took the integer-scale branch: `wp_viewport#43.destroy()` and buffer scale 1.
+  - From then on the compositor drew the buffer as if that old viewport were still there. A 4096-wide source mapped to
+    2560 is 0.625; 1920 buffer pixels show as 1200; beyond the buffer the source is clamped, which gives the streaks.
+- So the viewport state outlives `wp_viewport.destroy` on this Hyprland (0.56.2). That is a compositor-side cause,
+  inferred from the trace and not yet confirmed in Hyprland's source.
+- Workarounds to weigh later: keep the viewport and reset it (`set_source(-1,...)` / `set_destination(-1,-1)`)
+  instead of destroying it, which needs SDL patched; or start the window on the monitor it will land on.
+- XWayland (Vulkan mode) is not affected on the same-scale checks (chain46 below).
+
+**chain44/46 (r50, 2026-11-09 14:51-15:21Z): Paul's start path and the picture filling the window.** Paul's launcher
+(tvk/wolfviewer, diffed identical to ~/firestorm/wolfviewer) with a read-only COPY of his settings.xml (mkprof
+PROFBASE) and his window keys; nothing forced.
+| Run | Result |
+|---|---|
+| nv-xw-vk / amd-xw-vk (Vulkan) | "Native Wayland not used this start", SDL x11, Vulkan active (RTX 5090 / Radeon 890M, surface X11), in world. Swapchain followed every size. fillcheck 1.00 x 1.00 on every grab: Hyprland's first placement (fullscreen 1920x1080), fullscreen unset (941x1030), resized 1400x900 and 1100x700 (floating), tiled again, moved to the 1.6-scale panel (NV 2522x1520 pixels / AMD 1250x1520) and back to the scale-1 monitor |
+| nv-paul50-vk / amd-paul50-vk (Vulkan) | same start lines, in world; fill 1.00 (that run's resizes were refused because the window was fullscreen; fixed in resizefill.py for chain46) |
+| nv-paul50-gl (OpenGL, Paul's normal start) | "Wayland GPU: NVIDIA driver present, requesting it (PRIME render offload)", SDL wayland, GL on the RTX 5090, in world, clean quit - as before; picture 0.63 x 0.63 on the scale-1 monitor = the parked fractional-scale issue above |
+
+**chain39 (r46, 2026-11-09 13:07-13:58Z, results).**
+
+| Run | Window | Result |
+|---|---|---|
+| nv-paul-repro | native Wayland, RTX 5090, check bypassed | the failure reproduced and proven (above); session closed by hand |
+| nv-paul-guard | native Wayland, RTX 5090 | the driver check fell back before any Vulkan surface; OpenGL on NVIDIA in the same native Wayland window, into the world, clean quit |
+| nv-paul-fix | Paul's own settings, nothing forced | "Native Wayland not used this start", SDL x11, Vulkan active on the RTX 5090, into the world; the window moved by Hyprland 2560x1600 -> 1920x1080 and the picture fills it (shots/nv-paul-fix/world.png) |
+| nv-/amd-r46-stop | XWayland | `stopAtRunTime`; the message box blocked the main thread (46 s / 107 s, until OK was pressed on the screen - the rig's box finder missed it, fixed for chain40), then requestQuit and a clean quit |
+| amd-/nv-r46-val | XWayland, validation + sync + GPU-AV, resizes + unfocus | 0 VUID, 0 SYNC-HAZARD, no device loss |
+| amd-/nv-r46-play | XWayland | settled bursts max 5.1% / 6.2% of pixels per step, all in the moving water/sky/rigging area: no flashing |
+| nv-r46-noicd | no Vulkan driver | "Falling back to OpenGL: The Vulkan loader offers no VK_KHR_surface", the WolfVulkanFellBack notice on the login screen, into the world. (The chain's saved-file check printed nothing: its `grep -A4` stops before the `Value` line. `fallBack` sets `opengl`, which is not the default `vulkan`, so it is saved; the stop's saved file was read with a longer grep after chain40: `opengl`.) |
+| VR Big Screen | Vulkan with validation and OpenGL, both GPUs | e2e_vrbig PASSED all 4 (world in the picture before and after two resizes); Vulkan against OpenGL 14-18/255 mean (separate sessions: pose and foliage motion; same scene by eye) |
+
+**r47.** macOS CI run 42614243966 (snapshot 433e2208bd) failed at link on `_glCopyImageSubData` (GL 4.3) and
+`_glGetNamedBufferSubData` (GL 4.5); Apple's GL is 4.1.
+- `WolfVkGBuffer::glRewriteDepth` is not built on LL_DARWIN. Nothing reaches it there: no GL/Vulkan sharing on macOS.
+  `mRewriteTexLoc` is reset in destroy so no field goes unused there.
+- The pose-check probe reads the vertex through `GL_COPY_READ_BUFFER` and `glGetBufferSubData` (GL 3.1 / 1.5) on every
+  platform.
+- A grep of all new code for other GL 4.2+ entry points finds only `glTexStorage2D`, inside the excluded
+  glRewriteDepth.
 
 ### 8.3 Validation layer
 

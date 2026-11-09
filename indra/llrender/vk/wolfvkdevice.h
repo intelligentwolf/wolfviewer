@@ -130,6 +130,8 @@ public:
     bool createInstance(const Config& config, std::string& error);
     // Enumerates devices with their properties (valid after createInstance), for the floater and the log.
     const std::vector<WolfVkPhysicalDeviceInfo>& physicalDevices() const { return mPhysicalDevices; }
+    // [VULKAN WAYLAND 2026-11-09] the configuration createInstance was given (the OpenGL device UUID among it)
+    const Config& config() const { return mConfig; }
     // Runs the physical device choice (a.-e. above) without creating a device, so About and the renderer floater
     // can name the card that would be used; chosen()/aboutLine() are valid afterwards.
     bool chooseOnly(VkSurfaceKHR surface, std::string& error) { return choosePhysicalDevice(surface, error); }

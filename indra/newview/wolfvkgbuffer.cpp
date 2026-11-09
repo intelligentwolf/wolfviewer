@@ -194,6 +194,7 @@ void WolfVkGBuffer::destroy()
     mRewriteMsSum = 0.0;
     mRewriteMsCount = 0;
     mRewriteTex = mRewriteProgram = mRewriteVao = 0;
+    mRewriteTexLoc = -1;   // the program went with it (and keeps this field in use where glRewriteDepth is not built, macOS)
     mRewriteW = mRewriteH = 0;
     mAvailable = false;
     mWidth = mHeight = 0;
@@ -448,6 +449,12 @@ bool WolfVkGBuffer::writeGLViewDump(const std::string& dir, const std::string& p
 
 void WolfVkGBuffer::glRewriteDepth()
 {
+#if LL_DARWIN
+    // [CI 2026-11-09] Not built for macOS: Apple's GL is 4.1 and has no glCopyImageSubData (GL 4.3; macOS CI run
+    // 42614243966 failed at link on it), and nothing reaches this there - the G-buffer is only shared with Vulkan through
+    // GL_EXT_memory_object, which Apple's GL lacks (WolfVkShare::available is false on LL_DARWIN, wolfvkshare.cpp).
+    return;
+#else
     if (!ready()) return;
     if (!mRewriteProgram)
     {
@@ -553,6 +560,7 @@ void WolfVkGBuffer::glRewriteDepth()
     glUseProgram(static_cast<GLuint>(saved_prog));
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(saved_tex));
     glActiveTexture(static_cast<GLenum>(saved_active));
+#endif
 }
 
 double WolfVkGBuffer::rewriteMsAndReset()

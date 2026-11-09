@@ -57,6 +57,7 @@ extern LLControlGroup gSavedSettings;
 #ifdef LL_GLIB
 #include <glib.h>
 #endif
+#include <signal.h> // sigaction (OSMessageBoxSDL)
 
 extern "C" {
 # include "fontconfig/fontconfig.h"
@@ -781,7 +782,13 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
     {
         const char* forced = getenv("SDL_VIDEODRIVER");
         const char* wl = getenv("WAYLAND_DISPLAY");
-        if ((!forced || !*forced) && wl && *wl && gSavedSettings.getBOOL("WolfNativeWayland"))
+        // [VULKAN WAYLAND 2026-11-09] not for a start that tries the Vulkan renderer (llwindow.h sWolfAvoidNativeWayland)
+        if ((!forced || !*forced) && wl && *wl && gSavedSettings.getBOOL("WolfNativeWayland") && LLWindow::sWolfAvoidNativeWayland)
+        {
+            LL_INFOS() << "Native Wayland not used this start: the Vulkan renderer is chosen, and it shares the window with "
+                          "OpenGL through XWayland" << LL_ENDL;
+        }
+        else if ((!forced || !*forced) && wl && *wl && gSavedSettings.getBOOL("WolfNativeWayland"))
         {
             SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland,x11");
             // On a laptop with an NVIDIA GPU beside the integrated one (Paul's: RTX 5090 + Radeon
@@ -3136,9 +3143,29 @@ S32 OSMessageBoxSDL(const std::string& text, const std::string& caption, U32 typ
             break;
     }
 
+    // [RUN-TIME STOP 2026-11-09] SDL's Wayland box runs zenity and reads the answer after waitpid() on it
+    // (SDL_waylandmessagebox.c, SDL 2.28.0). LLVivoxVoiceClient's constructor sets SIGCHLD to SIG_IGN (llvoicevivox.cpp,
+    // "Ignoring SIGCHLD should prevent zombies"), so the kernel reaps zenity itself and waitpid() fails with ECHILD: the
+    // box was shown and answered but SDL_ShowMessageBox reported "Waiting on zenity failed: No child processes"
+    // (chain42 nv-r49-stop; the viewer's SigIgn mask had bit 17 set). The default SIGCHLD action is put back only while
+    // the box is up, then the previous one restored.
+    struct sigaction old_chld {};
+    struct sigaction dfl_chld {};
+    dfl_chld.sa_handler = SIG_DFL;
+    sigemptyset(&dfl_chld.sa_mask);
+    const bool chld_swapped = (0 == sigaction(SIGCHLD, &dfl_chld, &old_chld));
+
     int btn{0};
-    if( 0 == SDL_ShowMessageBox( &oData, &btn ) )
+    const int shown = SDL_ShowMessageBox( &oData, &btn );
+    if (chld_swapped)
+    {
+        sigaction(SIGCHLD, &old_chld, nullptr);
+    }
+    if( 0 == shown )
         return btn;
+    // say why no box (SDL_waylandmessagebox.c sets the error for a failed fork, a zenity that could not start or
+    // reported >= 128, and a failed waitpid), so a log shows whether the resident saw anything
+    LL_WARNS() << "SDL_ShowMessageBox failed: " << SDL_GetError() << LL_ENDL;
     return OSBTN_CANCEL;
 }
 

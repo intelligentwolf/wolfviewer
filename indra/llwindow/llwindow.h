@@ -219,6 +219,14 @@ public:
     virtual void openFile(const std::string& file_name) {};
 
     static std::vector<std::string> getDynamicFallbackFontList();
+    // [VULKAN WAYLAND 2026-11-09] Set by WolfVkBridge::decideBackend (before the window exists) when this start will try
+    // the Vulkan renderer: LLWindowSDL then does not ask SDL for native Wayland and the window runs through XWayland.
+    // SDL makes an EGL window surface on an OpenGL window's own wl_surface (SDL 2.28.0 src/video/wayland/
+    // SDL_waylandwindow.c:2082-2087), and NVIDIA's Vulkan WSI then fails vkCreateSwapchainKHR on that same surface with
+    // VK_ERROR_SURFACE_LOST_KHR and leaves the Wayland connection broken, which SDL turns into a quit
+    // (SDL_waylandevents.c:372-385; its reconnect is compiled out, SDL_waylandvideo.c:1118) - Paul's 12:06 run.
+    // On XWayland, GLX and the Vulkan Xlib surface share an X window (every Vulkan test so far ran that way).
+    static bool sWolfAvoidNativeWayland;
 
     // Provide native key event data
     virtual LLSD getNativeKeyData() { return LLSD::emptyMap(); }

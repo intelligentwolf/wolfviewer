@@ -74,6 +74,10 @@ Vulkan: [VULKAN_INFO]</string>
 	<string name="WolfVulkanNotAvailable">not available on this computer</string>
 	<!-- [V BUTTON 2026-11-08] the navigation bar's V button, greyed out where no Vulkan device was found (llnavigationbar.cpp) -->
 	<string name="WolfVulkanButtonUnavailable">Vulkan is not available on this computer</string>
+	<string name="WolfVulkanStoppedTitle">WolfViewer</string>
+	<string name="WolfVulkanStoppedRestart">WolfViewer's Vulkan renderer stopped working on your graphics card ([REASON]).
+
+WolfViewer will use OpenGL from now on. Please restart WolfViewer to carry on.</string>
 	<string name="WolfVulkanStatusActive">The Vulkan renderer is drawing this window.</string>
 	<string name="WolfVulkanStatusActiveAMD">Vulkan shows this window; OpenGL draws the world, which is faster on AMD built-in graphics.</string>
 	<string name="WolfVulkanStatusOpenGL">OpenGL is drawing this window. Vulkan is ready if you would like to try it.</string>

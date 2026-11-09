@@ -20340,6 +20340,45 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<string>auto</string>
 		</map>
+		<key>WolfVulkanStoppedReason</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-09] Internal: why the Vulkan renderer stopped during the last run. Saved before its message box and cleared once the box has been seen, so it is left only when the box could not be shown or the viewer never came back from it; the next start says so once and clears it.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string />
+		</map>
+		<key>WolfVulkanDebugWaylandAnyDriver</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-09] Testing: on a native Wayland window, try the Vulkan renderer with any driver (normally only Mesa RADV; NVIDIA breaks the Wayland connection there). For the test rig only.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugFallBack</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN BACKEND 2026-11-09] Testing: at the next frame the Vulkan renderer stops as a lost device makes it stop (the message box, the next start set to OpenGL, then the viewer quits), and this switches itself off. For the test rig.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfVulkanShareGBuffer</key>
 		<map>
 			<key>Comment</key>

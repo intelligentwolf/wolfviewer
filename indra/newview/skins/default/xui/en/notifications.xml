@@ -2935,7 +2935,7 @@ The age check is done once, on wolf-grid.com. General, Moderate and Adult region
    name="WolfVulkanFellBack"
    type="alertmodal">
     <unique/>
-WolfViewer could not start its Vulkan renderer on this computer, so it is drawing with OpenGL as before. Nothing else has changed. You can try Vulkan again from Wolf World &gt; Vulkan Renderer.
+WolfViewer could not start its Vulkan renderer on this computer, so it is drawing with OpenGL as before. Nothing else has changed. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
 
 Reason: [REASON]
     <usetemplate
@@ -2969,18 +2969,19 @@ WolfViewer will draw with OpenGL the next time you start it.
    name="WolfVulkanFellBackLastStart"
    type="alertmodal">
     <unique/>
-The last time WolfViewer started with the Vulkan renderer it did not get as far as the login screen, so this time it is drawing with OpenGL as before. You can try Vulkan again from Wolf World &gt; Vulkan Renderer.
+The last time WolfViewer started with the Vulkan renderer it did not get as far as the login screen, so this time it is drawing with OpenGL as before. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
     <usetemplate
      name="okbutton"
      yestext="OK"/>
   </notification>
-  <!-- [VULKAN BACKEND 2026-11-08] the Vulkan device was lost while running (driver reset, device lost): back to OpenGL for this session -->
+  <!-- [RUN-TIME STOP 2026-11-09] the Vulkan renderer stopped during the last run and its message box could not be shown
+       (wolfvkbridge.cpp stopAtRunTime / decideBackend): said once at the next start, which draws with OpenGL -->
   <notification
    icon="alertmodal.tga"
-   name="WolfVulkanLost"
+   name="WolfVulkanStoppedLastRun"
    type="alertmodal">
     <unique/>
-The Vulkan renderer stopped working ([REASON]). WolfViewer is drawing with OpenGL for the rest of this session. If this keeps happening, please use Report a Problem under Wolf World.
+The last time WolfViewer was running, its Vulkan renderer stopped working on your graphics card ([REASON]). WolfViewer is using OpenGL now. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
     <usetemplate
      name="okbutton"
      yestext="OK"/>

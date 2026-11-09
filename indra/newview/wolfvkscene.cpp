@@ -999,13 +999,17 @@ void WolfVkScene::probeBatch(const LLDrawInfo* params, const LLVertexBuffer* glv
     // the first vertex of the batch, straight from the GL buffer (llvertexbuffer.h getOffset: byte offset of the position
     // array; positions are 3 floats, LLVertexBuffer::sTypeSize[TYPE_VERTEX] = 12), pushed through the matrix the Vulkan
     // draw uses, so the log shows where it lands: clip w, GL NDC, the window pixel and GL's depth there
-#if LL_WINDOWS
-    if (!glGetNamedBufferSubData) return;   // a run-time pointer on Windows (llglheaders.h:707); the real function on Linux
-#endif
+    // [CI 2026-11-09] read through GL_COPY_READ_BUFFER (GL 3.1) and glGetBufferSubData (GL 1.5), not the GL 4.5
+    // glGetNamedBufferSubData: Apple's GL is 4.1 and has no such symbol (macOS CI run 42614243966: undefined
+    // _glGetNamedBufferSubData at link). The copy-read binding is put back, so LLVertexBuffer's own bindings are untouched.
     if (!glvb->getGLBuffer()) return;
     float pos[3] = { 0.f, 0.f, 0.f };
     const GLintptr offset = static_cast<GLintptr>(glvb->getOffset(LLVertexBuffer::TYPE_VERTEX)) + static_cast<GLintptr>(params->mStart) * 12;
-    glGetNamedBufferSubData(glvb->getGLBuffer(), offset, 12, pos);
+    GLint saved_copy_read = 0;
+    glGetIntegerv(GL_COPY_READ_BUFFER_BINDING, &saved_copy_read);
+    glBindBuffer(GL_COPY_READ_BUFFER, glvb->getGLBuffer());
+    glGetBufferSubData(GL_COPY_READ_BUFFER, offset, 12, pos);
+    glBindBuffer(GL_COPY_READ_BUFFER, static_cast<GLuint>(saved_copy_read));
     const glm::vec4 clip = mvp * glm::vec4(pos[0], pos[1], pos[2], 1.f);
     std::ostringstream s;
     s << "probe: batch count " << params->mCount << " offset " << params->mOffset << " start " << params->mStart << " end " << params->mEnd

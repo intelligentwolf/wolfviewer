@@ -45,8 +45,9 @@ class LLTextBox;
  */
 namespace WolfFishing
 {
-    /** A "WolfFish1|..." line from one of this agent's attachments (llRegionSayTo): the Fishing window's, never chat. */
-    bool onObjectChat(const LLUUID& source, U8 chat_type, const std::string& text);
+    /** A "WolfFish1|..." line from an object this agent owns (llRegionSayTo): the Fishing window's, never chat. `owner` is the
+     *  ChatFromSimulator OwnerID, which the region writes. */
+    bool onObjectChat(const LLUUID& source, const LLUUID& owner, U8 chat_type, const std::string& text);
 }
 
 class WolfFloaterFishing : public LLFloater

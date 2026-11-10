@@ -33,8 +33,6 @@
 #include "lltextbox.h"
 #include "lluicolortable.h"
 #include "llviewerinventory.h"
-#include "llviewerobjectlist.h"
-#include "llvoavatarself.h"
 #include "wolfcave.h"
 #include "wolfgrid.h"
 
@@ -104,14 +102,14 @@ namespace
     std::string fieldAt(const std::vector<std::string>& f, size_t i) { return i < f.size() ? f[i] : std::string(); }
 }
 
-bool WolfFishing::onObjectChat(const LLUUID& source, U8 chat_type, const std::string& text)
+bool WolfFishing::onObjectChat(const LLUUID& source, const LLUUID& owner, U8 chat_type, const std::string& text)
 {
     if (text.compare(0, PREFIX.size(), PREFIX) != 0) return false;
     // [WOLF ONLY] as WolfLifts::onObjectChat: off Wolf the line is left to chat like any other
     if (!onWolf() || chat_type != CHAT_TYPE_DIRECT) return false;
-    // only one of this agent's own attachments speaks to the window
-    LLViewerObject* o = gObjectList.findObject(source);
-    if (!o || !isAgentAvatarValid() || o->getAvatarAncestor() != gAgentAvatarp) return false;
+    // only an object this agent owns speaks to the window: the region writes the OwnerID, so this holds even before the
+    // rod's object has reached the viewer (WolfStorm 2026-11-10: a login's rod answered before its object arrived)
+    if (source.isNull() || owner != gAgent.getID()) return false;
     // from here the line is the window's, never chat (the rod only sends these after the window said hello)
     if (text.size() > MAX_LINE) return true;
     if (WolfFloaterFishing* f = LLFloaterReg::findTypedInstance<WolfFloaterFishing>("wolf_fishing")) f->onRodLine(text);

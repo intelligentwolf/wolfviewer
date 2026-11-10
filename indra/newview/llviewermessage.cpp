@@ -2883,7 +2883,7 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
         }
         // [WOLF FISHING 2026-11-10] the fishing rod's "WolfFish1|..." lines to the Fishing window (wolffloaterfishing.h),
         // taken the same way. </WolfViewer>
-        if (WolfFishing::onObjectChat(from_id, type_temp, helm_line))
+        if (WolfFishing::onObjectChat(from_id, owner_id, type_temp, helm_line))
         {
             return;
         }

@@ -20,6 +20,8 @@
 #include "wolfvkdevice.h"
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
+#include <sstream>
 
 WolfVkSwapchain::~WolfVkSwapchain()
 {
@@ -234,6 +236,31 @@ bool WolfVkSwapchain::build(uint32_t width, uint32_t height, bool vsync, VkSwapc
     {
         error = std::string("vkCreateSwapchainKHR: ") + WolfVkLoader::resultString(res);
         mSwapchain = VK_NULL_HANDLE;
+        // [T724 2026-11-10] everything that was asked for and everything the surface offered, in one block, so a report
+        // of a refused swapchain (ticket 724: VK_ERROR_INITIALIZATION_FAILED on NVIDIA X11, nothing else in the log) tells
+        // which of the two the driver objected to. Hex for the flag words (VkSurfaceTransformFlagsKHR vulkan_core.h:8981-,
+        // VkCompositeAlphaFlagsKHR :8995-, VkImageUsageFlags :2808-).
+        auto hex = [](uint32_t v) { char b[16]; snprintf(b, sizeof(b), "0x%x", v); return std::string(b); };
+        std::ostringstream o;
+        o << "vkCreateSwapchainKHR failed: " << WolfVkLoader::resultString(res) << " (" << static_cast<int32_t>(res) << ")\n"
+          << "  asked: minImageCount " << info.minImageCount << ", format " << info.imageFormat << " (" << formatString() << ")"
+          << ", colour space " << info.imageColorSpace << ", extent " << info.imageExtent.width << "x" << info.imageExtent.height
+          << ", layers " << info.imageArrayLayers << ", usage " << hex(info.imageUsage) << ", sharing " << info.imageSharingMode
+          << ", preTransform " << hex(static_cast<uint32_t>(info.preTransform)) << ", compositeAlpha " << hex(static_cast<uint32_t>(info.compositeAlpha))
+          << ", presentMode " << info.presentMode << " (" << presentModeString() << ")" << ", clipped " << info.clipped
+          << ", oldSwapchain " << (old != VK_NULL_HANDLE ? "yes" : "none") << ", pNext none"
+          << "; window drawable size given " << width << "x" << height << (vsync ? ", vsync on" : ", vsync off") << "\n"
+          << "  surface capabilities: imageCount " << caps.minImageCount << ".." << caps.maxImageCount << " (0 = no limit)"
+          << ", currentExtent " << caps.currentExtent.width << "x" << caps.currentExtent.height
+          << ", imageExtent " << caps.minImageExtent.width << "x" << caps.minImageExtent.height << ".." << caps.maxImageExtent.width << "x" << caps.maxImageExtent.height
+          << ", maxImageArrayLayers " << caps.maxImageArrayLayers << ", supportedTransforms " << hex(caps.supportedTransforms)
+          << ", currentTransform " << hex(static_cast<uint32_t>(caps.currentTransform)) << ", supportedCompositeAlpha " << hex(caps.supportedCompositeAlpha)
+          << ", supportedUsageFlags " << hex(caps.supportedUsageFlags) << "\n"
+          << "  surface formats (" << formats.size() << "):";
+        for (const VkSurfaceFormatKHR& sf : formats) o << " " << sf.format << "/" << sf.colorSpace;
+        o << "\n  present modes (" << modes.size() << "):";
+        for (VkPresentModeKHR m : modes) o << " " << m;
+        LL_WARNS("Vulkan") << o.str() << LL_ENDL;
         return false;
     }
 

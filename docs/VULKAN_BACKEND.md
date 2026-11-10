@@ -35,7 +35,7 @@ time (`wolfvkloader.cpp`) and every entry point is fetched through `vkGetInstanc
 | `wolfvkloader.h/.cpp` | (new) | dlopen/LoadLibrary of the loader; X-macro tables of every function with its `vulkan_core.h` line; global/instance/device loading; optional (1.1/1.2) functions with KHR fallbacks |
 | `wolfvkallocator.h/.cpp` | (new) | sub-allocating allocator: 64 MiB blocks (an eighth of a small heap), first-fit free list, separate blocks for linear and optimal resources (so `bufferImageGranularity` never applies within a block), dedicated allocations for big resources and for images shared with GL, `maxMemoryAllocationCount` honoured, persistent mapping, `nonCoherentAtomSize` flushes |
 | `wolfvkdevice.h/.cpp` | `gGLManager` | instance (validation layer + debug messenger when `WolfVulkanValidation`), physical device choice (setting / GL device UUID / GL vendor / first discrete / first), logical device with one graphics+present queue, features (anisotropy, wireframe, BC, independent blend, depth clamp), per-frame command pools + fences + binary semaphores, timeline semaphore when available, deferred destruction queue (frames-in-flight later), one-time command buffers |
-| `wolfvksurface.h/.cpp/_macosx.mm` | `LLWindow` | `VkSurfaceKHR` from `LLWindow::getNativeHandles()`: X11 `vkCreateXlibSurfaceKHR`, Wayland `vkCreateWaylandSurfaceKHR`, Win32 `vkCreateWin32SurfaceKHR`, macOS `vkCreateMetalSurfaceEXT` on a `CAMetalLayer` the `.mm` attaches to the GL view |
+| `wolfvksurface.h/.cpp/_macosx.mm` | `LLWindow` | `VkSurfaceKHR` from `LLWindow::getNativeHandles()`: X11 `vkCreateXlibSurfaceKHR` on a child X window of the viewer's window (8.2s: the viewer's own window carries the GLX drawable), Wayland `vkCreateWaylandSurfaceKHR`, Win32 `vkCreateWin32SurfaceKHR`, macOS `vkCreateMetalSurfaceEXT` on a `CAMetalLayer` the `.mm` attaches to the GL view |
 | `wolfvkswapchain.h/.cpp` | `SDL_GL_SwapWindow` | format choice (UNORM 8-bit first, sRGB last), present mode from `RenderVSyncEnable` (FIFO on; MAILBOX or IMMEDIATE off), recreate on resize / out-of-date |
 | `wolfvkbuffer.h/.cpp` | `LLVertexBuffer` | `WolfVkBuffer` (device-local + staging, range uploads) and `WolfVkVertexBuffer` with LLVertexBuffer's layout (`calcOffsets`, `sTypeSize`), mapping semantics (`MappedRegion`), attribute formats from `setupVertexBuffer`, bind/draw |
 | `wolfvkimage.h/.cpp` | `LLImageGL`, `LLTexUnit` | 2D/cube/array/3D images, the GL -> VkFormat table (section 4), GL-row upload with re-packing and byte swapping, mip generation by blit, read-back, layout transitions; `WolfVkSamplerCache` for `TFO_*` x `TAM_*` |
@@ -238,7 +238,7 @@ Blockers of the FIRST full run (spv5, before the version change), for the record
 | Path | Linux (this laptop) | Windows | macOS |
 |---|---|---|---|
 | loader | `libvulkan.so.1` (dlopen) | `vulkan-1.dll` (LoadLibrary) | `libvulkan.1.dylib` / `libMoltenVK.dylib` (bundle not wired) |
-| surface | X11 tested; Wayland written | Win32 written | Metal layer written (`wolfvksurface_macosx.mm`) |
+| surface | X11 tested (through XWayland, both GPUs; child window from W103, 8.2s); Wayland written, RADV only (8.2q); pure NVIDIA X11 reported failing in W101/W102 (8.2s) | Win32 written | Metal layer written (`wolfvksurface_macosx.mm`) |
 | build | built here | CMake paths complete, not compiled here | CMake paths complete, not compiled here |
 | MoltenVK quirks | - | - | `VK_KHR_portability_subset` enabled when offered; triangle fans not converted (declared) |
 
@@ -1320,6 +1320,80 @@ Vulkan with validation (sync + GPU-AV):
 | nv-r51-vrbig (Big Screen) | PASSED: 7980 pictures; 0 VUID / SYNC / OUT_OF_POOL, clean quit. The desktop rate fell from ~21 to ~4 frames/s after 7 min (swap/present wait 30 -> 80 ms and display CPU time doubled together); cause not proven (laptop at Tctl 87 C afterwards, GPU-AV on) |
 | amd-r51-vrbig | PASSED: 17096 pictures, steady ~28 frames/s; 0 VUID / SYNC / OUT_OF_POOL, clean quit |
 | nv-r51-hud-vulkan / -opengl | Shadow Testwolf's own worn HUD (top right, "HUD objects count: 1"): Vulkan against OpenGL over that HUD's area, mean difference 0.5/255. The extra cube the campaign tried to rez and attach did not appear in either run (no rez seen) |
+
+### 8.2s Pure NVIDIA X11: `vkCreateSwapchainKHR` refused with VK_ERROR_INITIALIZATION_FAILED (ticket 724, 2026-11-10)
+
+**The report** (Shy Morrigan, W101 7.2.4.101, Linux Mint 22.2 XFCE, X11 session, RTX 4060 Ti 16 GB, driver 580.178.04,
+Vulkan 1.4.312). Instance, device by GL UUID, X11 surface (`wolfvksurface.cpp:154`), allocator, logical device (queue
+family 0, two frames in flight, timeline semaphores) all succeed; then `fallBack: vkCreateSwapchainKHR:
+VK_ERROR_INITIALIZATION_FAILED` and OpenGL carries on. `vkcube` works on the same desktop with the system loader AND
+with the viewer's bundled loader (`LD_LIBRARY_PATH=/opt/wolfviewer/lib vkcube`). Her full `vulkaninfo` and the log lines
+before the fall-back were asked for on the ticket; not yet received when this was written.
+
+**What is different between vkcube and the viewer on that machine, from the code.**
+- The viewer's X window is made with `SDL_WINDOW_OPENGL` (llwindowsdl2.cpp:848) and the GL context is created and made
+  current on it (`SDL_GL_CreateContext(mWindow)` :935, `SDL_GL_MakeCurrent(mWindow, ...)` :3575/:3612): the window
+  carries a GLX drawable. `WolfVkSurface::create` then made the Vulkan surface on THAT window (`handles.mWindow` from
+  `SDL_GetWindowWMInfo`, llwindowsdl2.cpp:3345), and the swapchain on it. vkcube's window is a plain X window of its
+  own (Vulkan-Tools cube.c:3006-3007 `xcb_create_window(... XCB_COPY_FROM_PARENT ... XCB_WINDOW_CLASS_INPUT_OUTPUT,
+  screen->root_visual ...)`, mapped at :3031, swapchain after it at :5025) with no GLX drawable.
+- The Vulkan specification (vkCreateSwapchainKHR refpage, docs.vulkan.org): "If the native window referred to by
+  pCreateInfo->surface is already associated with a non-Vulkan graphics API surface, VK_ERROR_NATIVE_WINDOW_IN_USE_KHR
+  must be returned", and "The native window ... must not become associated with a non-Vulkan graphics API surface
+  before all associated Vulkan swapchains have been destroyed". A GLX drawable is such a surface. Mesa's X11 WSI keeps
+  no such book (it shares happily: every run through XWayland on the Radeon, and the NVIDIA runs through XWayland +
+  PRIME render offload on this laptop, section 8). NVIDIA on native Wayland refused the same sharing with its EGL
+  window surface (8.2q, proven by the protocol trace). On a pure X11 session the NVIDIA X driver and the NVIDIA GLX
+  server module own the window; the error code is the driver's choice (the Vulkan-Docs issue 828 thread records
+  NVIDIA answering VK_ERROR_INITIALIZATION_FAILED from `vkCreateSwapchainKHR` for conditions the spec words
+  differently).
+- Nothing in the request itself is outside the capabilities: the format is one of the surface's own with
+  SRGB_NONLINEAR (wolfvkswapchain.cpp build), the present mode comes from the surface's list (FIFO otherwise),
+  minImageCount is clamped to maxImageCount, usage adds only bits in supportedUsageFlags, compositeAlpha opaque only
+  when offered, preTransform identity only when offered, pNext is empty (the present fence goes on vkQueuePresentKHR,
+  and only when `swapchainMaintenance1` was enabled), and the extent is the surface's currentExtent on X11.
+- Not reproducible here: this laptop runs Hyprland (Wayland); its X windows are XWayland's and NVIDIA runs by PRIME
+  render offload, the path that works. Xephyr/Xvfb would not have the NVIDIA GLX path. A pure NVIDIA X11 session was
+  not available. So the cause is the strongest reading of the code and the spec, not a proven one; the diagnostics
+  below are there so the next report settles it.
+
+**What W103 does.**
+- `WolfVkSurface::create` on X11 makes a child X window of the viewer's window (`XCreateWindow`, depth and visual
+  CopyFromParent, InputOutput, background black like vkcube's, NoEventMask), maps it, and makes the Vulkan surface on
+  it. GLX never touches that window. Pointer events in the child propagate to the viewer's window, which selected them
+  (SDL_x11window.c:674), with coordinates relative to it; the keyboard goes to the focused top-level as before; the
+  cursor is inherited. SDL selects StructureNotify, not SubstructureNotify, on its window, so the child's own Map/
+  ConfigureNotify never reach SDL. OpenGL keeps drawing into the viewer's window's own back buffer (never swapped in
+  Vulkan mode) and the UI / read-back layers are taken from GL_BACK as before (wolfvkshare.cpp:767-772,
+  wolfvkscene.cpp:453/543). The one thing the child changes for OpenGL is that the parent's pixels under it are no
+  longer the parent's on screen; what `glReadPixels(GL_BACK)` returns there is OpenGL's pixel-ownership question. The
+  back buffer is the GLX window's own on both drivers in use (NVIDIA's shared-back-buffer mode, UBB, exists only on the
+  professional RTX/Quadro boards, README "Flipping and UBB": "When UBB is enabled, all windows share the same back,
+  stencil and depth buffers"; Mesa's DRI3 drawables carry their own buffers), so the layers are expected unchanged;
+  the runs below are the check (a wrong UI layer would show at once).
+- `WolfVkSurface::resize(w, h)` (XMoveResizeWindow + XSync) runs in `createSwapchain` before every build, so the
+  child's size, and with it `currentExtent`, is the viewer's drawable size at the moment of the build.
+- If the child cannot be made (an X error, caught synchronously by a temporary error handler), the surface goes on
+  the viewer's window as before, with a WARNING.
+- `WolfVulkanDebugSharedWindow` (hidden, off): the W101/W102 way, for comparison on a reporting machine.
+- `WolfVkSwapchain::build` logs ONE WARNING block when `vkCreateSwapchainKHR` fails: every field asked for (count,
+  format, colour space, extent, layers, usage, sharing, preTransform, compositeAlpha, present mode, clipped,
+  oldSwapchain, pNext), the window size given, and the surface's capabilities, formats and present modes; the bridge
+  adds the X windows' depth, size and map state (`WolfVkSurface::describe`).
+- The W102 fall-back guard is unchanged: a refused swapchain still means OpenGL for that start, with the notice.
+
+**Tested here (XWayland, the same code path; chain-t724, 2026-11-10 11:08Z onwards).** Build from the W102 tree, clang
+macOS-flag check and -Wconversion clean on the three changed files, gdb break-at-main start-up check passed.
+- nv-t724-child (RTX 5090 by PRIME offload, Vulkan): "Window surface created (X11): viewer's window 0xe0000a depth 24
+  2522x1520 unmapped; Vulkan child window 0xe000f2 depth 24 2522x1520 mapped, parent unmapped" (the viewer's window is
+  still hidden under the splash at that point, as always), "Vulkan renderer active", the login screen drawn and
+  presented at ~114 frames/s, the swapchain followed Hyprland's placement (2522x1520 -> 618x366, 3 images,
+  B8G8R8A8_UNORM, immediate), no fall-back, no X protocol error. The login, the in-world shots and the resize/fill
+  checks (resizefill.py + fillcheck.py), then amd-t724-child (Radeon 890M, RADV) and the nv-t724-shared control
+  (WolfVulkanDebugSharedWindow=1) were still running when this was written: results in ~/.cache/vkbackend/chain.log,
+  log-*-t724-*.log and shots/*-t724-*/ (to be copied here).
+- Not tested anywhere: a pure NVIDIA X11 session (the reporting machine). The child window is the spec-backed change;
+  whether that driver accepts it is for the ticket's next run, and the WARNING block tells the rest if it does not.
 
 ### 8.3 Validation layer
 

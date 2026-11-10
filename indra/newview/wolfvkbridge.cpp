@@ -418,6 +418,9 @@ namespace
         const std::string pm = gSavedSettings.getString("WolfVulkanPresentMode");
         sSwapchain.setPresentModeOverride(pm == "immediate" ? VK_PRESENT_MODE_IMMEDIATE_KHR : pm == "mailbox" ? VK_PRESENT_MODE_MAILBOX_KHR
                                           : pm == "fifo" ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAX_ENUM_KHR);
+        // [T724 2026-11-10] the X11 child window the surface is on follows the viewer's window first (wolfvksurface.h),
+        // so the swapchain's currentExtent is this size; a no-op on every other surface
+        WolfVkSurface::resize(w, h);
         if (sSwapchain.isValid())
         {
             return sSwapchain.recreate(w, h, vsync, error);
@@ -595,7 +598,10 @@ void initAfterGL(LLWindow* window)
             }
         }
     }
-    sSurface = WolfVkSurface::create(gWolfVkDevice.instance(), window, error);
+    // [T724 2026-11-10] on X11 the surface is made on a child window of the viewer's window, which OpenGL's GLX drawable
+    // never touches (wolfvksurface.h: NVIDIA on a pure X11 session refused a swapchain on the GL window itself with
+    // VK_ERROR_INITIALIZATION_FAILED). WolfVulkanDebugSharedWindow (hidden test setting) keeps the W101/W102 way.
+    sSurface = WolfVkSurface::create(gWolfVkDevice.instance(), window, gSavedSettings.getBOOL("WolfVulkanDebugSharedWindow"), error);
     if (sSurface == VK_NULL_HANDLE)
     {
         fallBack(error, "WolfVulkanFellBack");
@@ -611,6 +617,9 @@ void initAfterGL(LLWindow* window)
     sVulkanDeviceLine = gWolfVkDevice.aboutLine();
     if (!createSwapchain(error))
     {
+        // [T724] with WolfVkSwapchain's own block (what was asked, what the surface offered): the windows the surface sits on
+        const std::string where = WolfVkSurface::describe();
+        if (!where.empty()) LL_WARNS("Vulkan") << "Swapchain refused on: " << where << LL_ENDL;
         fallBack(error, "WolfVulkanFellBack");
         return;
     }

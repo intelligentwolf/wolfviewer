@@ -29,14 +29,37 @@
 
 #include "wolfvkloader.h"
 #include "llwindow.h"
+#include <cstdint>
 #include <string>
 
 namespace WolfVkSurface
 {
     // Creates the surface for the window; VK_NULL_HANDLE and a reason in error on failure.
     // instance: from WolfVkDevice::instance(). The surface is destroyed with destroy() (vkDestroySurfaceKHR).
-    VkSurfaceKHR create(VkInstance instance, LLWindow* window, std::string& error);
+    //
+    // [T724 2026-11-10] X11: the surface goes on a child X window of the viewer's window, not on the viewer's window
+    // itself, unless shared_x11_window is true. The viewer's window carries OpenGL's GLX drawable (SDL_GL_CreateContext /
+    // SDL_GL_MakeCurrent bind the context to it, llwindowsdl2.cpp:935/3575), and the Vulkan specification makes a
+    // native window "already associated with a non-Vulkan graphics API surface" an error of vkCreateSwapchainKHR
+    // (VK_ERROR_NATIVE_WINDOW_IN_USE_KHR, vkCreateSwapchainKHR refpage). NVIDIA's driver on a pure X11 session refused
+    // it with VK_ERROR_INITIALIZATION_FAILED (ticket 724, RTX 4060 Ti, 580.178.04, Linux Mint 22.2 X11), while vkcube on
+    // a window of its own works there with the same loader and driver. The child window is a plain X window like
+    // vkcube's (same depth and visual as its parent, no GLX drawable, no events of its own), covers the viewer's window
+    // and follows its size (resize()); the pointer events it receives propagate to the viewer's window, which selected
+    // them. OpenGL keeps drawing into the viewer's window's own back buffer (never swapped in Vulkan mode) and the
+    // frame's layers are taken from there as before. shared_x11_window = true is the W101/W102 behaviour, for the test
+    // setting WolfVulkanDebugSharedWindow.
+    VkSurfaceKHR create(VkInstance instance, LLWindow* window, bool shared_x11_window, std::string& error);
     void destroy(VkInstance instance, VkSurfaceKHR surface);
+
+    // [T724] X11 child window: moved to (0,0) and resized to width x height (the viewer's window's drawable size), then
+    // XSync, so that vkGetPhysicalDeviceSurfaceCapabilitiesKHR's currentExtent is the new size. Called before every
+    // swapchain build. No-op on the other surfaces.
+    void resize(uint32_t width, uint32_t height);
+
+    // [T724] One line about the native window(s) behind the surface for the log when a swapchain cannot be made: X11
+    // "window 0x.. depth N WxH map_state S; Vulkan child 0x.. WxH map_state S". Empty on the other surfaces.
+    std::string describe();
 
     // "X11", "Wayland", "Win32" or "Metal" for the log and the renderer floater; empty before create.
     const std::string& kind();

@@ -17,6 +17,7 @@
 
 #include "linden_common.h"
 #include "wolfvksurface.h"
+#include <cstdio>
 
 #if LL_WINDOWS
 #include <windows.h>
@@ -39,6 +40,89 @@ struct wl_surface;
 namespace
 {
     std::string sKind;
+
+#if !LL_WINDOWS && !LL_DARWIN
+    // [T724 2026-11-10] the X11 child window the surface is made on (wolfvksurface.h); None when the surface is on the
+    // viewer's own window (shared_x11_window, or the child could not be made)
+    Display* sX11Display = nullptr;
+    Window sX11Parent = 0;
+    Window sX11Child = 0;
+
+    // Xlib reports protocol errors asynchronously through the error handler (Xlib.h:1848 XSetErrorHandler); the viewer's
+    // own handler (llwindowsdl2.cpp wolfX11ErrorHandler) logs and carries on. During the child window's creation this one
+    // records the code instead, and XSync (Xlib.h:3419) makes the server answer before the handler is put back.
+    int sX11ErrorCode = 0;
+    int recordX11Error(Display*, XErrorEvent* event)
+    {
+        if (event && sX11ErrorCode == 0) sX11ErrorCode = event->error_code;
+        return 0;
+    }
+
+    std::string x11WindowLine(Display* dpy, Window w)
+    {
+        // Source: Xlib.h:2701 XGetWindowAttributes; :306-308 XWindowAttributes width, height, depth; map_state (X.h:445-447
+        // IsUnmapped 0 / IsUnviewable 1 / IsViewable 2)
+        XWindowAttributes attr{};
+        char buf[160];
+        if (XGetWindowAttributes(dpy, w, &attr) == 0)
+        {
+            snprintf(buf, sizeof(buf), "window 0x%lx (attributes unavailable)", w);
+            return buf;
+        }
+        const char* state = attr.map_state == IsViewable ? "viewable" : attr.map_state == IsUnviewable ? "mapped, parent unmapped" : "unmapped";
+        snprintf(buf, sizeof(buf), "window 0x%lx depth %d %dx%d %s", w, attr.depth, attr.width, attr.height, state);
+        return buf;
+    }
+
+    // Creates and maps the child window; 0 with a reason when the server refused it (the surface then goes on parent).
+    Window createX11Child(Display* dpy, Window parent, std::string& why)
+    {
+        // Source: Xlib.h:2701 XGetWindowAttributes; the child takes the parent's geometry
+        XWindowAttributes attr{};
+        if (XGetWindowAttributes(dpy, parent, &attr) == 0 || attr.width <= 0 || attr.height <= 0)
+        {
+            why = "XGetWindowAttributes on the viewer's window failed";
+            return 0;
+        }
+        // Source: Xlib.h:1632 XCreateWindow(display, parent, x, y, width, height, border_width, depth, class, visual,
+        // valuemask, attributes). Depth and visual CopyFromParent (X.h:121): the same visual as the viewer's window,
+        // so no colormap or border pixel is needed (a window of a different depth or visual than its parent needs
+        // both, or BadMatch). InputOutput (X.h:387): a window with contents, which a swapchain needs (vkcube's own
+        // window is XCB_WINDOW_CLASS_INPUT_OUTPUT, Vulkan-Tools cube.c:3006-3007). Background black as vkcube's
+        // (cube.c:3002-3003 XCB_CW_BACK_PIXEL black_pixel): the server paints it black on exposure until the next
+        // present. Event mask none (X.h:150 NoEventMask): a pointer event in the child that the child did not select
+        // propagates to the nearest ancestor that did (X11 protocol, "event propagation"), which is the viewer's
+        // window (SDL selects ButtonPress/Release, PointerMotion, Enter/Leave on it, SDL_x11window.c:674), so clicks and
+        // mouse movement reach SDL as before, with coordinates relative to the viewer's window. The keyboard goes to
+        // the focus window (the viewer's top-level) regardless. The cursor is the parent's (no cursor set on the child).
+        XSetWindowAttributes swa{};
+        swa.background_pixel = BlackPixel(dpy, DefaultScreen(dpy));
+        swa.event_mask = NoEventMask;
+        sX11ErrorCode = 0;
+        XErrorHandler previous = XSetErrorHandler(recordX11Error);
+        Window child = XCreateWindow(dpy, parent, 0, 0, static_cast<unsigned int>(attr.width), static_cast<unsigned int>(attr.height),
+                                     0, CopyFromParent, InputOutput, CopyFromParent, CWBackPixel | CWEventMask, &swa);   // X.h:393, :403
+        if (child != 0)
+        {
+            XMapWindow(dpy, child);   // Xlib.h:2816; viewable once the viewer's window is (it is created hidden under the splash)
+        }
+        XSync(dpy, False);   // Xlib.h:3419: every request above answered, errors delivered to recordX11Error
+        XSetErrorHandler(previous);
+        if (child == 0 || sX11ErrorCode != 0)
+        {
+            char text[128] = { 0 };
+            if (sX11ErrorCode != 0) XGetErrorText(dpy, sX11ErrorCode, text, sizeof(text) - 1);
+            why = std::string("XCreateWindow/XMapWindow of the Vulkan child window failed: ") + (sX11ErrorCode != 0 ? text : "no window id");
+            if (child != 0)
+            {
+                XDestroyWindow(dpy, child);   // Xlib.h:2253
+                XFlush(dpy);                   // Xlib.h:2517
+            }
+            return 0;
+        }
+        return child;
+    }
+#endif
 }
 
 namespace WolfVkSurface
@@ -49,9 +133,16 @@ const std::string& kind()
     return sKind;
 }
 
-VkSurfaceKHR create(VkInstance instance, LLWindow* window, std::string& error)
+VkSurfaceKHR create(VkInstance instance, LLWindow* window, bool shared_x11_window, std::string& error)
 {
     sKind.clear();
+#if !LL_WINDOWS && !LL_DARWIN
+    sX11Display = nullptr;
+    sX11Parent = 0;
+    sX11Child = 0;
+#else
+    (void)shared_x11_window;
+#endif
     if (instance == VK_NULL_HANDLE || !window)
     {
         error = "no instance or window";
@@ -116,10 +207,32 @@ VkSurfaceKHR create(VkInstance instance, LLWindow* window, std::string& error)
             error = "vkCreateXlibSurfaceKHR is not available (VK_KHR_xlib_surface missing)";
             return VK_NULL_HANDLE;
         }
+        Display* dpy = static_cast<Display*>(handles.mDisplay);
+        Window target = static_cast<Window>(handles.mWindow);
+        sX11Display = dpy;
+        sX11Parent = target;
+        // [T724 2026-11-10] the surface's own child window (wolfvksurface.h): GLX never touches it
+        if (shared_x11_window)
+        {
+            LL_WARNS("Vulkan") << "WolfVulkanDebugSharedWindow: the Vulkan surface shares the viewer's X window with OpenGL (W101/W102 behaviour)" << LL_ENDL;
+        }
+        else
+        {
+            std::string why;
+            sX11Child = createX11Child(dpy, target, why);
+            if (sX11Child != 0)
+            {
+                target = sX11Child;
+            }
+            else
+            {
+                LL_WARNS("Vulkan") << why << "; the Vulkan surface goes on the viewer's X window itself" << LL_ENDL;
+            }
+        }
         VkXlibSurfaceCreateInfoKHR info{};
         info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;   // vulkan_core.h:484
-        info.dpy = static_cast<Display*>(handles.mDisplay);
-        info.window = static_cast<Window>(handles.mWindow);
+        info.dpy = dpy;
+        info.window = target;
         res = create_fn(instance, &info, nullptr, &surface);
         sKind = "X11";
     }
@@ -149,9 +262,11 @@ VkSurfaceKHR create(VkInstance instance, LLWindow* window, std::string& error)
     {
         error = "vkCreate" + sKind + "Surface: " + WolfVkLoader::resultString(res);
         sKind.clear();
+        destroy(instance, VK_NULL_HANDLE);   // [T724] the child window, if one was made
         return VK_NULL_HANDLE;
     }
-    LL_INFOS("Vulkan") << "Window surface created (" << sKind << ")" << LL_ENDL;
+    const std::string where = describe();
+    LL_INFOS("Vulkan") << "Window surface created (" << sKind << ")" << (where.empty() ? "" : ": " + where) << LL_ENDL;
     return surface;
 }
 
@@ -161,7 +276,48 @@ void destroy(VkInstance instance, VkSurfaceKHR surface)
     {
         gVk.vkDestroySurfaceKHR(instance, surface, nullptr);
     }
+#if !LL_WINDOWS && !LL_DARWIN
+    // [T724] after the surface (VUID-vkDestroySurfaceKHR-surface-01266: the surface after its swapchains; the window after
+    // the surface that was made on it)
+    if (sX11Display && sX11Child != 0)
+    {
+        XDestroyWindow(sX11Display, sX11Child);   // Xlib.h:2253
+        XFlush(sX11Display);                       // Xlib.h:2517
+    }
+    sX11Display = nullptr;
+    sX11Parent = 0;
+    sX11Child = 0;
+#endif
     sKind.clear();
+}
+
+void resize(uint32_t width, uint32_t height)
+{
+#if !LL_WINDOWS && !LL_DARWIN
+    if (sX11Display && sX11Child != 0 && width > 0 && height > 0)
+    {
+        // Source: Xlib.h:2835 XMoveResizeWindow(display, w, x, y, width, height); XSync (:3419) so the server holds the new
+        // size before the swapchain build asks for currentExtent
+        XMoveResizeWindow(sX11Display, sX11Child, 0, 0, static_cast<unsigned int>(width), static_cast<unsigned int>(height));
+        XSync(sX11Display, False);
+    }
+#else
+    (void)width;
+    (void)height;
+#endif
+}
+
+std::string describe()
+{
+#if !LL_WINDOWS && !LL_DARWIN
+    if (!sX11Display || sX11Parent == 0) return std::string();
+    std::string line = "viewer's " + x11WindowLine(sX11Display, sX11Parent);
+    if (sX11Child != 0) line += "; Vulkan child " + x11WindowLine(sX11Display, sX11Child);
+    else line += "; the surface is on the viewer's window itself";
+    return line;
+#else
+    return std::string();
+#endif
 }
 
 } // namespace WolfVkSurface

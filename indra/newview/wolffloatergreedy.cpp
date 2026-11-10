@@ -1,0 +1,716 @@
+/**
+ * @file wolffloatergreedy.cpp
+ * @brief WolfViewer: Greedy, the dice game window. See wolffloatergreedy.h.
+ *
+ * $LicenseInfo:firstyear=2026&license=viewerlgpl$
+ * WolfViewer — Wolf Territories Grid
+ * Copyright (C) 2026 IntelligentWolf Ltd.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation;
+ * version 2.1 of the License only.
+ * $/LicenseInfo$
+ */
+
+#include "llviewerprecompiledheaders.h"
+
+#include "wolffloatergreedy.h"
+
+#include <cstdlib>
+
+#include <boost/json.hpp>
+
+#include "fsnearbychathub.h"
+#include "llagent.h"
+#include "llaudioengine.h"
+#include "llbutton.h"
+#include "llchat.h"
+#include "llcombobox.h"
+#include "llcorehttputil.h"
+#include "llcoros.h"
+#include "llfloaterreg.h"
+#include "llframetimer.h"
+#include "llhttpconstants.h"
+#include "lliconctrl.h"
+#include "llsdjson.h"
+#include "llstyle.h"
+#include "lltextbox.h"
+#include "lltexteditor.h"
+#include "lluri.h"
+#include "llviewercontrol.h"
+#include "llviewerobject.h"
+#include "llviewerobjectlist.h"
+#include "llviewerregion.h"
+#include "llvoavatarself.h"
+#include "wolfgrid.h"
+#include "wolfobjectprops.h"
+
+namespace
+{
+    // Source: region-terrain-work/greedy-dice-2026-11-10/server/deploy.sh - the same file on both web hosts (one database)
+    const char* API_1 = "https://wolf-grid.com/wolfstorm/php/wolfdice.php";
+    const char* API_2 = "https://wolfstorm.app/php/wolfdice.php";
+    // Source: lsl/wolfdice_table.lsl HELLO_CH and tellWindow() (README s3c)
+    const S32 HELLO_CHANNEL = 7171;
+    const char* const HELLO = "greedy hello 1";
+    const std::string PREFIX("WolfGreedy1|");
+    const F64 HELLO_RETRY_S = 3.0;
+    const S32 HELLO_TRIES = 10;
+    const size_t MAX_LINE = 200;
+    // Source: wolfdice_window.php - a game going is polled every 2 s, a lobby or a finished game every 4 s (README s3)
+    const F64 POLL_PLAYING_S = 2.0;
+    const F64 POLL_WAITING_S = 4.0;
+    // Source: region-terrain-work/greedy-dice-2026-11-10/test/delivery_lonewolf.json "sounds" (our own, art/make_art.py)
+    const char* SND_ROLL = "2888b686-e2c2-48c0-bc92-3ec2ad4c63fd";
+    const char* SND_BUST = "db99ff28-3bc3-432a-a991-a4bf8a4adf11";
+    const char* SND_BANK = "51193b59-63fe-47e6-a028-5906ffe0f628";
+    const char* SND_LUCKY = "2c68cbc9-aecc-4cc8-a160-d3aba2042140";
+    const char* SND_WIN = "45be77bb-2278-45a5-95a9-c0109229fe77";
+
+    // The guide: the same nine pages as the table's (lsl/wolfdice_tutorial.lsl PAGES), each with its example dice.
+    struct GuidePage { const char* text; const char* dice; const char* kept; };
+    const GuidePage GUIDE[] = {
+        { "HOW TO PLAY  1 of 9\n\nWelcome! This takes 2 minutes.\n\nGreedy is a game of luck and good sense for 1 to 8 players.\n\n"
+          "Roll six dice and collect points. The first to 10,000 wins.", "000000", "000000" },
+        { "ROLLING THE DICE  2 of 9\n\nPress ROLL and the six dice are rolled for you - by the Greedy server, so nobody can cheat.\n\n"
+          "Dice that score turn GOLD and are put aside for you.\n\nHere a 1 and a 5 scored: 100 + 50 = 150 points.", "153326", "110000" },
+        { "WHAT SCORES  3 of 9\n\nA single 1: 100\nA single 5: 50\nThree 1s: 1,000\nThree 2s: 200, three 3s: 300, and so on\n\n"
+          "Each extra matching die doubles it: four 4s = 800.\nHere: 800 + 100 = 900.", "444412", "111110" },
+        { "SPECIAL ROLLS  4 of 9\n\nIn one roll:\n1 2 3 4 5 or 2 3 4 5 6: 1,000\n1 2 3 4 5 6: 1,500\nThree pairs: 1,500\n"
+          "Four alike and a pair: 2,000 (four 1s and a pair: 2,500)\nTwo threes alike: 2,000\nSix 1s: 8,000", "123456", "111111" },
+        { "ROLL AGAIN OR BANK?  5 of 9\n\nAfter a roll that scores, you choose: ROLL the dice that are left to add more points, "
+          "or BANK to keep this turn's points. Then it is the next player's turn.\n\nFewer dice left means more risk.", "152263", "110000" },
+        { "GOING BUST  6 of 9\n\nNo 1s, no 5s and nothing special means BUST: the points from that turn are lost, and the "
+          "next player goes.\n\nA star * shows each bust. On your third bust your score goes back to 0 - take care!", "234623", "xxxxxx" },
+        { "LUCKY SIX  7 of 9\n\nWhen every die has scored, you may roll all six again and keep adding to your turn.\n\n"
+          "Or BANK, if you would rather be safe. It is up to you.\n\nHere: two threes alike, 2,000.", "111555", "111111" },
+        { "WINNING  8 of 9\n\nThe first to bank 10,000 (or that game's target) starts the LAST TURNS: everyone else has one more "
+          "turn to beat them. The highest score wins.\n\nThere is no clock. Take all the time you need.", "000000", "000000" },
+        { "READY?  9 of 9\n\nLet's play!\n\nNew game starts a game others can join from their Greedy window or a Greedy table. "
+          "Join plays in a game going now.\n\nPRACTICE is a game on your own with tips. Nothing is saved and it is not ranked.\n\n"
+          "HOW TO PLAY shows this again.", "000000", "000000" },
+    };
+    const S32 GUIDE_PAGES = S32(sizeof(GUIDE) / sizeof(GUIDE[0]));
+
+    // Source: wolffloaterdob.cpp json_to_llsd (wolfviewerkey.cpp)
+    LLSD json_to_llsd(const LLSD::Binary& bytes)
+    {
+        std::string text(bytes.begin(), bytes.end());
+        boost::system::error_code ec;
+        boost::json::value v = boost::json::parse(text, ec);
+        if (ec) return LLSD();
+        return LlsdFromJson(v);
+    }
+
+    /** One request to the dice server as this login. Runs in a coroutine. Source: wolffloaterdob.cpp post_dob. */
+    LLSD post_greedy(const char* url, const std::string& body, LLCore::HttpStatus& status)
+    {
+        LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
+            std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfGreedy", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+        LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+        LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
+        options->setTimeout(20);
+        LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
+        headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
+        headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/x-www-form-urlencoded");
+        headers->append("X-Wolf-Agent", gAgentID.asString());
+        headers->append("X-Wolf-Session", gAgentSessionID.asString());
+        LLCore::BufferArray::ptr_t raw(new LLCore::BufferArray());
+        raw->append(body.data(), body.size());
+        LLSD result = adapter->postRawAndSuspend(request, url, raw, options, headers);
+        status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+        LLSD reply;
+        if (result.has(LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW))
+            reply = json_to_llsd(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary());
+        return reply;
+    }
+
+    std::string number(S32 n)
+    {
+        // 10,000 style, as the server's lines (wolfdice_lib.php wd_n)
+        std::string s = llformat("%d", n < 0 ? -n : n), out;
+        S32 c = 0;
+        for (size_t i = s.size(); i-- > 0;)
+        {
+            out.insert(out.begin(), s[i]);
+            if (++c % 3 == 0 && i > 0) out.insert(out.begin(), ',');
+        }
+        return n < 0 ? "-" + out : out;
+    }
+
+    LLViewerObject* seat_root()
+    {
+        // Source: wolfskis.cpp seatRoot() (wolfhelm.cpp)
+        if (!isAgentAvatarValid() || !gAgentAvatarp->isSitting()) return nullptr;
+        LLViewerObject* p = (LLViewerObject*)gAgentAvatarp->getParent();
+        while (p && p->getParent()) p = (LLViewerObject*)p->getParent();
+        return p;
+    }
+
+    const LLColor4 YELLOW(1.f, 0.86f, 0.35f, 1.f);
+    const LLColor4 GREEN(0.45f, 1.f, 0.55f, 1.f);
+    const LLColor4 GREY(0.65f, 0.65f, 0.7f, 1.f);
+    const LLColor4 RED_TEXT(1.f, 0.6f, 0.6f, 1.f);
+    const LLColor4 GOLD_DIE(1.f, 0.8f, 0.3f, 1.f);
+    const LLColor4 RED_DIE(1.f, 0.42f, 0.4f, 1.f);
+}
+
+// ------------------------------------------------------------------------------------------------------------- window
+
+WolfFloaterGreedy::WolfFloaterGreedy(const LLSD& key) : LLFloater(key)
+{
+}
+
+bool WolfFloaterGreedy::postBuild()
+{
+    for (const char* p : { "f_", "t_" })
+    {
+        const std::string pre(p);
+        getChild<LLButton>(pre + "mode_full")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("full", true); });
+        getChild<LLButton>(pre + "mode_table")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("table", true); });
+        getChild<LLButton>(pre + "mode_strip")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("strip", true); });
+    }
+    getChild<LLButton>("s_mode_full")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode(mModeBeforeStrip, true); });
+    for (const char* p : { "f_", "t_", "s_" })
+    {
+        const std::string pre(p);
+        getChild<LLButton>(pre + "roll")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRoll(); });
+        getChild<LLButton>(pre + "bank")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onBank(); });
+    }
+    for (const char* n : { "f_leave", "t_leave" })
+        getChild<LLButton>(n)->setCommitCallback([this](LLUICtrl*, const LLSD&) { if (mGame) send("leave"); });
+    for (const char* n : { "f_help", "t_help" })
+        getChild<LLButton>(n)->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("full", false); showGuide(0); });
+    getChild<LLButton>("f_pass")->setCommitCallback([this](LLUICtrl*, const LLSD&) { if (mGame) send("pass"); });
+    getChild<LLButton>("f_new")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onNew(false); });
+    getChild<LLButton>("f_practice")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onNew(true); });
+    getChild<LLButton>("f_join")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onJoin(); });
+    getChild<LLButton>("f_refresh")->setCommitCallback([this](LLUICtrl*, const LLSD&) { send("list"); });
+    getChild<LLButton>("f_guide_back")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(llmax(0, mGuidePage - 1)); });
+    getChild<LLButton>("f_guide_next")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(llmin(GUIDE_PAGES - 1, mGuidePage + 1)); });
+    getChild<LLButton>("f_guide_done")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(-1); });
+    getChild<LLButton>("f_guide_practice")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(-1); onNew(true); });
+    getChild<LLButton>("f_offer_yes")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        getChild<LLUICtrl>("f_offer")->setVisible(false);
+        setMode("table", true);
+    });
+    getChild<LLButton>("f_offer_no")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        mOfferDismissed = true;
+        getChild<LLUICtrl>("f_offer")->setVisible(false);
+        // back to the view they had chosen (the offer is shown in Full so it can be read)
+        if (!mModeBeforeOffer.empty() && mModeBeforeOffer != mMode) setMode(mModeBeforeOffer, false);
+        mModeBeforeOffer.clear();
+    });
+    LLComboBox* target = getChild<LLComboBox>("f_target");
+    target->add("10,000", LLSD(10000));
+    target->add("5,000", LLSD(5000));
+    target->add("2,000", LLSD(2000));
+    target->selectFirstItem();
+    std::string mode = gSavedSettings.getString("WolfGreedyMode");
+    if (mode != "table" && mode != "strip") mode = "full";
+    setMode(mode, false);
+    showNoGame();
+    return true;
+}
+
+void WolfFloaterGreedy::onOpen(const LLSD& key)
+{
+    LLFloater::onOpen(key);
+    if (!WolfGrid::isWolfTerritories())
+    {
+        setMessage("Greedy is for Wolf Territories logins. Log in to Wolf Territories to play.", EStatus::ERR);
+        return;
+    }
+    if (key.isMap() && key.has("table"))
+    {
+        onTable(key["table"].asInteger(), key["label"].asString());
+        return;
+    }
+    if (!mGame)
+    {
+        send("mine");
+        send("list");
+    }
+    if (!gSavedSettings.getBOOL("WolfGreedyGuideSeen"))
+    {
+        gSavedSettings.setBOOL("WolfGreedyGuideSeen", true);
+        setMode("full", false);
+        showGuide(0);
+    }
+}
+
+void WolfFloaterGreedy::setMode(const std::string& mode, bool remember)
+{
+    if (mode == "strip" && mMode != "strip") mModeBeforeStrip = mMode == "table" ? "table" : "full";
+    mMode = mode;
+    if (remember) gSavedSettings.setString("WolfGreedyMode", mode);
+    LLView* full = getChild<LLView>("full_panel");
+    LLView* table = getChild<LLView>("table_panel");
+    LLView* strip = getChild<LLView>("strip_panel");
+    full->setVisible(mode == "full");
+    table->setVisible(mode == "table");
+    strip->setVisible(mode == "strip");
+    LLView* shown = mode == "table" ? table : mode == "strip" ? strip : full;
+    const S32 header = getRect().getHeight() - full->getRect().mTop;   // the title bar above the panels
+    const LLRect old = getRect();
+    const S32 w = shown->getRect().getWidth(), h = shown->getRect().getHeight() + header;
+    LLRect r(old.mLeft, old.mTop, old.mLeft + w, old.mTop - h);
+    if (mode == "strip" && gFloaterView)
+    {
+        // along the bottom of the screen, above the toolbars (getSnapRect leaves them out), centred
+        const LLRect snap = gFloaterView->getSnapRect();
+        const S32 left = snap.mLeft + (snap.getWidth() - w) / 2;
+        r.setLeftTopAndSize(left, snap.mBottom + 6 + h, w, h);
+    }
+    reshape(w, h, false);
+    setRect(r);
+    // the panels sit under the title bar, whatever the floater's height now is
+    for (LLView* p : { full, table, strip })
+    {
+        LLRect pr = p->getRect();
+        pr.setLeftTopAndSize(0, h - header, pr.getWidth(), pr.getHeight());
+        p->setRect(pr);
+    }
+    for (const char* p : { "f_", "t_" })
+    {
+        const std::string pre(p);
+        getChild<LLButton>(pre + "mode_full")->setToggleState(mode == "full");
+        getChild<LLButton>(pre + "mode_table")->setToggleState(mode == "table");
+        getChild<LLButton>(pre + "mode_strip")->setToggleState(mode == "strip");
+    }
+    getChild<LLButton>("s_mode_full")->setLabel(mModeBeforeStrip == "table" ? std::string("Table") : std::string("Bigger"));
+}
+
+void WolfFloaterGreedy::draw()
+{
+    LLFloater::draw();
+    if (!mGame || mBusy || !WolfGrid::isWolfTerritories()) return;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now < mNextPoll) return;
+    send("poll", "&v=" + llformat("%d", mVersion));
+}
+
+void WolfFloaterGreedy::onTable(S32 game, const std::string& label)
+{
+    if (game <= 0) return;
+    mTableGame = game;
+    mTableLabel = label;
+    if (mGame != game)
+    {
+        // the table has already seated them in this game: this just loads it (wolfdice_window.php wdw_join). The game
+        // goes in the request itself ("&g=" last wins in PHP), so a "leave" still out names the old one.
+        mVersion = -1;
+        send("join", llformat("&g=%d", game));
+    }
+    if (mMode != "table" && !mOfferDismissed)
+    {
+        getChild<LLTextBox>("f_offer_text")->setText("You are at " + (label.empty() ? std::string("a Greedy table") : label) + ".");
+        getChild<LLUICtrl>("f_offer")->setVisible(true);
+        mModeBeforeOffer = mMode;
+        if (mMode == "strip") setMode("full", false);
+    }
+}
+
+void WolfFloaterGreedy::onLeftTable()
+{
+    mTableGame = 0;
+    mOfferDismissed = false;
+    getChild<LLUICtrl>("f_offer")->setVisible(false);
+    if (mMode == "table") setMessage("You have left the table. The Full view shows the whole game.", EStatus::INFO);
+}
+
+void WolfFloaterGreedy::onRoll()
+{
+    const std::string b = mState["game"]["buttons"].asString();
+    if (!mGame) { setMessage("Start a new game, or join one, first.", EStatus::ERR); return; }
+    if (b.find('S') != std::string::npos || b.find('A') != std::string::npos) send("start");
+    else if (b.find('R') != std::string::npos) send("roll");
+    else setMessage("It is not your turn yet.", EStatus::INFO);
+}
+
+void WolfFloaterGreedy::onBank()
+{
+    const std::string b = mState["game"]["buttons"].asString();
+    if (b.find('B') != std::string::npos) send("bank");
+    else if (b.find('R') != std::string::npos) setMessage("Roll first - there is nothing to bank yet.", EStatus::INFO);
+    else if (mGame) setMessage("It is not your turn yet.", EStatus::INFO);
+}
+
+void WolfFloaterGreedy::onNew(bool practice)
+{
+    if (mGame && mState["game"]["in_game"].asBoolean() && mState["game"]["state"].asString() != "finished")
+    {
+        send("leave");   // one game at a time; the queue keeps the order
+    }
+    const S32 target = practice ? 2000 : getChild<LLComboBox>("f_target")->getValue().asInteger();
+    std::string region = gAgent.getRegion() ? gAgent.getRegion()->getName() : std::string();
+    send("new", llformat("&target=%d", target) + (practice ? "&practice=1" : "") + "&region=" + LLURI::escape(region));
+}
+
+void WolfFloaterGreedy::onJoin()
+{
+    const S32 id = getChild<LLComboBox>("f_games")->getValue().asInteger();
+    if (id <= 0) { setMessage("Choose a game from the list first (Refresh looks again).", EStatus::INFO); return; }
+    if (mGame && mGame != id && mState["game"]["in_game"].asBoolean()) send("leave");
+    mVersion = -1;
+    send("join", llformat("&g=%d", id));   // the answer's game.id becomes mGame (onReply)
+}
+
+void WolfFloaterGreedy::send(const std::string& op, const std::string& extra)
+{
+    if (mBusy)
+    {
+        if (op != "poll") mQueued = op + "\n" + extra;   // the newest press wins; it goes when the answer comes
+        return;
+    }
+    mBusy = true;
+    const std::string body = "op=" + op + "&g=" + llformat("%d", mGame) + extra;
+    LLHandle<LLFloater> handle = getHandle();
+    LLCoros::instance().launch("WolfGreedy", [handle, op, body]() { sendCoro(handle, op, body); });
+}
+
+// static
+void WolfFloaterGreedy::sendCoro(LLHandle<LLFloater> handle, std::string op, std::string body)
+{
+    LLCore::HttpStatus status;
+    LLSD reply = post_greedy(API_1, body, status);
+    if (!reply.isMap())
+    {
+        // the first web host did not answer: the second has the same file and the same database (README s3)
+        reply = post_greedy(API_2, body, status);
+    }
+    std::string error;
+    if (!reply.isMap() || !reply["ok"].asBoolean())
+    {
+        error = reply.isMap() && reply.has("error") ? reply["error"].asString() : std::string();
+        if (error.empty()) error = "The Greedy server did not answer (" + status.toString() + "). Please try again in a moment.";
+        if (op != "poll") LL_WARNS("WolfGreedy") << op << ": " << status.toString() << " " << error << LL_ENDL;
+    }
+    WolfFloaterGreedy* self = static_cast<WolfFloaterGreedy*>(handle.get());
+    if (!self) return;
+    self->onReply(op, reply, error);
+}
+
+void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const std::string& error)
+{
+    mBusy = false;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (!error.empty())
+    {
+        if (op != "poll") setMessage(error, EStatus::ERR);
+        mNextPoll = now + POLL_WAITING_S;
+    }
+    else if (op == "list")
+    {
+        mGames = reply["games"];
+        LLComboBox* games = getChild<LLComboBox>("f_games");
+        games->removeall();
+        if (!mGames.isArray() || mGames.size() == 0)
+        {
+            games->add("Nobody is playing just now", LLSD(0));
+        }
+        else
+        {
+            games->add("Choose a game to join...", LLSD(0));
+            for (const LLSD& g : llsd::inArray(mGames))
+            {
+                std::string where = g["region"].asString();
+                games->add(g["label"].asString() + (where.empty() ? std::string() : " at " + where) +
+                           llformat(" - %d in", g["players"].asInteger()) +
+                           (g["state"].asString() == "lobby" ? std::string(", waiting") : std::string(", playing")),
+                           LLSD(g["id"].asInteger()));
+            }
+        }
+        games->selectFirstItem();
+    }
+    else if (reply["left"].asBoolean())
+    {
+        mGame = 0;
+        mVersion = -1;
+        mState = LLSD();
+        showNoGame();
+        setMessage("You have left the game.", EStatus::INFO);
+    }
+    else if (reply["gone"].asBoolean())
+    {
+        mGame = 0;
+        mVersion = -1;
+        mState = LLSD();
+        showNoGame();
+        setMessage("That game has ended.", EStatus::INFO);
+        send("list");
+        return;
+    }
+    else if (reply["none"].asBoolean())
+    {
+        showNoGame();
+    }
+    else if (!reply["same"].asBoolean() && reply.has("game"))
+    {
+        const LLSD& g = reply["game"];
+        const S32 v = g["version"].asInteger();
+        const bool first = mVersion < 0 || mGame != g["id"].asInteger();
+        mGame = g["id"].asInteger();
+        if (!first && v != mVersion) playSound(g["event_kind"].asString());
+        mVersion = v;
+        mState = reply;
+        show(reply);
+        if (op != "poll") setMessage(std::string(), EStatus::INFO);
+    }
+    const std::string st = mState["game"]["state"].asString();
+    mNextPoll = now + ((st == "playing" || st == "final") ? POLL_PLAYING_S : POLL_WAITING_S);
+    if (!mQueued.empty())
+    {
+        const size_t nl = mQueued.find('\n');
+        const std::string q = mQueued.substr(0, nl), extra = nl == std::string::npos ? std::string() : mQueued.substr(nl + 1);
+        mQueued.clear();
+        send(q, extra);
+    }
+}
+
+void WolfFloaterGreedy::playSound(const std::string& kind)
+{
+    const char* id = kind == "roll" ? SND_ROLL : kind == "bust" ? SND_BUST : kind == "bank" ? SND_BANK
+                   : kind == "lucky" ? SND_LUCKY : kind == "win" ? SND_WIN : nullptr;
+    if (!id || !gAudiop) return;
+    gAudiop->triggerSound(LLUUID(id), gAgentID, 0.8f, LLAudioEngine::AUDIO_TYPE_UI);
+}
+
+void WolfFloaterGreedy::showNoGame()
+{
+    LLTextEditor* players = getChild<LLTextEditor>("f_players");
+    players->clear();
+    players->appendText("Start a new game below - others can join it from their Greedy window or a Greedy table - "
+                        "or join a game being played now.\n\nNew here? Press How to play.", false);
+    for (const char* n : { "f_status", "t_status", "s_status" }) getChild<LLTextBox>(n)->setText(std::string("Greedy"));
+    getChild<LLTextBox>("f_turn")->setText(std::string());
+    getChild<LLTextBox>("f_event")->setText(std::string());
+    getChild<LLTextBox>("t_score")->setText(std::string("Not in a game"));
+    getChild<LLTextBox>("s_score")->setText(std::string("Not in a game"));
+    showDice(LLSD(), "000000");
+    refreshButtons();
+}
+
+void WolfFloaterGreedy::show(const LLSD& state)
+{
+    const LLSD& g = state["game"];
+    const std::string status = g["status"].asString();
+    for (const char* n : { "f_status", "t_status", "s_status" })
+    {
+        LLTextBox* t = getChild<LLTextBox>(n);
+        t->setText(status);
+        t->setColor(g["my_turn"].asBoolean() ? YELLOW : LLColor4::white);
+    }
+    LLTextEditor* players = getChild<LLTextEditor>("f_players");
+    players->clear();
+    S32 myScore = 0, top = 0;
+    bool first = true;
+    for (const LLSD& p : llsd::inArray(state["players"]))
+    {
+        LLStyle::Params style;
+        style.color = p["away"].asBoolean() ? GREY : p["current"].asBoolean() ? YELLOW
+                    : (p["me"].asBoolean() || p["winner"].asBoolean()) ? GREEN : LLColor4::white;
+        std::string stars;
+        for (S32 i = 0; i < p["busts"].asInteger() && i < 3; ++i) stars += "*";
+        std::string line = std::string(p["current"].asBoolean() ? "> " : "   ") + p["name"].asString() + "   " +
+                           number(p["score"].asInteger()) + (p["away"].asBoolean() ? "   (away)" : stars.empty() ? "" : "   " + stars) +
+                           (p["me"].asBoolean() ? "   (you)" : "") + (p["winner"].asBoolean() ? "   WINNER" : "");
+        players->appendText(line, !first, style);
+        first = false;
+        if (p["me"].asBoolean()) myScore = p["score"].asInteger();
+        top = llmax(top, p["score"].asInteger());
+    }
+    if (state.has("tips"))
+    {
+        LLStyle::Params tip;
+        tip.color = LLColor4(0.45f, 0.9f, 1.f, 1.f);
+        for (const LLSD& t : llsd::inArray(state["tips"])) players->appendText(t.asString(), true, tip);
+    }
+    const std::string st = g["state"].asString();
+    const bool going = st == "playing" || st == "final";
+    getChild<LLTextBox>("f_turn")->setText(going ? "This turn: " + number(g["turn_points"].asInteger()) +
+                                                   llformat("      Dice to roll: %d", g["dice_left"].asInteger())
+                                                 : llformat("First to %s", number(g["target"].asInteger()).c_str()));
+    LLTextBox* ev = getChild<LLTextBox>("f_event");
+    ev->setText(g["event"].asString());
+    ev->setColor(g["event_kind"].asString() == "bust" ? RED_TEXT : LLColor4::white);
+    const std::string score = "Your score: " + number(myScore) + (top > myScore ? "   Top: " + number(top) : std::string());
+    getChild<LLTextBox>("t_score")->setText(score);
+    getChild<LLTextBox>("s_score")->setText(score);
+    showDice(g["dice"], g["kept"].asString());
+    refreshButtons();
+}
+
+void WolfFloaterGreedy::showDice(const LLSD& dice, const std::string& kept)
+{
+    for (S32 i = 0; i < 6; ++i)
+    {
+        const S32 face = dice.isArray() && i < (S32)dice.size() ? llclamp(dice[i].asInteger(), 0, 6) : 0;
+        const char k = i < (S32)kept.size() ? kept[i] : '0';
+        const LLColor4 c = k == '1' ? GOLD_DIE : k == 'x' ? RED_DIE : LLColor4::white;
+        for (const char* p : { "f_die", "s_die" })
+        {
+            LLIconCtrl* icon = getChild<LLIconCtrl>(llformat("%s%d", p, i));
+            icon->setValue(LLSD(llformat("WolfGreedy_Die%d", face)));
+            icon->setColor(c);
+        }
+    }
+}
+
+void WolfFloaterGreedy::refreshButtons()
+{
+    const LLSD& g = mState["game"];
+    const std::string b = g["buttons"].asString();
+    const bool inGame = mGame && g["in_game"].asBoolean();
+    const std::string rollLabel = b.find('S') != std::string::npos ? "Start" : b.find('A') != std::string::npos ? "Play again" : "Roll";
+    for (const char* p : { "f_", "t_", "s_" })
+    {
+        const std::string pre(p);
+        LLButton* roll = getChild<LLButton>(pre + "roll");
+        roll->setLabel(rollLabel);
+        roll->setEnabled(inGame && (b.find('R') != std::string::npos || b.find('S') != std::string::npos || b.find('A') != std::string::npos));
+        getChild<LLButton>(pre + "bank")->setEnabled(inGame && b.find('B') != std::string::npos);
+    }
+    const bool guide = mGuidePage >= 0;
+    for (const char* n : { "f_target_label", "f_target", "f_new", "f_practice", "f_games", "f_join", "f_refresh" })
+        getChild<LLUICtrl>(n)->setVisible(!guide && !inGame);
+    for (const char* n : { "f_leave", "f_pass" }) getChild<LLUICtrl>(n)->setVisible(!guide && inGame);
+    getChild<LLUICtrl>("t_leave")->setEnabled(inGame);
+    getChild<LLUICtrl>("f_help")->setVisible(!guide);
+    for (const char* n : { "f_players", "f_turn", "f_event", "f_roll", "f_bank", "f_status" }) getChild<LLUICtrl>(n)->setVisible(!guide);
+}
+
+void WolfFloaterGreedy::showGuide(S32 page)
+{
+    mGuidePage = page;
+    const bool on = page >= 0;
+    for (const char* n : { "f_guide", "f_guide_back", "f_guide_next", "f_guide_done" }) getChild<LLUICtrl>(n)->setVisible(on);
+    getChild<LLUICtrl>("f_guide_practice")->setVisible(on && page == GUIDE_PAGES - 1);
+    getChild<LLUICtrl>("f_guide_next")->setVisible(on && page < GUIDE_PAGES - 1);
+    getChild<LLUICtrl>("f_guide_back")->setEnabled(page > 0);
+    if (on)
+    {
+        getChild<LLTextEditor>("f_guide")->setText(std::string(GUIDE[page].text));
+        LLSD dice = LLSD::emptyArray();
+        for (S32 i = 0; i < 6; ++i) dice.append(GUIDE[page].dice[i] - '0');
+        showDice(dice, GUIDE[page].kept);
+    }
+    else if (mState.has("game"))
+    {
+        showDice(mState["game"]["dice"], mState["game"]["kept"].asString());
+    }
+    else
+    {
+        showDice(LLSD(), "000000");
+    }
+    refreshButtons();
+}
+
+void WolfFloaterGreedy::setMessage(const std::string& text, EStatus kind)
+{
+    // Source: wolffloaterdob.cpp setStatus - light red on the dark floater, and the words say it too; it stays until the
+    // next action (an error is never taken away by a timer)
+    for (const char* n : { "f_message", "t_message" })
+    {
+        LLTextEditor* m = getChild<LLTextEditor>(n);
+        const LLUIColor c = kind == EStatus::ERR ? LLUIColor(RED_TEXT) : LLUIColor(LLColor4::white);
+        m->setReadOnlyColor(c);
+        m->setColor(c);
+        m->setText(text);
+        m->setVisible(!text.empty());
+    }
+    if (kind == EStatus::ERR && mMode == "strip") getChild<LLTextBox>("s_status")->setText(text);
+}
+
+// ---------------------------------------------------------------------------------------------------------- table link
+
+void WolfGreedy::reset(const LLUUID& seat)
+{
+    mSeatRoot = seat;
+    mDescKnown = false;
+    mIsTable = false;
+    mAnswered = false;
+    mHelloTries = 0;
+    mHelloAt = -100.0;
+}
+
+void WolfGreedy::idle()
+{
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        if (mSeatRoot.notNull()) reset(LLUUID::null);
+        return;
+    }
+    LLViewerObject* root = seat_root();
+    const LLUUID id = root ? root->getID() : LLUUID::null;
+    if (id != mSeatRoot)
+    {
+        if (mIsTable)
+        {
+            WolfFloaterGreedy* f = LLFloaterReg::findTypedInstance<WolfFloaterGreedy>("wolf_greedy");
+            if (f) f->onLeftTable();
+        }
+        reset(id);
+        if (root) WolfObjectProps::instance().want(root, false);
+    }
+    if (!root) return;   // not sitting: nothing to do (paul-think-of-scale)
+    if (!mDescKnown)
+    {
+        const WolfObjectProps::Props* p = WolfObjectProps::instance().get(id);
+        if (!p)
+        {
+            WolfObjectProps::instance().want(root, false);
+            return;
+        }
+        mDescKnown = true;
+        // Source: build_wolfdice.py TABLE_DESC "greedy-table: ..."
+        mIsTable = p->mDescriptionLower.compare(0, 12, "greedy-table") == 0;
+    }
+    if (!mIsTable || mAnswered || mHelloTries >= HELLO_TRIES) return;
+    const F64 t = LLFrameTimer::getElapsedSeconds();
+    if (t - mHelloAt < HELLO_RETRY_S || !WolfGrid::isOnWolfTerritoriesConfirmed()) return;
+    mHelloAt = t;
+    ++mHelloTries;
+    // said, not shouted: the table is the object we sit on (as WolfSkis::say)
+    FSNearbyChat::sendChatFromViewerFinal(HELLO, HELLO, CHAT_TYPE_NORMAL, false, HELLO_CHANNEL);
+}
+
+bool WolfGreedy::onObjectChat(const LLUUID& source, U8 chat_type, const std::string& text)
+{
+    if (text.compare(0, PREFIX.size(), PREFIX) != 0) return false;
+    if (!WolfGrid::isOnWolfTerritories() || chat_type != CHAT_TYPE_DIRECT) return false;
+    // ours from here, never chat; read only from the table we sit at (as WolfSkis::onObjectChat)
+    const LLViewerObject* o = gObjectList.findObject(source);
+    while (o && o->getParent()) o = (const LLViewerObject*)o->getParent();
+    if (!o || o->getID() != mSeatRoot || !mIsTable || text.size() > MAX_LINE) return true;
+    std::vector<std::string> f;
+    std::string rest = text.substr(PREFIX.size());
+    size_t at = 0;
+    while (f.size() < 4)
+    {
+        const size_t bar = rest.find('|', at);
+        f.push_back(rest.substr(at, bar == std::string::npos ? std::string::npos : bar - at));
+        if (bar == std::string::npos) break;
+        at = bar + 1;
+    }
+    if (f[0] == "table" && f.size() >= 2)
+    {
+        mAnswered = true;
+        const S32 game = (S32)std::strtol(f[1].c_str(), nullptr, 10);
+        LLSD key;
+        key["table"] = game;
+        key["label"] = f.size() >= 3 ? f[2] : std::string();
+        WolfFloaterGreedy* fl = LLFloaterReg::findTypedInstance<WolfFloaterGreedy>("wolf_greedy");
+        if (fl && fl->getVisible()) fl->onTable(game, key["label"].asString());
+        else LLFloaterReg::showInstance("wolf_greedy", key);
+    }
+    else if (f[0] == "bye")
+    {
+        WolfFloaterGreedy* fl = LLFloaterReg::findTypedInstance<WolfFloaterGreedy>("wolf_greedy");
+        if (fl) fl->onLeftTable();
+    }
+    return true;
+}

@@ -31,6 +31,7 @@
 #include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
 #include "wolfviewerkey.h"  // [COPYBOT EXEMPT 2026-10-19/] the per-login key for the regions' copybot guard
 #include "wolffloaterdob.h"  // [DOB IN THE VIEWER 2026-10-26/] ask for a date of birth after login when the account has none
+#include "wolffloatergreedy.h"  // [GREEDY WINDOW 2026-11-10/] the Greedy table link
 #include "wolffloaterexperiences.h"  // [WolfViewer 2026-10-14/] Experiences: auto-open after a new account's login, arrival notice
 #include "llappviewer.h"
 #include "wolfsplash.h"   // [WOLF SPLASH 2026-10-21/]
@@ -6370,6 +6371,7 @@ void LLAppViewer::idle()
     // [SKIS 2026-11-06] skis and snowboards: the hello, the run's numbers (wolfskis.h); after WolfDrive / WolfFlight / WolfHelm
     // so one of their panels opened by hand this frame takes the bottom from the Ski HUD. Returns at once when not sitting.
     { WolfVRScreen::SubPart wsp_("WolfSkis"); WolfSkis::instance().idle(); }
+    { WolfVRScreen::SubPart wsp_("WolfGreedy"); WolfGreedy::instance().idle(); }   // [GREEDY WINDOW 2026-11-10/] a Greedy table we sit at
     // </WolfViewer>
     // <WolfViewer 2026-11-01> Wolf Air: a warplane's hello, the dogfight band's orders and fire key, the kill feed
     // (wolfair.cpp); after WolfFlight so the deck it may switch on is there next frame. </WolfViewer>

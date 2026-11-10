@@ -2167,6 +2167,12 @@
              Put on / take off the free Wolf skis or snowboard; the Ski HUD opens while riding. Wolf Territories only. -->
             <!-- [SLEDGES 2026-11-07] ticket 556 (Indi): a sledge and a snow disc too, so "Winter Fun"; the words in brackets
                  so a resident looking for the skis still finds them -->
+            <!-- [GREEDY WINDOW 2026-11-10] wolffloatergreedy.cpp: Greedy, the dice game (ticket 721); Paul: "built into the
+             viewer NOT a hud". Wolf Territories logins only (the dice server checks the session). -->
+            <menu_item_call label="Greedy (Dice Game)..." name="WolfGreedy">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_greedy" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <menu_item_call label="Winter Fun (Skis and Sledges)..." name="WolfSkis">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_skis" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />

@@ -32,6 +32,7 @@
 #include "wolfdjchatcontrol.h"   // <WolfViewer 2026-10-19/> Wolf DJ chat control
 #include "wolfhelm.h"            // <WolfViewer 2026-10-28/> the Captain's Helm hears its ship
 #include "wolfskis.h"            // [SKIS 2026-11-06/] skis and snowboards hear their ride
+#include "wolffloatergreedy.h"   // [GREEDY WINDOW 2026-11-10/] a Greedy table's "WolfGreedy1|" lines
 #include "wolfair.h"             // <WolfViewer 2026-11-01/> Wolf Air: the flight deck's dogfight band hears its plane
 #include "wolffloaterlifts.h"    // [WOLF LIFTS 2026-11-10/] the lift kit's "WolfLift1|" lines
 #include "wolffloaterfishing.h"   // [WOLF FISHING 2026-11-10/] the fishing rod's "WolfFish1|" lines
@@ -2889,6 +2890,11 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
         }
         // [SKIS 2026-11-06] skis' / a snowboard's "WolfSki1|..." line to the Ski HUD (wolfskis.h), taken the same way.
         if (WolfSkis::instance().onObjectChat(from_id, type_temp, helm_line))
+        {
+            return;
+        }
+        // [GREEDY WINDOW 2026-11-10] a Greedy table's "WolfGreedy1|..." line to the Greedy window (wolffloatergreedy.h).
+        if (WolfGreedy::instance().onObjectChat(from_id, type_temp, helm_line))
         {
             return;
         }

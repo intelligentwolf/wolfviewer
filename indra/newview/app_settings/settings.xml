@@ -30240,6 +30240,28 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <integer>1</integer>
     </map>
+    <key>WolfGreedyMode</key>
+    <map>
+      <key>Comment</key>
+      <string>[GREEDY WINDOW 2026-11-10] The Greedy window's view, chosen by the player: full, table (controls only) or strip</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>String</string>
+      <key>Value</key>
+      <string>full</string>
+    </map>
+    <key>WolfGreedyGuideSeen</key>
+    <map>
+      <key>Comment</key>
+      <string>[GREEDY WINDOW 2026-11-10] The Greedy guide (How to play) has opened by itself once</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
     <key>WolfSkiHudMph</key>
     <map>
       <key>Comment</key>

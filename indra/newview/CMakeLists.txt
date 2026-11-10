@@ -934,6 +934,7 @@ set(viewer_SOURCE_FILES
     wolfcrashreport.cpp   # [CRASH REPORTS 2026-10-28] crash stack / minidump, sent as a staff ticket next run
     wolflogscrub.cpp   # [CRASH REPORTS 2026-10-28] log scrub / tail / gzip shared with the Flea Report
     wolffloaterdob.cpp   # [DOB IN THE VIEWER 2026-10-26] Your Date of Birth (asked after login when the account has none)
+    wolffloatergreedy.cpp   # [GREEDY WINDOW 2026-11-10] Greedy, the dice game (ticket 721)
     wolfvrpipe.cpp   # [VR PIPE 2026-11-03] VR in the headset browser: LAN HTTPS/WebSocket server (no viewer headers)
     wolfvrpipe_video.cpp   # [VR PIPE 2026-11-03] test pattern + GStreamer H.264 (dlopen) / libjpeg encoders
     wolfvrdevice.cpp   # [VR SIMPLE 2026-11-03] the headset page id and browser name (no pairing)
@@ -1972,6 +1973,7 @@ set(viewer_HEADER_FILES
     wolfcrashreport.h   # [CRASH REPORTS 2026-10-28]
     wolflogscrub.h   # [CRASH REPORTS 2026-10-28]
     wolffloaterdob.h   # [DOB IN THE VIEWER 2026-10-26]
+    wolffloatergreedy.h   # [GREEDY WINDOW 2026-11-10]
     wolfvrpipe.h   # [VR PIPE 2026-11-03]
     wolfvrpipe_video.h   # [VR PIPE 2026-11-03]
     wolfvrdevice.h   # [VR SIMPLE 2026-11-03]

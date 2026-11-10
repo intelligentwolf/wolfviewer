@@ -34,6 +34,7 @@
 #include "wolfskis.h"            // [SKIS 2026-11-06/] skis and snowboards hear their ride
 #include "wolfair.h"             // <WolfViewer 2026-11-01/> Wolf Air: the flight deck's dogfight band hears its plane
 #include "wolffloaterlifts.h"    // [WOLF LIFTS 2026-11-10/] the lift kit's "WolfLift1|" lines
+#include "wolffloaterfishing.h"   // [WOLF FISHING 2026-11-10/] the fishing rod's "WolfFish1|" lines
 #include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
 // Linden libraries
@@ -2877,6 +2878,12 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
         // [WOLF LIFTS 2026-11-10] the lift kit's "WolfLift1|..." lines to the Cable Cars and Ski Lifts window
         // (wolffloaterlifts.h), taken the same way. </WolfViewer>
         if (WolfLifts::onObjectChat(from_id, type_temp, helm_line))
+        {
+            return;
+        }
+        // [WOLF FISHING 2026-11-10] the fishing rod's "WolfFish1|..." lines to the Fishing window (wolffloaterfishing.h),
+        // taken the same way. </WolfViewer>
+        if (WolfFishing::onObjectChat(from_id, type_temp, helm_line))
         {
             return;
         }

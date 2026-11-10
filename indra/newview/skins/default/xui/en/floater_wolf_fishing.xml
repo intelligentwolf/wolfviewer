@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF FISHING 2026-11-10] Fishing (wolffloaterfishing.cpp). Ticket 679, Jimmy Olsen: "rez a fishing rod from viewer and get
+     it attached automatically and play the reeling sounds etc and catch fishes"; Paul: "have a grid leaderboard that is reset
+     every week". Built into the viewer, not a HUD; simple for older residents.
+     Persona: Margaret, 62, a quiet hour by the sea with friends. Story: "I press Cast, a fish bites, I press Reel in, I see
+     what I caught and where I am this week."
+     Flow: the window puts the rod in your hand (given first if you have none) -> Cast -> waiting -> "A fish is biting!" (no
+     hurry) -> Reel in -> the catch and the score -> Cast again. The big line at the top always says what is happening or
+     what to do; failures show there in the caution colour and stay until the next action. No codes, no countdowns. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="610"
+ layout="topleft"
+ name="wolf_fishing"
+ help_topic="wolf_fishing"
+ save_rect="true"
+ single_instance="true"
+ title="Fishing"
+ width="500">
+    <text follows="left|top" font="SansSerifLarge" height="66" layout="topleft" left="16" name="fish_status" top="26" width="468" word_wrap="true">Looking for your fishing rod...</text>
+    <button follows="left|top" font="SansSerifLarge" height="40" label="Cast" layout="topleft" left="16" name="fish_cast" top="98" width="150"
+     tool_tip="Cast your line into the water in front of you. Face the water first." />
+    <button follows="left|top" font="SansSerifLarge" height="40" label="Reel in" layout="topleft" left="176" name="fish_reel" top="98" width="150"
+     tool_tip="Reel in your line and see what you have caught. When a fish bites there is no hurry - it waits for you." />
+    <button follows="left|top" height="40" label="Stop fishing" layout="topleft" left="336" name="fish_stop" top="98" width="148"
+     tool_tip="Take your line out of the water without reeling in" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="mine_heading" top="150" width="468">Your week</text>
+    <text follows="left|top" height="20" layout="topleft" left="16" name="fish_mine" top="172" width="468" word_wrap="true" />
+    <scroll_list
+     draw_heading="true"
+     follows="left|top"
+     height="110"
+     layout="topleft"
+     left="16"
+     multi_select="false"
+     name="fish_my_best"
+     top="196"
+     tool_tip="Your ten biggest fish this week: their weights added up are your score."
+     width="468">
+        <scroll_list.columns label="Your biggest fish" name="fish" relative_width="0.66" />
+        <scroll_list.columns label="Where" name="where" relative_width="0.34" />
+    </scroll_list>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="board_heading" top="316" width="340">This week's top 10 on Wolf Territories</text>
+    <button follows="left|top" height="22" label="Update" layout="topleft" left="384" name="fish_update" top="314" width="100"
+     tool_tip="Read the top 10 again" />
+    <scroll_list
+     draw_heading="true"
+     follows="left|top"
+     height="170"
+     layout="topleft"
+     left="16"
+     multi_select="false"
+     name="fish_board"
+     top="340"
+     width="468">
+        <scroll_list.columns label="#" name="place" width="28" />
+        <scroll_list.columns label="Angler" name="name" relative_width="0.3" />
+        <scroll_list.columns label="Score" name="score" relative_width="0.17" />
+        <scroll_list.columns label="Fish" name="fish" relative_width="0.09" />
+        <scroll_list.columns label="Biggest" name="best" relative_width="0.44" />
+    </scroll_list>
+    <text follows="left|top" height="36" layout="topleft" left="16" name="fish_board_note" top="516" width="468" word_wrap="true" />
+    <text follows="left|top" height="20" layout="topleft" left="16" name="fish_last_week" top="552" width="340" word_wrap="true" />
+    <button follows="left|top" height="24" label="Put the rod away" layout="topleft" left="354" name="fish_away" top="578" width="130"
+     tool_tip="Take the fishing rod off. Get my rod puts it back." />
+</floater>

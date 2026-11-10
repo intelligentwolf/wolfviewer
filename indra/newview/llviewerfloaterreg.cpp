@@ -155,6 +155,7 @@
 #include "wolffloaterbuildinggen.h"   // [BUILDING GENERATOR 2026-11-01/]
 #include "wolffloaterterraform.h" // [WOLF TERRAFORM 2026-10-23/] the Terraform window
 #include "wolffloaterlifts.h"     // [WOLF LIFTS 2026-11-10/] Cable Cars and Ski Lifts (ticket 691)
+#include "wolffloaterfishing.h"    // [WOLF FISHING 2026-11-10/] Fishing (ticket 679)
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
 #include "llfloaternamedesc.h"
@@ -715,6 +716,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_animator", "floater_wolf_animator.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAnimator>);   // [WOLF ANIMATOR 2026-11-05/] describe a movement, get an animation (ticket 547)
     LLFloaterReg::add("wolf_building_gen", "floater_wolf_building_gen.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBuildingGen>);   // [BUILDING GENERATOR 2026-11-01/] describe a building, the yard plans and builds it
     LLFloaterReg::add("wolf_lifts", "floater_wolf_lifts.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLifts>);   // [WOLF LIFTS 2026-11-10/] ticket 691
+    LLFloaterReg::add("wolf_fishing", "floater_wolf_fishing.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterFishing>);   // [WOLF FISHING 2026-11-10/] ticket 679
     LLFloaterReg::add("wolf_terraform", "floater_wolf_terraform.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTerraform>);   // [WOLF TERRAFORM 2026-10-23/] Level, Ramp, Terrace, Smooth, Road, River, Beach + Undo
     LLFloaterReg::add("wolf_drive_controls", "floater_wolf_drive_controls.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDriveControls>);   // [WOLF DRIVE 2026-10-09/] wheel / pedal / gamepad setup
     LLFloaterReg::add("wolf_dj", "floater_wolf_dj.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJ>);   // [WOLF DJ 2026-10-04/]

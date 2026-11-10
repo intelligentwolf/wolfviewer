@@ -2005,6 +2005,12 @@
         </menu_item_call>
         <menu_item_separator />
         <menu create_jump_keys="true" label="Games &amp; Stories" name="WolfGroupGames" tear_off="true">
+            <!-- [WOLF FISHING 2026-11-10] Ticket 679 (Jimmy Olsen): cast, reel in, the weekly top 10 (wolffloaterfishing.cpp).
+             Wolf Territories only, as the other Wolf games. -->
+            <menu_item_call label="Fishing..." name="WolfWorldFishing">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_fishing" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <!-- [WOLF ADVENTURE P1 2026-10-16] HUD_MESSAGES_V1.md §3.12: the Roleplay window on Journal >
              Adventures here (join one, start a party, leave). [WOLF GRID GATE] gone (not greyed) off Wolf. -->
             <menu_item_call label="Adventures..." name="WolfAdventures">

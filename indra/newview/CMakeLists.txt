@@ -1070,6 +1070,7 @@ set(viewer_SOURCE_FILES
     wolfterraform.cpp # [WOLF TERRAFORM 2026-10-23] the Terraform tools: plans, history (Undo / Redo), jobs
     wolffloaterterraform.cpp # [WOLF TERRAFORM 2026-10-23] the Terraform window
     wolffloaterlifts.cpp # [WOLF LIFTS 2026-11-10] Cable Cars and Ski Lifts (ticket 691)
+    wolffloaterfishing.cpp # [WOLF FISHING 2026-11-10] Fishing (ticket 679)
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
     wolfmapchart.cpp
@@ -2109,6 +2110,7 @@ set(viewer_HEADER_FILES
     wolfterraform.h
     wolffloaterterraform.h
     wolffloaterlifts.h
+    wolffloaterfishing.h
     wolfsurfcurl.h
     wolfmapglobe.h
     wolfmapchart.h

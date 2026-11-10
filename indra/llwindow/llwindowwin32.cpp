@@ -492,6 +492,16 @@ private:
 };
 
 
+// [WIN32 TITLE 2026-11-10] The window title as UTF-16 for the wide Win32 calls: ll_convert<std::wstring>(std::string)
+// (llstring.h, the UTF-8 -> UTF-16 conversion this file already uses for the splash title at the bottom), at most 255
+// characters into the 256-WCHAR buffer; "OpenGL Window" for an empty title, as before.
+static void wolfWin32TitleToWide(WCHAR* dst, const std::string& title)
+{
+    const std::wstring wide = title.empty() ? std::wstring(L"OpenGL Window") : ll_convert<std::wstring>(title);
+    wcsncpy(dst, wide.c_str(), 255);
+    dst[255] = 0;
+}
+
 LLWindowWin32::LLWindowWin32(LLWindowCallbacks* callbacks,
                              const std::string& title, const std::string& name, S32 x, S32 y, S32 width,
                              S32 height, U32 flags,
@@ -626,17 +636,12 @@ LLWindowWin32::LLWindowWin32(LLWindowCallbacks* callbacks,
     RECT            window_rect;
 
     // Set the window title
-    if (title.empty())
-    {
-        mWindowTitle = new WCHAR[50];
-        wsprintf(mWindowTitle, L"OpenGL Window");
-    }
-    else
-    {
-        mWindowTitle = new WCHAR[256]; // Assume title length < 255 chars.
-        mbstowcs(mWindowTitle, title.c_str(), 255);
-        mWindowTitle[255] = 0;
-    }
+    // [WIN32 TITLE 2026-11-10] always the 256-WCHAR buffer (setTitle writes up to 255 characters into it whatever the
+    // first title was; the 50-WCHAR "OpenGL Window" buffer of before overflowed then), filled by wolfWin32TitleToWide:
+    // the title is UTF-8 (the viewer's channel/version/avatar strings), and mbstowcs read it in the ANSI code page -
+    // "WolfViewer â Vulcan's Forge Â· AVX2" in W102's title bar (Paul's cloud PC, 2026-11-10).
+    mWindowTitle = new WCHAR[256];
+    wolfWin32TitleToWide(mWindowTitle, title);
 
     // Set the window class name
     if (name.empty())
@@ -2120,20 +2125,12 @@ void LLWindowWin32::setTitle(const std::string& title)
     //    });
 
 
-    // Set the window title
-    if (title.empty())
-    {
-        wsprintf(mWindowTitle, L"OpenGL Window");
-    }
-    else
-    {
-        mbstowcs(mWindowTitle, title.c_str(), 255);
-        mWindowTitle[255] = 0;
-    }
+    // Set the window title ([WIN32 TITLE 2026-11-10] UTF-8 -> UTF-16, see the constructor)
+    wolfWin32TitleToWide(mWindowTitle, title);
 
     mWindowThread->post([=]()
         {
-            SetWindowText(mWindowHandle, mWindowTitle);
+            SetWindowTextW(mWindowHandle, mWindowTitle);
         });
     // </FS:TT>
 }

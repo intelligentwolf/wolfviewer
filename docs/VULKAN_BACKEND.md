@@ -1452,6 +1452,23 @@ unproven: Windows NVIDIA/AMD/Intel GL+Vulkan interop"):
 3. The world layer's hand-over itself (same as the working UI layer; the only extra is the depth copy pass, which
    writes no colour). The white dot is unexplained; nothing here guesses at it.
 
+**Found by running the W102 Windows binary under Wine (winevulkan + Wine's opengl32 on the NVIDIA Linux driver;
+login screen only): a HALF-shared G-buffer in vintage mode.** The run itself: Vulkan started, Win32 surface, swapchain,
+the shared layers (Wine's opengl32 exposes GL_EXT_memory_object_win32 and the import raised no GL error), the login
+screen presented - so the Windows build's own paths (loader, keys, the composite SPIR-V, the Win32 import calls) work
+as code. But its GPU benchmark under Wine gave Class1 -> graphics level 1 -> `RenderDisableVintageMode 0`
+(featuretable.txt:140/185/411-459 for Low/LowMid/Mid) -> `handleDisableVintageMode` sets `RenderHDREnabled` and
+`RenderEnableEmissiveBuffer` off (llviewercontrol.cpp:366-369) -> `addDeferredAttachments` (pipeline.cpp:394-420) asks for a
+`GL_RGB10_A2` normal attachment and no emissive one. W102's provider knew only `GL_RGBA16` at index 2 and logged
+"G-buffer attachment 2 asked for GL format 0x8059, not the one this provider shares; left to GL": diffuse, orm and the
+depth over Vulkan memory, the normal OpenGL's own, and no Vulkan pass ever (`prepare()` wanted four). Every resident on
+graphics quality Low, LowMid or Mid is in that state, on every platform; no Linux test ran below level 6. Whether this
+is Omniwright's exact fault depends on his graphics level (unknown until his log); it is real either way. W103
+([VINTAGE G-BUFFER], wolfvkgbuffer.cpp): the slot format follows the request (RGBA8 / RGBA16 / RGB10_A2 ->
+`A2B10G10R10_UNORM_PACK32` / RGBA16F, all five checked exportable at init), the Vulkan target takes three or four colour
+attachments (`colorCount()`), the pass semaphores and dumps name only the attachments that exist, and a format the
+provider cannot share ends the sharing for the session instead of leaving a hole. The self-test decodes the packed word.
+
 **What W103 does (all shipped whatever the cause turns out to be).**
 - *Win32 child window for the surface* ([WIN32 CHILD], wolfvksurface.cpp, the twin of 8.2s): a `WS_CHILD | WS_VISIBLE`
   window of class `WolfVulkanSurface` over the viewer's client area, no pixel format, no GL context; its window

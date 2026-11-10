@@ -4387,6 +4387,25 @@ bool LLWindowWin32::getNativeHandles(NativeHandles& handles)
     return true;
 }
 
+// [VK RESIZE 2026-11-10] (llwindow.h) the Win32 twin of LLWindowSDL::refreshGLDrawable: this window's context is released
+// and made current again on the main thread. When an ICD gives the never-swapped back buffer its new size is inside the
+// closed vendor drivers; the one open WGL (Mesa 26.2.5 src/gallium/frontends/wgl) reads the client size again in
+// make-current (stw_context.c:481 stw_framebuffer_update -> stw_framebuffer.c:422-436 -> GetClientRect), and otherwise
+// only from a WM_WINDOWPOSCHANGED hook on the thread that receives the message (stw_framebuffer.c:234-251), which here is
+// the window thread, not the GL thread. UNTESTED on Windows (no Windows machine).
+void LLWindowWin32::refreshGLDrawable()
+{
+    if (!mhRC || !mhDC || wglGetCurrentContext() != mhRC || wglGetCurrentDC() != mhDC)
+    {
+        return;
+    }
+    if (!wglMakeCurrent(NULL, NULL) || !wglMakeCurrent(mhDC, mhRC))
+    {
+        LL_WARNS("Window") << "refreshGLDrawable: wglMakeCurrent failed, error " << GetLastError() << LL_ENDL;
+        wglMakeCurrent(mhDC, mhRC);   // the window's context must be current again for the rest of the frame
+    }
+}
+
 void LLWindowWin32::bringToFront()
 {
     mWindowThread->post([=]()

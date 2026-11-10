@@ -67,6 +67,7 @@ namespace
     std::string sLastError;
     bool sLoginShown = false;
     bool sResizePending = false;
+    bool sGLRefreshAfterPresent = false;   // [VK RESIZE 2026-11-10] onResize: refresh GL's drawable once more after the next present
     bool sInfoProbed = false;           // devices enumerated for About / the floater
     std::string sVulkanDeviceLine;      // "<name>, driver <d>, Vulkan <v>" of the device that would be / is used
     std::string sLoaderName;
@@ -949,6 +950,16 @@ bool isActive()
 void onResize()
 {
     sResizePending = true;
+    // [VK RESIZE 2026-11-10] OpenGL's never-swapped back buffer takes the new size only when the drawable is refreshed
+    // (LLWindow::refreshGLDrawable, llwindow.h): before this frame's GL drawing (reshape runs from gatherInput), and once
+    // more at the end of the next present - Mesa learns the size from a Present ConfigureNotify, read without waiting
+    // (loader_dri3_helper.c dri3_flush_present_events: xcb_poll_for_special_event), so one that is not in yet when the
+    // first refresh runs is picked up by the second.
+    if (sState == State::VULKAN_ACTIVE && sWindow)
+    {
+        sWindow->refreshGLDrawable();
+        sGLRefreshAfterPresent = true;
+    }
 }
 
 void captureWorld()
@@ -1542,6 +1553,12 @@ bool presentFrame()
     else if (present_out_of_date || out_of_date)
     {
         sResizePending = true;
+    }
+    // [VK RESIZE 2026-11-10] (onResize) the frame is out: GL's drawable is refreshed again before the next frame draws
+    if (sGLRefreshAfterPresent)
+    {
+        sGLRefreshAfterPresent = false;
+        sWindow->refreshGLDrawable();
     }
 
     // [BLACK WORLD 2026-11-10] the world check judges the newest probe sample now that the frame is out; a verdict against

@@ -129,6 +129,7 @@ public:
 
     /*virtual*/ void *getPlatformWindow();
     bool getNativeHandles(NativeHandles& handles) override;   // [VULKAN BACKEND 2026-11-08/] X11 or Wayland handles for the Vulkan surface
+    void refreshGLDrawable() override;   // [VK RESIZE 2026-11-10] (llwindow.h)
     /*virtual*/ void bringToFront();
     void requestKeyboardFocus() override;   // [VR KEYBOARD 2026-11-05]
 

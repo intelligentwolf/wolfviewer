@@ -113,6 +113,7 @@ public:
 
     void *getPlatformWindow() override;
     bool getNativeHandles(NativeHandles& handles) override;   // [VULKAN BACKEND 2026-11-08/] HINSTANCE + HWND for the Vulkan surface
+    void refreshGLDrawable() override;   // [VK RESIZE 2026-11-10] (llwindow.h)
     void bringToFront() override;
     void focusClient() override;
     void requestKeyboardFocus() override;   // [VR KEYBOARD 2026-11-05]

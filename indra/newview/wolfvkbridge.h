@@ -70,7 +70,8 @@ namespace WolfVkBridge
     // transparent layer of its own.
     void captureWorld();
 
-    // The window changed size (LLViewerWindow::reshape): the swapchain is rebuilt at the next present.
+    // The window changed size (LLViewerWindow::reshape): the swapchain is rebuilt at the next present, and in Vulkan mode
+    // OpenGL's window drawable is refreshed so its never-swapped back buffer follows the size ([VK RESIZE 2026-11-10]).
     void onResize();
 
     // The login screen has been drawn: the first-run marker is set, and a pending fall-back notice is shown.

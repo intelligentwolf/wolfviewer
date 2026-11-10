@@ -213,6 +213,18 @@ public:
     };
     virtual bool getNativeHandles(NativeHandles& handles) { handles = NativeHandles(); return false; }
 
+    // [VK RESIZE 2026-11-10] In Vulkan mode OpenGL keeps drawing each frame into this window's back buffer, which is never
+    // swapped (WolfVkBridge::present replaces swapBuffers), and the frame is copied out of it at the window's current size
+    // (WolfVkShare::glCaptureUIAndSignal; WolfVkScene::captureWorld / readBackUI). Mesa's GLX (DRI3) only gives that back
+    // buffer a new size when the drawable has been invalidated, which on X11 happens when Mesa reads the Present
+    // ConfigureNotify (loader_dri3_helper.c dri3_handle_present_event) - and it reads those events only in a swap or when
+    // the context fetches its buffers anew, which a make-current forces (frontends/dri/dri_context.c dri_make_current:
+    // texture_stamp = lastStamp - 1). With no swap the back buffer kept its start-up size after a resize: the picture
+    // was cut to it, black beyond. Called on the main thread (the GL context's) after the window changed size, Vulkan
+    // mode only: the window's GL context is released and made current again, so the next frame is drawn into a back
+    // buffer of the new size. Default: nothing (a window layer that does not need it).
+    virtual void refreshGLDrawable() {}
+
 // return the platform-specific window reference we use to initialize llmozlib (HWND on Windows, WindowRef on the Mac, Gtk window on Linux)
     virtual void *getMediaWindow();
 

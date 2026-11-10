@@ -3359,6 +3359,36 @@ bool LLWindowSDL::getNativeHandles(NativeHandles& handles)
     return false;
 }
 
+// [VK RESIZE 2026-11-10] (llwindow.h) X11/GLX only. SDL_GL_MakeCurrent returns at once when the window and context are
+// already current (SDL-release-2.28.0 src/video/SDL_video.c:4027-4031), and so does GLX for the same context and
+// drawables (Mesa 26.2.5 src/glx/glxcurrent.c:128-130 MakeContextCurrent), so the context is released first
+// (SDL_GL_MakeCurrent(window, NULL): X11_GL_MakeCurrent -> glXMakeCurrent(display, None, NULL), SDL_x11opengl.c:828-846)
+// and then bound again: dri_make_current marks the drawable's buffers stale, the next draw fetches them
+// (loader_dri3_get_buffers -> dri3_update_drawable -> dri3_flush_present_events), the queued ConfigureNotify gives the
+// new size and the back buffer is made at it (dri3_get_buffer: a buffer whose size differs from the drawable's is
+// replaced). Not on native Wayland: Mesa's EGL invalidates the drawable from wl_egl_window's resize callback itself
+// (src/egl/drivers/dri2/platform_wayland.c:445-467 resize_callback), with no swap needed.
+void LLWindowSDL::refreshGLDrawable()
+{
+    if (!mWindow || !mContext || mWayland)
+    {
+        return;
+    }
+    if (SDL_GL_GetCurrentWindow() != mWindow || SDL_GL_GetCurrentContext() != mContext)
+    {
+        LL_WARNS_ONCE("Window") << "refreshGLDrawable: the window's GL context is not current on this thread; not refreshed" << LL_ENDL;
+        return;
+    }
+    if (SDL_GL_MakeCurrent(mWindow, nullptr) != 0 || SDL_GL_MakeCurrent(mWindow, mContext) != 0)
+    {
+        LL_WARNS("Window") << "refreshGLDrawable: SDL_GL_MakeCurrent failed: " << SDL_GetError() << LL_ENDL;
+        // whatever happened above, the window's context must be current again for the rest of the frame
+        SDL_GL_MakeCurrent(mWindow, mContext);
+        return;
+    }
+    LL_DEBUGS("Window") << "GL context made current again: the back buffer follows the window's new size" << LL_ENDL;
+}
+
 // [VR KEYBOARD 2026-11-05] (llwindow.h). SDL_RaiseWindow: on Wayland an xdg-activation request for this window's own
 // surface (SDL-release-2.28.0 src/video/wayland/SDL_waylandwindow.c Wayland_RaiseWindow / Wayland_activate_window),
 // which the compositor grants or turns into an "urgent" mark by its own rules (Hyprland: misc:focus_on_activate); on

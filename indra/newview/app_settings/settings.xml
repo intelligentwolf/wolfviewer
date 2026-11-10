@@ -19913,6 +19913,39 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfViewerFallingLeaves</key>
+		<map>
+			<key>Comment</key>
+			<string>[FALLING LEAVES 2026-11-10] Ticket 718: a few leaves fall from the trees whose description contains "wolftree" on Wolf regions, coloured by the season of the region's place (none in winter or while it snows) (Wolf World &gt; Falling Leaves). Off means none for you only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerFallingLeavesMax</key>
+		<map>
+			<key>Comment</key>
+			<string>[FALLING LEAVES 2026-11-10] At most this many falling leaves at once (0 to 600). The frame budget lowers it further on a slow frame.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>300</integer>
+		</map>
+		<key>WolfViewerFallingLeavesTestDay</key>
+		<map>
+			<key>Comment</key>
+			<string>[FALLING LEAVES 2026-11-10] For checking the seasons: the day of the year (1 to 366) the falling leaves use instead of the day the region's sky shows. 0 = the sky's own day. Not kept between sessions.</string>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfViewerUnderSeaFishMax</key>
 		<map>
 			<key>Comment</key>

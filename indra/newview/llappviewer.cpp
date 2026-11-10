@@ -107,6 +107,7 @@
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
 #include "wolfundersea.h"   // [UNDERSEA 2026-11-09/] ticket 652
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
+#include "wolfleaves.h"      // [FALLING LEAVES 2026-11-10/] ticket 718
 #include "wolfnaturesounds.h" // [NATURE SOUNDS 2026-11-03/] ticket 475
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
@@ -6379,6 +6380,7 @@ void LLAppViewer::idle()
     { WolfVRScreen::SubPart wsp_("WolfSeaLife"); WolfSeaLife::instance().idle(); }     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)
     { WolfVRScreen::SubPart wsp_("WolfUnderSea"); WolfUnderSea::instance().idle(); }   // [UNDERSEA 2026-11-09/] ticket 652: sea plants, fish and sharks (wolfundersea.h)
     { WolfVRScreen::SubPart wsp_("WolfSwimBubbles"); WolfSwimBubbles::instance().idle(); } // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles from mouths under the water
+    { WolfVRScreen::SubPart wsp_("WolfLeaves"); WolfLeaves::instance().idle(); }   // [FALLING LEAVES 2026-11-10/] ticket 718: leaves falling from wolftree trees (wolfleaves.h)
     { WolfVRScreen::SubPart wsp_("WolfNatureSounds"); WolfNatureSounds::instance().idle(); } // [NATURE SOUNDS 2026-11-03/] ticket 475: insects, lapping and surf (wolfnaturesounds.h)
     // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name
     // tags - after gObjectList.update() above has placed this frame's name tags.

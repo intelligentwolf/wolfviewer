@@ -1939,6 +1939,14 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerUnderSea" />
             <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
         </menu_item_check>
+        <!-- [FALLING LEAVES 2026-11-10] ticket 718: a few leaves falling from trees whose description contains "wolftree"
+             (wolfleaves.cpp), coloured by the season of the region's place, none in winter; your own on/off, on by default
+             (WolfViewerFallingLeaves). Wolf regions only, visitors included: gone (not greyed) elsewhere. -->
+        <menu_item_check label="Falling Leaves" name="WolfFallingLeaves">
+            <menu_item_check.on_check function="CheckControl" parameter="WolfViewerFallingLeaves" />
+            <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerFallingLeaves" />
+            <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
+        </menu_item_check>
         <!-- [SOUND EFFECTS 2026-11-06] Paul: "Wolf World -> Sound Effects allows the user to select weather sounds and teleport
              sounds and volumes" (wolffloatersoundeffects.cpp). Every grid: the teleport sound plays everywhere. -->
         <!-- [TICKET 673 2026-11-08] "Wolf Sound Effects": the stock Preferences slider for object sounds is also called Sound Effects -->

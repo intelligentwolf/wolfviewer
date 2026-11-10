@@ -151,6 +151,7 @@
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
 #include "wolfundersea.h"   // [UNDERSEA 2026-11-09/] ticket 652
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
+#include "wolfleaves.h"      // [FALLING LEAVES 2026-11-10/] ticket 718
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfterrainlevels.h"   // [WOLF SKY LEVELS 2026-11-05/]
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
@@ -4424,6 +4425,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
             WolfSeaLife::instance().renderDeferred(); // [SEA LIFE 2026-11-03/] ticket 499: dolphins, whales and their spray
             WolfUnderSea::instance().renderDeferred(); // [UNDERSEA 2026-11-09/] ticket 652: sea plants, fish and sharks
             WolfSwimBubbles::instance().renderDeferred();   // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles under the water
+            WolfLeaves::instance().renderDeferred();   // [FALLING LEAVES 2026-11-10/] ticket 718: leaves from wolftree trees
         }
         // </WolfViewer>
 

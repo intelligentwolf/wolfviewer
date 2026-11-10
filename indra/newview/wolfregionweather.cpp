@@ -612,6 +612,22 @@ void WolfRegionWeather::readAutoEnv(const LLSD& row)
     // [GRID TIME 2026-10-03] The sky shows the place at the grid's (Pacific) wall-clock time:
     // that moment is now + skyShift (php/auto_env_lib.php ae_timezone_fields).
     mAutoEnvSkyShift = ae.isMap() ? ae["skyShift"].asReal() : 0.0;
+    // [FALLING LEAVES 2026-11-10] weather.php region_payload autoEnv.wolfEnvironment (!empty($cfg['wolfEnvironment']))
+    mAutoEnvWolfEnv = ae.isMap() && ae["wolfEnvironment"].asBoolean();
+}
+
+// [FALLING LEAVES 2026-11-10] ticket 718. Source: wolfstorm/php/wolf_ambient_lib.php wa_place_lat:
+//   if (empty($cfg['enabled'])) return null;  $l = lat;  if (empty($cfg['wolfEnvironment'])) return $l;
+//   if (lon != 0 || $l != 0 || placeName !== 'No place') return $l;  return null;
+bool WolfRegionWeather::autoEnvPlaceLat(F64& lat) const
+{
+    if (!mHaveRow || !mAutoEnvOn) return false;
+    if (!mAutoEnvWolfEnv || mAutoEnvLon != 0.0 || mAutoEnvLat != 0.0 || mAutoEnvPlace != "No place")
+    {
+        lat = mAutoEnvLat;
+        return true;
+    }
+    return false;
 }
 
 // [HURRICANE 2026-10-29] ticket #367. Source: region-terrain-work/hurricane-2026-10-29/README.md "The storm document": the

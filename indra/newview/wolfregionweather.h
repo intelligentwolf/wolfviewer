@@ -148,6 +148,10 @@ public:
     const std::string& autoEnvPlace() const { return mAutoEnvPlace; }
     F64 autoEnvLat() const { return mAutoEnvLat; }
     F64 autoEnvLon() const { return mAutoEnvLon; }
+    /** [FALLING LEAVES 2026-11-10] ticket 718: the latitude of the region's place, false when it has none. Source:
+     *  wolfstorm/php/wolf_ambient_lib.php wa_place_lat - the automatic environment always has a place (London unless the owner
+     *  chose another); a Wolf Environment has one unless it is "No place" at 0, 0; with neither there is none. */
+    bool autoEnvPlaceLat(F64& lat) const;
     /** True when the sky on screen IS the automatic one: the region follows a place AND the
      *  current day cycle is the module's (a personal sky, a parcel's own EEP or an editor
      *  preview replaces it, and then the real stars and moon must not be drawn over it). */
@@ -269,6 +273,7 @@ private:
     std::string        mAutoEnvPlace;
     F64                mAutoEnvLat = 0.0;
     F64                mAutoEnvLon = 0.0;
+    bool               mAutoEnvWolfEnv = false;  // [FALLING LEAVES 2026-11-10/] weather.php autoEnv.wolfEnvironment
     F64                mAutoEnvSkyShift = 0.0;   // [GRID TIME 2026-10-03] weather.php autoEnv.skyShift
     bool               mAutoEnvPreviewOn = false;
     bool               mHaveHurricane = false;   // [HURRICANE 2026-10-29/] readHurricane

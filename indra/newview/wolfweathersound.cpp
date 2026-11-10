@@ -725,9 +725,20 @@ void WolfWeatherSound::idle()
         const F32 vol = (F32)p.mVolume / 100.f * WolfSoundEffects::level(WolfSoundEffects::WEATHER);
         const F32 i = intensity(p);
         const F32 k = llclamp(WolfWeather::indoors(), 0.f, 1.f);
+        // [t703 2026-11-10] Jimmy Olsen, TROMSO: "light snowfall but I hear wind and a light rain sound ... no rain sound
+        // should be played". Every bed and near recording is rain (BEDS / NEAR_* above, app_settings/wolfweather/SOURCES.md),
+        // and so is every synthesised near voice (NEAR_LAYERS: patter, leaves, water); before this they played for snow too.
+        // The real weather sets the ambience but never the near layer (auto_env_lib.php ae_override_from_obs: 'soundPreset'
+        // only), so a snowing region kept its row's near layer - TROMSO's weather row has sound_layer "soft", the default
+        // (weather.php weather_profile_payload) - and the soft rain patter played under the wind. Rain sounds now play only while
+        // rain falls. A rain ambience chosen for snow (thunder / distant / steady - the real weather picks thunder or distant
+        // for thundersnow) is played as the wind, the ambience every snow preset has (wolfweatherprofile.cpp applyPreset
+        // lightsnow / snowfall / blizzard: "wind", "none"); the thunder cracks still follow mSoundPreset (crack()).
+        const bool rain = (p.mKind == WolfWeatherProfile::RAIN);
+        const std::string ambience_id = (rain || !is_rain_bed(p.mSoundPreset)) ? p.mSoundPreset : std::string("wind");
 
         // ── the ambience bed ─────────────────────────────────────────────────────────────────
-        if (is_rain_bed(p.mSoundPreset))
+        if (rain && is_rain_bed(p.mSoundPreset))
         {
             F32 w[3];
             tierWeights(i, w);
@@ -757,7 +768,7 @@ void WolfWeatherSound::idle()
                 }
             }
         }
-        else if (const Voice* v = ambience(p.mSoundPreset))       // the wind
+        else if (const Voice* v = ambience(ambience_id))          // the wind
         {
             if (ensureSound(*v))
             {
@@ -766,8 +777,8 @@ void WolfWeatherSound::idle()
             }
         }
 
-        // ── the near layer ───────────────────────────────────────────────────────────────────
-        if (const Recording* r = near_recording(p.mSoundLayer))
+        // ── the near layer (rain only: t703 above) ─────────────────────────────────────────────
+        if (const Recording* r = rain ? near_recording(p.mSoundLayer) : nullptr)
         {
             const Prep st = prepare(*r);
             if (st == Prep::READY)

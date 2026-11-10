@@ -9,8 +9,9 @@
 # The backend's own Vulkan GLSL (class1/wolfvk/*.glsl: the composite pass) is compiled the same way to spv/wolfvk_*.spv.
 #
 # glslang: the same binary ShaderCheck.cmake finds (GLSLANG_VALIDATOR; PATH, $VULKAN_SDK/bin, the CI's pinned install
-# from .github/scripts/install-glslang.sh). Without it the step is skipped with a warning and the Vulkan renderer
-# reports "no SPIR-V" for every program at run time (it still starts and falls back to drawing nothing of its own).
+# from .github/scripts/install-glslang.sh). Without it a local build skips the step with a warning, a CI build stops
+# (2026-11-10), and a viewer packaged without the SPIR-V cannot start Vulkan at all (wolfvkscene.cpp WolfVkScene::init
+# needs wolfvk_composite.*.spv), so viewer_manifest.py refuses to package one.
 #
 #   WOLF_VULKAN_SHADERS    ON   build the SPIR-V as part of the viewer build (target wolfvk_shaders)
 #   WOLF_VULKAN_SHADERS_QUICK  OFF  the quick scenario set only (development)
@@ -28,6 +29,14 @@ macro (wolfvk_compile_shaders _target)
     endif ()
     find_program(GLSLANG_VALIDATOR NAMES glslangValidator glslang PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/Bin" DOC "glslangValidator")
     if (NOT GLSLANG_VALIDATOR)
+      # [2026-11-10] On CI this is an error, not a warning: W101 was built and released with this warning in every
+      # job's log (run 42727291379) and no SPIR-V in any download, so every resident's Vulkan start fell back to
+      # OpenGL. GitHub Actions sets CI and GITHUB_ACTIONS on every runner; a local build keeps the warning.
+      if (DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS})
+        message(FATAL_ERROR "glslangValidator not found on a CI build: the Vulkan renderer's SPIR-V (app_settings/shaders/spv) "
+                            "cannot be built, and a viewer without it cannot start Vulkan. Run .github/scripts/install-glslang.sh "
+                            "before the configure (it exports GLSLANG_VALIDATOR).")
+      endif ()
       message(WARNING "glslangValidator not found: no Vulkan SPIR-V is built (the Vulkan renderer will report missing shaders)")
     else ()
       set(WOLFVK_SHADERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/app_settings/shaders")

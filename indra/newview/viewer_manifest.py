@@ -124,6 +124,21 @@ class ViewerManifest(LLManifest,FSViewerManifest):
 
                 # include the entire shaders directory recursively
                 self.path("shaders")
+                # [2026-11-10] ...and it must hold the Vulkan renderer's SPIR-V (indra/cmake/VulkanShaders.cmake). W101 was
+                # packaged without it on every platform (glslang never installed on CI), and every resident's Vulkan
+                # start fell back to OpenGL. The composite pair is what WolfVkScene::init reads (wolfvkscene.cpp), the
+                # <key>.spv files are the program variants (wolfvkshader.cpp), manifest.json is the variant step's record
+                # (scripts/shader_check.py --vulkan-out). Every platform: macOS packages app_settings the same way, under
+                # Contents/Resources (Darwin construct: super().construct() inside prefix "Resources"), and the
+                # mac build makes the same SPIR-V (install-glslang.sh has a macOS archive), so the check costs it nothing.
+                spv_dir = self.dst_path_of(os.path.join("shaders", "spv"))
+                for spv_name in ("wolfvk_composite.vert.spv", "wolfvk_composite.frag.spv", "manifest.json"):
+                    if not os.path.isfile(os.path.join(spv_dir, spv_name)):
+                        raise ManifestError("the package has no app_settings/shaders/spv/%s: the Vulkan renderer cannot "
+                                            "start without it (was glslang installed? indra/cmake/VulkanShaders.cmake)" % spv_name)
+                if not any(n.endswith(".spv") and not n.startswith("wolfvk_") for n in os.listdir(spv_dir)):
+                    raise ManifestError("the package has no program-variant SPIR-V in app_settings/shaders/spv "
+                                        "(scripts/shader_check.py --vulkan-out wrote none)")
                 # include the extracted list of contributors
                 contributions_path = os.path.join(self.args['source'], "..", "..", "doc", "contributions.txt")
                 contributor_names = self.extract_names(contributions_path)

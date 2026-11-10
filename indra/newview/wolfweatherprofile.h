@@ -126,7 +126,7 @@ struct WolfWeatherProfile
     static constexpr F32 FOG_MIN_VISIBILITY_M = 150.f;
 
 
-    /** The neutral colour of a kind, before the tint moves it. #808080 for rain and snow (2026-10-06). */
+    /** The neutral colour of a kind, before the tint moves it. #808080 for rain (2026-10-06), #ffffff for snow (t706 2026-11-10). */
     static LLColor4 neutralColor(Kind k);
 
     static const char* kindName(Kind k);

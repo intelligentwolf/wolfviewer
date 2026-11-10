@@ -37,6 +37,8 @@
 #include "llappviewer.h"   // [RUN-TIME STOP 2026-11-09] requestQuit
 #include "llviewercontrol.h"
 #include "llnotificationsutil.h"
+#include "indra_constants.h"   // [W102 2026-11-10] APP_NAME (the log file name)
+#include "llfile.h"            // [W102 2026-11-10] llifstream
 #include "lltrans.h"
 #include "lltimer.h"
 #include <chrono>   // [AMD PERF] frame step timing
@@ -467,6 +469,36 @@ namespace
         }
         sInfoProbed = true;
     }
+
+    // [W102 2026-11-10] W101 shipped without its SPIR-V (no glslang on CI, indra/cmake/VulkanShaders.cmake), so every
+    // W101 Vulkan start that got as far as the scene failed in WolfVkScene::init with this reason (wolfvkscene.cpp: the
+    // composite pair is missing) and fallBack() above logged it and saved WolfRenderBackend "opengl". W101 kept the
+    // reason in no setting: fallBack leaves exactly what a resident's own OpenGL choice leaves (WolfRenderBackend
+    // "opengl", WolfVulkanStartOK true). The one record of WHY is the log line fallBack writes. The log of the previous
+    // run is <APP_NAME>.old by the time decideBackend runs: initLoggingAndGetLastDuration (llappviewer.cpp, "Rename
+    // current log file to .old"), called from processMarkerFiles in the LLAppViewer constructor, renames it before
+    // init() reaches initConfiguration. APP_NAME = "WolfViewer" (indra_constants.h). The text is W101's own, kept
+    // here as it was written: fallBack's "Falling back to OpenGL: " + wolfvkscene.cpp's error, up to "are missing".
+    bool lastRunFellBackForMissingSpv()
+    {
+        static const std::string W101_MISSING_SPV =
+            "Falling back to OpenGL: the composite shaders (shaders/spv/wolfvk_composite.*.spv) are missing";
+        const std::string path = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, APP_NAME + ".old");
+        llifstream in(path.c_str());
+        if (!in.is_open())
+        {
+            return false;
+        }
+        std::string line;
+        while (std::getline(in, line))
+        {
+            if (line.find(W101_MISSING_SPV) != std::string::npos)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 extern bool gCubeSnapshot;   // pipeline.cpp:269 (a reflection probe / mirror render is in progress: its G-buffer is not the shared one)
@@ -482,6 +514,25 @@ void decideBackend()
     {
         gSavedSettings.setString("WolfVulkanStoppedReason", "");
         rememberNotice("WolfVulkanStoppedLastRun", stopped);
+    }
+    // [W102 2026-11-10] Once, at the first start of a viewer with this code: a resident whose previous run fell back to
+    // OpenGL ONLY because W101's download had no SPIR-V (lastRunFellBackForMissingSpv) is put back on Vulkan. Nobody else
+    // is touched: the log line exists only when that run asked for Vulkan, every earlier step (instance, device, surface,
+    // swapchain) succeeded and the scene found no composite shaders - not after a crash before the login screen
+    // (WolfVulkanFellBackLastStart: no Vulkan start at all that run), a run-time stop (stopAtRunTime logs other words) or
+    // a run that started on OpenGL because the resident chose it (no Vulkan start, no line). WolfVulkanW101SpvRetryDone
+    // is set whatever is found, so the check runs at one start only and can never switch anyone twice. A second instance
+    // leaves it to the first (it shares the settings and the logs folder: WolfCrashReport::checkDriverCrash does the same).
+    if (!gSavedSettings.getBOOL("WolfVulkanW101SpvRetryDone") && !LLAppViewer::instance()->isSecondInstance())
+    {
+        gSavedSettings.setBOOL("WolfVulkanW101SpvRetryDone", true);
+        if (gSavedSettings.getString("WolfRenderBackend") == "opengl" && lastRunFellBackForMissingSpv())
+        {
+            LL_INFOS("Vulkan") << "The last run fell back to OpenGL only because W101's download had no Vulkan shaders; "
+                                  "trying Vulkan again once" << LL_ENDL;
+            gSavedSettings.setString("WolfRenderBackend", "vulkan");
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);   // as chooseBackend: the first-run marker must not stop this try
+        }
     }
     const std::string backend = gSavedSettings.getString("WolfRenderBackend");
     sRequested = false;

@@ -74,6 +74,13 @@ LLColor4 WolfWeatherProfile::neutralColor(Kind k)
     // <WolfViewer 2026-10-06> #808080 for both - weather_profile.js NEUTRAL. Jimmy Olsen: rain and
     // snow at (0.5, 0.5, 0.5) look most like real life; Paul: "rain and snow DEFAULT to that
     // colour". Was rain #aaccff, snow #ffffff.
+    // [t706 2026-11-10] Snow is white again (#ffffff, its colour before 10-06); rain stays #808080. Jimmy Olsen, TROMSO
+    // at night: "For rain its ok being light grey.. but for snow, maybe make it white?". Snow is LIT, not emissive
+    // (wolfweather.cpp emit(): no LL_PART_EMISSIVE_MASK; llvopartgroup.cpp:361-367 / :647 give it the alpha pass's
+    // sun, moon and ambient light), so this is the flake's albedo: a 0.5 flake was half as bright as the sky light that
+    // reaches it and read as dark specks against the night sky; a white one takes that light as it is - white by day,
+    // as dim as everything else at night, never glowing.
+    if (k == SNOW) return LLColor4(1.f, 1.f, 1.f, 1.f);
     return LLColor4(0x80 / 255.f, 0x80 / 255.f, 0x80 / 255.f, 1.f);
 }
 
@@ -352,9 +359,9 @@ WolfWeatherProfile WolfWeatherProfile::applyPreset(const WolfWeatherProfile& bas
     else if (id == "steady")       set(RAIN, 2, 100, "#808080", 100,  60, 100, 100, 100, true, 60, "steady",  "soft");
     else if (id == "downpour")     set(RAIN, 3, 100, "#808080", 100, 110, 130, 120, 115, true, 75, "steady",  "heavy");
     else if (id == "thunderstorm") set(RAIN, 4, 100, "#808080", 100, 180, 170, 140, 120, true, 85, "thunder", "heavy");
-    else if (id == "lightsnow")    set(SNOW, 1, 100, "#808080", 100,  50,  90,  80, 100, true, 30, "wind",    "none");
-    else if (id == "snowfall")     set(SNOW, 2, 100, "#808080", 100,  70, 110, 100, 110, true, 40, "wind",    "none");
-    else if (id == "blizzard")   { set(SNOW, 4, 100, "#808080", 100, 600, 300, 160, 120, true, 80, "wind",    "none"); p.mFog = 45; }
+    else if (id == "lightsnow")    set(SNOW, 1, 100, "#ffffff", 100,  50,  90,  80, 100, true, 30, "wind",    "none");
+    else if (id == "snowfall")     set(SNOW, 2, 100, "#ffffff", 100,  70, 110, 100, 110, true, 40, "wind",    "none");
+    else if (id == "blizzard")   { set(SNOW, 4, 100, "#ffffff", 100, 600, 300, 160, 120, true, 80, "wind",    "none"); p.mFog = 45; }
     // Source: weather_profile.js PRESETS mist / thickfog - fog on its own: CLEAR means nothing
     // falling, not no weather.
     else if (id == "mist")       { p.mKind = CLEAR; p.mLevel = 2; p.mEnabled = true; p.mSound = false; p.mFog = 30; }
@@ -455,7 +462,10 @@ bool WolfWeatherProfile::fromDescription(const std::string& lower)
     mFog        = desc_int(lower, "fog",    mFog);      // Source: weather_profile.js fromDescription num('fog')
 
     const std::string col = desc_word(lower, "col");
-    if (!col.empty()) mTint = colorFromHex(col, mTint);
+    // [t706 2026-11-10] Source: weather_profile.js fromDescription - tintColor: word('col') || NEUTRAL[kind]. Without a
+    // col= the colour is the kind's neutral one, so a plain "wolfsnow" prim falls white (neutralColor), not the #808080
+    // the member starts at.
+    mTint = col.empty() ? neutralColor(mKind) : colorFromHex(col, neutralColor(mKind));
     const std::string amb = desc_word(lower, "amb");
     if (!amb.empty()) mSoundPreset = amb;
     const std::string nr = desc_word(lower, "near");

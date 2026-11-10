@@ -33,7 +33,7 @@ env:
   # BuildVersion.cmake:14 reads ENV{revision} for the 4th version field (must be
   # numeric — viewerRes.rc:145 FILEVERSION). Pin to the wolf revision number so the
   # viewer reports 7.2.4.1 instead of a meaningless git commit count.
-  revision: "101"
+  revision: "102"
   # [2026-09-12] From here on a release has a NAME, and that is what residents see. The number
   # stays because it has to — viewerRes.rc:145 FILEVERSION must be numeric, and wolfupdate.cpp
   # compares it with the signed latest.json's "revision" — but it is no longer the thing anyone is
@@ -185,6 +185,17 @@ jobs:
           echo "AUTOBUILD_VARIABLES_FILE=$(cd ../fs-build-variables && pwd)/variables" >> $GITHUB_ENV
           echo "AUTOBUILD_VSVER=170" >> $GITHUB_ENV
 
+      # [2026-11-10] glslang, BEFORE Configure: indra/cmake/VulkanShaders.cmake compiles the Vulkan renderer's SPIR-V
+      # (app_settings/shaders/spv, packaged with app_settings/shaders) and ShaderCheck.cmake pre-compiles every GLSL
+      # variant, both with the GLSLANG_VALIDATOR this script exports (GITHUB_ENV, and its bin folder on GITHUB_PATH).
+      # W101 shipped without this step: every build job logged "glslangValidator not found: no Vulkan SPIR-V is built"
+      # (run 42727291379), no download had a shaders/spv folder, and every resident's Vulkan start fell back to OpenGL
+      # with "the composite shaders (shaders/spv/wolfvk_composite.*.spv) are missing". On CI a missing glslang now
+      # stops the configure (VulkanShaders.cmake) and a package without the SPIR-V stops the build (viewer_manifest.py).
+      - name: glslang (Vulkan SPIR-V and the shader check)
+        shell: bash
+        run: bash .github/scripts/install-glslang.sh
+
       - name: Configure
         shell: bash
         run: |
@@ -323,6 +334,17 @@ jobs:
           test -x "$BIN"
           tar -xOf "$AVX" "$ATOP/bin/do-not-directly-run-wolfviewer-bin" > "$BIN-avx2"
           chmod 755 "$BIN-avx2"
+
+          # [2026-11-10] The Linux download must carry the Vulkan renderer's SPIR-V (W101's had none). The composite pair
+          # is what WolfVkScene::init reads (wolfvkscene.cpp), the <key>.spv files are every program variant
+          # (wolfvkshader.cpp), manifest.json is the variant step's own record (scripts/shader_check.py --vulkan-out).
+          SPV="work/$TOP/app_settings/shaders/spv"
+          for f in wolfvk_composite.vert.spv wolfvk_composite.frag.spv manifest.json; do
+            test -s "$SPV/$f" || { echo "::error::$TOP has no app_settings/shaders/spv/$f"; exit 1; }
+          done
+          N=$(find "$SPV" -name '*.spv' ! -name 'wolfvk_*' | wc -l)
+          echo "program-variant SPIR-V files in the tarball: $N"
+          [ "$N" -gt 0 ] || { echo "::error::$TOP has no program-variant SPIR-V in app_settings/shaders/spv"; exit 1; }
 
           # The AVX2 build must really be the AVX2 build: a different file, with far more
           # 256-bit (ymm) instructions than the standard one.

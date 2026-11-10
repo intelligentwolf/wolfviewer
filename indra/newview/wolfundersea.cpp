@@ -520,8 +520,10 @@ void WolfUnderSea::scanObjects(const LLVector3& cam)
     }
 }
 
-bool WolfUnderSea::blocked(F64 gx, F64 gy, F32 radius, F32 zlo, F32 zhi) const
+bool WolfUnderSea::blocked(F64 gx, F64 gy, F32 radius, F32 zlo, F32 zhi, bool hulls) const
 {
+    // [T733 2026-11-10] an air-filled volume is out of bounds as a build is (usually there are none: one empty test)
+    if (!mDry.empty() && dry(gAgent.getPosAgentFromGlobal(LLVector3d(gx, gy, 0.0)), radius, zlo, zhi, hulls)) return true;
     if (mBlocks.empty()) return false;
     const F64 r = (F64)radius;
     for (S64 bx = cell_of(gx - r, BLOCK_M); bx <= cell_of(gx + r, BLOCK_M); ++bx)
@@ -548,6 +550,105 @@ U64 WolfUnderSea::blockHash(const LLVector3d& corner) const
             if (it == mBlocks.end()) continue;
             h ^= hash2(bx, by, (U64)(S64)floorf(it->second.mZMin * 4.f) * 1315423911ULL + (U64)(S64)floorf(it->second.mZMax * 4.f));
         }
+    }
+    return h;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// [T733 2026-11-10] the air-filled volumes: no plant grows and no fish swims inside one
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// Ticket 733 (Luke Koda): a "wolfdry" dome under the sea at Oasis had fish and sea plants inside it. The volumes are
+// WolfDryVolumes' own (wolfdryvolumes.h WHAT COUNTS AS AIR: the "wolfdry" prims' shapes, the Tunnel tool's boxes under the
+// sea, measured boats' hulls), tested with Volume::contains - the CPU copy of waterFogF.glsl wolfInDry, the shapes the water
+// fog and the water surface leave out. Not the prims' boxes: those would also clear the sea round a tube.
+
+namespace
+{
+    // CHOSEN: a column is sampled on its axis and 8 points round its rim, at most DRY_STEP_M apart up it (inside the
+    // volume's bounding sphere), at most DRY_MAX_LEVELS + 1 heights
+    constexpr F32 DRY_STEP_M = 1.f;
+    constexpr S32 DRY_MAX_LEVELS = 32;
+    constexpr F32 RIM_C[8] = { 1.f, 0.70710678f, 0.f, -0.70710678f, -1.f, -0.70710678f, 0.f, 0.70710678f };
+    constexpr F32 RIM_S[8] = { 0.f, 0.70710678f, 1.f, 0.70710678f, 0.f, -0.70710678f, -1.f, -0.70710678f };
+}
+
+void WolfUnderSea::dryUpdate()
+{
+    mDry.clear();
+    U64 sig = 0;
+    for (const WolfDryVolumes::Volume& v : WolfDryVolumes::instance().volumes())
+    {
+        if (v.mKind == WolfDryVolumes::KIND_NONE) continue;
+        DryVolume d;
+        d.mVol = v;
+        d.mRadius = v.boundingRadius();
+        d.mGlobal = gAgent.getPosGlobalFromAgent(v.mCentre);
+        // world metres rounded to 0.25 m, the turn to 1/64 and the size to 0.25 m (blockHash's rounding): a region crossing
+        // or a rebase changes nothing, a dome moved or stretched does
+        U64 k = mix64(0x7330ULL + (U64)v.mKind);
+        k = hash2((S64)floor(d.mGlobal.mdV[VX] * 4.0), (S64)floor(d.mGlobal.mdV[VY] * 4.0), k);
+        k = hash2((S64)floor(d.mGlobal.mdV[VZ] * 4.0), 0, k);
+        for (S32 a = 0; a < 3; ++a)
+        {
+            k = hash2((S64)floorf(v.mAxis[a].mV[VX] * 64.f), (S64)floorf(v.mAxis[a].mV[VY] * 64.f), k);
+            k = hash2((S64)floorf(v.mAxis[a].mV[VZ] * 64.f), (S64)floorf(v.mHalf[a] * 4.f), k);
+        }
+        d.mKey = k;
+        mDry.push_back(d);
+        // the plants' volumes only: a boat's hull sails on (plantBlocked), so its rocking never rebuilds a garden
+        if (v.mKind != WolfDryVolumes::KIND_HULL) sig ^= k;
+    }
+    mDrySig = sig;
+}
+
+bool WolfUnderSea::dry(const LLVector3& at, F32 radius, F32 zlo, F32 zhi, bool hulls) const
+{
+    for (const DryVolume& d : mDry)
+    {
+        const WolfDryVolumes::Volume& v = d.mVol;
+        if (!hulls && v.mKind == WolfDryVolumes::KIND_HULL) continue;
+        // its bounding sphere first (every kind lies inside it: wolfdryvolumes.cpp boundingRadius, the unit box's corner)
+        const F32 dx = at.mV[VX] - v.mCentre.mV[VX], dy = at.mV[VY] - v.mCentre.mV[VY];
+        const F32 reach = d.mRadius + radius;
+        if (dx * dx + dy * dy > reach * reach) continue;
+        const F32 z0 = llmax(zlo, v.mCentre.mV[VZ] - d.mRadius), z1 = llmin(zhi, v.mCentre.mV[VZ] + d.mRadius);
+        if (z0 > z1) continue;
+        const S32 levels = llclamp((S32)ceilf((z1 - z0) / DRY_STEP_M), 1, DRY_MAX_LEVELS);
+        for (S32 l = 0; l <= levels; ++l)
+        {
+            const F32 z = z0 + (z1 - z0) * (F32)l / (F32)levels;
+            if (v.contains(LLVector3(at.mV[VX], at.mV[VY], z))) return true;
+            if (radius <= 0.f) continue;
+            for (S32 k = 0; k < 8; ++k)
+            {
+                if (v.contains(LLVector3(at.mV[VX] + RIM_C[k] * radius, at.mV[VY] + RIM_S[k] * radius, z))) return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool WolfUnderSea::inDry(const LLVector3& agent) const
+{
+    for (const DryVolume& d : mDry)
+    {
+        if (d.mVol.contains(agent)) return true;
+    }
+    return false;
+}
+
+U64 WolfUnderSea::dryHash(const LLVector3d& corner) const
+{
+    U64 h = 0;
+    for (const DryVolume& d : mDry)
+    {
+        if (d.mVol.mKind == WolfDryVolumes::KIND_HULL) continue;
+        // its bounding sphere over the chunk's square (the nearest point of the square to its centre)
+        const F64 nx = llclamp(d.mGlobal.mdV[VX], corner.mdV[VX], corner.mdV[VX] + (F64)CHUNK_M);
+        const F64 ny = llclamp(d.mGlobal.mdV[VY], corner.mdV[VY], corner.mdV[VY] + (F64)CHUNK_M);
+        const F64 ex = d.mGlobal.mdV[VX] - nx, ey = d.mGlobal.mdV[VY] - ny;
+        if (ex * ex + ey * ey > (F64)d.mRadius * (F64)d.mRadius) continue;
+        h ^= d.mKey;
     }
     return h;
 }
@@ -1201,6 +1302,7 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
     c.mOriginGlobal = LLVector3d((F64)cx * CHUNK_M, (F64)cy * CHUNK_M, 0.0);
     c.mBlockHash = blockHash(c.mOriginGlobal);
     c.mClimate = climateStamp();
+    c.mDryHash = dryHash(c.mOriginGlobal);   // [T733/]
     c.mRetryAt = 0.0;
     c.mDirty = false;
     c.mVB = nullptr;
@@ -1255,7 +1357,7 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
         if (pick < kelp_share)
         {
             const F32 h = llmin(head, ir.range(0.75f, 1.f) * head, 16.f);
-            if (h < 2.f || blocked(gx, gy, 0.6f, foot - 0.2f, foot + h)) return true;
+            if (h < 2.f || plantBlocked(gx, gy, 0.6f, foot - 0.2f, foot + h)) return true;
             plant_kelp(wr, local(gx, gy, foot - 0.05f), h, ir);
             grew(foot, foot + h + 1.6f);
             return false;
@@ -1264,34 +1366,34 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
         if (q < 0.25f)
         {
             const F32 size = ir.range(0.15f, 0.35f);
-            if (head < size * 1.6f || blocked(gx, gy, size, foot - 0.2f, foot + size * 1.6f)) return true;
+            if (head < size * 1.6f || plantBlocked(gx, gy, size, foot - 0.2f, foot + size * 1.6f)) return true;
             plant_anemone(wr, local(gx, gy, foot), size, ir);
             grew(foot, foot + size * 1.6f);
         }
         else if (q < 0.45f)
         {
-            if (head < 0.15f || blocked(gx, gy, 0.4f, foot - 0.2f, foot + 0.15f)) return true;
+            if (head < 0.15f || plantBlocked(gx, gy, 0.4f, foot - 0.2f, foot + 0.15f)) return true;
             plant_urchins(wr, local(gx, gy, foot), ir);
             grew(foot, foot + 0.15f);
         }
         else if (q < 0.62f)
         {
             const F32 size = ir.range(0.15f, 0.3f);
-            if (head < 0.1f || blocked(gx, gy, size * 0.6f, foot - 0.2f, foot + 0.1f)) return true;
+            if (head < 0.1f || plantBlocked(gx, gy, size * 0.6f, foot - 0.2f, foot + 0.1f)) return true;
             plant_starfish(wr, local(gx, gy, foot), size, ir);
             grew(foot, foot + 0.1f);
         }
         else if (q < 0.76f)
         {
             const F32 size = ir.range(0.25f, 0.5f);
-            if (head < size * 1.05f || blocked(gx, gy, size * 0.3f, foot - 0.2f, foot + size)) return true;
+            if (head < size * 1.05f || plantBlocked(gx, gy, size * 0.3f, foot - 0.2f, foot + size)) return true;
             plant_sponges(wr, local(gx, gy, foot), size, ir);
             grew(foot, foot + size * 1.05f);
         }
         else
         {
             const F32 rad = ir.range(0.25f, 0.7f);
-            if (head < rad * 0.6f || blocked(gx, gy, rad, foot - 0.2f, foot + rad * 0.6f)) return true;
+            if (head < rad * 0.6f || plantBlocked(gx, gy, rad, foot - 0.2f, foot + rad * 0.6f)) return true;
             plant_stone(wr, local(gx, gy, foot), rad, ir);
             grew(foot, foot + rad * 0.6f);
         }
@@ -1346,7 +1448,7 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
                 bo.mH = llmin(bo.mH, broom - 0.3f);
                 if (bo.mH < 0.2f) continue;
                 boulders.push_back(bo);
-                if (in_chunk(md.mX, md.mY) && !blocked(bo.mX, bo.mY, bo.mRx, bbed - 0.3f, bbed + bo.mH))
+                if (in_chunk(md.mX, md.mY) && !plantBlocked(bo.mX, bo.mY, bo.mRx, bbed - 0.3f, bbed + bo.mH))
                 {
                     plant_boulder(wr, local(bo.mX, bo.mY, bbed - 0.12f), bo.mRx, bo.mRy, bo.mH + 0.12f, br, warm, cold);
                     grew(bbed - 0.3f, bbed + bo.mH);
@@ -1391,7 +1493,7 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
                 if (pick < 0.3f)
                 {
                     const F32 rad = ir.range(0.3f, 0.75f);
-                    if (head < rad * 0.85f || blocked(gx, gy, rad, foot - 0.2f, foot + rad)) continue;
+                    if (head < rad * 0.85f || plantBlocked(gx, gy, rad, foot - 0.2f, foot + rad)) continue;
                     plant_brain(wr, local(gx, gy, foot - rad * 0.1f), rad, ir);
                     grew(foot, foot + rad);
                 }
@@ -1399,35 +1501,35 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
                 {
                     const F32 size = ir.range(0.6f, 1.3f);
                     // plant_elkhorn reaches about 0.92 x size up (trunk 0.22, the forks' rises): checked against 1.0 x size
-                    if (head < size || blocked(gx, gy, size * 0.8f, foot - 0.2f, foot + size)) continue;
+                    if (head < size || plantBlocked(gx, gy, size * 0.8f, foot - 0.2f, foot + size)) continue;
                     plant_elkhorn(wr, local(gx, gy, foot), size, ir);
                     grew(foot, foot + size);
                 }
                 else if (pick < 0.57f)
                 {
                     const F32 size = ir.range(0.5f, 1.0f);
-                    if (head < size * 0.7f || blocked(gx, gy, size * 0.5f, foot - 0.2f, foot + size * 0.7f)) continue;
+                    if (head < size * 0.7f || plantBlocked(gx, gy, size * 0.5f, foot - 0.2f, foot + size * 0.7f)) continue;
                     plant_staghorn(wr, local(gx, gy, foot), size, ir);
                     grew(foot, foot + size * 0.7f);
                 }
                 else if (pick < 0.75f)
                 {
                     const F32 size = ir.range(0.4f, 0.9f);
-                    if (head < size * 1.05f || blocked(gx, gy, size * 0.3f, foot - 0.2f, foot + size)) continue;
+                    if (head < size * 1.05f || plantBlocked(gx, gy, size * 0.3f, foot - 0.2f, foot + size)) continue;
                     plant_sponges(wr, local(gx, gy, foot), size, ir);
                     grew(foot, foot + size * 1.05f);
                 }
                 else if (pick < 0.93f)
                 {
                     const F32 size = ir.range(0.5f, 1.1f);
-                    if (head < size + 0.1f || blocked(gx, gy, 0.3f, foot - 0.2f, foot + size)) continue;
+                    if (head < size + 0.1f || plantBlocked(gx, gy, 0.3f, foot - 0.2f, foot + size)) continue;
                     plant_rods(wr, local(gx, gy, foot), size, ir);
                     grew(foot, foot + size + 0.1f);
                 }
                 else
                 {
                     const F32 rad = ir.range(0.6f, 1.1f);   // the fan's height is 1.2 x this (plant_fan)
-                    if (head < rad * 1.3f + 0.1f || blocked(gx, gy, rad, foot - 0.2f, foot + rad * 1.3f)) continue;
+                    if (head < rad * 1.3f + 0.1f || plantBlocked(gx, gy, rad, foot - 0.2f, foot + rad * 1.3f)) continue;
                     plant_fan(wr, local(gx, gy, foot), rad, ir);
                     grew(foot, foot + rad * 1.3f + 0.1f);
                 }
@@ -1501,7 +1603,7 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
                     F32 bed = 0.f, room = 0.f;
                     if (!spot(gx, gy, 0.3f, 1.2f, 4.5f, 0.6f, bed, room) || room < 0.25f) continue;
                     const F32 h = llmin(room, rng.range(0.3f, 0.7f));
-                    if (blocked(gx, gy, 0.3f, bed - 0.2f, bed + h)) continue;
+                    if (plantBlocked(gx, gy, 0.3f, bed - 0.2f, bed + h)) continue;
                     plant_wrack(wr, local(gx, gy, bed - 0.03f), h, rng);
                     grew(bed, bed + h);
                 }
@@ -1520,7 +1622,7 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
                     const F32 h = rng.range(0.3f, 0.75f) * (0.7f + 0.5f * dens);
                     if (!spot(gx, gy, 0.3f, 1.6f, 14.f, 0.85f, bed, room) || room < 0.25f) continue;
                     const F32 hh = llmin(h, room);
-                    if (blocked(gx, gy, 0.3f, bed - 0.2f, bed + hh)) continue;
+                    if (plantBlocked(gx, gy, 0.3f, bed - 0.2f, bed + hh)) continue;
                     plant_seagrass(wr, local(gx, gy, bed - 0.03f), hh, rng);
                     grew(bed, bed + hh + 0.15f);
                 }
@@ -1542,7 +1644,7 @@ bool WolfUnderSea::buildChunk(Chunk& c, S64 cx, S64 cy)
                 F64 gx, gy; rand_pos(rng, gx, gy);
                 const F32 rad = rng.range(0.2f, 0.6f);
                 F32 bed = 0.f, room = 0.f;
-                if (spot(gx, gy, rad, 1.5f, 60.f, 0.6f, bed, room) && room >= rad * 0.6f && !blocked(gx, gy, rad, bed - 0.3f, bed + rad))
+                if (spot(gx, gy, rad, 1.5f, 60.f, 0.6f, bed, room) && room >= rad * 0.6f && !plantBlocked(gx, gy, rad, bed - 0.3f, bed + rad))
                 {
                     plant_stone(wr, local(gx, gy, bed), rad, rng);
                     grew(bed, bed + rad * 0.6f);
@@ -1620,6 +1722,14 @@ void WolfUnderSea::garden(const LLVector3& cam, F64 now, bool plants_on)
         mCheckedGeneration = mScanGeneration;
         for (auto& kv : mChunks)
             if (blockHash(kv.second.mOriginGlobal) != kv.second.mBlockHash) kv.second.mDirty = true;
+    }
+    // [T733 2026-11-10] the air-filled volumes changed (a "wolfdry" description arrived after the chunk was built, a dome was
+    // moved or its word cleared, a tunnel was bored): the chunks they reach, or reached, are built again
+    if (mDrySig != mCheckedDrySig)
+    {
+        mCheckedDrySig = mDrySig;
+        for (auto& kv : mChunks)
+            if (dryHash(kv.second.mOriginGlobal) != kv.second.mDryHash) kv.second.mDirty = true;
     }
     const LLVector3d camg = gAgent.getPosGlobalFromAgent(cam);
     const U32 stamp = climateStamp();
@@ -2157,6 +2267,9 @@ void WolfUnderSea::swim(F32 dt, F64 now, const LLVector3& cam)
             const F32 bed = seabed(f.mPos);
             if (bed < -1e8f || s.mCeiling - bed < BED_CLEAR_M + 0.3f) { drop_fish[(size_t)i] = true; continue; }
             f.mPos.mV[VZ] = llclamp(f.mPos.mV[VZ], bed + BED_CLEAR_M, s.mCeiling);
+            // [T733 2026-11-10] inside an air-filled volume (it came, or moved, round the fish; the look-ahead above turns
+            // them away from one as from a build): gone, as one aground
+            if (!mDry.empty() && inDry(f.mPos)) { drop_fish[(size_t)i] = true; continue; }
             // heading, pitch and the tail beat (about 2.5 beats a body length swum, CHOSEN)
             const F32 hs = sqrtf(f.mVel.mV[VX] * f.mVel.mV[VX] + f.mVel.mV[VY] * f.mVel.mV[VY]);
             if (hs > 1e-3f) f.mHeading = atan2f(f.mVel.mV[VY], f.mVel.mV[VX]);
@@ -2467,6 +2580,7 @@ void WolfUnderSea::idle()
         scanObjects(cam);
         atlasReady();
     }
+    dryUpdate();   // [T733/] before the garden and the fish read them
     garden(cam, now, mPlantsActive);
     if (!mFishActive && height > FISH_ABOVE_M + CAMERA_ONWARDS_M && !mFish.empty())
     {

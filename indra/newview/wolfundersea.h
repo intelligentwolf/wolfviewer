@@ -23,6 +23,7 @@
 #include "v3dmath.h"
 #include "v3math.h"
 #include "v4math.h"
+#include "wolfdryvolumes.h"   // [T733 2026-11-10/] air-filled volumes: nothing grows or swims in them
 
 #include <map>
 #include <unordered_map>
@@ -82,6 +83,7 @@ private:
         F32 mZMin = 0.f, mZMax = 0.f;  // the plants' height range (for culling)
         U64 mBlockHash = 0;            // the objects' cells inside it when it was built
         U32 mClimate = 0;              // the climate and permission stamp it was built with (climateStamp)
+        U64 mDryHash = 0;              // [T733/] the air-filled volumes over it when it was built (dryHash)
         F64 mLastWanted = 0.0;
         F64 mRetryAt = 0.0;            // > 0: some of its terrain had not come; build it again then
         bool mDirty = false;           // the objects round it changed: build it again
@@ -135,9 +137,30 @@ private:
 
     // the objects' cells
     void scanObjects(const LLVector3& cam);
-    /** Whether a prim reaches into the box round world (global) metres gx, gy, `radius` out, between heights zlo..zhi. */
-    bool blocked(F64 gx, F64 gy, F32 radius, F32 zlo, F32 zhi) const;
+    /** Whether a prim reaches into the box round world (global) metres gx, gy, `radius` out, between heights zlo..zhi, or
+     *  that column reaches into an air-filled volume (dry; boats' hulls too unless `hulls` is false). */
+    bool blocked(F64 gx, F64 gy, F32 radius, F32 zlo, F32 zhi, bool hulls = true) const;
+    /** The plants' test: blocked() without the boats' hulls (they sail on: a garden built round one would keep the hole). */
+    bool plantBlocked(F64 gx, F64 gy, F32 radius, F32 zlo, F32 zhi) const { return blocked(gx, gy, radius, zlo, zhi, false); }
     U64 blockHash(const LLVector3d& corner) const;
+
+    // [T733 2026-11-10] the air-filled volumes (WolfDryVolumes: "wolfdry" prims, the Tunnel tool's boxes under the sea,
+    // boats' hulls) - the same shapes the water fog and surface leave out; nothing grows or swims inside them
+    struct DryVolume
+    {
+        WolfDryVolumes::Volume mVol;   // agent frame, this frame
+        F32 mRadius = 0.f;             // its bounding sphere about mVol.mCentre
+        LLVector3d mGlobal;            // mVol.mCentre in world (global) metres
+        U64 mKey = 0;                  // its kind, place, turn and size, rounded (dryHash)
+    };
+    /** Once a frame: this frame's volumes into mDry, and mDrySig (the plants' volumes: all but hulls) for the garden. */
+    void dryUpdate();
+    /** Whether the vertical column at agent (x, y), `radius` out, zlo..zhi, reaches into one of mDry. */
+    bool dry(const LLVector3& agent_xy, F32 radius, F32 zlo, F32 zhi, bool hulls) const;
+    /** Whether an agent point is inside one of mDry. */
+    bool inDry(const LLVector3& agent) const;
+    /** The plants' volumes (not hulls) reaching over a chunk (change detection only). */
+    U64 dryHash(const LLVector3d& corner) const;
 
     // the reef patches round a world point (agent x, y, the bed's height, the radius), for the fish to gather round
     void patchesNear(F64 gx, F64 gy, F32 reach, std::vector<LLVector4>& out) const;
@@ -165,6 +188,10 @@ private:
     U64 mScanGeneration = 0;           // bumped each finished pass
     U64 mCheckedGeneration = 0;        // the pass the chunks were last checked against
     LLVector3d mScanCentre;            // the camera (global) when the pass began
+
+    std::vector<DryVolume> mDry;       // [T733/] this frame's air-filled volumes
+    U64 mDrySig = 0;                   // [T733/] the plants' ones, to rebuild the chunks they reach when they change
+    U64 mCheckedDrySig = 0;
 
     std::vector<Fish> mFish;
     std::vector<School> mSchools;

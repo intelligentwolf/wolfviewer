@@ -130,6 +130,13 @@ public:
     void applyUniforms(LLShaderUniforms* uniforms, const F32* modelview);
     /** Is this agent-frame point inside an air-filled volume (this frame's list)? */
     bool contains(const LLVector3& agent_pos) const;
+    /** [T733 2026-11-10] This frame's volumes, every one (the shapes contains() tests): the sea plants and fish keep out of
+     *  them (wolfundersea.cpp WolfUnderSea::dryUpdate). Empty off a Wolf region. */
+    const std::vector<Volume>& volumes() const
+    {
+        const_cast<WolfDryVolumes*>(this)->collect();
+        return mFrame;
+    }
     /** Is the camera inside one? */
     bool cameraInside() const;
     /** [WOLF DRY T352] Does any volume of this frame reach both below and above the agent-frame height z (by its bounding

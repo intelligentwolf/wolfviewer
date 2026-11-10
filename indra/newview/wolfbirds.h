@@ -151,6 +151,7 @@ private:
     struct Flock
     {
         Kind mKind = GULL;
+        U8 mZone = 0;            // [BIRDS ZONES 2026-11-10/] WolfRegionWeather::BirdsZone it was born in: its species
         LLVector3 mCentre;       // agent metres, at the surface
         LLVector3 mTarget;       // where the flock is heading (small, starling)
         LLVector3 mExit;         // where it flies off to when leaving
@@ -170,6 +171,7 @@ private:
     };
 
     void reset();
+    U8 zoneOf(const Bird& b) const { return mFlocks[(size_t)b.mFlock].mZone; }   // [BIRDS ZONES 2026-11-10/]
     bool wanted(LLViewerRegion*& region) const;
     void direct(LLViewerRegion* region, F64 now);
     bool spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now);

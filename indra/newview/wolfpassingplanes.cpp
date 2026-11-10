@@ -23,6 +23,13 @@
  * "undersea", wolf_ambient_lib.php wa_undersea_block: ON unless switched off). wolfundersea.cpp draws them from weather.php;
  * this viewer shows the choice at once (WolfRegionWeather::setUnderSeaLocal), every other within a minute.
  *
+ * [STYLES 2026-11-10] t712 / t715 (Jimmy Olsen; Paul approved): "Kind of planes", "Kind of ships" and "Kind of birds", a
+ * drop-down under each of those switches: the record's planes_style / boats_style / birds_zone (wolf_ambient.php view/set
+ * what "planes_style" | "boats_style" | "birds_zone" with `style`; wolf_ambient_lib.php wa_style_block, wa_birds_zone_fields).
+ * After a save: "/74 traffic style" (wolf-air 1.9.0 AirTraffic.Command reads the record again), the ships' own nudge
+ * (wolf-naval 1.14.0 applies boats.style from the same get), the birds' zone shown here at once
+ * (WolfRegionWeather::setBirdsZoneLocal). Design: region-terrain-work/traffic-birds-styles-2026-11-10/README.md.
+ *
  * Copyright (C) 2026 IntelligentWolf Ltd.
  */
 
@@ -34,6 +41,7 @@
 
 #include "llagent.h"
 #include "llcheckboxctrl.h"
+#include "llcombobox.h"   // [STYLES 2026-11-10/]
 #include "llchat.h"
 #include "llcorehttputil.h"
 #include "llfloater.h"   // [TICKET 481 2026-11-03/] layout() grows the window; [TICKET 529 2026-11-05/] gFloaterView
@@ -102,6 +110,11 @@ namespace
     /** [NATURE SOUNDS 2026-11-03] Which switch a save is for (wolf_ambient.php set {what}). */
     enum What { WHAT_PLANES, WHAT_BIRDS, WHAT_SOUNDS, WHAT_SHIPS, WHAT_SEALIFE, WHAT_UNDERSEA };   // not PLANES: wingdi.h #defines PLANES (GetDeviceCaps index 14)
 
+    /** [STYLES 2026-11-10] Which kind a drop-down saves (wolf_ambient.php set {what}). */
+    enum Kind { KIND_PLANES, KIND_SHIPS, KIND_BIRDS };
+    const char* kind_what(Kind k) { return k == KIND_PLANES ? "planes_style" : k == KIND_SHIPS ? "boats_style" : "birds_zone"; }
+    const char* kind_combo(Kind k) { return k == KIND_PLANES ? "wolf_planes_kind" : k == KIND_SHIPS ? "wolf_ships_kind" : "wolf_birds_kind"; }
+
     void set_status(const std::string& msg, bool error, bool from_read = false)
     {
         sState.mStatus = msg;
@@ -151,11 +164,29 @@ namespace
         {
             if (LLView* c = panel->findChildView(name)) place(c, c->getRect().getHeight(), AFTER_CHECK);
         };
+        // [STYLES 2026-11-10] a kind row: its label and its drop-down side by side, as tall as the drop-down
+        auto kind = [&](const char* label, const char* combo)
+        {
+            LLView* c = panel->findChildView(combo);
+            if (!c) return;
+            const S32 h = c->getRect().getHeight();
+            if (LLView* l = panel->findChildView(label))
+            {
+                LLRect r = l->getRect();
+                r.setLeftTopAndSize(r.mLeft, top, r.getWidth(), h);
+                l->setShape(r);
+            }
+            place(c, h, AFTER_TEXT);
+        };
         text("wolf_planes_state", AFTER_TEXT);
+        kind("wolf_planes_kind_label", "wolf_planes_kind");   // [STYLES 2026-11-10/]
         check("wolf_ships_check");                // [SHIP OPT-IN 2026-11-03/]
         text("wolf_ships_state", AFTER_TEXT);
+        kind("wolf_ships_kind_label", "wolf_ships_kind");     // [STYLES 2026-11-10/]
         check("wolf_birds_check");
         text("wolf_birds_state", AFTER_TEXT);
+        kind("wolf_birds_kind_label", "wolf_birds_kind");     // [STYLES 2026-11-10/]
+        text("wolf_birds_kind_state", AFTER_TEXT);
         check("wolf_sounds_check");
         text("wolf_sounds_state", AFTER_TEXT);
         check("wolf_sealife_check");              // [SEA LIFE 2026-11-03/]
@@ -335,6 +366,64 @@ namespace
         return str(panel, on ? "undersea_on_default" : "off_unless");
     }
 
+    /** [STYLES 2026-11-10] The reply carries this kind (an older grid does not: the drop-down stays greyed). */
+    bool have_kind(Kind k)
+    {
+        if (!sState.mHave) return false;
+        const LLSD& r = sState.mReply;
+        if (k == KIND_PLANES) return r["planesStyle"].isMap() && r["planesStyle"]["style"].isString();
+        if (k == KIND_SHIPS) return r["boatsStyle"].isMap() && r["boatsStyle"]["style"].isString();
+        return have_birds() && r["birds"]["zone"].isString();
+    }
+
+    /** [STYLES 2026-11-10] The drop-down's value: the owner's choice, or "auto". */
+    std::string kind_value(Kind k)
+    {
+        const LLSD& r = sState.mReply;
+        const LLSD chosen = k == KIND_PLANES ? r["planesStyle"]["chosen"] : k == KIND_SHIPS ? r["boatsStyle"]["chosen"] : r["birds"]["zoneChosen"];
+        return chosen.isString() ? chosen.asString() : std::string("auto");
+    }
+
+    /** [STYLES 2026-11-10] What the region has now (Automatic worked out by the grid). */
+    std::string kind_resolved(Kind k)
+    {
+        const LLSD& r = sState.mReply;
+        return (k == KIND_PLANES ? r["planesStyle"]["style"] : k == KIND_SHIPS ? r["boatsStyle"]["style"] : r["birds"]["zone"]).asString();
+    }
+
+    /** [STYLES 2026-11-10] A kind in the window's words (the panel's kind_* strings). */
+    std::string kind_words(LLPanel* panel, Kind k, const std::string& id)
+    {
+        if (id == "modern") return str(panel, k == KIND_PLANES ? "kind_modern_planes" : "kind_modern_ships");
+        static const char* const KNOWN[] = { "auto", "vintage", "scifi", "sail", "eastern", "tropical", "subtropical", "temperate", "polar" };
+        for (const char* known : KNOWN)
+            if (id == known) return str(panel, (std::string("kind_") + known).c_str());
+        return id;
+    }
+
+    std::string with_kind(std::string text, const std::string& kind)
+    {
+        const size_t at = text.find("[KIND]");
+        if (at != std::string::npos) text.replace(at, 6, kind);
+        return text;
+    }
+
+    /** [STYLES 2026-11-10] The line under the birds' drop-down: the owner's choice, or what Automatic gives here and why. */
+    std::string birds_kind_line(LLPanel* panel)
+    {
+        if (!have_kind(KIND_BIRDS)) return std::string();
+        const LLSD& b = sState.mReply["birds"];
+        const std::string words = kind_words(panel, KIND_BIRDS, b["zone"].asString());
+        if (b["zoneChosen"].isString()) return with_kind(str(panel, "kind_birds_chosen"), words);
+        if (!b["lat"].isReal() && !b["lat"].isInteger()) return with_kind(str(panel, "kind_birds_auto_noplace"), words);
+        const F64 lat = b["lat"].asReal();
+        const std::string at = llformat("%d\xC2\xB0 %s", (S32)ll_round(fabs(lat)), lat < 0.0 ? "south" : "north");   // degree sign, UTF-8
+        std::string line = with_kind(str(panel, "kind_birds_auto"), words);
+        const size_t p = line.find("[LAT]");
+        if (p != std::string::npos) line.replace(p, 5, at);
+        return line;
+    }
+
     void write_controls(LLPanel* panel)
     {
         LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check");
@@ -399,6 +488,24 @@ namespace
             undersea_state->setEnabled(true);
             undersea_state->setText(undersea_line(panel));
         }
+        // [STYLES 2026-11-10] the three kinds, from the same reply; the labels stay readable for everyone
+        for (Kind k : { KIND_PLANES, KIND_SHIPS, KIND_BIRDS })
+        {
+            if (LLComboBox* combo = panel->findChild<LLComboBox>(kind_combo(k)))
+            {
+                if (have_kind(k)) combo->setValue(LLSD(kind_value(k)));
+                combo->setEnabled(may && !sState.mBusy && have_kind(k));
+            }
+        }
+        for (const char* label : { "wolf_planes_kind_label", "wolf_ships_kind_label", "wolf_birds_kind_label" })
+        {
+            if (LLView* l = panel->findChildView(label)) l->setEnabled(true);
+        }
+        if (LLTextBox* birds_kind_state = panel->findChild<LLTextBox>("wolf_birds_kind_state"))
+        {
+            birds_kind_state->setEnabled(true);
+            birds_kind_state->setText(birds_kind_line(panel));
+        }
         // setCtrlsEnabled greys every child for someone who may not manage the estate; these lines must stay readable.
         state->setEnabled(true);
         status->setEnabled(true);
@@ -442,6 +549,17 @@ namespace
         if (reply.isMap() && reply.has("error")) return reply["error"].asString();
         if (!status) return status.toString();
         return "the service returned an unreadable reply";
+    }
+
+    /** [STYLES 2026-11-10] wolf_ambient.php set {region, what: planes_style | boats_style | birds_zone, style}. */
+    std::string kind_body(const LLUUID& region, Kind k, const std::string& style)
+    {
+        boost::json::object o;
+        o["action"] = "set";
+        o["region"] = region.asString();
+        o["what"] = kind_what(k);
+        o["style"] = style;
+        return boost::json::serialize(o);
     }
 
     std::string request_body(const char* action, const LLUUID& region, int ambient, What what = WHAT_PLANES)
@@ -628,6 +746,90 @@ namespace
         }
     }
 
+    /** [STYLES 2026-11-10] A kind's save: the grid's answer, then the plugin told (planes, ships) or this viewer's birds
+     *  changed now; a failure stays on the status line and in an alert. */
+    void save_kind_coro(LLHandle<LLPanel> handle, LLUUID region, Kind k, std::string style, U64 serial)
+    {
+        LLCore::HttpStatus status;
+        const LLSD reply = post_and_wait(kind_body(region, k, style), true, status);
+        const bool ok = status && reply.isMap() && reply["success"].asBoolean();
+        LLPanel* panel = handle.get();
+        if (!ok)
+        {
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
+                std::string(k == KIND_PLANES ? "Could not save the kind of planes: " : k == KIND_SHIPS ? "Could not save the kind of ships: "
+                            : "Could not save the kind of birds: ") + why_failed(status, reply)));
+        }
+        if (sState.mSerial != serial) return;
+        sState.mBusy = false;
+        if (!ok)
+        {
+            if (panel)
+            {
+                set_status(str(panel, "kind_save_failed") + " " + why_failed(status, reply), true);
+                write_controls(panel);   // the drop-down goes back to what the grid has
+            }
+            return;
+        }
+        sState.mReply = reply;
+        sState.mHave = true;
+        const bool here = WolfGrid::isOnWolfTerritoriesConfirmed() && gAgent.getRegion() && gAgent.getRegion()->getRegionID() == region;
+        bool told = false;
+        std::string msg;
+        if (k == KIND_PLANES)
+        {
+            // wolf-air 1.9.0 "/74 traffic style": it reads the record at once (else at its next 30-minute read)
+            if (here && !(rlv_handler_t::isEnabled() && !RlvActions::canSendChannel(AIR_CHANNEL)))
+            {
+                send_chat_from_viewer("traffic style", CHAT_TYPE_NORMAL, AIR_CHANNEL);
+                told = true;
+            }
+            if (panel) msg = with_kind(str(panel, "kind_saved_planes"), kind_words(panel, k, kind_resolved(k))) + (told ? "" : " " + str(panel, "planes_later"));
+        }
+        else if (k == KIND_SHIPS)
+        {
+            // wolf-naval 1.14.0 takes boats.style from the same "get" the boats nudge asks for
+            if (here && !(rlv_handler_t::isEnabled() && !RlvActions::canSendChannel(SHIPS_CHANNEL)))
+            {
+                send_chat_from_viewer(SHIPS_NUDGE, CHAT_TYPE_NORMAL, SHIPS_CHANNEL);
+                told = true;
+            }
+            if (panel) msg = with_kind(str(panel, "kind_saved_ships"), kind_words(panel, k, kind_resolved(k))) + (told ? "" : " " + str(panel, "ships_later"));
+        }
+        else
+        {
+            // no plugin: the viewers draw the birds from weather.php within the minute; this one now
+            if (WolfRegionWeather::instanceExists()) WolfRegionWeather::instance().setBirdsZoneLocal(region, kind_resolved(k));
+            if (panel) msg = with_kind(str(panel, "kind_saved_birds"), kind_words(panel, k, kind_resolved(k)));
+        }
+        if (panel)
+        {
+            set_status(msg, false);
+            write_controls(panel);
+        }
+    }
+
+    void on_kind_commit(LLHandle<LLPanel> handle, Kind k)
+    {
+        LLPanel* panel = handle.get();
+        if (!panel) return;
+        LLComboBox* combo = panel->findChild<LLComboBox>(kind_combo(k));
+        if (!combo) return;
+        if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean() || !have_kind(k))
+        {
+            write_controls(panel);
+            return;
+        }
+        const std::string style = combo->getValue().asString();
+        if (style.empty() || style == kind_value(k)) return;   // nothing changed
+        const LLUUID region = sState.mRegion;
+        const U64 serial = sState.mSerial;
+        sState.mBusy = true;
+        set_status(str(panel, "planes_saving"), false);
+        write_controls(panel);
+        LLCoros::instance().launch("WolfPassingPlanesKind", [handle, region, k, style, serial]() { save_kind_coro(handle, region, k, style, serial); });
+    }
+
     void on_commit(LLHandle<LLPanel> handle, What what)
     {
         LLPanel* panel = handle.get();
@@ -681,6 +883,13 @@ void WolfPassingPlanes::postBuild(LLPanel* panel)
     {
         undersea->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_UNDERSEA); });
     }
+    for (Kind k : { KIND_PLANES, KIND_SHIPS, KIND_BIRDS })   // [STYLES 2026-11-10/]
+    {
+        if (LLComboBox* combo = panel->findChild<LLComboBox>(kind_combo(k)))
+        {
+            combo->setCommitCallback([handle, k](LLUICtrl*, const LLSD&) { on_kind_commit(handle, k); });
+        }
+    }
 }
 
 void WolfPassingPlanes::sync(LLPanel* panel, LLViewerRegion* region, bool reread)
@@ -693,7 +902,9 @@ void WolfPassingPlanes::sync(LLPanel* panel, LLViewerRegion* region, bool reread
                               "wolf_birds_check", "wolf_birds_state",
                               "wolf_sounds_check", "wolf_sounds_state",     // [NATURE SOUNDS 2026-11-03/]
                               "wolf_sealife_check", "wolf_sealife_state",   // [SEA LIFE 2026-11-03/]
-                              "wolf_undersea_check", "wolf_undersea_state" }) // [UNDERSEA 2026-11-09/]
+                              "wolf_undersea_check", "wolf_undersea_state",   // [UNDERSEA 2026-11-09/]
+                              "wolf_planes_kind_label", "wolf_planes_kind", "wolf_ships_kind_label", "wolf_ships_kind",   // [STYLES 2026-11-10/]
+                              "wolf_birds_kind_label", "wolf_birds_kind", "wolf_birds_kind_state" })
     {
         if (LLView* v = panel->findChildView(name)) v->setVisible(wolf);
     }

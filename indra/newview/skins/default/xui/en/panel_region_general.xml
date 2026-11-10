@@ -429,6 +429,45 @@
      visible="false"
      width="442"
      wrap="true" />
+    <!-- [STYLES 2026-11-10] t712/t715: the kind, under its switch (wolfpassingplanes.cpp kind rows; saved at once) -->
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="20"
+     layout="topleft"
+     left="28"
+     name="wolf_planes_kind_label"
+     top="482"
+     valign="center"
+     visible="false"
+     width="100">Kind of planes:</text>
+    <combo_box
+     follows="left|top"
+     height="20"
+     layout="topleft"
+     left="130"
+     name="wolf_planes_kind"
+     tool_tip="Which passing planes fly over this region: classic propeller planes (the Wolf Air Tours Mustang, Spitfire and Camel), modern airliners (a Boeing 747 and Concorde) or science fiction craft (a flying saucer and a space fighter). Automatic is classic propeller planes. Saved at once. Only the estate owner or an estate manager can change it."
+     top="482"
+     visible="false"
+     width="300">
+        <combo_box.item
+         label="Automatic (fits the region)"
+         name="auto"
+         value="auto" />
+        <combo_box.item
+         label="Classic propeller planes"
+         name="vintage"
+         value="vintage" />
+        <combo_box.item
+         label="Modern airliners"
+         name="modern"
+         value="modern" />
+        <combo_box.item
+         label="Science fiction craft"
+         name="scifi"
+         value="scifi" />
+    </combo_box>
     <check_box
      follows="left|top"
      height="20"
@@ -451,6 +490,45 @@
      visible="false"
      width="442"
      wrap="true" />
+    <!-- [STYLES 2026-11-10] t712/t715: the kind, under its switch (wolfpassingplanes.cpp kind rows; saved at once) -->
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="20"
+     layout="topleft"
+     left="28"
+     name="wolf_ships_kind_label"
+     top="520"
+     valign="center"
+     visible="false"
+     width="100">Kind of ships:</text>
+    <combo_box
+     follows="left|top"
+     height="20"
+     layout="topleft"
+     left="130"
+     name="wolf_ships_kind"
+     tool_tip="Which passing ships sail here: pirates and medieval sailing ships (brigs, sloops and schooners), modern boats and ships (a coaster, a trawler and a ferry) or eastern ships (a Chinese junk, a sampan and a Japanese sengoku-bune). Automatic is pirates and medieval sailing ships. The ships at sea change in a minute or two. Saved at once. Only the estate owner or an estate manager can change it."
+     top="520"
+     visible="false"
+     width="300">
+        <combo_box.item
+         label="Automatic (fits the region)"
+         name="auto"
+         value="auto" />
+        <combo_box.item
+         label="Pirates and medieval sailing ships"
+         name="sail"
+         value="sail" />
+        <combo_box.item
+         label="Modern boats and ships"
+         name="modern"
+         value="modern" />
+        <combo_box.item
+         label="Eastern ships (Chinese and Japanese)"
+         name="eastern"
+         value="eastern" />
+    </combo_box>
     <check_box
      follows="left|top"
      height="20"
@@ -470,6 +548,60 @@
      left="28"
      name="wolf_birds_state"
      top="558"
+     visible="false"
+     width="442"
+     wrap="true" />
+    <!-- [STYLES 2026-11-10] t712/t715: the kind, under its switch (wolfpassingplanes.cpp kind rows; saved at once) -->
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="20"
+     layout="topleft"
+     left="28"
+     name="wolf_birds_kind_label"
+     top="558"
+     valign="center"
+     visible="false"
+     width="100">Kind of birds:</text>
+    <combo_box
+     follows="left|top"
+     height="20"
+     layout="topleft"
+     left="130"
+     name="wolf_birds_kind"
+     tool_tip="Which birds fly here. Automatic picks them from the region's place: tropical birds within the tropics, subtropical to 35 degrees from the equator, temperate to the polar circles and polar beyond them; a region with no place has temperate birds. Saved at once. Only the estate owner or an estate manager can change it."
+     top="558"
+     visible="false"
+     width="300">
+        <combo_box.item
+         label="Automatic (from the region's place)"
+         name="auto"
+         value="auto" />
+        <combo_box.item
+         label="Tropical birds"
+         name="tropical"
+         value="tropical" />
+        <combo_box.item
+         label="Subtropical birds"
+         name="subtropical"
+         value="subtropical" />
+        <combo_box.item
+         label="Temperate birds"
+         name="temperate"
+         value="temperate" />
+        <combo_box.item
+         label="Polar birds"
+         name="polar"
+         value="polar" />
+    </combo_box>
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="28"
+     name="wolf_birds_kind_state"
+     top="578"
      visible="false"
      width="442"
      wrap="true" />
@@ -587,5 +719,24 @@
     <string name="undersea_saved_on">Saved: fish and sea plants may now live in this region's sea.</string>
     <string name="undersea_saved_off">Saved: no more fish and sea plants here.</string>
     <string name="undersea_save_failed">Could not save fish and sea plants:</string>
+    <!-- [STYLES 2026-11-10] the kinds' words (the same as WolfStorm's region_passing_planes.js TEXT) -->
+    <string name="kind_auto">automatic</string>
+    <string name="kind_vintage">classic propeller planes</string>
+    <string name="kind_modern_planes">modern airliners</string>
+    <string name="kind_scifi">science fiction craft</string>
+    <string name="kind_sail">pirates and medieval sailing ships</string>
+    <string name="kind_modern_ships">modern boats and ships</string>
+    <string name="kind_eastern">eastern ships</string>
+    <string name="kind_tropical">tropical birds</string>
+    <string name="kind_subtropical">subtropical birds</string>
+    <string name="kind_temperate">temperate birds</string>
+    <string name="kind_polar">polar birds</string>
+    <string name="kind_birds_auto">Automatic here: [KIND] (the region's place is at [LAT]).</string>
+    <string name="kind_birds_auto_noplace">Automatic here: [KIND] (the region has no place).</string>
+    <string name="kind_birds_chosen">Chosen for this region: [KIND].</string>
+    <string name="kind_saved_planes">Saved: [KIND] from the next plane.</string>
+    <string name="kind_saved_ships">Saved: [KIND]. The ships at sea change in a minute or two.</string>
+    <string name="kind_saved_birds">Saved: [KIND].</string>
+    <string name="kind_save_failed">Could not save the kind:</string>
     <string name="planes_not_wolf">the region has not confirmed it is on Wolf Territories. Close and reopen this window to try again.</string>
 </panel>

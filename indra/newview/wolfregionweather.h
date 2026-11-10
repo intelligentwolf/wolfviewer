@@ -184,6 +184,14 @@ public:
     /** [BIRDS 2026-11-02] Region/Estate saved a new choice for `region` (wolfpassingplanes.cpp): show it now instead of at
      *  the next minute's poll. Ignored for any region but the agent's. */
     void setBirdsLocal(const LLUUID& region, bool on);
+    /** [BIRDS ZONES 2026-11-10] t715: which birds fly here, the `birds` block's `zone` (wolf_ambient_lib.php
+     *  wa_birds_zone_fields: the owner's choice, else from the place's latitude). An older grid sends none: temperate (the
+     *  birds every region had before). */
+    enum BirdsZone : U8 { BIRDS_TEMPERATE = 0, BIRDS_TROPICAL = 1, BIRDS_SUBTROPICAL = 2, BIRDS_POLAR = 3 };
+    BirdsZone birdsZone() const { return mBirdsZone; }
+    static BirdsZone birdsZoneFrom(const std::string& id);
+    /** [BIRDS ZONES 2026-11-10] Region/Estate saved a kind of birds for `region`: this viewer shows it now. */
+    void setBirdsZoneLocal(const LLUUID& region, const std::string& zone);
 
     /** [NATURE SOUNDS 2026-11-03] ticket 475: weather.php's `sounds` block for this region (wolfstorm/php/wolf_ambient_lib.php
      *  wa_sounds_payload: {ambient, default, on} and, while on, the night insects' climate {insects, place, lat, tempC,
@@ -258,6 +266,7 @@ private:
     bool               mHaveRow = false;
     bool               mBirdsOn = false;        // [BIRDS 2026-11-02/] weather.php `birds.on`
     bool               mBirdsSeaOnly = false;   // [BIRDS 2026-11-02/] ... by the sea-and-coast default only
+    BirdsZone          mBirdsZone = BIRDS_TEMPERATE;   // [BIRDS ZONES 2026-11-10/] weather.php `birds.zone`
     bool               mSoundsOn = false;       // [NATURE SOUNDS 2026-11-03/] weather.php `sounds.on`
     F32                mSoundsInsects = 0.f;    // [NATURE SOUNDS 2026-11-03/] weather.php `sounds.insects`, 0..1
     bool               mSeaLifeOn = false;      // [SEA LIFE 2026-11-03/] weather.php `sealife.on`

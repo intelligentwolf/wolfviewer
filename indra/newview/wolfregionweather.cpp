@@ -669,6 +669,28 @@ void WolfRegionWeather::readBirds(const LLSD& row)
     }
     mBirdsOn = on;
     mBirdsSeaOnly = sea_only;
+    // [BIRDS ZONES 2026-11-10] t715: the species' zone (absent: temperate)
+    const BirdsZone zone = birdsZoneFrom(b.isMap() && b["zone"].isString() ? b["zone"].asString() : std::string());
+    if (zone != mBirdsZone) LL_INFOS("WolfBirds") << "birds' zone: " << (S32)zone << LL_ENDL;
+    mBirdsZone = zone;
+}
+
+// [BIRDS ZONES 2026-11-10] Source: wolf_ambient_lib.php WA_BIRDS_ZONES ('tropical', 'subtropical', 'temperate', 'polar');
+// anything else is temperate.
+WolfRegionWeather::BirdsZone WolfRegionWeather::birdsZoneFrom(const std::string& id)
+{
+    if (id == "tropical") return BIRDS_TROPICAL;
+    if (id == "subtropical") return BIRDS_SUBTROPICAL;
+    if (id == "polar") return BIRDS_POLAR;
+    return BIRDS_TEMPERATE;
+}
+
+void WolfRegionWeather::setBirdsZoneLocal(const LLUUID& region, const std::string& zone)
+{
+    LLViewerRegion* here = gAgent.getRegion();
+    if (!here || here->getRegionID() != region) return;
+    mBirdsZone = birdsZoneFrom(zone);
+    LL_INFOS("WolfBirds") << "birds' zone: " << zone << " (saved in Region/Estate)" << LL_ENDL;
 }
 
 void WolfRegionWeather::setBirdsLocal(const LLUUID& region, bool on)

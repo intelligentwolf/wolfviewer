@@ -62,6 +62,7 @@ namespace
         F32 mBeatDeg;       // inner wing amplitude, degrees
         F32 mAltMin, mAltMax;   // metres above the surface below
         F32 mTop[3], mTip[3], mUnder[3], mBody[3], mHead[3];   // colours (sRGB 0..1)
+        bool mCalls = true;     // [BIRDS ZONES 2026-11-10/] plays its kind's recordings (false: silent, or no open recording)
     };
     // GULL a herring gull: 1.37 m span, 0.60 m long, 10.6 m/s, 2.8 Hz; grey back, black wingtips, white below.
     // TERN a common tern: 0.82 m span, 0.33 m long, 8.9 m/s, 3.4 Hz; pale grey back, black cap, white below.
@@ -77,6 +78,76 @@ namespace
         { 0.39f, 0.21f, 12.0f, 12.0f, 45.f, 35.f, 90.f,
           {0.08f, 0.08f, 0.10f}, {0.05f, 0.05f, 0.06f}, {0.13f, 0.12f, 0.13f}, {0.09f, 0.09f, 0.11f}, {0.07f, 0.07f, 0.09f} },
     };
+
+    // [BIRDS ZONES 2026-11-10] t715 (Jimmy Olsen; Paul approved): the species of each role by the region's climate zone
+    // (weather.php birds.zone, WolfRegionWeather::BirdsZone). Figures and sources:
+    // region-terrain-work/traffic-birds-styles-2026-11-10/birds_research.md (tags [n] there); colours REPRESENTATIVE from
+    // the field-guide descriptions cited there. Where no figure is published the nearest relative's is used and marked REL;
+    // GAME TUNING where neither exists. A span of 0 = no species does this role in the zone (the role is not drawn).
+    // Wing amplitudes and heights over the surface keep the temperate role's (no source gives them for these species),
+    // except where the research gives a height.
+    const Species NONE_SPECIES = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, false };
+    const Species SPECIES_TROPICAL[WolfBirds::KIND_COUNT] = {
+        // GULL: great frigatebird Fregata minor: span 2.084 m measured [3], length 0.95 m (0.85-1.05 [8]), wingbeat 2.6 Hz [3].
+        // Airspeed not published (Pennycuick 1983 paywalled): the herring gull's 10.6 m/s, GAME TUNING. Silent away from the
+        // nest [8]. Black all over (female's white breast not drawn).
+        { 2.084f, 0.95f, 10.6f, 2.6f, 34.f, 10.f, 45.f,
+          {0.09f, 0.10f, 0.10f}, {0.05f, 0.05f, 0.06f}, {0.08f, 0.08f, 0.09f}, {0.09f, 0.10f, 0.10f}, {0.08f, 0.08f, 0.09f}, false },
+        // TERN: sooty tern Onychoprion fuscatus: span 0.86 m (0.82-0.90 [9]), length 0.40 m (0.36-0.45 [10]); speed REL
+        // common tern 10.8 m/s (radar [5]); wingbeat REL common tern 3.4 Hz. Its voice at sea is not described and no
+        // recording is in the viewer: silent.
+        { 0.86f, 0.40f, 10.8f, 3.4f, 40.f, 5.f, 14.f,
+          {0.10f, 0.10f, 0.11f}, {0.06f, 0.06f, 0.07f}, {0.94f, 0.94f, 0.94f}, {0.95f, 0.95f, 0.95f}, {0.07f, 0.07f, 0.08f}, false },
+        // SMALL: wild budgerigar Melopsittacus undulatus: span 0.30 m, length 0.18 m [11], cruising 9.75 m/s [12], wingbeat
+        // 16.5 Hz (60-62 ms a beat, [12]). No open recording of a wild flock: silent.
+        { 0.30f, 0.18f, 9.75f, 16.5f, 55.f, 4.f, 18.f,
+          {0.30f, 0.32f, 0.12f}, {0.10f, 0.14f, 0.08f}, {0.50f, 0.78f, 0.30f}, {0.45f, 0.75f, 0.25f}, {0.95f, 0.88f, 0.30f}, false },
+        // STARLING: none (the red-billed quelea's figures and sounds could not be sourced; README "The birds by zone").
+        NONE_SPECIES,
+    };
+    const Species SPECIES_SUBTROPICAL[WolfBirds::KIND_COUNT] = {
+        // GULL: brown pelican Pelecanus occidentalis: span 2.10 m [14], length 1.25 m (1.0-1.5 [15][16]), airspeed 12.6 m/s
+        // (Schnell & Hellack 1978, read only as a quoted extract [17]); wingbeat not published in an open source: the
+        // frigatebird's measured 2.6 Hz, GAME TUNING. Low over the waves, up to about 20 m [14][15]. Silent away from the nest [16].
+        { 2.10f, 1.25f, 12.6f, 2.6f, 30.f, 2.f, 20.f,
+          {0.58f, 0.58f, 0.56f}, {0.10f, 0.09f, 0.09f}, {0.40f, 0.36f, 0.32f}, {0.22f, 0.18f, 0.15f}, {0.95f, 0.93f, 0.82f}, false },
+        // TERN: sandwich tern Thalasseus sandvicensis: span 1.00 m (0.95-1.05 [18]), length 0.385 m (0.36-0.41 [18]),
+        // 12.6 m/s (radar [5]); wingbeat REL common tern 3.4 Hz. Calls: the tern recordings (one of them is a sandwich tern).
+        { 1.00f, 0.385f, 12.6f, 3.4f, 40.f, 5.f, 14.f,
+          {0.80f, 0.82f, 0.85f}, {0.40f, 0.41f, 0.44f}, {0.96f, 0.96f, 0.96f}, {0.96f, 0.96f, 0.96f}, {0.05f, 0.05f, 0.06f}, true },
+        // SMALL and STARLING: the temperate sparrow/finch and starling (Negev winter murmurations at 31 N [19]): species() gives them; these entries are never read.
+        NONE_SPECIES, NONE_SPECIES,
+    };
+    const Species SPECIES_POLAR[WolfBirds::KIND_COUNT] = {
+        // GULL: glaucous gull Larus hyperboreus: span 1.55 m (1.32-1.70 [23]), length 0.70 m (0.55-0.81 [22][23]), 13.4 m/s
+        // (radar [1]); wingbeat REL herring gull 2.8 Hz. Pale grey, white wingtips [22][23]. Calls like the herring gull's,
+        // deeper [23]: the gull recordings.
+        { 1.55f, 0.70f, 13.4f, 2.8f, 34.f, 10.f, 45.f,
+          {0.80f, 0.83f, 0.86f}, {0.97f, 0.97f, 0.97f}, {0.95f, 0.95f, 0.95f}, {0.96f, 0.96f, 0.96f}, {0.97f, 0.97f, 0.97f}, true },
+        // TERN: Arctic tern Sterna paradisaea: span 0.80 m [1], length 0.38 m (0.35-0.42 [24]), 10.9 m/s (radar [1]); wingbeat
+        // REL common tern 3.4 Hz. Calls: the tern recordings (its call is like the common tern's, higher [24]).
+        { 0.80f, 0.38f, 10.9f, 3.4f, 40.f, 5.f, 14.f,
+          {0.76f, 0.78f, 0.82f}, {0.62f, 0.64f, 0.68f}, {0.92f, 0.92f, 0.93f}, {0.82f, 0.83f, 0.86f}, {0.04f, 0.04f, 0.05f}, true },
+        // SMALL: snow bunting Plectrophenax nivalis (winter): span 0.32 m (0.30-0.32 [26]), length 0.16 m (0.15-0.17 [26]);
+        // speed REL chaffinch 12.8 m/s (radar [1]); wingbeat REL the sparrow/finch 14 Hz. No recording in the viewer: silent.
+        { 0.32f, 0.16f, 12.8f, 14.0f, 55.f, 4.f, 18.f,
+          {0.92f, 0.90f, 0.86f}, {0.06f, 0.06f, 0.06f}, {0.95f, 0.94f, 0.92f}, {0.72f, 0.58f, 0.42f}, {0.80f, 0.68f, 0.52f}, false },
+        // STARLING: none (no murmurations beyond the polar circles).
+        NONE_SPECIES,
+    };
+
+    /** [BIRDS ZONES 2026-11-10] The species of a role in a zone (WolfRegionWeather::BirdsZone order: temperate, tropical,
+     *  subtropical, polar). Subtropical small birds and starlings are the temperate ones. */
+    const Species& species(U8 zone, WolfBirds::Kind kind)
+    {
+        switch (zone)
+        {
+        case WolfRegionWeather::BIRDS_TROPICAL: return SPECIES_TROPICAL[kind];
+        case WolfRegionWeather::BIRDS_SUBTROPICAL: return (kind == WolfBirds::GULL || kind == WolfBirds::TERN) ? SPECIES_SUBTROPICAL[kind] : SPECIES[kind];
+        case WolfRegionWeather::BIRDS_POLAR: return SPECIES_POLAR[kind];
+        default: return SPECIES[kind];
+        }
+    }
 
     // The director: how often it decides, and how far round the camera birds live.
     constexpr F64 DIRECT_SECS = 3.0;
@@ -597,15 +668,25 @@ void WolfBirds::direct(LLViewerRegion* region, F64 now)
     if (scale > 0.05f)
     {
         if (sea_f >= 0.08f) want[GULL] = (sea_f > 0.4f) ? 2 : 1;
-        if (sea_f >= 0.08f && tern_season() && day > 0.9f) want[TERN] = 1;
+        // [BIRDS ZONES 2026-11-10] terns all the year in the tropics and subtropics (sooty and sandwich terns live there
+        // year-round, birds_research.md); the summer season (tern_season) for the temperate and Arctic terns
+        const U8 tz = (U8)WolfRegionWeather::instance().birdsZone();
+        const bool all_year = tz == WolfRegionWeather::BIRDS_TROPICAL || tz == WolfRegionWeather::BIRDS_SUBTROPICAL;
+        if (sea_f >= 0.08f && (all_year || tern_season()) && day > 0.9f) want[TERN] = 1;
         if (land_f >= 0.15f && !sea_only) want[SMALL] = (land_f > 0.5f) ? 2 : 1;
     }
     if (murmur) want[STARLING] = 1;
+    // [BIRDS ZONES 2026-11-10] t715: a role no species does in this zone is not drawn; flocks of another zone (the owner
+    // changed it, or the camera crossed into a region of another climate) fly off and the zone's own come
+    const U8 zone = (U8)WolfRegionWeather::instance().birdsZone();
+    for (S32 k = 0; k < KIND_COUNT; ++k)
+        if (species(zone, (Kind)k).mSpan <= 0.f) want[k] = 0;
 
     S32 have[KIND_COUNT] = { 0, 0, 0, 0 };
     for (Flock& f : mFlocks)
     {
         if (f.mLeaving || f.mRoosting) continue;
+        if (f.mZone != zone) { leave(f, cam); continue; }   // [BIRDS ZONES 2026-11-10/]
         if (have[f.mKind] >= want[f.mKind])
         {
             // more than wanted: the starlings go down to roost where they are; the others fly off
@@ -660,6 +741,7 @@ bool WolfBirds::spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now
 {
     Flock f;
     f.mKind = kind;
+    f.mZone = (U8)WolfRegionWeather::instance().birdsZone();   // [BIRDS ZONES 2026-11-10/] its species for its life
     const F32 far_m = flock_reach_m();   // [BIRDS MID 2026-11-02] ticket 463
     const F32 near_m = llmin(NEAR_M, far_m * 0.5f);
     if (!pickPlace(region, kind, near_m, far_m, f.mCentre)) return false;
@@ -676,13 +758,13 @@ bool WolfBirds::spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now
     {
         const F32 a = ll_frand(F_TWO_PI);
         LLVector3 e = f.mCentre + LLVector3(cosf(a), sinf(a), 0.f) * ENTRY_M;
-        e.mV[VZ] = surfaceZ(e) + SPECIES[kind].mAltMax;
+        e.mV[VZ] = surfaceZ(e) + species(f.mZone, kind).mAltMax;
         entry = e;
         if (!camera->sphereInFrustum(e, 2.f) || (e - cam).length() > far_m + 40.f) break;
     }
     const S32 index = (S32)mFlocks.size();
     mFlocks.push_back(f);
-    const Species& sp = SPECIES[kind];
+    const Species& sp = species(f.mZone, kind);   // [BIRDS ZONES 2026-11-10/]
     const F32 spread = (kind == STARLING) ? 18.f : 8.f;
     for (S32 i = 0; i < count; ++i)
     {
@@ -799,7 +881,7 @@ bool WolfBirds::threatNear(const LLVector3& p, Kind kind, F32 mult) const
  *  underside on the bare leg (TARSUS_*), both scaled with the bird. */
 F32 WolfBirds::standHeight(const Bird& b, Kind kind) const
 {
-    const F32 len = SPECIES[kind].mLength * b.mSize;
+    const F32 len = species(zoneOf(b), kind).mLength * b.mSize;
     if (b.mSpot == SPOT_WATER) return len * FLOAT_ABOVE;
     return len * BODY_UNDER + (kind == SMALL ? TARSUS_SMALL_M : TARSUS_GULL_M) * b.mSize;
 }
@@ -967,7 +1049,9 @@ void WolfBirds::chooseLanding(Bird& b, Flock& f, S32 index, F64 now)
             }
         }   // no perch free: the sea (below), not the shore, so the shore keeps its own 30 % (review 2026-11-02)
     }
-    else if (r < 0.6f)
+    // [BIRDS ZONES 2026-11-10] a frigatebird never sits on the sea or the beach (its plumage is not waterproof; it roosts
+    // up on perches: birds_research.md [8]); it takes a perch or stays in the air
+    else if (r < 0.6f && f.mZone != WolfRegionWeather::BIRDS_TROPICAL)
     {
         for (S32 k = 0; k < 10; ++k)
         {
@@ -980,7 +1064,7 @@ void WolfBirds::chooseLanding(Bird& b, Flock& f, S32 index, F64 now)
             break;
         }
     }
-    if (kind == SPOT_NONE)
+    if (kind == SPOT_NONE && f.mZone != WolfRegionWeather::BIRDS_TROPICAL)   // [BIRDS ZONES 2026-11-10/] see above
     {
         // a raft: beside a flock-mate already on the water (chosen 2-6 m off), else near the flock's centre
         LLVector3 near_to = f.mCentre;
@@ -1394,7 +1478,7 @@ void WolfBirds::moveDown(Bird& b, Flock& f, F32 dt)
     }
     // the bill reaches the surface and no further: a body of half-length L pitched by a, standing h over the surface,
     // brings its tip down by L sin a, so a is held to asin(h / L) (the legs do not bend here)
-    const F32 half_len = 0.5f * SPECIES[kind].mLength * b.mSize;
+    const F32 half_len = 0.5f * species(zoneOf(b), kind).mLength * b.mSize;
     pitch = llmin(pitch, asinf(llclamp(standHeight(b, kind) / half_len, 0.f, 1.f)));
     b.mPitch += (pitch - b.mPitch) * llmin(1.f, dt * 10.f);
     // exactly on the surface under it
@@ -1422,7 +1506,7 @@ void WolfBirds::moveTakeOff(Bird& b, Flock& f, F32 dt)
     LLVector3 p = b.mPos + b.mVel * dt;
     const F32 frac = 1.f - llmax(b.mRun, 0.f) / TAKEOFF_RUN_S;
     // the feet patter on the water while the body rises a little (chosen: 0.3 m over the run)
-    p.mV[VZ] = floatZ(b, p) + SPECIES[f.mKind].mLength * b.mSize * FLOAT_ABOVE + 0.3f * frac;
+    p.mV[VZ] = floatZ(b, p) + species(f.mZone, f.mKind).mLength * b.mSize * FLOAT_ABOVE + 0.3f * frac;
     b.mPos = p;
     if (b.mRun <= 0.f)
     {
@@ -1529,7 +1613,7 @@ void WolfBirds::moveGull(Bird& b, Flock& f, F32 dt)
     else b.mGlideFor = frand_range(5.f, 14.f);
     if (b.mVel.mV[VZ] > 0.6f && b.mFlapFor <= 0.f) b.mFlapFor = 1.f;
     b.mAlt += frand_range(-1.f, 1.f) * dt;
-    b.mAlt = llclamp(b.mAlt, SPECIES[GULL].mAltMin, SPECIES[GULL].mAltMax);
+    b.mAlt = llclamp(b.mAlt, species(zoneOf(b), GULL).mAltMin, species(zoneOf(b), GULL).mAltMax);
 }
 
 void WolfBirds::moveTern(Bird& b, Flock& f, F32 dt)
@@ -1789,7 +1873,7 @@ void WolfBirds::move(F32 dt, F64 now)
             b.mPos += b.mVel * dt;
             if (!(f.mRoosting)) keepClear(b, dt);
         }
-        const Species& sp = SPECIES[f.mKind];
+        const Species& sp = species(f.mZone, f.mKind);
         const F32 beat = (b.mFlapFor > 0.f) ? sp.mBeatHz : 0.f;
         b.mPhase += F_TWO_PI * beat * dt;   // a glide holds the phase; buildMesh sets the gliding wings itself
         if (b.mPhase > F_TWO_PI * 64.f) b.mPhase -= F_TWO_PI * 64.f;
@@ -1859,7 +1943,7 @@ void WolfBirds::calls(F64 now)
             const F32 d = (b.mPos - cam).length();
             if (d < best) { best = d; at = b.mPos; }
         }
-        if (best < 1e8f) playCall(f.mKind, at, best);
+        if (best < 1e8f && species(f.mZone, f.mKind).mCalls) playCall(f.mKind, at, best);   // [BIRDS ZONES 2026-11-10/] silent species
     }
 }
 
@@ -2069,7 +2153,7 @@ void WolfBirds::buildMesh(S32& verts)
     for (size_t i = 0; i < mBirds.size() && (S32)(mVisible.size() + 1) * VERTS_PER_BIRD <= MAX_VERTS; ++i)
     {
         const Bird& b = mBirds[i];
-        const F32 span = SPECIES[mFlocks[b.mFlock].mKind].mSpan * b.mSize;
+        const F32 span = species(zoneOf(b), mFlocks[b.mFlock].mKind).mSpan * b.mSize;
         if (!camera->sphereInFrustum(b.mPos, span)) continue;
         if ((b.mPos - cam).length() > span * 900.f) continue;
         mVisible.push_back((S32)i);
@@ -2086,7 +2170,7 @@ void WolfBirds::buildMesh(S32& verts)
     for (S32 vi : mVisible)
     {
         const Bird& b = mBirds[(size_t)vi];
-        const Species& sp = SPECIES[mFlocks[b.mFlock].mKind];
+        const Species& sp = species(zoneOf(b), mFlocks[b.mFlock].mKind);
         const F32 span = sp.mSpan * b.mSize, len = sp.mLength * b.mSize;
         const bool distant = (b.mPos - cam).length() > span * LOD_SPANS;   // not "far": <windef.h> defines far (and near) away
 

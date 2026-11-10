@@ -439,8 +439,11 @@ jobs:
             apt-get update >/dev/null; apt-get install -y /out/wolfviewer_${V}_amd64.deb >/dev/null; $LDD; echo deb OK"
           docker run --rm -v "$OUT:/out:ro" fedora:latest bash -c "set -euo pipefail
             dnf -y -q install /out/wolfviewer-${V}-1.x86_64.rpm >/dev/null; $LDD; echo rpm OK"
+          # [2026-11-10] a full -Syu, not -Sy: with only a refreshed database, installing our package's dependencies is a
+          # partial upgrade, and the W102 run failed on Arch's openssl -> openssl-3 split ("conflicting files:
+          # /usr/lib/libcrypto.so.3 exists in filesystem (owned by openssl)"). The build container above already does -Syu.
           docker run --rm -v "$OUT:/out:ro" archlinux:latest bash -c "set -euo pipefail
-            pacman -Sy --noconfirm >/dev/null; pacman -U --noconfirm /out/wolfviewer-${V}-1-x86_64.pkg.tar.zst >/dev/null; $LDD; echo arch OK"
+            pacman -Syu --noconfirm >/dev/null; pacman -U --noconfirm /out/wolfviewer-${V}-1-x86_64.pkg.tar.zst >/dev/null; $LDD; echo arch OK"
           echo "::endgroup::"
           ls -la "$OUT"
 

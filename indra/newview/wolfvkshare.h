@@ -97,6 +97,20 @@ public:
     uint32_t glTexture() const { return mGlTexture; }
     uint32_t width() const { return mImage ? mImage->width() : 0; }
     uint32_t height() const { return mImage ? mImage->height() : 0; }
+
+    // [IMPORT SELF-TEST 2026-11-10] One round trip through the shared memory, with the GL context current and the image
+    // released to GL in its hand layout (COLOR_ATTACHMENT / DEPTH_STENCIL_ATTACHMENT, as createLayer/primeVulkan and
+    // WolfVkGBuffer::createImage leave it): GL clears the imported texture to a known value (colour 0.25, 0.5, 0.75, 1.0;
+    // depth 0.25) through a framebuffer of its own and signals gl_sem_signal with the layout; Vulkan waits vk_wait,
+    // acquires the image from VK_QUEUE_FAMILY_EXTERNAL, copies a 4x4 block at its centre to a host buffer, releases it
+    // back in the hand layout and signals vk_signal; GL then waits gl_sem_wait (the protocol is balanced again: every
+    // signal consumed, the image GL's). The 16 texels are decoded by the image's format and compared with the value
+    // GL wrote. gl_waits_first: a vk_signal is already pending for GL to wait first (WolfVkShare after primeVulkan).
+    // True = the bytes came back as written; false = not (the import does not carry GL's writes to Vulkan, or a GL
+    // or Vulkan call failed). result: one plain line for the log either way. The Windows import (OPAQUE_WIN32 handles,
+    // GL_EXT_memory_object_win32) had never been run anywhere when this was written (W102 Windows: black world).
+    bool roundTrip(uint32_t gl_sem_signal, uint32_t gl_sem_wait, VkSemaphore vk_wait, VkSemaphore vk_signal, bool gl_waits_first,
+                   std::string& result);
 private:
     WolfVkDevice* mDevice = nullptr;
     std::unique_ptr<WolfVkImage> mImage;
@@ -118,7 +132,8 @@ public:
 
     // Makes the three layers (width x height = the window) and, the first time, the two semaphores; false (with error)
     // when anything cannot be shared - the caller then stays on the read-back path.
-    bool init(WolfVkDevice& device, uint32_t width, uint32_t height, std::string& error);
+    // self_test: run selfTest() before returning (false with its error when the round trip fails).
+    bool init(WolfVkDevice& device, uint32_t width, uint32_t height, bool self_test, std::string& error);
     bool resize(uint32_t width, uint32_t height, std::string& error);
     void destroy();
     bool isValid() const { return mWorld.mShared.isValid() && mUI.mShared.isValid() && mDepth.mShared.isValid() && mGlDone != VK_NULL_HANDLE; }
@@ -162,6 +177,15 @@ public:
     WolfVkImage* world() { return mWorld.mImage; }
     WolfVkImage* ui() { return mUI.mImage; }
     WolfVkImage* depth() { return mDepth.mImage; }
+    // [IMPORT SELF-TEST 2026-11-10] after init: the world (RGBA8) and depth (D32F) layers each make one round trip
+    // (WolfVkSharedImage::roundTrip with the frame semaphores). False with the failing layer's line in error: the owner
+    // drops the shared hand-over for the read-back one. Lines of both layers in result. Run by init() when
+    // WolfVulkanShareSelfTest is on; the protocol state after it equals the state after primeVulkan's signal was consumed
+    // (mVkSignalled false: the next frame's Vulkan submit signals vk_done without GL having to wait first).
+    bool selfTest(std::string& result, std::string& error);
+    const std::string& selfTestResult() const { return mSelfTestResult; }
+    // [BLACK WORLD 2026-11-10] "GL_EXT_memory_object ... present" lines etc. for the log, once
+    static void logExtensions(const WolfVkDevice& device);
     // The GL entry points for sharing, loaded once (false when any is missing). WolfVkSharedImage needs them.
     static bool loadGL();
     const LLRect& worldRect() const;
@@ -201,6 +225,7 @@ private:
     uint32_t mDepthVao = 0;   // core profile: a vertex array must be bound to draw, even with no arrays
     int32_t mDepthTexLoc = -1, mDepthOriginLoc = -1;
     std::unique_ptr<LLRect> mWorldRect;
+    std::string mSelfTestResult;   // [IMPORT SELF-TEST 2026-11-10]
 };
 
 #endif // WOLF_VK_SHARE_H

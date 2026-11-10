@@ -19,8 +19,10 @@
 #include "wolfvkshare.h"
 #include "llgl.h"
 #include "llglheaders.h"
+#include "vk/wolfvkbuffer.h"   // [IMPORT SELF-TEST 2026-11-10] the host buffer of the round trip
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 
 #if LL_SDL
 #include "SDL2/SDL_video.h"   // SDL_GL_GetProcAddress, as llgl.cpp:64 GLH_EXT_GET_PROC_ADDRESS
@@ -261,7 +263,7 @@ bool WolfVkShare::available(const WolfVkDevice& device, std::string& why)
 #endif
 }
 
-bool WolfVkShare::init(WolfVkDevice& device, uint32_t width, uint32_t height, std::string& error)
+bool WolfVkShare::init(WolfVkDevice& device, uint32_t width, uint32_t height, bool self_test, std::string& error)
 {
     destroy();
     mDevice = &device;
@@ -282,6 +284,16 @@ bool WolfVkShare::init(WolfVkDevice& device, uint32_t width, uint32_t height, st
     if (!createDepthCopyProgram(error)) { destroy(); return false; }
     if (!resize(width, height, error)) { destroy(); return false; }
     LL_INFOS("Vulkan") << "Shared GL/Vulkan layers: " << width << "x" << height << " world + UI RGBA8, depth D32_SFLOAT; two exported semaphores" << LL_ENDL;
+    // [IMPORT SELF-TEST 2026-11-10] before the first frame: GL's writes must come back through the memory
+    if (self_test)
+    {
+        std::string result;
+        if (!selfTest(result, error)) { destroy(); return false; }
+    }
+    else
+    {
+        mSelfTestResult = "not run (WolfVulkanShareSelfTest off)";
+    }
     return true;
 }
 
@@ -414,7 +426,302 @@ bool WolfVkSharedImage::create(WolfVkDevice& device, const WolfVkImage::Format& 
     e = glErrors();
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(saved_tex));
     if (!e.empty()) { error = llformat("glTexStorageMem2DEXT(0x%x): ", gl_internal_format) + e; destroy(); return false; }
+    // [BLACK WORLD 2026-11-10] every import on record (W102 Windows: a black world with the UI fine; no Windows log yet)
+    LL_INFOS("Vulkan") << "Shared image imported into OpenGL: texture " << mGlTexture << " over memory object " << mGlMemory
+                       << llformat(" (GL format 0x%x, %ux%u, %llu KiB, ", gl_internal_format, width, height, static_cast<unsigned long long>(mImage->allocationSize() / 1024))
+#if LL_WINDOWS
+                       << "OPAQUE_WIN32 handle)" << LL_ENDL;
+#else
+                       << "OPAQUE_FD handle)" << LL_ENDL;
+#endif
     return true;
+}
+
+// ---- [IMPORT SELF-TEST 2026-11-10] ---------------------------------------------------------------------------------
+
+namespace
+{
+    // IEEE 754-2008 binary16 -> float (sign 1, exponent 5 with bias 15, mantissa 10); subnormals and inf/nan included
+    float halfToFloat(uint16_t h)
+    {
+        const uint32_t sign = (h & 0x8000u) ? 0x80000000u : 0u;
+        const uint32_t exp = (h >> 10) & 0x1Fu;
+        const uint32_t man = h & 0x3FFu;
+        uint32_t bits;
+        if (exp == 0)
+        {
+            if (man == 0) bits = sign;
+            else
+            {
+                // subnormal: value = man * 2^-24
+                float f = static_cast<float>(man) * (1.0f / 16777216.0f);
+                memcpy(&bits, &f, 4);
+                bits |= sign;
+            }
+        }
+        else if (exp == 31) bits = sign | 0x7F800000u | (man << 13);
+        else bits = sign | ((exp + 112u) << 23) | (man << 13);
+        float out;
+        memcpy(&out, &bits, 4);
+        return out;
+    }
+
+    // one texel of the formats the shared images use, as floats (channels), and the tolerance of its encoding
+    bool decodeTexel(VkFormat format, const uint8_t* at, float out[4], uint32_t& channels, float& tolerance)
+    {
+        switch (format)
+        {
+        case VK_FORMAT_R8G8B8A8_UNORM:   // vulkan_core.h: UNORM 8 = value / 255
+            for (int c = 0; c < 4; ++c) out[c] = static_cast<float>(at[c]) / 255.f;
+            channels = 4; tolerance = 1.5f / 255.f; return true;
+        case VK_FORMAT_R16G16B16A16_UNORM:
+            for (int c = 0; c < 4; ++c) { uint16_t v; memcpy(&v, at + c * 2, 2); out[c] = static_cast<float>(v) / 65535.f; }
+            channels = 4; tolerance = 1.5f / 65535.f; return true;
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+            for (int c = 0; c < 4; ++c) { uint16_t v; memcpy(&v, at + c * 2, 2); out[c] = halfToFloat(v); }
+            channels = 4; tolerance = 0.001f; return true;
+        case VK_FORMAT_D32_SFLOAT:
+            memcpy(&out[0], at, 4); out[1] = out[2] = out[3] = 0.f;
+            channels = 1; tolerance = 0.0001f; return true;
+        default:
+            return false;
+        }
+    }
+}
+
+bool WolfVkSharedImage::roundTrip(uint32_t gl_sem_signal, uint32_t gl_sem_wait, VkSemaphore vk_wait, VkSemaphore vk_signal, bool gl_waits_first,
+                                  std::string& result)
+{
+    if (!isValid() || !mDevice || !sGL.mComplete) { result = "round trip: no shared image"; return false; }
+    WolfVkImage* img = mImage.get();
+    const bool depth = img->format().mDepth;
+    const VkFormat vkformat = img->format().mFormat;
+    const GLenum hand_layout = depth ? WOLF_GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT : WOLF_GL_LAYOUT_COLOR_ATTACHMENT_EXT;
+    const VkImageLayout vk_hand = depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    const float expected[4] = { 0.25f, 0.5f, 0.75f, 1.0f };   // depth: expected[0]
+    const char* what = depth ? "depth" : "colour";
+    uint32_t channels = 0;
+    float tolerance = 0.f;
+    {
+        float dummy[4];
+        const uint8_t zeros[16] = { 0 };
+        if (!decodeTexel(vkformat, zeros, dummy, channels, tolerance))
+        {
+            result = std::string("round trip: format ") + WolfVkImage::formatName(vkformat) + " not decoded by the test";
+            return false;
+        }
+    }
+    const uint32_t texel_bytes = depth ? 4u : img->format().mTexelBytes;
+    const uint32_t w = img->width(), h = img->height();
+    const uint32_t bw = std::min<uint32_t>(4, w), bh = std::min<uint32_t>(4, h);
+    const uint32_t bx = (w > bw) ? (w / 2 - bw / 2) : 0, by = (h > bh) ? (h / 2 - bh / 2) : 0;
+
+    // ---- GL: clear the imported texture through a framebuffer of its own, hand it over --------------------------------
+    GLStateKeeper keep;
+    GLfloat saved_clear[4] = { 0.f, 0.f, 0.f, 0.f };
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, saved_clear);
+    glErrors();
+    if (gl_waits_first)
+    {
+        GLuint tex = mGlTexture; GLenum layout = hand_layout;
+        sGL.WaitSemaphoreEXT(gl_sem_wait, 0, nullptr, 1, &tex, &layout);
+        const std::string we = glErrors();
+        if (!we.empty()) { result = std::string("round trip (") + what + "): glWaitSemaphoreEXT before the clear: " + we; glClearColor(saved_clear[0], saved_clear[1], saved_clear[2], saved_clear[3]); return false; }
+    }
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+    if (depth)
+    {
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, mGlTexture, 0);
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+    }
+    else
+    {
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mGlTexture, 0);
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    }
+    const GLenum status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+    bool gl_ok = (status == GL_FRAMEBUFFER_COMPLETE);
+    std::string gl_err;
+    if (gl_ok)
+    {
+        glDisable(GL_SCISSOR_TEST);
+        if (depth)
+        {
+            glDepthMask(GL_TRUE);
+            glClearDepth(static_cast<GLclampd>(expected[0]));
+            glClear(GL_DEPTH_BUFFER_BIT);
+        }
+        else
+        {
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glClearColor(expected[0], expected[1], expected[2], expected[3]);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
+        gl_err = glErrors();
+        gl_ok = gl_err.empty();
+    }
+    else
+    {
+        gl_err = llformat("framebuffer status 0x%x", status);
+        glErrors();
+    }
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fbo);
+    glClearColor(saved_clear[0], saved_clear[1], saved_clear[2], saved_clear[3]);
+    if (!gl_ok)
+    {
+        // nothing was signalled: the protocol is where it was (a gl_waits_first wait already consumed vk_signal, which the
+        // caller's flags must reflect - WolfVkShare::selfTest does)
+        result = std::string("round trip (") + what + "): OpenGL could not clear the imported texture: " + gl_err;
+        return false;
+    }
+    {
+        GLuint tex = mGlTexture; GLenum layout = hand_layout;
+        sGL.SignalSemaphoreEXT(gl_sem_signal, 0, nullptr, 1, &tex, &layout);
+        const std::string se = glErrors();
+        if (!se.empty()) { result = std::string("round trip (") + what + "): glSignalSemaphoreEXT after the clear: " + se; return false; }
+    }
+
+    // ---- Vulkan: acquire, copy the centre block out, release, signal -------------------------------------------------
+    WolfVkBuffer host;
+    std::string error;
+    if (!host.create(*mDevice, static_cast<VkDeviceSize>(bw) * bh * texel_bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, error))
+    {
+        result = std::string("round trip (") + what + "): host buffer: " + error;
+        return false;
+    }
+    VkCommandBuffer cmd = mDevice->beginOneTime();
+    if (cmd == VK_NULL_HANDLE) { result = std::string("round trip (") + what + "): no one-time command buffer"; return false; }
+    const uint32_t ours = mDevice->queueFamily();
+    const VkImageAspectFlags aspect = img->aspect();
+    // Source: vulkan_core.h:4025 VkImageMemoryBarrier; the acquire half of a queue family ownership transfer from
+    // VK_QUEUE_FAMILY_EXTERNAL (:5477), with the layout GL was told (EXT_external_objects Table 4.4) to TRANSFER_SRC
+    VkImageMemoryBarrier acquire{};
+    acquire.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    acquire.srcAccessMask = 0;
+    acquire.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    acquire.oldLayout = vk_hand;
+    acquire.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    acquire.srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+    acquire.dstQueueFamilyIndex = ours;
+    acquire.image = img->image();
+    acquire.subresourceRange = { aspect, 0, 1, 0, 1 };
+    gVk.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &acquire);
+    VkBufferImageCopy region{};   // Source: vulkan_core.h:3996 { bufferOffset, bufferRowLength, bufferImageHeight, imageSubresource, imageOffset, imageExtent }
+    region.imageSubresource = { aspect, 0, 0, 1 };
+    region.imageOffset = { static_cast<int32_t>(bx), static_cast<int32_t>(by), 0 };
+    region.imageExtent = { bw, bh, 1 };
+    gVk.vkCmdCopyImageToBuffer(cmd, img->image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, host.buffer(), 1, &region);   // :4593
+    VkBufferMemoryBarrier hb{};   // the host reads after the copy (:2936 HOST_BIT, :3117 HOST_READ)
+    hb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    hb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    hb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    hb.srcQueueFamilyIndex = hb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hb.buffer = host.buffer();
+    hb.size = VK_WHOLE_SIZE;
+    gVk.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &hb, 0, nullptr);
+    VkImageMemoryBarrier release = acquire;   // the release half: back to the hand layout, to EXTERNAL
+    release.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    release.dstAccessMask = 0;
+    release.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    release.newLayout = vk_hand;
+    release.srcQueueFamilyIndex = ours;
+    release.dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+    gVk.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &release);
+    img->noteLayout(vk_hand, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0);
+    WolfVkDevice::ExtraSync sync;
+    sync.mWaits.push_back(vk_wait);
+    sync.mWaitStages.push_back(VK_PIPELINE_STAGE_TRANSFER_BIT);
+    sync.mSignals.push_back(vk_signal);
+    if (!mDevice->submitSync(cmd, sync, true, error))
+    {
+        // GL's signal is consumed only by a submit that waited on it; a failed submit leaves the protocol unknown
+        result = std::string("round trip (") + what + "): Vulkan submit: " + error;
+        return false;
+    }
+    {
+        GLuint tex = mGlTexture; GLenum layout = hand_layout;
+        glErrors();
+        sGL.WaitSemaphoreEXT(gl_sem_wait, 0, nullptr, 1, &tex, &layout);
+        const std::string we = glErrors();
+        if (!we.empty()) { result = std::string("round trip (") + what + "): glWaitSemaphoreEXT after Vulkan's copy: " + we; return false; }
+    }
+
+    // ---- compare ---------------------------------------------------------------------------------------------------
+    const uint8_t* data = host.hostData();
+    if (!data) { result = std::string("round trip (") + what + "): the host buffer is not mapped"; return false; }
+    bool all_ok = true;
+    float first[4] = { 0.f, 0.f, 0.f, 0.f };
+    uint32_t wrong = 0;
+    for (uint32_t i = 0; i < bw * bh; ++i)
+    {
+        float v[4];
+        uint32_t ch; float tol;
+        decodeTexel(vkformat, data + static_cast<size_t>(i) * texel_bytes, v, ch, tol);
+        if (i == 0) memcpy(first, v, sizeof(first));
+        bool ok = true;
+        for (uint32_t c = 0; c < ch; ++c) if (std::fabs(v[c] - expected[c]) > tol) ok = false;
+        if (!ok) { all_ok = false; wrong++; }
+    }
+    std::string line = llformat("round trip (%s %s, %ux%u block at %u,%u): GL wrote ", what, WolfVkImage::formatName(vkformat), bw, bh, bx, by);
+    if (depth) line += llformat("depth %.4f, Vulkan read %.4f", expected[0], first[0]);
+    else line += llformat("%.3f %.3f %.3f %.3f, Vulkan read %.3f %.3f %.3f %.3f", expected[0], expected[1], expected[2], expected[3], first[0], first[1], first[2], first[3]);
+    line += all_ok ? ": OK" : llformat(": FAILED (%u of %u texels wrong)", wrong, bw * bh);
+    result = line;
+    return all_ok;
+}
+
+bool WolfVkShare::selfTest(std::string& result, std::string& error)
+{
+    result.clear();
+    error.clear();
+    if (!isValid()) { error = "self-test: the layers are not valid"; return false; }
+    // after primeVulkan: vk_done signalled once, GL waits it first; from the second layer on nothing is pending
+    std::string line;
+    bool ok = mWorld.mShared.roundTrip(mGlSemGlDone, mGlSemVkDone, mGlDone, mVkDone, mVkSignalled, line);
+    mVkSignalled = false;   // consumed by the test's first GL wait (or by its last; either way nothing of Vulkan's is pending)
+    mGlSignalled = false;
+    result = "world layer " + line;
+    LL_INFOS("Vulkan") << "Shared layer self-test: world layer " << line << LL_ENDL;
+    if (ok)
+    {
+        ok = mDepth.mShared.roundTrip(mGlSemGlDone, mGlSemVkDone, mGlDone, mVkDone, false, line);
+        result += "; depth layer " + line;
+        LL_INFOS("Vulkan") << "Shared layer self-test: depth layer " << line << LL_ENDL;
+    }
+    mSelfTestResult = result;
+    if (!ok)
+    {
+        error = "the shared-image self-test failed (" + line + ")";
+        LL_WARNS("Vulkan") << "Shared layer self-test FAILED: " << line << " - the picture would not reach Vulkan this way" << LL_ENDL;
+    }
+    return ok;
+}
+
+void WolfVkShare::logExtensions(const WolfVkDevice& device)
+{
+#if LL_DARWIN
+    (void)device;
+#else
+    static bool logged = false;
+    if (logged) return;
+    logged = true;
+    auto yn = [](bool b) { return b ? "yes" : "NO"; };
+    LL_INFOS("Vulkan") << "Sharing extensions: OpenGL GL_EXT_memory_object " << yn(glHasExtension("GL_EXT_memory_object"))
+                       << ", GL_EXT_semaphore " << yn(glHasExtension("GL_EXT_semaphore"))
+#if LL_WINDOWS
+                       << ", GL_EXT_memory_object_win32 " << yn(glHasExtension("GL_EXT_memory_object_win32"))
+                       << ", GL_EXT_semaphore_win32 " << yn(glHasExtension("GL_EXT_semaphore_win32"))
+#else
+                       << ", GL_EXT_memory_object_fd " << yn(glHasExtension("GL_EXT_memory_object_fd"))
+                       << ", GL_EXT_semaphore_fd " << yn(glHasExtension("GL_EXT_semaphore_fd"))
+#endif
+                       << "; Vulkan device external memory + semaphore " << yn(device.externalSharing())
+                       << "; GL renderer " << gGLManager.mGLRenderer << LL_ENDL;
+#endif
 }
 
 void WolfVkSharedImage::destroy()

@@ -3214,6 +3214,19 @@ LRESULT CALLBACK LLWindowWin32::mainWindowProc(HWND h_wnd, UINT u_msg, WPARAM w_
             LL_PROFILE_ZONE_NAMED_CATEGORY_WIN32("mwp - WM_SIZE");
             window_imp->updateWindowRect();
 
+            // [WIN32 CHILD 2026-11-10] the Vulkan surface's child window (class WolfVulkanSurface, wolfvksurface.cpp)
+            // follows the client area here, on the window thread that owns both windows, before the main thread hears of
+            // the resize (handleResize is posted below): its client size is what the Vulkan swapchain's currentExtent
+            // reports (vkGetPhysicalDeviceSurfaceCapabilitiesKHR on a Win32 surface). Found by class name so this file
+            // needs nothing of the Vulkan code; nothing happens without such a child (OpenGL mode).
+            if (w_param != SIZE_MINIMIZED)
+            {
+                if (HWND vk_child = FindWindowExW(h_wnd, NULL, L"WolfVulkanSurface", NULL))
+                {
+                    SetWindowPos(vk_child, NULL, 0, 0, LOWORD(l_param), HIWORD(l_param), SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                }
+            }
+
             // There's an odd behavior with WM_SIZE that I would call a bug. If
             // the window is maximized, and you call MoveWindow() with a size smaller
             // than a maximized window, it ends up sending WM_SIZE with w_param set
@@ -4365,6 +4378,15 @@ bool LLWindowWin32::getNativeHandles(NativeHandles& handles)
     handles.mKind = NativeHandles::KIND_WIN32;
     handles.mInstance = mhInstance;
     handles.mHandle = mWindowHandle;
+    // [WIN32 CHILD 2026-11-10] the Vulkan surface's child window (wolfvksurface.cpp) is made, sized and destroyed on the
+    // window thread. Post() (not post()) so the work runs at once: it PostMessages WM_POST_FUNCTION_ to wake the thread's
+    // GetMessage() (LLWindowWin32Thread::Post above), where post() only runs at the thread's next pass.
+    HWND hwnd = mWindowHandle;
+    LLWindowWin32Thread* thread = mWindowThread;
+    handles.mPostToWindowThread = [hwnd, thread](std::function<void()> func)
+    {
+        if (thread && hwnd) thread->Post(hwnd, std::move(func));
+    };
     return true;
 }
 

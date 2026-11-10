@@ -35,6 +35,7 @@
 #include "vk/wolfvkshader.h"
 #include "llwindow.h"
 #include "llappviewer.h"   // [RUN-TIME STOP 2026-11-09] requestQuit
+#include "llstartup.h"     // [BLACK WORLD 2026-11-10] the world check starts in-world (STATE_STARTED)
 #include "llviewercontrol.h"
 #include "llnotificationsutil.h"
 #include "lltrans.h"
@@ -74,6 +75,39 @@ namespace
     // and whether it was the automatic AMD-integrated choice (the Vulkan window then says so in plain words)
     std::string sGBufferNotSharedWhy;
     bool sGBufferAutoAMD = false;
+
+    // [BLACK WORLD 2026-11-10] WolfVulkanBlackWorldCheck (wolfvkscene.h WorldProbe): the check's own state. Paul's W102
+    // report (Omniwright Mooncastle, Windows, AVX2): the whole 3D view black at every region with Vulkan on, UI and
+    // mini-map fine; the viewer did not notice. It is CONSERVATIVE by construction - it never fires on a dark scene:
+    //   A. OpenGL's own frame has light (max R/G/B > 0) but Vulkan's view of the shared world layer is black, three
+    //      probes running: the import does not carry the picture -> stop (OpenGL next start).
+    //   B. OpenGL's own frame is black three probes running -> a two-stage experiment with the shared G-buffer:
+    //      stage 1 OpenGL draws the simple pass itself and skips the depth rewrite (Vulkan touches the G-buffer no
+    //      more); stage 2 the G-buffer is given back to OpenGL (its own textures). Only when a stage brings light back
+    //      is Vulkan to blame -> stop with the stage's reason. Black through both stages = a dark scene (a black sky
+    //      box, a cave at night): nothing fires, the normal mode is restored, and the log says so.
+    //   The check runs once a second for the first 90 s in-world and ends early after 10 lit probes.
+    struct BlackCheck
+    {
+        enum Stage { OFF, WATCH, STAGE1_SETTLE, STAGE1, STAGE2_SETTLE, STAGE2, DONE };
+        Stage mStage = OFF;
+        F64 mStarted = 0.0;
+        uint32_t mLastGlSeq = 0;     // the last GL sample judged
+        uint32_t mProbes = 0;
+        uint32_t mGlBlackRun = 0;    // consecutive GL-black probes in the current stage
+        uint32_t mGlLitRun = 0;      // consecutive GL-lit probes in the current stage
+        uint32_t mImportFaultRun = 0;
+        uint32_t mGoodRun = 0;
+        uint32_t mSettle = 0;        // probes to let pass after a stage change (the G-buffer is remade at the next frame)
+        bool mGBufferWasShared = false;
+        std::string mSummary;        // the outcome, for the log and the reports
+    };
+    BlackCheck sBlack;
+    bool sGBufferGLOnly = false;         // [BLACK WORLD] stage 1: Vulkan draws no pass and no depth rewrite runs
+    bool sGBufferUnsharePending = false; // [BLACK WORLD] stage 2: the target gives the shared textures back at its next allocate
+    void stopAtRunTime(const std::string& reason);
+    bool shareGBuffer(const char* why);
+    void unshareGBuffer(const std::string& why);
 
     LLWindow* sWindow = nullptr;
     VkSurfaceKHR sSurface = VK_NULL_HANDLE;
@@ -321,8 +355,21 @@ namespace
     }
 
     // Everything Vulkan made goes, in the order the hand-over needs (both fall-back paths below).
+    void logSessionSummary(const char* when)
+    {
+        // [BLACK WORLD 2026-11-10] one line with everything the next report needs
+        LL_INFOS("Vulkan") << "Vulkan session summary (" << when << "): SPIR-V " << (sScene ? sScene->spirvSummary() : std::string("no scene"))
+                           << "; hand-over " << (sScene ? sScene->handOverLine() : std::string("-"))
+                           << "; G-buffer " << (sGBuffer ? (sGBuffer->available() ? "shared" : "sharing ended: " + sGBuffer->disabledReason()) : "not shared" + (sGBufferNotSharedWhy.empty() ? std::string() : " (" + sGBufferNotSharedWhy + ")"))
+                           << "; world check " << (sBlack.mSummary.empty() ? std::string("not run") : sBlack.mSummary) << LL_ENDL;
+    }
+
     void tearDown()
     {
+        logSessionSummary("teardown");
+        sBlack.mStage = BlackCheck::DONE;
+        sGBufferGLOnly = false;
+        sGBufferUnsharePending = false;
         // the G-buffer first: the render target stops being shared and gets ordinary GL textures at its next allocation
         if (gPipeline.mRT) gPipeline.mMainRT.deferredScreen.setWolfVkShared(false);
         LLRenderTarget::sWolfVkProvider = nullptr;
@@ -469,6 +516,229 @@ namespace
             }
         }
         sInfoProbed = true;
+    }
+
+    // [VULKAN G-BUFFER 2026-11-08] the main G-buffer becomes shared: LLRenderTarget asks this provider for its textures
+    // from the next allocation, which gResizeScreenTexture forces at the next frame (LLPipeline::resizeScreenTexture).
+    // [BLACK WORLD 2026-11-10] a function: the world check gives the G-buffer back to OpenGL (unshareGBuffer) and, when
+    // that proved nothing, shares it again. why: for the log ("start", "restored after the world check").
+    bool shareGBuffer(const char* why)
+    {
+        if (sGBuffer) return true;
+        static LLCachedControl<bool> no_gbuffer(gSavedSettings, "WolfVulkanDebugNoGBuffer", false);
+        std::string error;
+        // [A1 2026-11-09] WolfVulkanShareGBuffer: "on" (default) shares, "off" does not, "auto" shares except on AMD
+        // integrated graphics. Default "on" by the coordinator's decision for Paul ("whichever is best", 8.2o chain34):
+        // after the end-of-frame flush (r41) Vulkan matches OpenGL on the 890M either way (shared 25.6 fps, not shared
+        // 26.9, OpenGL 26.6 - one valid round, within noise), and not sharing leaves Vulkan drawing none of the world.
+        // "auto" keeps the measured AMD rule for whoever chooses it. There, images shared between the APIs lose DCC/HTILE compression on RADV + radeonsi
+        // (8.2o r38: every shared image reports VK_IMAGE_COMPRESSION_DISABLED_EXT, the drivers' dumps agree) and OpenGL
+        // draws the whole deferred geometry into them, ~6 ms a frame on the Radeon 890M (r37: 49-50 ms shared, 43.5-44
+        // not); GL drawing PASS_SIMPLE itself gives the same picture (OpenGL mode). AMD integrated = the chosen Vulkan
+        // device's VkPhysicalDeviceProperties deviceType VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU (vulkan_core.h) and
+        // vendorID WolfVkDevice::VENDOR_AMD (0x1002, wolfvkdevice.h:101), and OpenGL on AMD too (gGLManager.mIsAMD,
+        // llgl.cpp: GL_VENDOR names AMD/ATI) - the device is normally matched to GL's by its UUID (choosePhysicalDevice b.).
+        const std::string share_mode = gSavedSettings.getString("WolfVulkanShareGBuffer");
+        const WolfVkPhysicalDeviceInfo& dev = gWolfVkDevice.chosen();
+        // Only on Mesa's RADV (VkPhysicalDeviceDriverProperties driverID VK_DRIVER_ID_MESA_RADV, vulkan_core.h:6357):
+        // the compression loss was measured with RADV + radeonsi; AMD's own Windows driver has not been measured, so
+        // "auto" keeps sharing there.
+        const bool amd_integrated = dev.mProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+                                    && dev.mProperties.vendorID == WolfVkDevice::VENDOR_AMD
+                                    && dev.mDriver.driverID == VK_DRIVER_ID_MESA_RADV && gGLManager.mIsAMD;
+        sGBufferNotSharedWhy.clear();
+        sGBufferAutoAMD = false;
+        if (no_gbuffer)
+        {
+            sGBufferNotSharedWhy = "WolfVulkanDebugNoGBuffer";
+        }
+        else if (share_mode == "off")
+        {
+            sGBufferNotSharedWhy = "WolfVulkanShareGBuffer off";
+        }
+        else if (share_mode == "auto" && amd_integrated)
+        {
+            sGBufferNotSharedWhy = "WolfVulkanShareGBuffer auto: AMD integrated graphics on RADV (" + dev.name() + ")";
+            sGBufferAutoAMD = true;
+        }
+        else if (sScene && !sScene->sharedHandOver())
+        {
+            // [IMPORT SELF-TEST 2026-11-10] the layers' round trip failed (or sharing is off): the same import would carry
+            // the G-buffer, so it is not shared either - OpenGL draws every pass into its own textures
+            sGBufferNotSharedWhy = "the shared layers are not in use (" + sScene->handOverLine() + ")";
+        }
+        if (!sGBufferNotSharedWhy.empty())
+        {
+            LL_INFOS("Vulkan") << "G-buffer sharing off (" << sGBufferNotSharedWhy << "): OpenGL draws the geometry passes" << LL_ENDL;
+            return false;
+        }
+        sGBuffer = new WolfVkGBuffer();
+        if (sGBuffer->init(gWolfVkDevice, gSavedSettings.getBOOL("WolfVulkanShareSelfTest"), error))
+        {
+            LLRenderTarget::sWolfVkProvider = sGBuffer;
+            gPipeline.mMainRT.deferredScreen.setWolfVkShared(true);
+            gResizeScreenTexture = true;
+            LL_INFOS("Vulkan") << "G-buffer sharing on (" << why << "): the main G-buffer is remade over Vulkan memory at the next frame" << LL_ENDL;
+            return true;
+        }
+        LL_INFOS("Vulkan") << "G-buffer sharing unavailable, geometry passes stay on OpenGL: " << error << LL_ENDL;
+        sGBufferNotSharedWhy = error;
+        delete sGBuffer;
+        sGBuffer = nullptr;
+        return false;
+    }
+
+    // [BLACK WORLD 2026-11-10] The G-buffer goes back to OpenGL's own textures: the target is marked unshared and remade at
+    // the next frame (gResizeScreenTexture -> LLPipeline::resizeScreenTexture -> release(): the provider hears of it and
+    // the shared images go); the provider object itself goes once the target has given them back (finishUnshare,
+    // at the next present), never while the target's framebuffer still names its textures.
+    void unshareGBuffer(const std::string& why)
+    {
+        if (!sGBuffer) return;
+        LL_INFOS("WolfVulkanCheck") << "G-buffer given back to OpenGL: " << why << LL_ENDL;
+        sGBufferGLOnly = true;   // no Vulkan pass into it from this moment, whatever the target still holds
+        if (gPipeline.mRT) gPipeline.mMainRT.deferredScreen.setWolfVkShared(false);
+        gResizeScreenTexture = true;
+        sGBufferUnsharePending = true;
+        if (sGBufferNotSharedWhy.empty()) sGBufferNotSharedWhy = why;
+    }
+
+    void finishUnshare()
+    {
+        if (!sGBufferUnsharePending || !sGBuffer) return;
+        if (sGBuffer->hasImages()) return;   // the target has not released them yet (it does at its next allocate)
+        if (gWolfVkDevice.hung()) return;    // tearDown abandons it
+        LLRenderTarget::sWolfVkProvider = nullptr;
+        delete sGBuffer;
+        sGBuffer = nullptr;
+        sGBufferUnsharePending = false;
+        LL_INFOS("WolfVulkanCheck") << "G-buffer sharing ended: OpenGL draws every pass into its own textures" << LL_ENDL;
+    }
+
+    // [BLACK WORLD 2026-11-10] the world check, once per new GL probe sample (presentFrame, after the frame went out)
+    void blackCheck()
+    {
+        static LLCachedControl<bool> enabled(gSavedSettings, "WolfVulkanBlackWorldCheck", true);
+        if (!enabled || sState != State::VULKAN_ACTIVE || !sScene) return;
+        if (sBlack.mStage == BlackCheck::DONE) return;
+        if (sBlack.mStage == BlackCheck::OFF)
+        {
+            // armed in-world, at the first frame that captured a world
+            if (LLStartUp::getStartupState() < STATE_STARTED || !sScene->worldCapturedThisFrame()) return;
+            sBlack.mStage = BlackCheck::WATCH;
+            sBlack.mStarted = LLTimer::getTotalSeconds();
+            sBlack.mGBufferWasShared = sGBuffer != nullptr;
+            sScene->setProbeArmed(true);
+            LL_INFOS("WolfVulkanCheck") << "World check started: once a second for up to 90 s; GL samples its own frame"
+                                        << (sScene->sharedHandOver() ? ", Vulkan samples the shared world layer" : " (read-back hand-over: no Vulkan sample)")
+                                        << "; G-buffer " << (sGBuffer ? "shared" : "not shared") << LL_ENDL;
+            return;
+        }
+        const WolfVkScene::WorldProbe& p = sScene->probe();
+        if (!p.mGlValid || p.mGlSeq == sBlack.mLastGlSeq) return;   // no new GL sample yet
+        sBlack.mLastGlSeq = p.mGlSeq;
+        sBlack.mProbes++;
+        const bool gl_black = p.mGlMax == 0;
+        // Vulkan's sample of the same frame, when the hand-over is shared and that sample is in (it lags a few frames;
+        // judged only when it belongs to this GL sample or a later one is not needed: the sequence numbers match)
+        const bool vk_known = p.mVkValid && p.mVkPossible && p.mVkSeq == p.mGlSeq;
+        const bool vk_black = vk_known && p.mVkMax == 0;
+        LL_INFOS("WolfVulkanCheck") << "World probe " << p.mGlSeq << ": GL max R/G/B " << p.mGlMax << " (" << p.mGlLit << " of 1024 points lit)"
+                                    << (vk_known ? llformat(", Vulkan's view max %u (%u lit)", p.mVkMax, p.mVkLit) : std::string(p.mVkPossible ? ", Vulkan's view pending" : ""))
+                                    << ", stage " << static_cast<int>(sBlack.mStage) << LL_ENDL;
+        // A. the import does not carry the picture
+        if (!gl_black && vk_black) sBlack.mImportFaultRun++; else if (vk_known) sBlack.mImportFaultRun = 0;
+        if (sBlack.mImportFaultRun >= 3)
+        {
+            sBlack.mSummary = llformat("FAILED: OpenGL's frame had light (max %u) but Vulkan read the shared world layer black, 3 probes running", p.mGlMax);
+            LL_WARNS("WolfVulkanCheck") << "World check " << sBlack.mSummary << LL_ENDL;
+            sScene->setProbeArmed(false);
+            stopAtRunTime("Vulkan drew nothing on this computer: the picture OpenGL drew did not reach Vulkan through the shared image");
+            return;
+        }
+        auto end_check = [&](const std::string& summary, bool warn)
+        {
+            sBlack.mSummary = summary;
+            sBlack.mStage = BlackCheck::DONE;
+            sScene->setProbeArmed(false);
+            if (warn) LL_WARNS("WolfVulkanCheck") << "World check " << summary << LL_ENDL;
+            else LL_INFOS("WolfVulkanCheck") << "World check " << summary << LL_ENDL;
+        };
+        switch (sBlack.mStage)
+        {
+        case BlackCheck::WATCH:
+            if (gl_black) { sBlack.mGlBlackRun++; sBlack.mGoodRun = 0; }
+            else { sBlack.mGlBlackRun = 0; sBlack.mGoodRun++; }
+            if (sBlack.mGoodRun >= 10)
+            {
+                end_check(llformat("passed: OpenGL's frame lit in 10 probes running (last max %u)%s", p.mGlMax, vk_known ? ", Vulkan sees it too" : ""), false);
+                return;
+            }
+            if (sBlack.mGlBlackRun >= 3)
+            {
+                if (!sGBuffer)
+                {
+                    // nothing of Vulkan's is in OpenGL's frame when the G-buffer is OpenGL's own: a black frame here is a dark
+                    // scene or something no renderer switch would change
+                    end_check("ended: OpenGL's own frame black 3 probes running with the G-buffer not shared - a dark scene, not a Vulkan fault", false);
+                    return;
+                }
+                LL_WARNS("WolfVulkanCheck") << "OpenGL's frame black 3 probes running: stage 1, OpenGL draws the simple pass itself and no depth rewrite runs" << LL_ENDL;
+                sGBufferGLOnly = true;
+                sBlack.mStage = BlackCheck::STAGE1_SETTLE;
+                sBlack.mSettle = 2;
+                sBlack.mGlBlackRun = sBlack.mGlLitRun = 0;
+            }
+            else if (LLTimer::getTotalSeconds() - sBlack.mStarted > 90.0)
+            {
+                end_check(llformat("ended after 90 s: %u probes, last GL max %u", sBlack.mProbes, p.mGlMax), false);
+            }
+            break;
+        case BlackCheck::STAGE1_SETTLE:
+        case BlackCheck::STAGE2_SETTLE:
+            if (sBlack.mSettle > 0) sBlack.mSettle--;
+            if (sBlack.mSettle == 0)
+            {
+                sBlack.mStage = (sBlack.mStage == BlackCheck::STAGE1_SETTLE) ? BlackCheck::STAGE1 : BlackCheck::STAGE2;
+                sBlack.mGlBlackRun = sBlack.mGlLitRun = 0;
+            }
+            break;
+        case BlackCheck::STAGE1:
+            if (gl_black) { sBlack.mGlBlackRun++; sBlack.mGlLitRun = 0; } else { sBlack.mGlLitRun++; sBlack.mGlBlackRun = 0; }
+            if (sBlack.mGlLitRun >= 3)
+            {
+                end_check(llformat("FAILED: the world came back (max %u) once OpenGL drew the simple pass itself: Vulkan's pass into the shared G-buffer (or the depth rewrite) blanked it", p.mGlMax), true);
+                stopAtRunTime("Vulkan drew nothing on this computer: its pass into the G-buffer shared with OpenGL blanked the picture");
+                return;
+            }
+            if (sBlack.mGlBlackRun >= 3)
+            {
+                LL_WARNS("WolfVulkanCheck") << "Still black with OpenGL drawing every pass: stage 2, the G-buffer goes back to OpenGL's own textures" << LL_ENDL;
+                unshareGBuffer("world check stage 2");
+                sBlack.mStage = BlackCheck::STAGE2_SETTLE;
+                sBlack.mSettle = 3;
+            }
+            break;
+        case BlackCheck::STAGE2:
+            if (gl_black) { sBlack.mGlBlackRun++; sBlack.mGlLitRun = 0; } else { sBlack.mGlLitRun++; sBlack.mGlBlackRun = 0; }
+            if (sBlack.mGlLitRun >= 3)
+            {
+                end_check(llformat("FAILED: the world came back (max %u) once the G-buffer was OpenGL's own: the G-buffer shared with Vulkan came back black", p.mGlMax), true);
+                stopAtRunTime("Vulkan drew nothing on this computer: the G-buffer shared between OpenGL and Vulkan came back black");
+                return;
+            }
+            if (sBlack.mGlBlackRun >= 3)
+            {
+                // black with and without Vulkan's part: a dark scene. The normal mode comes back.
+                sGBufferGLOnly = false;
+                finishUnshare();
+                if (sBlack.mGBufferWasShared && !sGBuffer) shareGBuffer("restored after the world check");
+                end_check("ended: OpenGL's frame black with and without the shared G-buffer - a dark scene, not a Vulkan fault; sharing restored", false);
+            }
+            break;
+        default:
+            break;
+        }
     }
 }
 
@@ -633,66 +903,7 @@ void initAfterGL(LLWindow* window)
     LL_INFOS("Vulkan") << "Vulkan renderer active: " << sVulkanDeviceLine << ", surface " << WolfVkSurface::kind() << LL_ENDL;
     prof::initStamps();   // [AMD PERF 2026-11-08] Vulkan timestamps for the WolfLogFrameRate breakdown (none when the queue has no timestamps)
 
-    // [VULKAN G-BUFFER 2026-11-08] the main G-buffer becomes shared: LLRenderTarget asks this provider for its textures
-    // from the next allocation, which gResizeScreenTexture forces at the next frame (LLPipeline::resizeScreenTexture)
-    {
-        static LLCachedControl<bool> no_gbuffer(gSavedSettings, "WolfVulkanDebugNoGBuffer", false);
-        std::string why;
-        // [A1 2026-11-09] WolfVulkanShareGBuffer: "on" (default) shares, "off" does not, "auto" shares except on AMD
-        // integrated graphics. Default "on" by the coordinator's decision for Paul ("whichever is best", 8.2o chain34):
-        // after the end-of-frame flush (r41) Vulkan matches OpenGL on the 890M either way (shared 25.6 fps, not shared
-        // 26.9, OpenGL 26.6 - one valid round, within noise), and not sharing leaves Vulkan drawing none of the world.
-        // "auto" keeps the measured AMD rule for whoever chooses it. There, images shared between the APIs lose DCC/HTILE compression on RADV + radeonsi
-        // (8.2o r38: every shared image reports VK_IMAGE_COMPRESSION_DISABLED_EXT, the drivers' dumps agree) and OpenGL
-        // draws the whole deferred geometry into them, ~6 ms a frame on the Radeon 890M (r37: 49-50 ms shared, 43.5-44
-        // not); GL drawing PASS_SIMPLE itself gives the same picture (OpenGL mode). AMD integrated = the chosen Vulkan
-        // device's VkPhysicalDeviceProperties deviceType VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU (vulkan_core.h) and
-        // vendorID WolfVkDevice::VENDOR_AMD (0x1002, wolfvkdevice.h:101), and OpenGL on AMD too (gGLManager.mIsAMD,
-        // llgl.cpp: GL_VENDOR names AMD/ATI) - the device is normally matched to GL's by its UUID (choosePhysicalDevice b.).
-        const std::string share_mode = gSavedSettings.getString("WolfVulkanShareGBuffer");
-        const WolfVkPhysicalDeviceInfo& dev = gWolfVkDevice.chosen();
-        // Only on Mesa's RADV (VkPhysicalDeviceDriverProperties driverID VK_DRIVER_ID_MESA_RADV, vulkan_core.h:6357):
-        // the compression loss was measured with RADV + radeonsi; AMD's own Windows driver has not been measured, so
-        // "auto" keeps sharing there.
-        const bool amd_integrated = dev.mProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
-                                    && dev.mProperties.vendorID == WolfVkDevice::VENDOR_AMD
-                                    && dev.mDriver.driverID == VK_DRIVER_ID_MESA_RADV && gGLManager.mIsAMD;
-        sGBufferNotSharedWhy.clear();
-        sGBufferAutoAMD = false;
-        if (no_gbuffer)
-        {
-            sGBufferNotSharedWhy = "WolfVulkanDebugNoGBuffer";
-        }
-        else if (share_mode == "off")
-        {
-            sGBufferNotSharedWhy = "WolfVulkanShareGBuffer off";
-        }
-        else if (share_mode == "auto" && amd_integrated)
-        {
-            sGBufferNotSharedWhy = "WolfVulkanShareGBuffer auto: AMD integrated graphics on RADV (" + dev.name() + ")";
-            sGBufferAutoAMD = true;
-        }
-        if (!sGBufferNotSharedWhy.empty())
-        {
-            LL_INFOS("Vulkan") << "G-buffer sharing off (" << sGBufferNotSharedWhy << "): OpenGL draws the geometry passes" << LL_ENDL;
-        }
-        else
-        {
-            sGBuffer = new WolfVkGBuffer();
-            if (sGBuffer->init(gWolfVkDevice, why))
-            {
-                LLRenderTarget::sWolfVkProvider = sGBuffer;
-                gPipeline.mMainRT.deferredScreen.setWolfVkShared(true);
-                gResizeScreenTexture = true;
-            }
-            else
-            {
-                LL_INFOS("Vulkan") << "G-buffer sharing unavailable, geometry passes stay on OpenGL: " << why << LL_ENDL;
-                delete sGBuffer;
-                sGBuffer = nullptr;
-            }
-        }
-    }
+    shareGBuffer("start");
 }
 
 bool isActive()
@@ -975,6 +1186,7 @@ bool drawPassSimple()
     // [G-BUFFER COMPARE 2026-11-08] GL draws the pass into the shared buffers instead (the dump then shows GL's result)
     static LLCachedControl<bool> gl_only(gSavedSettings, "WolfVulkanDebugGBufferGLOnly", false);
     if (gl_only) return false;
+    if (sGBufferGLOnly) return false;   // [BLACK WORLD 2026-11-10] world check stage 1/2: no Vulkan pass, no depth rewrite
     if (!ensureFrameBegun()) return false;
     VkCommandBuffer cmd = gWolfVkDevice.beginMidFrame();
     if (cmd == VK_NULL_HANDLE) return false;
@@ -1137,6 +1349,7 @@ bool presentFrame()
     struct EndOfFrameFlush { ~EndOfFrameFlush() { if (gGLManager.mInited && !gWolfVkDevice.hung()) glFlush(); } } end_of_frame_flush;
     const F64 t0 = LLTimer::getTotalSeconds();
     std::string error;
+    finishUnshare();   // [BLACK WORLD 2026-11-10] a G-buffer given back last frame: the provider goes once the target released it
 
     // [VULKAN WAYLAND 2026-11-09] test only (WolfVulkanDebugFallBack, switches itself off): the run-time stop, as a lost
     // device takes it (stopAtRunTime: message box, next start in OpenGL, quit), so the rig can prove it on every window
@@ -1296,6 +1509,11 @@ bool presentFrame()
         sResizePending = true;
     }
 
+    // [BLACK WORLD 2026-11-10] the world check judges the newest probe sample now that the frame is out; a verdict against
+    // Vulkan stops the renderer (stopAtRunTime), and this frame counts as shown either way
+    blackCheck();
+    if (sState == State::STOPPED) return false;
+
     const F64 t1 = LLTimer::getTotalSeconds();
     sPresentAccum += (t1 - t0) * 1000.0;
     sPresentCount++;
@@ -1383,6 +1601,7 @@ void onLoginScreenShown()
 
 void shutdown()
 {
+    if (sState == State::VULKAN_ACTIVE) logSessionSummary("shutdown");   // [BLACK WORLD 2026-11-10]
     LLRenderTarget::sWolfVkProvider = nullptr;
     // [HANG GUARD 2026-11-08 8.2k] as fallBack: from the first step that finds the card hung, the rest is abandoned
     if (sGBuffer && !gWolfVkDevice.hung()) delete sGBuffer;
@@ -1442,6 +1661,11 @@ LLSD reportFields()
     f["vulkan_hand_over"] = sScene ? sScene->handOverLine() : "";
     f["vulkan_gbuffer"] = gbufferShared() ? std::string("shared") : sGBufferNotSharedWhy.empty() ? std::string("not shared")
                                                                    : "not shared: " + sGBufferNotSharedWhy;   // [A1 2026-11-09]
+    // [BLACK WORLD 2026-11-10] the self-tests and the world check, so the grid's statistics and the reports carry them
+    f["vulkan_self_test"] = (sScene && sScene->sharedHandOver() ? "layers: " + sScene->shareSelfTestResult() : std::string("layers: not shared"))
+                          + (sGBuffer ? "; G-buffer: " + sGBuffer->selfTestResult() : std::string());
+    f["vulkan_world_check"] = sBlack.mSummary.empty() ? (sBlack.mStage == BlackCheck::OFF ? std::string("not started") : std::string("running")) : sBlack.mSummary;
+    f["vulkan_spirv"] = sScene ? sScene->spirvSummary() : std::string();
     return f;
 }
 

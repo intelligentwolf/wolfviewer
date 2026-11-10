@@ -9,7 +9,10 @@
  * SDL_Vulkan_CreateSurface is not usable: the viewer's window is made with SDL_WINDOW_OPENGL (llwindowsdl2.cpp:841),
  * and SDL 2 refuses a Vulkan surface on a window without SDL_WINDOW_VULKAN (SDL_vulkan.c SDL_Vulkan_CreateSurface:
  * "The specified window isn't a Vulkan window"), while the two flags cannot be combined on one window.
- * Windows (LLWindowWin32): vkCreateWin32SurfaceKHR on HINSTANCE/HWND.          UNTESTED here (no Windows machine).
+ * Windows (LLWindowWin32): vkCreateWin32SurfaceKHR on HINSTANCE and a child HWND of the viewer's window
+ * ([WIN32 CHILD 2026-11-10], the Win32 twin of T724's X11 child: the viewer's HWND carries WGL's pixel format and
+ * context; the child has neither, class "WolfVulkanSurface", made/moved/destroyed on the window thread through
+ * NativeHandles::mPostToWindowThread, mouse input passed down by HTTRANSPARENT).  UNTESTED here (no Windows machine).
  * macOS (LLWindowMacOSX): vkCreateMetalSurfaceEXT on a CAMetalLayer that wolfvksurface_macosx.mm attaches to the GL
  * content view; MoltenVK then presents through Metal.                          UNTESTED here (no Mac).
  *
@@ -37,8 +40,8 @@ namespace WolfVkSurface
     // Creates the surface for the window; VK_NULL_HANDLE and a reason in error on failure.
     // instance: from WolfVkDevice::instance(). The surface is destroyed with destroy() (vkDestroySurfaceKHR).
     //
-    // [T724 2026-11-10] X11: the surface goes on a child X window of the viewer's window, not on the viewer's window
-    // itself, unless shared_x11_window is true. The viewer's window carries OpenGL's GLX drawable (SDL_GL_CreateContext /
+    // [T724 2026-11-10] X11 (and [WIN32 CHILD 2026-11-10] Win32, the same way): the surface goes on a child window of the
+    // viewer's window, not on the viewer's window itself, unless shared_x11_window is true. The viewer's window carries OpenGL's GLX drawable (SDL_GL_CreateContext /
     // SDL_GL_MakeCurrent bind the context to it, llwindowsdl2.cpp:935/3575), and the Vulkan specification makes a
     // native window "already associated with a non-Vulkan graphics API surface" an error of vkCreateSwapchainKHR
     // (VK_ERROR_NATIVE_WINDOW_IN_USE_KHR, vkCreateSwapchainKHR refpage). NVIDIA's driver on a pure X11 session refused

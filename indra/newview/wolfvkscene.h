@@ -40,6 +40,7 @@
 #include "vk/wolfvkpipeline.h"
 #include "vk/wolfvkshader.h"
 #include "wolfvkshare.h"
+#include "vk/wolfvkbuffer.h"   // [BLACK WORLD 2026-11-10] the probe's host buffers
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
@@ -81,7 +82,34 @@ public:
     bool handOverBroken() const;
     std::string handOverBrokenReason() const;
     bool sharedHandOver() const { return mShare != nullptr; }
+    // [IMPORT SELF-TEST 2026-11-10] the layers' round-trip lines (empty without shared layers)
+    std::string shareSelfTestResult() const { return mShare ? mShare->selfTestResult() : std::string(); }
     const std::string& handOverLine() const { return mHandOver; }
+
+    // [BLACK WORLD 2026-11-10] The world probe (WolfVulkanBlackWorldCheck; WolfVkBridge decides on it). Once a second
+    // while armed: GL copies its finished world (the default framebuffer at captureWorld, before the UI) into a 32x32
+    // texture by a linear blit and reads it back through a pixel buffer object a second later (no GPU wait); with the
+    // shared hand-over Vulkan blits its view of the shared world layer, in the same frame's command buffer after the
+    // acquire, into a 32x32 image and copies it to a host buffer read when the frame slot comes round again. Both give
+    // the largest R/G/B value over 1024 points of the screen: 0 = every sampled pixel exactly black.
+    struct WorldProbe
+    {
+        bool mGlValid = false;      // a GL sample has been read
+        uint32_t mGlMax = 0;        // largest R/G/B of the last GL sample (0..255)
+        uint32_t mGlLit = 0;        // points with any R/G/B > 0
+        uint32_t mGlSeq = 0;        // sample number of that GL sample
+        bool mVkValid = false;      // a Vulkan sample has been read (shared hand-over only)
+        uint32_t mVkMax = 0;
+        uint32_t mVkLit = 0;
+        uint32_t mVkSeq = 0;
+        uint32_t mSeq = 0;          // samples issued
+        bool mVkPossible = false;   // the shared world layer can be blitted (format features) and the hand-over is shared
+    };
+    void setProbeArmed(bool armed);
+    const WorldProbe& probe() const { return mProbe; }
+    // [BLACK WORLD 2026-11-10] SPIR-V this session: programs mirrored and programs without SPIR-V (one line)
+    std::string spirvSummary() const;
+    bool worldCapturedThisFrame() const { return mHaveWorld; }
 
     // Statistics for the floater and the log (last frame).
     uint32_t drawsLastFrame() const { return mDrawsLastFrame; }
@@ -187,6 +215,27 @@ private:
     void probeBatch(const LLDrawInfo* params, const LLVertexBuffer* glvb, const WolfVkVertexBuffer* vb, const WolfVkShaderMirror* mirror, const glm::mat4& mvp);
     F64 mProbeLast = 0.0;
     bool mProbeThisFrame = false;
+
+    // [BLACK WORLD 2026-11-10] world probe state (WorldProbe above)
+    WorldProbe mProbe;
+    bool mProbeArmed = false;
+    bool mProbeDueThisFrame = false;   // decided at captureWorld, consumed at recordFrame
+    F64 mProbeLastTime = 0.0;
+    uint32_t mProbeGlTex = 0, mProbeGlFbo = 0;   // 32x32 RGBA8 GL texture + framebuffer, GL's own
+    uint32_t mProbeGlPbo[2] = { 0, 0 };          // pixel pack buffers, read a probe later
+    uint32_t mProbeGlPending[2] = { 0, 0 };      // sample number in each PBO (0 = none)
+    int mProbeGlNext = 0;
+    std::unique_ptr<WolfVkImage> mProbeVkImage;  // 32x32 RGBA8, the blit target
+    std::vector<std::unique_ptr<WolfVkBuffer>> mProbeVkHost;   // one host buffer per frame slot
+    std::vector<uint32_t> mProbeVkPending;       // sample number in each slot's buffer (0 = none)
+    bool mProbeVkChecked = false;                // format features looked up
+    void probeGLSample();                        // at captureWorld: issue this probe's GL read, collect the previous one
+    void probeGLSampleFromPixels();              // read-back hand-over: the CPU copy is sampled directly
+    void probeVkRecord(VkCommandBuffer cmd);     // at recordFrame, after the acquire
+    void probeVkCollect();                       // at beginFrame: this slot's buffer is final
+    void probeDestroy();
+    static const uint32_t PROBE_SIZE = 32;
+    uint32_t mMirrorsMade = 0;                   // [BLACK WORLD] shader mirrors made this session
 };
 
 #endif // WOLF_VK_SCENE_H

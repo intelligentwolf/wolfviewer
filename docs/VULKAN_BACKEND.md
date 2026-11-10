@@ -238,7 +238,7 @@ Blockers of the FIRST full run (spv5, before the version change), for the record
 | Path | Linux (this laptop) | Windows | macOS |
 |---|---|---|---|
 | loader | `libvulkan.so.1` (dlopen) | `vulkan-1.dll` (LoadLibrary) | `libvulkan.1.dylib` / `libMoltenVK.dylib` (bundle not wired) |
-| surface | X11 tested (through XWayland, both GPUs; child window from W103, 8.2s); Wayland written, RADV only (8.2q); pure NVIDIA X11 reported failing in W101/W102 (8.2s) | Win32 written | Metal layer written (`wolfvksurface_macosx.mm`) |
+| surface | X11 tested (through XWayland, both GPUs; child window from W103, 8.2s); Wayland written, RADV only (8.2q); pure NVIDIA X11 reported failing in W101/W102 (8.2s) | Win32 written: child HWND for the surface from W103 (8.2t), first run W102 = black world (8.2t) | Metal layer written (`wolfvksurface_macosx.mm`) |
 | build | built here | CMake paths complete, not compiled here | CMake paths complete, not compiled here |
 | MoltenVK quirks | - | - | `VK_KHR_portability_subset` enabled when offered; triangle fans not converted (declared) |
 
@@ -1408,6 +1408,103 @@ advances the frame slot, so a destroy raised between two frames - where every de
 frame lands (`LLVertexBuffer`/`LLImageGL` hooks) - was filed against the NEXT slot, whose fence belongs to the frame
 before last, not the frame just submitted. Fixed: deferred work is filed against the last submitted frame's slot (the
 current one while recording); `abandonFrame` closes an unsubmitted frame. To be re-measured in the next validation run.
+
+
+### 8.2t Windows: the first Vulkan run ever, and the world was black (W102, 2026-11-10)
+
+**The report** (Omniwright Mooncastle, Windows, AVX2 installer, W102 "Vulcan's Forge" e702c1c258 - the first time the
+Vulkan renderer ran on Windows at all). With Vulkan on, the whole 3D view is black at every region; the UI, the mini-map
+and the title bar draw; one white dot in the middle of the window. Cache clear, relog, other regions: black. V off and
+a restart: the world is back. The viewer noticed nothing, so no safety net fired, and W102 had just switched every
+W101 OpenGL fall-back back to Vulkan once. No Windows log had been received when this was written. Screenshot in the
+coordinator's session (10.png). Branch `winvk-black` (worktree `wolfviewer-winvk`), on top of T724's commit (8.2s).
+
+**What was ruled out, with evidence.**
+- *The SPIR-V keys differ on Windows (CRLF, backslashes, a different stitch).* No. The Windows AVX2 installer of W102
+  and the Linux bundle were unpacked side by side: 18766 `manifest.json` keys each, the same set (0 only-Windows, 0
+  only-Linux); 12043 `.spv` files each with identical names; 5122 complete vert+frag pairs each, the same pairs. The
+  CI logs of run 42769827477 say "5207 of 7254 ... 18766 recipe keys" on both the Windows and the Linux job. A key is
+  the MD5 of recipe strings `stage|file|class|#version|defines|channels|amd|oldselect` (scripts/shader_vulkan.py:87-95
+  = wolfvkshader.cpp:159-193) built from C++ string literals ("deferred/diffuseV.glsl"), never from file contents or
+  paths; `.gitattributes` has `* text eol=lf` besides. And a program without SPIR-V only makes Vulkan draw nothing of
+  it: OpenGL draws every batch itself (lldrawpoolsimple.cpp:109-113 ignores drawPassSimple's result; pushBatches skips
+  only batches in mDrawnByVulkan), so the world would still be there.
+- *The composite, the swapchain, the surface, the loader, the plain RGBA8 import.* All proven on that PC by the UI
+  itself: the UI layer is the same mechanism as the world layer (a blit from GL's back buffer into a shared RGBA8
+  image imported with GL_EXT_memory_object_win32, sampled by the composite, presented through the swapchain), and
+  the login screen goes the same way.
+
+**What is left, ranked** (none provable from the source - the Windows interop paths had never run, 8.2n "Still
+unproven: Windows NVIDIA/AMD/Intel GL+Vulkan interop"):
+1. **The shared G-buffer.** In Vulkan mode `LLRenderTarget` takes deferredScreen's four colour attachments and the depth
+   from Vulkan memory (wolfvkgbuffer.cpp colorTexture/depthTexture -> WolfVkSharedImage::create: glImportMemoryWin32HandleEXT
+   + glTexStorageMem2DEXT, OPAQUE_WIN32 handles, dedicated allocation). OpenGL then draws the WHOLE deferred frame
+   into those (RGBA8 x2, RGBA16, RGBA16F, D32F, depth-tested), Vulkan draws PASS_SIMPLE into them mid-frame, and OpenGL
+   rewrites the depth (glCopyImageSubData + a gl_FragDepth pass). The lighting pass samples that G-buffer; in the PBR
+   deferred path the sky is in it too. A G-buffer OpenGL cannot read back after writing gives exactly "everything black
+   including the sky, UI fine". The world differs from the UI only in rendering INTO imported attachments, the other
+   formats, the Vulkan pass and the depth rewrite.
+2. **One HWND for WGL and the Vulkan swapchain.** The Win32 surface was made on the viewer's own window, which carries
+   WGL's pixel format and context - the same spec violation as 8.2s on X11 (vkCreateSwapchainKHR: a native window
+   "already associated with a non-Vulkan graphics API surface"). On Windows the swapchain was accepted (the UI shows
+   through it), so the question is what two presenters on one HWND do to GL's back buffer; the UI being right argues
+   against this being the black world's cause, but it is wrong by the spec either way.
+3. The world layer's hand-over itself (same as the working UI layer; the only extra is the depth copy pass, which
+   writes no colour). The white dot is unexplained; nothing here guesses at it.
+
+**What W103 does (all shipped whatever the cause turns out to be).**
+- *Win32 child window for the surface* ([WIN32 CHILD], wolfvksurface.cpp, the twin of 8.2s): a `WS_CHILD | WS_VISIBLE`
+  window of class `WolfVulkanSurface` over the viewer's client area, no pixel format, no GL context; its window
+  procedure answers WM_NCHITTEST with HTTRANSPARENT (the mouse goes to the viewer's window beneath, same thread, as
+  without the child), WM_ERASEBKGND 1 and WM_PAINT validate-only (nothing of GDI's). It is created, moved and
+  destroyed on the viewer's window thread (`NativeHandles::mPostToWindowThread` -> `LLWindowWin32Thread::Post`), the
+  main thread waiting at most 5 s for the creation; `WM_SIZE` on the parent sizes the child on that thread
+  (llwindowwin32.cpp, found by class name) before the main thread hears of the resize, and `WolfVkSurface::resize`
+  posts the size again before every swapchain build. If the child cannot be made the surface goes on the viewer's
+  window as W102 did. `WolfVulkanDebugSharedWindow` (hidden) keeps the W102 way for comparison. Known risks, untested
+  here: OLE drag-and-drop onto the 3D view (the drop target is the parent; WindowFromPoint skips HTTRANSPARENT
+  windows by the documented behaviour, unverified here), DPI changes, and `recreateWindow` (fullscreen/vsync
+  switches), which destroys the parent and so the child - the surface was lost there before this change too.
+- *Shared-image round-trip self-test* ([IMPORT SELF-TEST], `WolfVulkanShareSelfTest`, default on): every image shared
+  with OpenGL makes one round trip before it is used. OpenGL clears the imported texture to a known value (colour
+  0.25/0.5/0.75/1.0, depth 0.25) through a framebuffer of its own and signals; Vulkan waits, acquires the image from
+  VK_QUEUE_FAMILY_EXTERNAL, copies the 4x4 block at its centre to a host buffer, releases it and signals; OpenGL
+  waits; the texels are decoded by format (UNORM8, UNORM16, half, float) and compared. The world and depth layers are
+  tested at `WolfVkShare::init` (a failure = the read-back hand-over for the session, and then the G-buffer is not
+  shared either); each G-buffer attachment is tested as it is created (a failure ends the sharing: that image goes,
+  the ones already handed to the target stay until it releases them, no Vulkan pass runs). Log lines "Shared layer
+  self-test: ..." / "G-buffer self-test: ...", "... FAILED ..." on failure. OpenGL's writes not reaching Vulkan is
+  the fault class candidate 1 belongs to; this test fires before any black frame.
+- *World check* ([BLACK WORLD], `WolfVulkanBlackWorldCheck`, default on; wolfvkscene.cpp WorldProbe + wolfvkbridge.cpp
+  blackCheck): once a second for the first 90 s in-world, OpenGL blits the world view rect of its finished frame
+  (at captureWorld, before the UI) to 32x32 and reads it back through a PBO two probes later (no GPU wait), and with
+  the shared hand-over Vulkan blits its view of the shared world layer in the same frame's command buffer (after
+  the acquire) to 32x32 and copies it to a per-slot host buffer read when the slot comes round. "Black" = the
+  largest R/G/B of all 1024 points is exactly 0. Decisions: (A) OpenGL lit, Vulkan black, three probes running -> the
+  import does not carry the picture -> `stopAtRunTime` ("Vulkan drew nothing on this computer: the picture OpenGL
+  drew did not reach Vulkan through the shared image"). (B) OpenGL black three probes running -> stage 1: OpenGL draws
+  the simple pass itself and no depth rewrite runs (`sGBufferGLOnly`); lit three running -> stop ("its pass into the
+  G-buffer shared with OpenGL blanked the picture"); still black -> stage 2: the G-buffer is given back to OpenGL
+  (`unshareGBuffer`: the target remade with its own textures at the next frame, the provider deleted once the
+  target released the images); lit three running -> stop ("the G-buffer shared between OpenGL and Vulkan came back
+  black"); still black -> a dark scene: the normal mode is restored (`shareGBuffer` again) and nothing fires. Ten lit
+  probes running end the check early ("passed"). The stop is the existing run-time stop (8.2q: message box, OpenGL
+  saved for the next start, quit). A black scene with the G-buffer not shared is not judged at all (nothing of
+  Vulkan's is in OpenGL's frame then). Log tag `WolfVulkanCheck`: "World check started", "World probe N: GL max R/G/B
+  .. (.. of 1024 points lit), Vulkan's view max ..", "World check passed/ended/FAILED: ...".
+- *Logging*: "Sharing extensions: ..." (every GL/Vulkan sharing extension yes/NO + the GL renderer), "Shared image
+  imported into OpenGL: texture N over memory object M (...)" per import, "SPIR-V store: N .spv files in <dir>,
+  manifest.json <bytes>" at start, and "Vulkan session summary (teardown/shutdown): SPIR-V <made/missing>; hand-over
+  ...; G-buffer ...; world check ..." at the end. `reportFields()` gains `vulkan_self_test`, `vulkan_world_check`,
+  `vulkan_spirv` (viewer stats, crash and bug reports).
+
+**Tested here.** Linux build (reflinked W102 tree), clang macOS-flag check and -Wconversion on the changed files, gdb
+start-up check, and a Linux session (NVIDIA, shared layers + shared G-buffer) proving the self-tests pass and the world
+check ends "passed" without firing. The Windows binary was run under Wine (winevulkan + Wine's opengl32 on the NVIDIA
+Linux driver): that exercises the Windows build's own code paths (keys, paths, the Win32 child window, the read-back
+hand-over where Wine's GL lacks GL_EXT_memory_object_win32) but not a Windows driver. The real Windows test is the TEST
+installer (/downloads/wolfviewer/test/WolfViewer-vulkan-test-windows64-AVX2-Setup.exe) on a Windows PC with a real GPU
+and Vulkan driver (a GPU-less VM never starts Vulkan and proves nothing); the results per machine are the log lines above.
 
 ## 8.5 Design for the next pass: `PASS_SIMPLE` into the G-buffer (stage 4 proper)
 

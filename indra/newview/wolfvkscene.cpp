@@ -37,6 +37,7 @@
 #include "lldir.h"
 #include "llmatrix4a.h"
 #include "llappviewer.h"   // gUseWireframe
+#include "llfile.h"        // [BLACK WORLD 2026-11-10] LLFile::stat of manifest.json
 
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -162,9 +163,12 @@ bool WolfVkScene::init(WolfVkDevice& device, WolfVkSwapchain& swapchain, std::st
         }
         else if (WolfVkShare::available(device, why))
         {
+            WolfVkShare::logExtensions(device);   // [BLACK WORLD 2026-11-10]
             mShare.reset(new WolfVkShare());
             const uint32_t w = std::max<uint32_t>(1, swapchain.extent().width), h = std::max<uint32_t>(1, swapchain.extent().height);
-            if (!mShare->init(device, w, h, why))
+            // [IMPORT SELF-TEST 2026-11-10] WolfVulkanShareSelfTest: GL's writes must come back through the shared memory
+            // before the first frame; a failed round trip means the read-back hand-over for this session
+            if (!mShare->init(device, w, h, gSavedSettings.getBOOL("WolfVulkanShareSelfTest"), why))
             {
                 LL_WARNS("Vulkan") << "Shared GL/Vulkan layers unavailable, using read-back: " << why << LL_ENDL;
                 mShare.reset();
@@ -175,6 +179,16 @@ bool WolfVkScene::init(WolfVkDevice& device, WolfVkSwapchain& swapchain, std::st
             LL_INFOS("Vulkan") << "Shared GL/Vulkan layers unavailable, using read-back: " << why << LL_ENDL;
         }
         mHandOver = mShare ? "through shared images (nothing is copied)" : "by copying it through the processor (" + why + ")";
+    }
+    // [BLACK WORLD 2026-11-10] what the package carries: the next log says at once whether the SPIR-V store is there
+    {
+        const std::string delim = gDirUtilp->getDirDelimiter();
+        const U32 spv_files = gDirUtilp->countFilesInDir(mSpvDir + delim, "*.spv");
+        const std::string manifest = mSpvDir + delim + "manifest.json";
+        llstat st{};
+        const S64 manifest_bytes = (LLFile::stat(manifest, &st) == 0) ? static_cast<S64>(st.st_size) : -1;
+        LL_INFOS("Vulkan") << "SPIR-V store: " << spv_files << " .spv files in " << mSpvDir << ", manifest.json "
+                           << (manifest_bytes < 0 ? std::string("MISSING") : llformat("%lld bytes", static_cast<long long>(manifest_bytes))) << LL_ENDL;
     }
 
     onSwapchainChanged(swapchain);
@@ -194,6 +208,9 @@ void WolfVkScene::destroy()
         (void)mShare.release();
         (void)mScene.release();
         (void)mComposite.release();
+        (void)mProbeVkImage.release();   // [BLACK WORLD 2026-11-10] left with the hung device, like the rest
+        for (auto& b : mProbeVkHost) (void)b.release();
+        mProbeVkHost.clear();
         mCompositeFramebuffers.clear();
         mCompositePass = VK_NULL_HANDLE;
         mDevice = nullptr;
@@ -201,6 +218,7 @@ void WolfVkScene::destroy()
     }
     mUniforms.resetPools();   // the descriptor sets name images that are about to go (also the deferred ones)
     mDevice->waitIdleAndFlushDeferred();
+    probeDestroy();           // [BLACK WORLD 2026-11-10]
     mScene.reset();           // may hold the shared depth as its external attachment
     mShare.reset();
     destroyCompositePass();
@@ -435,6 +453,19 @@ void WolfVkScene::captureWorld()
         mDepthHeight = static_cast<uint32_t>(std::max(0, world_rect.getHeight()));
         mHaveDepth = depth_tex != 0;
         mHaveWorld = true;
+        // [BLACK WORLD 2026-11-10] the probe's GL sample of the finished world, before the clear below
+        mProbeDueThisFrame = false;
+        if (mProbeArmed)
+        {
+            const F64 now = LLTimer::getTotalSeconds();
+            if (now - mProbeLastTime >= 1.0 && world_rect.getWidth() >= 32 && world_rect.getHeight() >= 32)
+            {
+                mProbeLastTime = now;
+                mProbe.mSeq++;
+                mProbeDueThisFrame = true;
+                probeGLSample();
+            }
+        }
         // the UI goes onto a clear layer, as below
         GLfloat cc[4];
         glGetFloatv(GL_COLOR_CLEAR_VALUE, cc);
@@ -469,6 +500,18 @@ void WolfVkScene::captureWorld()
     }
     mWidth = static_cast<uint32_t>(ww);   // the layer images follow the window; onSwapchainChanged keeps them matched
     mHeight = static_cast<uint32_t>(wh);
+    // [BLACK WORLD 2026-11-10] the probe's sample from the CPU copy (nothing of Vulkan's to compare with on this path)
+    mProbeDueThisFrame = false;
+    if (mProbeArmed && mHaveWorld)
+    {
+        const F64 now = LLTimer::getTotalSeconds();
+        if (now - mProbeLastTime >= 1.0)
+        {
+            mProbeLastTime = now;
+            mProbe.mSeq++;
+            probeGLSampleFromPixels();
+        }
+    }
 
     // the scene depth: the deferred screen target's depth texture (GL_DEPTH_COMPONENT24, llrendertarget.cpp:307), read as float
     if (gPipeline.mRT && gPipeline.mRT->deferredScreen.getDepth())
@@ -635,6 +678,7 @@ WolfVkShaderMirror* WolfVkScene::mirrorFor(LLGLSLShader* shader)
     }
     // the GL side sends every uniform again at its next bind, so the Vulkan copy gets them all (llglslshader.cpp bind())
     shader->mUniformsDirty = true;
+    mMirrorsMade++;   // [BLACK WORLD 2026-11-10]
     mShaderStatus = "\"" + shader->mName + "\" running on Vulkan (key " + shader->mWolfVk->key().substr(0, 8) + ")";
     return shader->mWolfVk;
 }
@@ -1148,6 +1192,270 @@ void WolfVkScene::beginFrame()
 {
     mUniforms.beginFrame(static_cast<uint32_t>(mDevice->frameCounter()));
     mStaging.beginFrame(static_cast<uint32_t>(mDevice->frameCounter()));
+    probeVkCollect();   // [BLACK WORLD 2026-11-10] this slot's fence has been waited: its probe buffer is final
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// [BLACK WORLD 2026-11-10] the world probe (wolfvkscene.h WorldProbe)
+
+void WolfVkScene::setProbeArmed(bool armed)
+{
+    if (armed == mProbeArmed) return;
+    mProbeArmed = armed;
+    mProbeLastTime = 0.0;
+    mProbeDueThisFrame = false;
+    if (!armed) probeDestroy();
+}
+
+namespace
+{
+    // the largest R/G/B over count RGBA8 pixels, and how many have any of R/G/B > 0
+    void maxRGB(const uint8_t* px, size_t count, uint32_t& max, uint32_t& lit)
+    {
+        max = 0;
+        lit = 0;
+        for (size_t i = 0; i < count; ++i)
+        {
+            const uint8_t m = std::max(px[i * 4], std::max(px[i * 4 + 1], px[i * 4 + 2]));
+            if (m > max) max = m;
+            if (m) ++lit;
+        }
+    }
+}
+
+void WolfVkScene::probeGLSample()
+{
+    // every probe: the sample issued two probes ago (into this PBO) is read - two seconds old, so the map never waits
+    // for the GPU - then this probe's blit + read are issued into the same PBO
+    const int k = mProbeGlNext;
+    mProbeGlNext = 1 - mProbeGlNext;
+    GLint saved_read = 0, saved_draw = 0, saved_pack = 0, saved_tex = 0, saved_read_buffer = 0, saved_pack_align = 4;
+    GLboolean saved_mask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &saved_read);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &saved_draw);
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &saved_pack);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &saved_tex);
+    glGetIntegerv(GL_READ_BUFFER, &saved_read_buffer);
+    glGetIntegerv(GL_PACK_ALIGNMENT, &saved_pack_align);
+    glGetBooleanv(GL_COLOR_WRITEMASK, saved_mask);
+    const GLboolean saved_scissor = glIsEnabled(GL_SCISSOR_TEST);
+    while (glGetError() != GL_NO_ERROR) {}
+    if (!mProbeGlTex)
+    {
+        glGenTextures(1, &mProbeGlTex);
+        glBindTexture(GL_TEXTURE_2D, mProbeGlTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(PROBE_SIZE), static_cast<GLsizei>(PROBE_SIZE), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glGenFramebuffers(1, &mProbeGlFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mProbeGlFbo);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mProbeGlTex, 0);
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        const GLenum status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+        glGenBuffers(2, mProbeGlPbo);
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+        {
+            LL_WARNS("WolfVulkanCheck") << "world probe: the 32x32 GL framebuffer is incomplete (0x" << std::hex << status << std::dec << "); no GL samples" << LL_ENDL;
+            probeDestroy();
+            mProbeArmed = false;
+            return;
+        }
+    }
+    // collect the sample issued into this PBO two probes ago
+    if (mProbeGlPending[k])
+    {
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, mProbeGlPbo[k]);
+        const void* p = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, static_cast<GLsizeiptr>(PROBE_SIZE * PROBE_SIZE * 4), GL_MAP_READ_BIT);
+        if (p)
+        {
+            maxRGB(static_cast<const uint8_t*>(p), PROBE_SIZE * PROBE_SIZE, mProbe.mGlMax, mProbe.mGlLit);
+            mProbe.mGlSeq = mProbeGlPending[k];
+            mProbe.mGlValid = true;
+            glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+        }
+        mProbeGlPending[k] = 0;
+    }
+    // this probe: the world view rect of the default framebuffer -> 32x32 by a linear blit (OpenGL 4.6 18.3.2: one
+    // 2x2 bilinear tap per destination pixel, so 1024 points spread over the rect), then read into the PBO
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mProbeGlFbo);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glBlitFramebuffer(mWorldRect[0], mWorldRect[1], mWorldRect[0] + mWorldRect[2], mWorldRect[1] + mWorldRect[3],
+                      0, 0, static_cast<GLint>(PROBE_SIZE), static_cast<GLint>(PROBE_SIZE), GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, mProbeGlFbo);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, mProbeGlPbo[k]);
+    glBufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(PROBE_SIZE * PROBE_SIZE * 4), nullptr, GL_STREAM_READ);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, static_cast<GLsizei>(PROBE_SIZE), static_cast<GLsizei>(PROBE_SIZE), GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    mProbeGlPending[k] = mProbe.mSeq;
+    const GLenum e = glGetError();
+    if (e != GL_NO_ERROR) LL_WARNS_ONCE("WolfVulkanCheck") << "world probe: GL error 0x" << std::hex << e << std::dec << " in the GL sample" << LL_ENDL;
+    // state back
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(saved_pack));
+    glPixelStorei(GL_PACK_ALIGNMENT, saved_pack_align);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(saved_read));
+    glReadBuffer(static_cast<GLenum>(saved_read_buffer));
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(saved_draw));
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(saved_tex));
+    glColorMask(saved_mask[0], saved_mask[1], saved_mask[2], saved_mask[3]);
+    if (saved_scissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+}
+
+void WolfVkScene::probeGLSampleFromPixels()
+{
+    // read-back hand-over: mWorldPixels is the whole window as GL drew it; 1024 points of the world view rect
+    if (!gViewerWindow || mWorldPixels.size() < static_cast<size_t>(mWidth) * mHeight * 4) return;
+    const LLRect rect = gViewerWindow->getWorldViewRectRaw();
+    const int32_t rw = rect.getWidth(), rh = rect.getHeight();
+    if (rw < 32 || rh < 32) return;
+    uint32_t max = 0, lit = 0;
+    for (uint32_t j = 0; j < PROBE_SIZE; ++j)
+    {
+        for (uint32_t i = 0; i < PROBE_SIZE; ++i)
+        {
+            const int32_t x = rect.mLeft + static_cast<int32_t>((static_cast<int64_t>(i) * rw) / PROBE_SIZE) + rw / (2 * static_cast<int32_t>(PROBE_SIZE));
+            const int32_t y = rect.mBottom + static_cast<int32_t>((static_cast<int64_t>(j) * rh) / PROBE_SIZE) + rh / (2 * static_cast<int32_t>(PROBE_SIZE));
+            if (x < 0 || y < 0 || static_cast<uint32_t>(x) >= mWidth || static_cast<uint32_t>(y) >= mHeight) continue;
+            const uint8_t* px = mWorldPixels.data() + (static_cast<size_t>(y) * mWidth + static_cast<size_t>(x)) * 4;
+            const uint8_t m = std::max(px[0], std::max(px[1], px[2]));
+            if (m > max) max = m;
+            if (m) ++lit;
+        }
+    }
+    mProbe.mGlMax = max;
+    mProbe.mGlLit = lit;
+    mProbe.mGlSeq = mProbe.mSeq;
+    mProbe.mGlValid = true;
+}
+
+void WolfVkScene::probeVkRecord(VkCommandBuffer cmd)
+{
+    if (!mDevice || !mShare || !mShare->world()) return;
+    WolfVkImage* world = mShare->world();
+    if (!mProbeVkChecked)
+    {
+        mProbeVkChecked = true;
+        // the blit needs BLIT_SRC on the layer's format and BLIT_DST on the 32x32 target's (vulkan_core.h:2725-2726), both
+        // optimal tiling; the same check WolfVkImage makes for its mip blits
+        VkFormatProperties src_props{}, dst_props{};
+        gVk.vkGetPhysicalDeviceFormatProperties(mDevice->physical(), world->format().mFormat, &src_props);
+        gVk.vkGetPhysicalDeviceFormatProperties(mDevice->physical(), VK_FORMAT_R8G8B8A8_UNORM, &dst_props);
+        const bool features = (src_props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) && (dst_props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT)
+                              && (world->usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+        std::string error;
+        bool ok = features;
+        if (ok)
+        {
+            mProbeVkImage.reset(new WolfVkImage());
+            ok = mProbeVkImage->create(*mDevice, WolfVkImage::Kind::TEXTURE_2D, WolfVkImage::formatFor(GL_RGBA8, GL_UNSIGNED_BYTE), PROBE_SIZE, PROBE_SIZE, 1, 1,
+                                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, false, error);
+        }
+        if (ok)
+        {
+            const uint32_t slots = mDevice->framesInFlight();
+            mProbeVkHost.clear();
+            mProbeVkPending.assign(slots, 0);
+            for (uint32_t i = 0; i < slots && ok; ++i)
+            {
+                std::unique_ptr<WolfVkBuffer> b(new WolfVkBuffer());
+                ok = b->create(*mDevice, static_cast<VkDeviceSize>(PROBE_SIZE) * PROBE_SIZE * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, error);
+                mProbeVkHost.push_back(std::move(b));
+            }
+        }
+        mProbe.mVkPossible = ok;
+        if (!ok)
+        {
+            LL_WARNS("WolfVulkanCheck") << "world probe: Vulkan's view of the shared world layer cannot be sampled ("
+                                        << (features ? error : std::string("the formats cannot be blitted")) << "); GL samples only" << LL_ENDL;
+            mProbeVkImage.reset();
+            mProbeVkHost.clear();
+            mProbeVkPending.clear();
+        }
+    }
+    if (!mProbe.mVkPossible) return;
+    const uint32_t slot = mDevice->frameIndex();
+    if (slot >= mProbeVkPending.size() || mProbeVkPending[slot] != 0) return;
+    // the world layer (SHADER_READ_ONLY after the acquire) to TRANSFER_SRC, the world view rect blitted to 32x32, copied
+    // out to this slot's host buffer, the layer back to SHADER_READ_ONLY for the composite (release() takes layout())
+    world->transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    mProbeVkImage->transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    // Source: vulkan_core.h:4111 VkImageBlit { srcSubresource, srcOffsets[2], dstSubresource, dstOffsets[2] }; :4660 PFN_vkCmdBlitImage
+    VkImageBlit blit{};
+    blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    const int32_t x0 = std::max(0, mWorldRect[0]), y0 = std::max(0, mWorldRect[1]);
+    const int32_t x1 = std::min(static_cast<int32_t>(world->width()), mWorldRect[0] + mWorldRect[2]);
+    const int32_t y1 = std::min(static_cast<int32_t>(world->height()), mWorldRect[1] + mWorldRect[3]);
+    if (x1 <= x0 || y1 <= y0) return;
+    blit.srcOffsets[0] = { x0, y0, 0 };
+    blit.srcOffsets[1] = { x1, y1, 1 };
+    blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    blit.dstOffsets[0] = { 0, 0, 0 };
+    blit.dstOffsets[1] = { static_cast<int32_t>(PROBE_SIZE), static_cast<int32_t>(PROBE_SIZE), 1 };
+    gVk.vkCmdBlitImage(cmd, world->image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, mProbeVkImage->image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+    mProbeVkImage->transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    VkBufferImageCopy region{};   // Source: vulkan_core.h:3996
+    region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    region.imageExtent = { PROBE_SIZE, PROBE_SIZE, 1 };
+    gVk.vkCmdCopyImageToBuffer(cmd, mProbeVkImage->image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, mProbeVkHost[slot]->buffer(), 1, &region);   // :4593
+    VkBufferMemoryBarrier hb{};   // host read after the copy (:2936 HOST_BIT, :3117 HOST_READ)
+    hb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    hb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    hb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    hb.srcQueueFamilyIndex = hb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hb.buffer = mProbeVkHost[slot]->buffer();
+    hb.size = VK_WHOLE_SIZE;
+    gVk.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &hb, 0, nullptr);
+    world->transition(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+    mProbeVkPending[slot] = mProbe.mSeq;
+}
+
+void WolfVkScene::probeVkCollect()
+{
+    if (!mDevice || mProbeVkPending.empty()) return;
+    const uint32_t slot = mDevice->frameIndex();
+    if (slot >= mProbeVkPending.size() || mProbeVkPending[slot] == 0 || slot >= mProbeVkHost.size()) return;
+    const uint8_t* data = mProbeVkHost[slot]->hostData();
+    if (data)
+    {
+        maxRGB(data, PROBE_SIZE * PROBE_SIZE, mProbe.mVkMax, mProbe.mVkLit);
+        mProbe.mVkSeq = mProbeVkPending[slot];
+        mProbe.mVkValid = true;
+    }
+    mProbeVkPending[slot] = 0;
+}
+
+void WolfVkScene::probeDestroy()
+{
+    if (gGLManager.mInited)
+    {
+        if (mProbeGlFbo) glDeleteFramebuffers(1, &mProbeGlFbo);
+        if (mProbeGlTex) glDeleteTextures(1, &mProbeGlTex);
+        if (mProbeGlPbo[0] || mProbeGlPbo[1]) glDeleteBuffers(2, mProbeGlPbo);
+    }
+    mProbeGlFbo = mProbeGlTex = 0;
+    mProbeGlPbo[0] = mProbeGlPbo[1] = 0;
+    mProbeGlPending[0] = mProbeGlPending[1] = 0;
+    mProbeGlNext = 0;
+    mProbeVkImage.reset();      // deferred Vulkan destroys, as every image
+    mProbeVkHost.clear();
+    mProbeVkPending.clear();
+    mProbeVkChecked = false;
+    mProbe.mVkPossible = false;
+}
+
+std::string WolfVkScene::spirvSummary() const
+{
+    std::string missing;
+    for (const auto& kv : mNoSpirv)
+    {
+        if (!missing.empty()) missing += ", ";
+        missing += kv.first ? kv.first->mName : std::string("?");
+    }
+    return llformat("%u program mirrors made, %u programs without SPIR-V", mMirrorsMade, static_cast<unsigned>(mNoSpirv.size()))
+         + (missing.empty() ? std::string() : " (" + missing + ")") + "; last: " + mShaderStatus;
 }
 
 bool WolfVkScene::recordFrame(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index)
@@ -1171,6 +1479,9 @@ bool WolfVkScene::recordFrame(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, u
     // and the composite would read them without ownership (VUID-vkQueueSubmit-pSubmits-02808), so nothing more is
     // recorded and the caller falls back without submitting (review item 7; today this coincides with handOverBroken()).
     if (handOverBroken() || (mShare && !mLayersAcquired)) return false;
+    // [BLACK WORLD 2026-11-10] Vulkan's view of the shared world layer, this very frame, after the acquire
+    if (mProbeDueThisFrame && mShare && mLayersAcquired && mHaveWorld) probeVkRecord(cmd);
+    mProbeDueThisFrame = false;
     drawFullbright(cmd);
     drawComposite(cmd, swapchain, image_index);
     if (mShare && mLayersAcquired)

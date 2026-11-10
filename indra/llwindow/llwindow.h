@@ -33,6 +33,7 @@
 #include "llcursortypes.h"
 #include "llinstancetracker.h"
 #include "llsd.h"
+#include <functional>   // [WIN32 CHILD 2026-11-10] NativeHandles::mPostToWindowThread
 
 class LLSplashScreen;
 class LLPreeditor;
@@ -204,6 +205,11 @@ public:
         void* mSurface = nullptr;        // Wayland: struct wl_surface*
         void* mInstance = nullptr;       // Win32: HINSTANCE
         void* mHandle = nullptr;         // Win32: HWND; Cocoa: NSView* (the GL content view)
+        // [WIN32 CHILD 2026-11-10] Win32 only: runs a function on the thread that owns the HWND (LLWindowWin32's window
+        // thread, LLWindowWin32Thread::Post). A child window must be created and destroyed on its parent's thread: a
+        // window made from another thread attaches the two threads' input queues (CreateWindowEx documentation), which
+        // is what the viewer's separate window thread exists to avoid. Null on the other platforms.
+        std::function<void(std::function<void()>)> mPostToWindowThread;
     };
     virtual bool getNativeHandles(NativeHandles& handles) { handles = NativeHandles(); return false; }
 

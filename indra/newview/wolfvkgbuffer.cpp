@@ -104,10 +104,11 @@ WolfVkGBuffer::~WolfVkGBuffer()
     destroy();
 }
 
-bool WolfVkGBuffer::init(WolfVkDevice& device, std::string& error)
+bool WolfVkGBuffer::init(WolfVkDevice& device, bool self_test, std::string& error)
 {
     destroy();
     mDevice = &device;
+    mSelfTest = self_test;
     std::string why;
     if (!WolfVkShare::available(device, why)) { error = why; mDevice = nullptr; return false; }
     if (!loadSemaphoreFunctions()) { error = "the OpenGL semaphore entry points are missing"; mDevice = nullptr; return false; }
@@ -197,6 +198,8 @@ void WolfVkGBuffer::destroy()
     mRewriteTexLoc = -1;   // the program went with it (and keeps this field in use where glRewriteDepth is not built, macOS)
     mRewriteW = mRewriteH = 0;
     mAvailable = false;
+    mDisabledReason.clear();
+    mSelfTestResult.clear();
     mWidth = mHeight = 0;
     mDevice = nullptr;
 }
@@ -245,6 +248,31 @@ bool WolfVkGBuffer::createImage(WolfVkSharedImage& out, uint32_t width, uint32_t
     img->noteLayout(b.newLayout, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, b.dstAccessMask);
     if (!mDevice->endOneTimeAndWait(cmd, error)) return false;
     mTargetDirty = true;
+    // [IMPORT SELF-TEST 2026-11-10] GL writes it, Vulkan reads it back, through the pass semaphores (nothing pending on
+    // either: the pass protocol only starts with the first glHandToVulkan). A failure ends the sharing: this image goes
+    // (never handed out), the ones already handed to LLRenderTarget stay until it releases them, and no Vulkan pass runs
+    // (prepare() needs all five).
+    if (mSelfTest)
+    {
+        std::string line;
+        const bool ok = out.roundTrip(mGlSemGlPassDone, mGlSemVkPassDone, mGlPassDone, mVkPassDone, false, line);
+        mGlSignalled = mVkSignalled = false;
+        if (!mSelfTestResult.empty()) mSelfTestResult += "; ";
+        mSelfTestResult += line;
+        if (ok)
+        {
+            LL_INFOS("Vulkan") << "G-buffer self-test: " << line << LL_ENDL;
+        }
+        else
+        {
+            LL_WARNS("Vulkan") << "G-buffer self-test FAILED: " << line << " - the G-buffer is not shared with Vulkan from here; OpenGL draws every pass" << LL_ENDL;
+            mDisabledReason = "self-test failed: " + line;
+            mAvailable = false;
+            out.destroy();
+            error = mDisabledReason;
+            return false;
+        }
+    }
     return true;
 }
 

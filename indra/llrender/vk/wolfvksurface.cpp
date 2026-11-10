@@ -18,6 +18,10 @@
 #include "linden_common.h"
 #include "wolfvksurface.h"
 #include <cstdio>
+#include <chrono>   // [WIN32 CHILD 2026-11-10] the wait for the window thread
+#include <future>
+#include <atomic>
+#include <memory>
 
 #if LL_WINDOWS
 #include <windows.h>
@@ -40,6 +44,140 @@ struct wl_surface;
 namespace
 {
     std::string sKind;
+
+#if LL_WINDOWS
+    // [WIN32 CHILD 2026-11-10] The child window the Win32 surface is made on, as the X11 child of T724 (wolfvksurface.h):
+    // the viewer's HWND carries OpenGL's pixel format and WGL context (llwindowwin32.cpp SetPixelFormat :1545,
+    // wglMakeCurrent :1560), and the Vulkan specification makes a native window "already associated with a non-Vulkan
+    // graphics API surface" an error of vkCreateSwapchainKHR (vkCreateSwapchainKHR refpage, VK_ERROR_NATIVE_WINDOW_IN_USE_KHR).
+    // The child has no pixel format and no GL context; only the Vulkan swapchain presents into it.
+    // All three HWNDs are only read here on the main thread; the child is created, moved and destroyed on the window
+    // thread through NativeHandles::mPostToWindowThread (llwindow.h).
+    HWND sWin32Parent = nullptr;
+    HWND sWin32Child = nullptr;
+    std::function<void(std::function<void()>)> sWin32Post;
+    const wchar_t* const sWin32ChildClass = L"WolfVulkanSurface";   // llwindowwin32.cpp WM_SIZE finds the child by this name
+    bool sWin32ClassRegistered = false;
+
+    // The child's window procedure, on the window thread.
+    LRESULT CALLBACK wolfVkChildProc(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param)
+    {
+        switch (msg)
+        {
+        case WM_NCHITTEST:
+            // WM_NCHITTEST documentation: "HTTRANSPARENT: In a window currently covered by another window in the same
+            // thread (the message will be sent to underlying windows in the same thread until one of them returns a code
+            // that is not HTTRANSPARENT)". The viewer's window is beneath and on the same thread, so every mouse message
+            // and WM_SETCURSOR go to it, with coordinates relative to it (the child sits at 0,0), exactly as without
+            // the child. Keyboard input goes to the focus window, which the child never takes (no WS_TABSTOP, no SetFocus).
+            return HTTRANSPARENT;
+        case WM_ERASEBKGND:
+            return 1;   // nothing of GDI's is painted: the swapchain owns every pixel (WM_ERASEBKGND: non-zero = erased)
+        case WM_PAINT:
+        {
+            PAINTSTRUCT ps;
+            BeginPaint(hwnd, &ps);   // validates the update region (BeginPaint documentation); no drawing
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        default:
+            return DefWindowProcW(hwnd, msg, w_param, l_param);
+        }
+    }
+
+    // On the window thread: registers the class once and creates the child over the parent's client area.
+    HWND createWin32ChildOnWindowThread(HINSTANCE instance, HWND parent, std::string& why)
+    {
+        if (!sWin32ClassRegistered)
+        {
+            // WNDCLASSEXW (winuser.h): no background brush (the child never paints), no cursor (WM_SETCURSOR goes to the
+            // parent through HTTRANSPARENT), no icon, no CS_OWNDC (no GL on this window)
+            WNDCLASSEXW wc{};
+            wc.cbSize = sizeof(wc);
+            wc.style = 0;
+            wc.lpfnWndProc = wolfVkChildProc;
+            wc.hInstance = instance;
+            wc.lpszClassName = sWin32ChildClass;
+            if (!RegisterClassExW(&wc))
+            {
+                const DWORD err = GetLastError();
+                if (err != ERROR_CLASS_ALREADY_EXISTS)
+                {
+                    char buf[96];
+                    snprintf(buf, sizeof(buf), "RegisterClassExW(WolfVulkanSurface) failed, error %lu", static_cast<unsigned long>(err));
+                    why = buf;
+                    return nullptr;
+                }
+            }
+            sWin32ClassRegistered = true;
+        }
+        RECT client{};
+        if (!GetClientRect(parent, &client))
+        {
+            why = "GetClientRect on the viewer's window failed";
+            return nullptr;
+        }
+        // WS_CHILD | WS_VISIBLE: a child shown with its parent (hidden under the splash until the parent is shown);
+        // WS_CLIPSIBLINGS as the parent has. The parent was created with WS_CLIPCHILDREN (llwindowwin32.cpp:1945), so
+        // nothing the parent paints reaches the child's area - and OpenGL never swaps the parent in Vulkan mode anyway.
+        HWND child = CreateWindowExW(0, sWin32ChildClass, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+                                     0, 0, client.right - client.left, client.bottom - client.top,
+                                     parent, nullptr, instance, nullptr);
+        if (!child)
+        {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "CreateWindowExW(WolfVulkanSurface) failed, error %lu", static_cast<unsigned long>(GetLastError()));
+            why = buf;
+            return nullptr;
+        }
+        return child;
+    }
+
+    // Main thread: asks the window thread for the child and waits for it (bounded). The window thread is a message
+    // pump that never waits on the main thread (llwindowwin32.cpp LLWindowWin32Thread::run: GetMessage / PeekMessage and
+    // its work queue; what it sends the main thread goes through a queue, WINDOW_IMP_POST), so the wait cannot deadlock;
+    // on a timeout the request is abandoned (the shared flag) and the surface goes on the viewer's window.
+    HWND createWin32Child(HINSTANCE instance, HWND parent, std::string& why)
+    {
+        if (!sWin32Post)
+        {
+            why = "the window layer gave no way to reach its window thread";
+            return nullptr;
+        }
+        struct Request { std::promise<HWND> mResult; std::string mWhy; std::atomic<bool> mAbandoned{ false }; };
+        auto request = std::make_shared<Request>();
+        std::future<HWND> future = request->mResult.get_future();
+        sWin32Post([request, instance, parent]()
+        {
+            if (request->mAbandoned.load()) return;   // the main thread gave up: nothing is created
+            HWND child = createWin32ChildOnWindowThread(instance, parent, request->mWhy);
+            request->mResult.set_value(child);
+        });
+        if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+        {
+            request->mAbandoned.store(true);
+            why = "the window thread did not answer within 5 s";
+            return nullptr;
+        }
+        HWND child = future.get();
+        if (!child) why = request->mWhy;
+        return child;
+    }
+
+    std::string win32WindowLine(HWND hwnd)
+    {
+        char buf[160];
+        RECT client{};
+        if (!IsWindow(hwnd) || !GetClientRect(hwnd, &client))
+        {
+            snprintf(buf, sizeof(buf), "HWND %p (not a window)", static_cast<void*>(hwnd));
+            return buf;
+        }
+        snprintf(buf, sizeof(buf), "HWND %p client %ldx%ld %s", static_cast<void*>(hwnd), static_cast<long>(client.right - client.left),
+                 static_cast<long>(client.bottom - client.top), IsWindowVisible(hwnd) ? "visible" : "hidden");
+        return buf;
+    }
+#endif
 
 #if !LL_WINDOWS && !LL_DARWIN
     // [T724 2026-11-10] the X11 child window the surface is made on (wolfvksurface.h); None when the surface is on the
@@ -140,6 +278,10 @@ VkSurfaceKHR create(VkInstance instance, LLWindow* window, bool shared_x11_windo
     sX11Display = nullptr;
     sX11Parent = 0;
     sX11Child = 0;
+#elif LL_WINDOWS
+    sWin32Parent = nullptr;
+    sWin32Child = nullptr;
+    sWin32Post = nullptr;
 #else
     (void)shared_x11_window;
 #endif
@@ -170,10 +312,31 @@ VkSurfaceKHR create(VkInstance instance, LLWindow* window, bool shared_x11_windo
         error = "vkCreateWin32SurfaceKHR is not available (VK_KHR_win32_surface missing)";
         return VK_NULL_HANDLE;
     }
+    HWND target = static_cast<HWND>(handles.mHandle);
+    sWin32Parent = target;
+    sWin32Post = handles.mPostToWindowThread;
+    // [WIN32 CHILD 2026-11-10] the surface's own child window (above): WGL never touches it
+    if (shared_x11_window)
+    {
+        LL_WARNS("Vulkan") << "WolfVulkanDebugSharedWindow: the Vulkan surface shares the viewer's window with OpenGL (W101/W102 behaviour)" << LL_ENDL;
+    }
+    else
+    {
+        std::string why;
+        sWin32Child = createWin32Child(static_cast<HINSTANCE>(handles.mInstance), target, why);
+        if (sWin32Child)
+        {
+            target = sWin32Child;
+        }
+        else
+        {
+            LL_WARNS("Vulkan") << why << "; the Vulkan surface goes on the viewer's window itself" << LL_ENDL;
+        }
+    }
     VkWin32SurfaceCreateInfoKHR info{};
     info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;   // vulkan_core.h:488
     info.hinstance = static_cast<HINSTANCE>(handles.mInstance);
-    info.hwnd = static_cast<HWND>(handles.mHandle);
+    info.hwnd = target;
     res = create_fn(instance, &info, nullptr, &surface);
     sKind = "Win32";
 #elif LL_DARWIN
@@ -287,6 +450,17 @@ void destroy(VkInstance instance, VkSurfaceKHR surface)
     sX11Display = nullptr;
     sX11Parent = 0;
     sX11Child = 0;
+#elif LL_WINDOWS
+    // [WIN32 CHILD 2026-11-10] after the surface, on the window thread (DestroyWindow must be called by the thread that
+    // created the window - DestroyWindow documentation). A parent already gone took the child with it: IsWindow checks.
+    if (sWin32Child && sWin32Post)
+    {
+        HWND child = sWin32Child;
+        sWin32Post([child]() { if (IsWindow(child)) DestroyWindow(child); });
+    }
+    sWin32Parent = nullptr;
+    sWin32Child = nullptr;
+    sWin32Post = nullptr;
 #endif
     sKind.clear();
 }
@@ -301,6 +475,20 @@ void resize(uint32_t width, uint32_t height)
         XMoveResizeWindow(sX11Display, sX11Child, 0, 0, static_cast<unsigned int>(width), static_cast<unsigned int>(height));
         XSync(sX11Display, False);
     }
+#elif LL_WINDOWS
+    // [WIN32 CHILD 2026-11-10] on the window thread, asynchronously: llwindowwin32.cpp's WM_SIZE already sized the child
+    // when the parent changed (before the main thread heard of it), so this is the first size and a safety net. A
+    // swapchain built before a pending move lands comes back VK_ERROR_OUT_OF_DATE_KHR at the next present and is rebuilt
+    // (WolfVkBridge sResizePending), the same as any window resize.
+    if (sWin32Child && sWin32Post && width > 0 && height > 0)
+    {
+        HWND child = sWin32Child;
+        const int w = static_cast<int>(width), h = static_cast<int>(height);
+        sWin32Post([child, w, h]()
+        {
+            if (IsWindow(child)) SetWindowPos(child, nullptr, 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        });
+    }
 #else
     (void)width;
     (void)height;
@@ -313,6 +501,12 @@ std::string describe()
     if (!sX11Display || sX11Parent == 0) return std::string();
     std::string line = "viewer's " + x11WindowLine(sX11Display, sX11Parent);
     if (sX11Child != 0) line += "; Vulkan child " + x11WindowLine(sX11Display, sX11Child);
+    else line += "; the surface is on the viewer's window itself";
+    return line;
+#elif LL_WINDOWS
+    if (!sWin32Parent) return std::string();
+    std::string line = "viewer's " + win32WindowLine(sWin32Parent);
+    if (sWin32Child) line += "; Vulkan child " + win32WindowLine(sWin32Child);
     else line += "; the surface is on the viewer's window itself";
     return line;
 #else

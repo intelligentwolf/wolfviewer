@@ -51,8 +51,16 @@ public:
 
     // Checks the five formats can be exported and makes the two semaphores. The target is only filled when LLRenderTarget
     // asks (allocate after setWolfVkShared). False with error when this device/GL pair cannot share them.
-    bool init(WolfVkDevice& device, std::string& error);
+    // self_test: [IMPORT SELF-TEST 2026-11-10] every attachment makes one round trip when it is created (GL clears it,
+    // Vulkan reads the value back through the pass semaphores); a failing attachment ends the sharing for the session
+    // (disabledReason()), and the attachments already handed to LLRenderTarget stay until it releases them.
+    bool init(WolfVkDevice& device, bool self_test, std::string& error);
     void destroy();
+    bool available() const { return mAvailable; }
+    const std::string& disabledReason() const { return mDisabledReason; }
+    // any shared image still exists (handed to LLRenderTarget and not yet released)
+    bool hasImages() const { for (const WolfVkSharedImage& c : mColor) if (c.isValid()) return true; return mDepth.isValid(); }
+    const std::string& selfTestResult() const { return mSelfTestResult; }
 
     // LLRenderTarget::WolfVkProvider
     bool colorTexture(LLRenderTarget& target, U32 index, U32& color_fmt, U32& tex) override;
@@ -114,6 +122,9 @@ private:
 
     WolfVkDevice* mDevice = nullptr;
     bool mAvailable = false;
+    bool mSelfTest = true;           // [IMPORT SELF-TEST 2026-11-10]
+    std::string mDisabledReason;     // why sharing ended (a failed round trip), for the reports
+    std::string mSelfTestResult;     // the round-trip lines so far
     uint32_t mWidth = 0, mHeight = 0;
     WolfVkSharedImage mColor[4];
     WolfVkSharedImage mDepth;

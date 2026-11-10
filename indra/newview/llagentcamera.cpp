@@ -398,6 +398,7 @@ void LLAgentCamera::resetView(bool reset_camera, bool change_camera, bool moveme
     }
     resetPanDiff();
     resetOrbitDiff();
+    WolfVRScreen::cameraReset();   // <WolfViewer 2026-11-09/> [VR CAMERA BACK] the headset's view rejoins the avatar too
     mHUDTargetZoom = 1.f;
 // <FS:CR> FIRE-8798: Option to prevent camera reset on movement
     }

@@ -87,6 +87,7 @@ namespace
     }
 
     struct ModeSize { std::string mode; U32 w, h; bool external; U32 kbps; };
+    std::atomic<U32> gEyeBase{0};   // [VR OVERSCAN 2026-11-09] the step's eye size before WolfVROverscan (modeSize)
     // [VR CONTROLS 2026-11-04] Quality steps the headset page picks (per-headset start, then down when its decoder or
     // the network falls behind, up again when steady; wolfvr.js adaptQuality): eye size, stereo / mono / big-screen
     // bitrate. Step 0 is the Quest 3 default; the page's own table says which step each headset starts on.
@@ -117,7 +118,15 @@ namespace
             // H.264 Table A-1) that NVENC and the Quest decoder both take. More pixels than mono: 40 Mbit/s.
             if (gSavedSettings.getBOOL("WolfVRStereo"))
             {
-                const U32 eye = llmin(q.eye, llclamp(gSavedSettings.getU32("WolfVREyeSize"), 512u, 2048u)) / 16 * 16;
+                const U32 base = llmin(q.eye, llclamp(gSavedSettings.getU32("WolfVREyeSize"), 512u, 2048u)) / 16 * 16;
+                // [VR OVERSCAN 2026-11-09] Paul (Quest 3): "When I turn my head ... there is black", and the stretched edge
+                // tried instead "was a bit worse". The eye is drawn WolfVROverscan times bigger and its window widened
+                // to match (wolfvrscreen.cpp widenEyeWindows), so the middle keeps this step's sharpness and the extra
+                // pixels are real picture past the edge. At most a 2048 px eye: two side by side are 4096 wide, NVENC's
+                // H.264 limit (see kQuality above). The bitrate stays the step's: the extra is the edge, seen only in a turn.
+                const F32 os = llclamp(gSavedSettings.getF32("WolfVROverscan"), 1.f, 1.4f);
+                const U32 eye = llmin(2048u, (U32)((F32)base * os + 8.f) / 16 * 16);
+                gEyeBase = base;
                 return {"world", eye * 2, eye, true, q.stereo_kbps};
             }
             const U32 side = q.eye * 5 / 4 / 16 * 16;   // 1440 at step 0, as before
@@ -543,6 +552,11 @@ std::string mode()
 {
     std::lock_guard<std::mutex> lk(gMutex);
     return gService ? gMode : std::string();
+}
+
+U32 eyeBase()
+{
+    return gEyeBase.load();
 }
 
 void frameSize(U32& width, U32& height)

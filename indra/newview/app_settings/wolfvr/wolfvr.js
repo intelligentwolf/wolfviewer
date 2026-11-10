@@ -33,7 +33,7 @@ import { VRBar } from './vrbar.js';
 import { VRLayer } from './vrlayer.js';
 import { VRKeyboard, layoutFor } from './vrkeyboard.js';
 import { VRAudio } from './vraudio.js';
-import { DepthEyes, inflateDepth, SHELL, EDGE_MODE_CUT, EDGE_MODE_FAR } from './vrdepth.js';
+import { DepthEyes, inflateDepth, SHELL, EDGE_MODE_CUT, EDGE_MODE_FAR, EDGE_FILL, edgeDir, sideColours, FADE_GLSL } from './vrdepth.js';
 import { VRTheatre } from './vrtheatre.js';
 
 // [VR PAIRING 2026-11-03] No code in the address (Paul: "get rid of that code"). This headset's own random id, kept in
@@ -656,7 +656,128 @@ bitmapTex.flipY = false;
 bitmapTex.generateMipmaps = false;
 bitmapTex.minFilter = THREE.LinearFilter;
 const screenMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, toneMapped: false });
-const screen = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), screenMat);
+// [VR EDGE FILL 2026-11-09] A 3D Mode picture's flat card (the one-view card, or one eye's half): the picture itself as
+// a plain quad in screenMat, exactly as before, and round it a frame (a child mesh) out past the picture's edges
+// (vrdepth.js EDGE_FILL / edgeDir), fading within EDGE_FADE_DEG from the picture's edge colours to that side's average
+// colour (vrdepth.js sideColours / FADE_GLSL): Paul's "when I turn my head ... there is black", and the stretched edge
+// of r51 "was a bit worse". The frame: 4 x 4 points, columns outer-left, left, right, outer-right; rows outer-top, top,
+// bottom, outer-bottom; its eight outer quads only. Positions are set for each picture's window by placeCard. u0 / u1:
+// the part of the picture this card shows (an eye's half, or all of it); eye: whose side colours.
+const FRAME_VERT = `
+attribute vec2 sxy;
+varying vec2 vUv;
+varying vec2 vSxy;
+void main() { vUv = uv; vSxy = sxy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const FRAME_FRAG = `
+uniform sampler2D map;
+uniform float decodeVideo;    // as vrdepth.js FRAG: a video frame is sampled as stored (sRGB)
+varying vec2 vUv;
+varying vec2 vSxy;
+${FADE_GLSL}
+void main() {
+    vec4 c = texture2D(map, vUv);
+    c = decodeVideo > 0.5 ? sRGBTransferEOTF(c) : c;
+    gl_FragColor = vec4(edgeFade(c.rgb, vSxy, max(abs(vSxy.x), abs(vSxy.y))), 1.0);
+    #include <colorspace_fragment>
+}`;
+function cardQuad(u0, u1) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(4 * 3), 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([u0, 1, u1, 1, u0, 0, u1, 0], 2));
+    g.setIndex([0, 2, 1, 1, 2, 3]);
+    return g;
+}
+function addCardFrame(card, u0, u1, eye) {
+    const g = new THREE.BufferGeometry(), uv = [], sxy = [], idx = [];
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+        uv.push(c < 2 ? u0 : u1, r < 2 ? 1 : 0);
+        sxy.push(c === 0 ? -1 : c === 3 ? 1 : 0, r === 0 ? 1 : r === 3 ? -1 : 0);
+    }
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        if (r === 1 && c === 1) continue;   // the picture's own quad is the card itself
+        const k = r * 4 + c;
+        idx.push(k, k + 4, k + 1, k + 1, k + 4, k + 5);
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(16 * 3), 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setAttribute('sxy', new THREE.Float32BufferAttribute(sxy, 2));
+    g.setIndex(idx);
+    const sc = sideColours[eye];
+    const mat = new THREE.ShaderMaterial({
+        uniforms: { map: { value: null }, decodeVideo: { value: 0 }, sideL: { value: sc.L }, sideR: { value: sc.R },
+                    sideB: { value: sc.B }, sideT: { value: sc.T } },
+        vertexShader: FRAME_VERT, fragmentShader: FRAME_FRAG, side: THREE.DoubleSide, toneMapped: false, depthWrite: false,
+    });
+    const f = new THREE.Mesh(g, mat);
+    f.frustumCulled = false;
+    f.name = 'WolfVRCardFrame' + eye;
+    card.add(f);
+    card.userData.frame = f;
+}
+// The card for a picture drawn for window w ([L, R, B, T] tangents) from eye position `at`, looking along q, D metres
+// in front of that eye: the picture's own quad exactly as the scaled plane put it before (corners D x the tangents),
+// the frame's outer ring EDGE_FILL further out (edgeDir); the frame follows the card's texture, eye layer and order
+let edgeFillOn = true;   // test hook only (__wolfvr.edgeFill): false = no frame, the black as before
+const _cardPt = [0, 0, 0];
+function placeCard(m, w, D, q, at) {
+    m.scale.set(1, 1, 1);
+    m.quaternion.copy(q);
+    m.position.copy(at);
+    const f = m.userData.frame;
+    if (f) {
+        f.visible = edgeFillOn;
+        f.layers.mask = m.layers.mask;
+        f.renderOrder = m.renderOrder;
+        const u = f.material.uniforms, map = m.material.map;
+        if (u.map.value !== map) u.map.value = map;
+        u.decodeVideo.value = map && map.isVideoTexture && map.colorSpace === THREE.SRGBColorSpace ? 1 : 0;
+    }
+    // the points change only with the window or the distance: rewritten (and sent to the GPU) only then
+    const key = `${w[0]},${w[1]},${w[2]},${w[3]},${D}`;
+    if (m.userData.cardKey === key) return;
+    m.userData.cardKey = key;
+    const p = m.geometry.attributes.position;
+    p.setXYZ(0, D * w[0], D * w[3], -D); p.setXYZ(1, D * w[1], D * w[3], -D);
+    p.setXYZ(2, D * w[0], D * w[2], -D); p.setXYZ(3, D * w[1], D * w[2], -D);
+    p.needsUpdate = true;
+    if (!f) return;
+    const fp = f.geometry.attributes.position;
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+        const tx = c < 2 ? w[0] : w[1], ty = r < 2 ? w[3] : w[2];
+        const sx = c === 0 ? -1 : c === 3 ? 1 : 0, sy = r === 0 ? 1 : r === 3 ? -1 : 0;
+        if (!sx && !sy) fp.setXYZ(r * 4 + c, D * tx, D * ty, -D);
+        else { edgeDir(tx, ty, D, sx, sy, EDGE_FILL, _cardPt); fp.setXYZ(r * 4 + c, _cardPt[0], _cardPt[1], _cardPt[2]); }
+    }
+    fp.needsUpdate = true;
+}
+// [VR EDGE FILL 2026-11-09] the side colours: each eye's half of a picture drawn small (SIDE_W x SIDE_H for the whole
+// picture), and the mean of its outermost row / column on each side, every SIDE_EVERY pictures (they change slowly; the
+// small read-back is the only cost on the headset). sRGB bytes -> three's linear working colours.
+const SIDE_W = 32, SIDE_H = 16, SIDE_EVERY = 8;
+const sideCanvas = document.createElement('canvas');
+sideCanvas.width = SIDE_W; sideCanvas.height = SIDE_H;
+const sideCtx = sideCanvas.getContext('2d');
+let sidePictures = 0;
+function sampleSides(img, halves) {
+    if (sidePictures++ % SIDE_EVERY) return;
+    try {
+        sideCtx.drawImage(img, 0, 0, SIDE_W, SIDE_H);
+        const d = sideCtx.getImageData(0, 0, SIDE_W, SIDE_H).data, ew = SIDE_W / halves;
+        const mean = (pts, out) => {
+            let r = 0, g = 0, b = 0;
+            for (const [x, y] of pts) { const k = 4 * (y * SIDE_W + x); r += d[k]; g += d[k + 1]; b += d[k + 2]; }
+            out.setRGB(r / pts.length / 255, g / pts.length / 255, b / pts.length / 255, THREE.SRGBColorSpace);
+        };
+        for (let e = 0; e < halves; e++) {
+            const x0 = e * ew, x1 = x0 + ew - 1, sc = sideColours[e];
+            const col = (x) => Array.from({ length: SIDE_H }, (_, y) => [x, y]);
+            const row = (y) => Array.from({ length: ew }, (_, i) => [x0 + i, y]);
+            mean(col(x0), sc.L); mean(col(x1), sc.R); mean(row(SIDE_H - 1), sc.B); mean(row(0), sc.T);
+        }
+    } catch (e) { /* a closed or unreadable frame: the colours stay as they were */ }
+}
+const screen = new THREE.Mesh(cardQuad(0, 1), screenMat);
+addCardFrame(screen, 0, 1, 0);
 screen.frustumCulled = false;
 screen.visible = false;
 scene.add(screen);
@@ -666,10 +787,8 @@ scene.add(screen);
 // that eye only: three.js draws layer 1 for the left eye and layer 2 for the right (WebXRManager cameraL / cameraR
 // layer masks), and each window is placed from its own eye, so the depth is the viewer's, not the page's.
 function halfPlane(right) {
-    const g = new THREE.PlaneGeometry(1, 1);
-    const uv = g.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 0.5 + (right ? 0.5 : 0));
-    const m = new THREE.Mesh(g, screenMat);
+    const m = new THREE.Mesh(cardQuad(right ? 0.5 : 0, right ? 1 : 0.5), screenMat);
+    addCardFrame(m, right ? 0.5 : 0, right ? 1 : 0.5, right ? 1 : 0);   // [VR EDGE FILL 2026-11-09]
     m.frustumCulled = false;
     m.visible = false;
     m.layers.set(right ? 2 : 1);
@@ -1001,9 +1120,12 @@ $('wvr-mic').addEventListener('click', () => {
 // Each eye's position in head space and its own frustum, from the XR views (WebXR XRView.eye, .transform,
 // .projectionMatrix), sent with each pose for the viewer to draw the eyes from; left eye first, by XRView.eye.
 // [VR 3D FIX 2026-11-04] The frustum goes as the tangents of its four edges (the viewer draws exactly that off-axis
-// window), each widened by EYE_MARGIN_DEG so a quick head turn does not show the picture's edge before the next one
-// comes (reprojection); the square field of view covering both ("f") stays for a viewer drawing one view.
-const EYE_MARGIN_DEG = 4;
+// window); the square field of view covering both ("f") stays for a viewer drawing one view.
+// [VR OVERSCAN 2026-11-09] Each window used to be widened here by 4 degrees (EYE_MARGIN_DEG, 2026-11-04) so a quick head
+// turn did not show the picture's edge before the next one came - into the same picture size, which cost the middle
+// sharpness. The viewer now widens them itself, with more picture pixels to pay for it (wolfvrscreen.cpp
+// widenEyeWindows, WolfVROverscan), and says the widened windows in each picture's header (hdr.tan), which is what the
+// picture is placed by. The eyes' own windows go as they are.
 // [VR EYE OFFSCREEN 2026-11-07] Paul's 3D Mode "feels flat even standing still": the picture was soft. The headset's
 // own layer (what the picture is drawn into, then shown on the panels) was made at three's default scale 1.0, the
 // browser's recommended size, which may hold fewer pixels than the panels have. WebXR's native scale factor
@@ -1048,15 +1170,15 @@ function noteXrLayer(pose) {
 // window, eyeTan; the layer the eye's own): a layer below the picture throws the picture's detail away
 function xrLayerLine() {
     const parts = xrLayer.eyes.map((e) => {
-        const r = e.eye === 'right' ? 4 : 0, wide = eyeTan ? eyeTan[r + 1] - eyeTan[r] : NaN;
-        const pic = config && config.mode === 'world' && config.h ? config.h / wide * Math.PI / 180 : NaN;
+        const pt = screen.userData.hdr && screen.userData.hdr.tan ? screen.userData.hdr.tan : eyeTan;   // [VR OVERSCAN] as drawn
+        const r = e.eye === 'right' ? 4 : 0, wide = pt ? pt[r + 1] - pt[r] : NaN;
+        const pic = config && config.mode === 'world' && config.h ? config.h / wide * Math.PI / 180 : NaN;   // (the picture's window: hdr.tan)
         return `${e.eye} ${e.x},${e.y} ${e.w}x${e.h}: centre ${fmt(e.w / e.span * Math.PI / 180, 1)} px/deg (picture ${fmt(pic, 1)})`;
     });
     return xrLayer.head + (parts.length ? '; ' + parts.join('; ') : '');
 }
 const _hinv = new THREE.Matrix4(), _ev = new THREE.Vector3();
 let eyeFov = 0, eyeTan = null, lastViews = null;
-function widen(t, sign) { return Math.tan(Math.atan(t) + sign * EYE_MARGIN_DEG * Math.PI / 180); }
 function eyesOf(pose) {
     if (!pose || !pose.views || pose.views.length < 2) return null;
     _hinv.fromArray(pose.transform.matrix).invert();
@@ -1073,7 +1195,7 @@ function eyesOf(pose) {
         // a perspective projection's edges: x/-z = (m8 -+ 1) / m0, y/-z = (m9 -+ 1) / m5 (column-major)
         const p = v.projectionMatrix;
         const L = (p[8] - 1) / p[0], R = (p[8] + 1) / p[0], B = (p[9] - 1) / p[5], T = (p[9] + 1) / p[5];
-        pt.push(+widen(L, -1).toFixed(4), +widen(R, 1).toFixed(4), +widen(B, -1).toFixed(4), +widen(T, 1).toFixed(4));
+        pt.push(+L.toFixed(4), +R.toFixed(4), +B.toFixed(4), +T.toFixed(4));
         maxTan = Math.max(maxTan, Math.abs(L), Math.abs(R), Math.abs(B), Math.abs(T));
     }
     eyeFov = Math.min(120, Math.max(90, Math.round(2 * Math.atan(maxTan) * 180 / Math.PI + 4)));
@@ -2124,7 +2246,6 @@ function pollControllers(session, frame, headPos, headQuat) {
 
 // ------------------------------------------------------------------------------------------------ frame loop
 const _m = new THREE.Matrix4(), _pos = new THREE.Vector3(), _quat = new THREE.Quaternion(), _scl = new THREE.Vector3();
-const _fwd = new THREE.Vector3();
 let xrErrors = 0;
 const pred = { t: 0, q: new THREE.Quaternion(), p: new THREE.Vector3(), w: new THREE.Vector3(), v: new THREE.Vector3(),
                dq: new THREE.Quaternion(), out: { p: new THREE.Vector3(), q: new THREE.Quaternion() }, ax: new THREE.Vector3() };
@@ -2198,6 +2319,7 @@ function animate(time, frame) {
         fresh = latest;
         latest = null;
         const mat = BIG() ? bigMat : screenMat;
+        if (!BIG()) sampleSides(fresh.img, fresh.hdr.stereo ? 2 : 1);   // [VR EDGE FILL]
         if (fresh.hdr.codec === 'h264') { videoTex.setFrame(fresh.img); if (mat.map !== videoTex) { mat.map = videoTex; mat.needsUpdate = true; } }
         else { bitmapTex.image = fresh.img; bitmapTex.needsUpdate = true; if (mat.map !== bitmapTex) { mat.map = bitmapTex; mat.needsUpdate = true; } }
         if (BIG()) { bigMesh.visible = true; screen.visible = false; eyeScreens[0].visible = eyeScreens[1].visible = false; }
@@ -2217,29 +2339,27 @@ function animate(time, frame) {
     // Reprojection: put the picture where it was rendered for, around where the head is NOW.
     const hdr = screen.userData.hdr;
     if (hdr && !BIG()) {
-        const size = 2 * PICTURE_DISTANCE * Math.tan((hdr.fov * Math.PI / 180) / 2);
-        _fwd.set(0, 0, -PICTURE_DISTANCE).applyQuaternion(hdr.q);
         if (!hdr.stereo && hdr.centre && hdr.tan) {
             // [VR CENTRE] the centre view's card: its own window, the far shell behind the mesh (or 10 m without depth)
-            const D = depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE, w = hdr.tan;
-            screen.scale.set(D * (w[1] - w[0]), D * (w[3] - w[2]), 1);
-            screen.quaternion.copy(hdr.q);
-            _ev.set(D * (w[0] + w[1]) / 2, D * (w[2] + w[3]) / 2, -D).applyQuaternion(hdr.q);
-            screen.position.copy(_pos).add(_ev);
+            const D = depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE;
+            placeCard(screen, hdr.tan, D, hdr.q, _pos);   // [VR EDGE FILL 2026-11-09] (was: a scaled plane, the same middle)
             screen.renderOrder = -10;
         } else if (!hdr.stereo) {
-            screen.scale.set(size, size, 1);
-            screen.quaternion.copy(hdr.q);
-            screen.position.copy(_pos).add(_fwd);
+            // the square picture, hdr.fov across both ways ([VR EDGE FILL 2026-11-09] as a card: the same middle)
+            const t = Math.tan((hdr.fov * Math.PI / 180) / 2);
+            placeCard(screen, [-t, t, -t, t], PICTURE_DISTANCE, hdr.q, _pos);
         } else {
             // [VR STEREO] each half from the eye it was drawn for: that eye NOW (head position + its offset turned
             // with the head now), looking where the head looked when the picture was drawn
-            for (let i = 0; i < 2; i++) {
-                const m = eyeScreens[i];
-                m.scale.set(size, size, 1);
-                m.quaternion.copy(hdr.q);
-                _ev.set(hdr.eyes[3 * i], hdr.eyes[3 * i + 1], hdr.eyes[3 * i + 2]).applyQuaternion(_quat);
-                m.position.copy(_pos).add(_ev).add(_fwd);
+            // (without the eye windows: the square picture, hdr.fov across, as before; [VR EDGE FILL 2026-11-09] as a card,
+            // and only when there are no eye windows - placing it both ways every frame rewrote the cards' points twice a
+            // frame, which in the emulator, sharing the PC's graphics card, cost the viewer a third of its frame rate)
+            if (!hdr.tan) {
+                const t = Math.tan((hdr.fov * Math.PI / 180) / 2);
+                for (let i = 0; i < 2; i++) {
+                    _ev.set(hdr.eyes[3 * i], hdr.eyes[3 * i + 1], hdr.eyes[3 * i + 2]).applyQuaternion(_quat);
+                    placeCard(eyeScreens[i], [-t, t, -t, t], PICTURE_DISTANCE, hdr.q, _ev.add(_pos));
+                }
             }
             // [VR 3D FIX 2026-11-04] each eye's own off-axis window: the half covers exactly the frustum it was drawn
             // for (tangents L, R, B, T), PICTURE_DISTANCE in front of that eye, along the head's direction then
@@ -2247,11 +2367,9 @@ function animate(time, frame) {
                 // [VR DEPTH] with the world-locked meshes in front, the cards are their far shell
                 const D = depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE;
                 for (let i = 0; i < 2; i++) {
-                    const w = hdr.tan.slice(4 * i, 4 * i + 4), m = eyeScreens[i];
-                    m.scale.set(D * (w[1] - w[0]), D * (w[3] - w[2]), 1);
-                    _ev.set(D * (w[0] + w[1]) / 2, D * (w[2] + w[3]) / 2, -D).applyQuaternion(hdr.q);
-                    const eo = new THREE.Vector3(hdr.eyes[3 * i], hdr.eyes[3 * i + 1], hdr.eyes[3 * i + 2]).applyQuaternion(_quat);
-                    m.position.copy(_pos).add(eo).add(_ev);
+                    // [VR EDGE FILL 2026-11-09] the same middle as the scaled plane before, plus the frame round it
+                    _ev.set(hdr.eyes[3 * i], hdr.eyes[3 * i + 1], hdr.eyes[3 * i + 2]).applyQuaternion(_quat).add(_pos);
+                    placeCard(eyeScreens[i], hdr.tan.slice(4 * i, 4 * i + 4), D, hdr.q, _ev);
                 }
             }
             // each half seen only by its eye (eyeLayer, from XRView.eye); on the page (no headset) the camera sees
@@ -2481,6 +2599,53 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
     // share of its pixels nothing covers - the holes through which the far shell would show. Plus the share of grid
     // points that are on an edge. Hold the picture first (freeze) so both modes see the same one.
     edgeMode: (cut) => depthEyes.setEdgeMode(cut ? EDGE_MODE_CUT : EDGE_MODE_FAR),
+    // [VR OVERSCAN 2026-11-09] test hook: the newest picture's windows (as drawn, hdr.tan), its eye size, the headset's own
+    // windows (eyeTan) and the side colours now: the middle's pixels per degree = eye px / (R - L) x (pi / 180)
+    picture: () => ({ tan: screen.userData.hdr ? screen.userData.hdr.tan : null, eye: config ? config.h : 0, own: eyeTan,
+                      sides: sideColours.map((c) => ({ L: c.L.getHexString(), R: c.R.getHexString(), B: c.B.getHexString(), T: c.T.getHexString() })) }),
+    // [VR EDGE FILL 2026-11-09] test hooks: the edge fill on / off (cards and world-locked eyes; off = the black as before),
+    // and what a head turn shows before the next picture: the LEFT eye drawn as the headset would draw it (its own
+    // projection, pose and layers, the picture's surfaces only), with the head turned yawDeg (+ = left) and pitchDeg
+    // (+ = up) from where it is, against a background no picture has (magenta): the share of the eye's view that nothing
+    // covers - what was black - plus the PNG. Hold the picture first (freeze) so on and off see the same one.
+    edgeFill: (on) => {
+        edgeFillOn = !!on; depthEyes.edgeFill = !!on;
+        for (const m of depthEyes.skirts) m.visible = !!on && depthEyes.active;   // a held picture is not shown again
+    },
+    turnProbe: (yawDeg, pitchDeg) => {
+        if (!lastViews) return null;
+        const li = Math.max(0, lastViews.findIndex((v) => v.eye === 'left'));
+        const v = lastViews[li];
+        const cam = new THREE.PerspectiveCamera();
+        cam.projectionMatrix.fromArray(v.projectionMatrix);
+        cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+        new THREE.Matrix4().fromArray(v.transform.matrix).premultiply(dolly.matrixWorld).decompose(cam.position, cam.quaternion, cam.scale);
+        cam.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (yawDeg || 0) * Math.PI / 180));
+        cam.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (pitchDeg || 0) * Math.PI / 180));
+        cam.updateMatrixWorld(true);
+        cam.layers.set(0); cam.layers.enable(eyeLayer[0]);
+        const pictures = [screen, ...eyeScreens, ...depthEyes.meshes, ...depthEyes.skirts];
+        const was = scene.children.map((o) => [o, o.visible]);
+        for (const [o, vis] of was) o.visible = vis && pictures.includes(o);
+        const bg = scene.background;
+        scene.background = new THREE.Color(1, 0, 1);
+        const W = 320, H = 288, rt = new THREE.WebGLRenderTarget(W, H, { colorSpace: THREE.SRGBColorSpace });
+        const xr = renderer.xr.enabled; renderer.xr.enabled = false;
+        renderer.setRenderTarget(rt); renderer.clear(); renderer.render(scene, cam); renderer.setRenderTarget(null);
+        renderer.xr.enabled = xr;
+        const px = new Uint8Array(W * H * 4);
+        renderer.readRenderTargetPixels(rt, 0, 0, W, H, px);
+        rt.dispose();
+        for (const [o, vis] of was) o.visible = vis;
+        scene.background = bg;
+        let empty = 0;
+        for (let i = 0; i < px.length; i += 4) if (px[i] > 245 && px[i + 1] < 10 && px[i + 2] > 245) empty++;
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        const img = c.getContext('2d').createImageData(W, H);
+        for (let y = 0; y < H; y++) img.data.set(px.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
+        c.getContext('2d').putImageData(img, 0, 0);
+        return { empty: +(empty / (W * H)).toFixed(4), png: c.toDataURL('image/png') };
+    },
     edgeProbe: (dx) => {
         if (!lastViews || !depthEyes.active) return null;
         const li = Math.max(0, lastViews.findIndex((v) => v.eye === 'left'));

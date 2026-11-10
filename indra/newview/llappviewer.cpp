@@ -84,6 +84,7 @@
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
 #include "wolfvrstream.h"       // [VR PIPE 2026-11-03/] WolfVRStream::shutdown, [VR STAGES 2026-11-04/] headsetInVR
 #include "wolfvrscreen.h"       // [VR STEREO 2026-11-04/] WolfVRScreen::displayFrame
+#include "wolfvkbridge.h"       // [VULKAN BACKEND 2026-11-08/] WolfRenderBackend decision, About lines, report fields
 #include "wolfaimode.h"         // [AI MODE 2026-11-05/]
 #include "wolfvraudio.h"        // [VR AUDIO 2026-11-04/] WolfVRAudio::shutdown
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
@@ -104,6 +105,7 @@
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
+#include "wolfundersea.h"   // [UNDERSEA 2026-11-09/] ticket 652
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolfnaturesounds.h" // [NATURE SOUNDS 2026-11-03/] ticket 475
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
@@ -903,6 +905,35 @@ public:
     }
 };
 
+// [T676 2026-11-08] The viewer's name and version in static_debug_info.log, which wolfcrashreport.cpp
+// debug_info_text reads back as "crashed_viewer" when the crash is reported at the next login. Source: this file's
+// writeSystemInfo() (the ClientInfo block, moved here unchanged), which runs only after initWindow(). A fatal
+// error inside initWindow (LLViewerShaderMgr::setShaders, llviewershadermgr.cpp:1011 "Unable to load ... shaders")
+// wrote static_debug_info.log from errorCallback with no ClientInfo at all, so viewercrashreport.php fell back
+// to the version of the viewer SENDING the report: tickets 643 (labelled 7.2.4.97) and 667/676 (labelled
+// 7.2.4.100) were W99 crashes. LLVersionInfo is ready by then: initConfiguration() already reads it
+// (getShortVersion for fsdata_defaults, resetChannel for --channel).
+static void wolf_write_client_info()
+{
+    gDebugInfo["ClientInfo"]["Name"] = LLVersionInfo::instance().getChannel();
+// [SL:KB] - Patch: Viewer-CrashReporting | Checked: 2011-05-08 (Catznip-2.6.0a) | Added: Catznip-2.6.0a
+    gDebugInfo["ClientInfo"]["Version"] = LLVersionInfo::instance().getVersion();
+    gDebugInfo["ClientInfo"]["Platform"] = LLVersionInfo::instance().getBuildPlatform();
+// [/SL:KB]
+    gDebugInfo["ClientInfo"]["MajorVersion"] = LLVersionInfo::instance().getMajor();
+    gDebugInfo["ClientInfo"]["MinorVersion"] = LLVersionInfo::instance().getMinor();
+    gDebugInfo["ClientInfo"]["PatchVersion"] = LLVersionInfo::instance().getPatch();
+    gDebugInfo["ClientInfo"]["BuildVersion"] = std::to_string(LLVersionInfo::instance().getBuild());
+    gDebugInfo["ClientInfo"]["AddressSize"] = LLVersionInfo::instance().getAddressSize();
+
+// <FS:ND> Add which flavor of FS generated an error
+#ifdef OPENSIM
+    gDebugInfo["ClientInfo"]["Flavor"] = "oss";
+#else
+    gDebugInfo["ClientInfo"]["Flavor"] = "hvk";
+#endif
+// </FS:ND>
+}
 
 bool LLAppViewer::init()
 {
@@ -1248,6 +1279,7 @@ bool LLAppViewer::init()
     // Initialize the window
     //
     gGLActive = true;
+    wolf_write_client_info();   // [T676 2026-11-08] before initWindow: a start-up fatal in it must still name this version
     initWindow();
     LL_INFOS("InitInfo") << "Window is initialized." << LL_ENDL ;
     WolfSpanScreens::startup();    // <WolfViewer 2026-10-10/> spread across all screens again if it was
@@ -1378,6 +1410,7 @@ bool LLAppViewer::init()
 
     // save the graphics card
     gDebugInfo["GraphicsCard"] = LLFeatureManager::getInstance()->getGPUString();
+    gDebugInfo["WolfVulkan"] = WolfVkBridge::reportFields();   // [VULKAN BACKEND 2026-11-08/] renderer + Vulkan device, for the crash report
 
     // Save the current version to the prefs file
     gSavedSettings.setString("LastRunVersion",
@@ -1719,6 +1752,7 @@ bool LLAppViewer::doFrame()
     {
         {
             LLPerfStats::RecordSceneTime T(LLPerfStats::StatType_t::RENDER_IDLE); // ensure we have the entire top scope of frame covered (input event and coro)
+            WolfVkBridge::LoopTimer wolf_loop_input(WolfVkBridge::LoopStage::kInput);   // [AMD PERF 2026-11-09/] WolfLogFrameRate
             LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df processMiscNativeEvents");
             pingMainloopTimeout("Main:MiscNativeWindowEvents");
 
@@ -1816,6 +1850,7 @@ bool LLAppViewer::doFrame()
                 {
                     LLPerfStats::RecordSceneTime T (LLPerfStats::StatType_t::RENDER_IDLE);
                     LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df idle");
+                    WolfVkBridge::LoopTimer wolf_loop_idle(WolfVkBridge::LoopStage::kIdle);   // [AMD PERF 2026-11-09/]
                     WolfVRScreen::framePart(WolfVRScreen::FramePart::Idle, true);   // [VR FRAME PARTS 2026-11-05/]
                     idle();
                     WolfVRScreen::framePart(WolfVRScreen::FramePart::Idle, false);
@@ -1849,10 +1884,12 @@ bool LLAppViewer::doFrame()
             if (!LLApp::isExiting() && !gHeadlessClient && gViewerWindow)
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df Display");
+                WolfVkBridge::LoopTimer wolf_loop_display(WolfVkBridge::LoopStage::kDisplay);   // [AMD PERF 2026-11-09/] incl. probes, snapshots
                 pingMainloopTimeout("Main:Display");
                 gGLActive = true;
 
                 WolfVRScreen::displayFrame();   // [VR STEREO 2026-11-04/] display(), or one display() per eye in VR 3D Mode
+                WolfVkBridge::endUnshownFrame();   // [VR 3D POOL 2026-11-09/] a Vulkan frame slot not closed by a present (paused desktop)
 
                 if (LLStartUp::getStartupState() == STATE_STARTED) // <FS:Beq/> FIRE-34590 - Bugsplat caused by updating maps before world is loaded.
                 {
@@ -1887,6 +1924,7 @@ bool LLAppViewer::doFrame()
         {
             //LL_RECORD_BLOCK_TIME(SLEEP2);
             LL_PROFILE_ZONE_WARN("Sleep2");
+            WolfVkBridge::LoopTimer wolf_loop_sleep(WolfVkBridge::LoopStage::kSleep);   // [AMD PERF 2026-11-09/] yields, limiter, texture/mesh updates
 
             // yield some time to the os based on command line option
             static LLCachedControl<S32> yield_time(gSavedSettings, "YieldTime", -1);
@@ -2008,6 +2046,7 @@ bool LLAppViewer::doFrame()
             }
             pingMainloopTimeout("Main:End");
         }
+        WolfVkBridge::loopFrameEnd();   // [AMD PERF 2026-11-09/] WolfLogFrameRate: the "main loop per frame" line once a second
     }
 
     if (LLApp::isExiting())
@@ -3753,6 +3792,9 @@ bool LLAppViewer::initConfiguration()
     }
 // [/RLVa:KB]
 
+    // [VULKAN BACKEND 2026-11-08] WolfRenderBackend read once, with the first-run check (wolfvkbridge.h)
+    WolfVkBridge::decideBackend();
+
     return true; // Config was successful.
 }
 
@@ -4225,6 +4267,10 @@ LLSD LLAppViewer::getViewerInfo() const
     info["RLV_VERSION"] = (rlv_handler_t::isEnabled()) ? RlvStrings::getVersionAbout() : LLTrans::getString("RLVaStatusDisabled");
 // [/RLVa:KB]
     info["OPENGL_VERSION"] = ll_safe_string((const char*)(glGetString(GL_VERSION)));
+    // [VULKAN BACKEND 2026-11-08] strings.xml AboutRenderer; the same fields the hardware statistics and crash reports carry
+    info["RENDERER"] = WolfVkBridge::rendererLine();
+    info["VULKAN_INFO"] = WolfVkBridge::vulkanLine();
+    info["WolfVulkan"] = WolfVkBridge::reportFields();
     info["LIBCURL_VERSION"] = LLCore::LLHttp::getCURLVersion();
     // Settings
     // <FS:Beq> gViewerWindow can be null on shutdown. Crashes if bugsplatt uses the info
@@ -4472,6 +4518,7 @@ std::string LLAppViewer::getViewerInfoString(bool default_string) const
         support << "\n" << LLTrans::getString("AboutDriver", args, default_string);
     }
     support << "\n" << LLTrans::getString("AboutOGL", args, default_string);
+    support << "\n" << LLTrans::getString("AboutRenderer", args, default_string);   // [VULKAN BACKEND 2026-11-08/]
     //support << "\n\n" << LLTrans::getString("AboutSettings", args, default_string); // <FS> Custom sysinfo
 #if LL_DARWIN
     support << "\n" << LLTrans::getString("AboutOSXHiDPI", args, default_string);
@@ -4571,24 +4618,7 @@ void LLAppViewer::writeSystemInfo()
 //#endif
     // </FS:ND>
 
-    gDebugInfo["ClientInfo"]["Name"] = LLVersionInfo::instance().getChannel();
-// [SL:KB] - Patch: Viewer-CrashReporting | Checked: 2011-05-08 (Catznip-2.6.0a) | Added: Catznip-2.6.0a
-    gDebugInfo["ClientInfo"]["Version"] = LLVersionInfo::instance().getVersion();
-    gDebugInfo["ClientInfo"]["Platform"] = LLVersionInfo::instance().getBuildPlatform();
-// [/SL:KB]
-    gDebugInfo["ClientInfo"]["MajorVersion"] = LLVersionInfo::instance().getMajor();
-    gDebugInfo["ClientInfo"]["MinorVersion"] = LLVersionInfo::instance().getMinor();
-    gDebugInfo["ClientInfo"]["PatchVersion"] = LLVersionInfo::instance().getPatch();
-    gDebugInfo["ClientInfo"]["BuildVersion"] = std::to_string(LLVersionInfo::instance().getBuild());
-    gDebugInfo["ClientInfo"]["AddressSize"] = LLVersionInfo::instance().getAddressSize();
-
-// <FS:ND> Add which flavor of FS generated an error
-#ifdef OPENSIM
-    gDebugInfo["ClientInfo"]["Flavor"] = "oss";
-#else
-    gDebugInfo["ClientInfo"]["Flavor"] = "hvk";
-#endif
-// </FS:ND>
+    wolf_write_client_info();   // [T676 2026-11-08] the ClientInfo block, now shared with init() (see above it)
 
     //  gDebugInfo["CAFilename"] = gDirUtilp->getCAFile();
 
@@ -6347,6 +6377,7 @@ void LLAppViewer::idle()
     { WolfVRScreen::SubPart wsp_("WolfFarGround"); WolfFarGround::instance().idle(); }   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     { WolfVRScreen::SubPart wsp_("WolfBirds"); WolfBirds::instance().idle(); }       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
     { WolfVRScreen::SubPart wsp_("WolfSeaLife"); WolfSeaLife::instance().idle(); }     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)
+    { WolfVRScreen::SubPart wsp_("WolfUnderSea"); WolfUnderSea::instance().idle(); }   // [UNDERSEA 2026-11-09/] ticket 652: sea plants, fish and sharks (wolfundersea.h)
     { WolfVRScreen::SubPart wsp_("WolfSwimBubbles"); WolfSwimBubbles::instance().idle(); } // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles from mouths under the water
     { WolfVRScreen::SubPart wsp_("WolfNatureSounds"); WolfNatureSounds::instance().idle(); } // [NATURE SOUNDS 2026-11-03/] ticket 475: insects, lapping and surf (wolfnaturesounds.h)
     // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name

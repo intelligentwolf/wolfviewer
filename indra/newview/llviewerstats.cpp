@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llviewerstats.h"
+#include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/] renderer + Vulkan fields for the grid
 #include "llviewerthrottle.h"
 
 #include "message.h"
@@ -729,6 +730,16 @@ void send_viewer_stats(bool include_preferences)
     system["gpu_vendor"] = gGLManager.mGLVendorShort;
     system["gpu_version"] = gGLManager.mDriverVersionVendorString;
     system["opengl_version"] = gGLManager.mGLVersionString;
+    // [VULKAN BACKEND 2026-11-08] which renderer draws the window and the Vulkan device found (wolfvkbridge.cpp reportFields):
+    // system.renderer, vulkan_available, vulkan_device, vulkan_driver, vulkan_api, vulkan_loader, vulkan_device_count,
+    // vulkan_last_error, vulkan_hand_over
+    {
+        const LLSD vk = WolfVkBridge::reportFields();
+        for (LLSD::map_const_iterator it = vk.beginMap(); it != vk.endMap(); ++it)
+        {
+            system[it->first] = it->second;
+        }
+    }
 
     gGLManager.asLLSD(system["gl"]);
 

@@ -128,6 +128,7 @@ public:
     /*virtual*/ bool dialogColorPicker(F32 *r, F32 *g, F32 *b);
 
     /*virtual*/ void *getPlatformWindow();
+    bool getNativeHandles(NativeHandles& handles) override;   // [VULKAN BACKEND 2026-11-08/] X11 or Wayland handles for the Vulkan surface
     /*virtual*/ void bringToFront();
     void requestKeyboardFocus() override;   // [VR KEYBOARD 2026-11-05]
 

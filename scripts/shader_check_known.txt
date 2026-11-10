@@ -1,0 +1,14 @@
+# Known, accepted failures for scripts/shader_check.py - one per line:
+#
+#     <GPU profile glob> | <program name regular expression> | <why it is accepted>
+#
+# A failing program variant is accepted only when EVERY scenario it fails in matches an entry.
+# Accepted failures are still printed (as KNOWN) but do not fail the build. Keep this list short
+# and every reason true: an entry here is a shader the viewer cannot build on that GPU.
+
+# wolftk/skyF.glsl:119 declares `uniform samplerCubeArray reflectionProbes` (GL 4.0 / ARB_texture_cube_map_array),
+# so on a GL 3.3 GPU the native sky dome does not compile ("#version 330": reserved word). The viewer tolerates it
+# (llviewershadermgr.cpp:2977-2980 logs and draws the EEP sky) and never draws the native sky there anyway:
+# WolfEnvironmentRender::tier() is 0 below GL 4.05 (wolfenvironmentrender.cpp:2338). Building the dome only when
+# gGLManager.mGLVersion > 4.05f (llviewershadermgr.cpp:2957) would remove the wasted compile and the log line.
+gl33 | ^Wolf Env Sky Dome | samplerCubeArray needs GL 4.0; the native sky is never drawn below GL 4.05 (wolfenvironmentrender.cpp:2338)

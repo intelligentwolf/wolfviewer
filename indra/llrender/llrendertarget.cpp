@@ -52,6 +52,8 @@ void check_framebuffer_status()
 
 bool LLRenderTarget::sUseFBO = false;
 U32 LLRenderTarget::sCurFBO = 0;
+LLRenderTarget::WolfVkProvider* LLRenderTarget::sWolfVkProvider = nullptr;   // [VULKAN G-BUFFER 2026-11-08/]
+bool LLRenderTarget::sWolfDepth32F = false;   // [AMD PERF 2026-11-08/] testing, llrendertarget.h
 
 
 extern S32 gGLViewport[4];
@@ -95,7 +97,7 @@ void LLRenderTarget::resize(U32 resx, U32 resy)
     {
         gGL.getTexUnit(0)->bindManual(mUsage, mDepth);
         U32 internal_type = LLTexUnit::getInternalType(mUsage);
-        LLImageGL::setManualImage(internal_type, 0, GL_DEPTH_COMPONENT24, mResX, mResY, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL, false);
+        LLImageGL::setManualImage(internal_type, 0, sWolfDepth32F ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT24, mResX, mResY, GL_DEPTH_COMPONENT, sWolfDepth32F ? GL_FLOAT : GL_UNSIGNED_INT, NULL, false);   // [AMD PERF 2026-11-08/] sWolfDepth32F: testing
 
         sBytesAllocated += pix_diff*4;
     }
@@ -226,13 +228,24 @@ bool LLRenderTarget::addColorAttachment(U32 color_fmt)
         return false;
     }
 
-    U32 tex;
-    LLImageGL::generateTextures(1, &tex);
+    U32 tex = 0;
+    bool provided = false;
+    if (mWolfVkShared && sWolfVkProvider && mUsage == LLTexUnit::TT_TEXTURE)
+    {
+        // [VULKAN G-BUFFER 2026-11-08] a texture over memory the Vulkan renderer exported (llrendertarget.h WolfVkProvider)
+        provided = sWolfVkProvider->colorTexture(*this, offset, color_fmt, tex);
+        if (provided) mWolfVkProvided = true;
+    }
+    if (!provided)
+    {
+        LLImageGL::generateTextures(1, &tex);
+    }
     gGL.getTexUnit(0)->bindManual(mUsage, tex);
 
     stop_glerror();
 
 
+    if (!provided)
     {
         clear_glerror();
         LLImageGL::setManualImage(LLTexUnit::getInternalType(mUsage), 0, color_fmt, mResX, mResY, GL_RGBA, GL_UNSIGNED_BYTE, NULL, false);
@@ -298,13 +311,27 @@ bool LLRenderTarget::addColorAttachment(U32 color_fmt)
 bool LLRenderTarget::allocateDepth()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_DISPLAY;
+    if (mWolfVkShared && sWolfVkProvider && mUsage == LLTexUnit::TT_TEXTURE)
+    {
+        // [VULKAN G-BUFFER 2026-11-08] the shared depth (GL_DEPTH_COMPONENT32F over a Vulkan D32_SFLOAT image)
+        U32 tex = 0;
+        if (sWolfVkProvider->depthTexture(*this, tex))
+        {
+            mDepth = tex;
+            mWolfVkProvided = true;
+            gGL.getTexUnit(0)->bindManual(mUsage, mDepth);
+            gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_POINT);
+            sBytesAllocated += mResX*mResY*4;
+            return true;
+        }
+    }
     LLImageGL::generateTextures(1, &mDepth);
     gGL.getTexUnit(0)->bindManual(mUsage, mDepth);
 
     U32 internal_type = LLTexUnit::getInternalType(mUsage);
     stop_glerror();
     clear_glerror();
-    LLImageGL::setManualImage(internal_type, 0, GL_DEPTH_COMPONENT24, mResX, mResY, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL, false);
+    LLImageGL::setManualImage(internal_type, 0, sWolfDepth32F ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT24, mResX, mResY, GL_DEPTH_COMPONENT, sWolfDepth32F ? GL_FLOAT : GL_UNSIGNED_INT, NULL, false);   // [AMD PERF 2026-11-08/] sWolfDepth32F: testing
     gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_POINT);
 
     sBytesAllocated += mResX*mResY*4;
@@ -356,9 +383,17 @@ void LLRenderTarget::release()
     LL_PROFILE_ZONE_SCOPED_CATEGORY_DISPLAY;
     llassert(!isBoundInStack());
 
+    // [VULKAN G-BUFFER 2026-11-08] textures from the provider belong to it: it hears of the release and deletes them itself
+    const bool provided = mWolfVkProvided;
+    if (provided && sWolfVkProvider)
+    {
+        sWolfVkProvider->released(*this);
+    }
+    mWolfVkProvided = false;
+
     if (mDepth)
     {
-        LLImageGL::deleteTextures(1, &mDepth);
+        if (!provided) LLImageGL::deleteTextures(1, &mDepth);
 
         mDepth = 0;
 
@@ -388,7 +423,7 @@ void LLRenderTarget::release()
         {
             sBytesAllocated -= mResX*mResY*4;
             glFramebufferTexture2D(GL_FRAMEBUFFER, static_cast<GLenum>(GL_COLOR_ATTACHMENT0+z), LLTexUnit::getInternalType(mUsage), 0, 0);
-            LLImageGL::deleteTextures(1, &mTex[z]);
+            if (!provided) LLImageGL::deleteTextures(1, &mTex[z]);
         }
         glBindFramebuffer(GL_FRAMEBUFFER, sCurFBO);
     }
@@ -408,7 +443,7 @@ void LLRenderTarget::release()
     if (mTex.size() > 0)
     {
         sBytesAllocated -= mResX*mResY*4;
-        LLImageGL::deleteTextures(1, &mTex[0]);
+        if (!provided) LLImageGL::deleteTextures(1, &mTex[0]);
     }
 
     mTex.clear();

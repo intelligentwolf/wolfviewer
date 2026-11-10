@@ -130,3 +130,6 @@ firestorm.code-workspace
 .github/release.yaml
 
 checks.json
+
+# [VULKAN BACKEND 2026-11-08] build output: the Vulkan SPIR-V of every shader variant (indra/cmake/VulkanShaders.cmake)
+indra/newview/app_settings/shaders/spv/

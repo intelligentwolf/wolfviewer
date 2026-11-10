@@ -1963,7 +1963,7 @@ Everything else works normally. Your graphics card was detected as:
 
     [GPU]
 
-To try them back on, one at a time, open Wolf World &gt; Graphics Helper. If a shader still will not build, WolfViewer simply switches it off again. The Graphics Helper can also save a diagnostic file to send to Wolf Territories support.
+To try them back on, one at a time, open Wolf World &gt; Graphics Helper.[WATER_HINT] If a shader still will not build, WolfViewer simply switches it off again. The Graphics Helper can also save a diagnostic file to send to Wolf Territories support.
     <tag>fail</tag>
     <usetemplate
      ignoretext="Graphics features were switched off so the viewer could start"
@@ -2928,6 +2928,64 @@ The age check is done once, on wolf-grid.com. General, Moderate and Adult region
   <!-- [ADULT CONTENT 2026-10-26] W81 Region/Estate > Region > Rating "Adult Content" chosen by someone whose age check is
        not complete (SimulatorFeatures WolfAgeVerified false). Paul 2026-10-26: whoever sets Adult Content must be verified
        (the website enforces it too). "Verify my age" opens WolfAgeCheckURL. -->
+  <!-- [VULKAN BACKEND 2026-11-08] wolfvkbridge.cpp: the Vulkan renderer could not be set up at this start, so the
+       viewer carried on with OpenGL and the setting went back to OpenGL. Plain words; the technical reason is at the end. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanFellBack"
+   type="alertmodal">
+    <unique/>
+WolfViewer could not start its Vulkan renderer on this computer, so it is drawing with OpenGL as before. Nothing else has changed. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+
+Reason: [REASON]
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <!-- [VULKAN BACKEND 2026-11-08] Wolf World > Vulkan Renderer: the choice was made; it applies at the next start -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanChosen"
+   type="alertmodal">
+    <unique/>
+WolfViewer will use its Vulkan renderer the next time you start it. Nothing changes until then. If Vulkan cannot start on this computer, WolfViewer goes back to OpenGL by itself and tells you.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanOpenGLChosen"
+   type="alertmodal">
+    <unique/>
+WolfViewer will draw with OpenGL the next time you start it.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <!-- [VULKAN BACKEND 2026-11-08] the previous Vulkan start never reached the login screen (WolfVulkanStartOK stayed off) -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanFellBackLastStart"
+   type="alertmodal">
+    <unique/>
+The last time WolfViewer started with the Vulkan renderer it did not get as far as the login screen, so this time it is drawing with OpenGL as before. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <!-- [RUN-TIME STOP 2026-11-09] the Vulkan renderer stopped during the last run and its message box could not be shown
+       (wolfvkbridge.cpp stopAtRunTime / decideBackend): said once at the next start, which draws with OpenGL -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanStoppedLastRun"
+   type="alertmodal">
+    <unique/>
+The last time WolfViewer was running, its Vulkan renderer stopped working on your graphics card ([REASON]). WolfViewer is using OpenGL now. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
   <notification
    icon="alertmodal.tga"
    name="WolfAdultContentOwnerVerify"

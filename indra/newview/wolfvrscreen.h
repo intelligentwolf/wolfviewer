@@ -35,6 +35,11 @@ namespace WolfVRScreen
      *  world, without the UI, goes to the headset (render_ui(), right after gPipeline.renderFinalize()). */
     void applyHeadCamera();
     void captureWorld();
+    /** [VR BIG SCREEN VULKAN 2026-11-09] Vulkan mode only, while Big Screen streams: keeps a copy of the finished world
+     *  (the back buffer after renderFinalize) before WolfVkBridge::captureWorld moves it to the shared world layer and
+     *  clears it for the UI, so captureFrame can hand the headset the same composite the Vulkan window shows
+     *  (llviewerdisplay.cpp render_ui, between captureWorld and WolfVkBridge::captureWorld). */
+    void keepWorldForBigScreen();
     void pumpInput();
     /** [VR STEREO 2026-11-04] The main loop's display(): one pass, or one per eye when the headset is in VR 3D Mode
      *  with stereo on (llappviewer.cpp, in place of display()). */
@@ -59,6 +64,9 @@ namespace WolfVRScreen
     bool cameraZoomSlider(float& value);
     bool setCameraZoomSlider(float value);
     void cameraPreset();
+    /** [VR CAMERA BACK 2026-11-09] LLAgentCamera::resetView reset the desktop camera's pan and orbit (the avatar moved,
+     *  flew, sat, teleported ...): the headset's view comes back to the avatar the same way (VR 3D Mode only). */
+    void cameraReset();
     /** [VR SHARED CULL 2026-11-04] The right eye's pass reuses the left eye's cull and state sort (WolfVRShareCull). */
     bool shareCull();
     /** [VR SHADOWS 2026-11-04] The left eye keeps last frame's shadow maps this frame (WolfVRShadowEvery). */

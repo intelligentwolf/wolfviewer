@@ -332,6 +332,15 @@ public:
     bool mUniformsDirty;
     LLShaderFeatures mFeatures;
     std::vector< std::pair< std::string, GLenum > > mShaderFiles;
+    // [VULKAN BACKEND 2026-11-08] the shared objects attachShaderFeatures attached, in order (vertex ones first, as it attaches them):
+    // with mShaderFiles this names every unit of the program, so the Vulkan backend can compute the program's SPIR-V key
+    // (WolfVkShaderMirror) even when the GL program came from the binary cache and no object was compiled.
+    std::vector< std::pair< std::string, GLenum > > mWolfVkFeatureObjects;
+    // [VULKAN BACKEND 2026-11-08] the Vulkan side of this program (null in OpenGL mode or when no SPIR-V exists); every uniform
+    // setter below also writes into it, so the viewer's shader code needs no change (wolfvkshader.h)
+    class WolfVkShaderMirror* mWolfVk = nullptr;
+    void wolfVkSet(U32 index, int kind, U32 count, const void* data, bool transpose = false);   // by reserved uniform index
+    void wolfVkSet(const LLStaticHashedString& uniform, int kind, U32 count, const void* data, bool transpose = false);
     std::string mName;
     typedef std::map<std::string, std::string> defines_map_t; //NOTE: this must be an ordered map to maintain hash consistency
     defines_map_t mDefines;

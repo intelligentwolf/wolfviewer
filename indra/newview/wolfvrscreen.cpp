@@ -52,6 +52,8 @@
 #include "wolfvrstream.h"
 #include "wolfvrui.h"
 #include "pipeline.h"
+#include "wolfvkbridge.h"   // [VR BIG SCREEN VULKAN 2026-11-09] WolfVkBridge::isActive
+#include "llframetimer.h"
 
 #include <cmath>
 #include <cstring>
@@ -98,9 +100,35 @@ namespace
         U32 dw = 0, dh = 0;
         bool depth_ok = false;     // the first blit worked (checked once)
         bool depth_checked = false;
+        GLenum dfmt = 0;               // [VR DEPTH FORMAT 2026-11-09] drb's format, and the scene depth it was matched to
+        GLuint dsrc = 0;
+        U32 dsrc_w = 0, dsrc_h = 0;
         std::vector<float> dbuf;
     };
     Capture gCap;
+
+    // [VR BIG SCREEN VULKAN 2026-11-09] Big Screen in Vulkan mode (docs/VULKAN_BACKEND.md 8.2i, 8.2p). There the window's
+    // picture is not in GL's back buffer at swap: WolfVkBridge::captureWorld blits the finished world into the shared
+    // world layer and clears the back buffer to (0,0,0,0), GL draws the HUD and UI onto that, and Vulkan composites
+    // world + UI into the swapchain (wolfvk/compositeF.glsl: out = ui.rgb + world.rgb * (1 - ui.a); the UI is drawn
+    // with BT_ALPHA onto a cleared buffer, so it is premultiplied). The reverted 11-08 attempt changed the hand-over
+    // itself; this one never touches the shared layers or their semaphores: GL keeps its OWN copy of the world
+    // (keepWorldForBigScreen, before the clear) and, at swap, rebuilds the same composite in GL from that copy and the
+    // back buffer (the UI), then the usual Big Screen copy reads that instead of the back buffer. The textures follow
+    // the window's size every frame, so a resize needs nothing else. Only while Big Screen streams in Vulkan mode.
+    // Not reproduced: the debug views WolfVulkanDebugTint / WolfVulkanShowSceneOnly and the debug overlay
+    // WolfVulkanOverlayFullbright (off by default), which draw in Vulkan only.
+    struct VkBigScreen
+    {
+        GLuint world_tex = 0, world_fbo = 0, ui_tex = 0, ui_fbo = 0, out_tex = 0, out_fbo = 0;
+        GLuint prog = 0, vao = 0;
+        GLint loc_world = -1, loc_ui = -1;
+        S32 w = 0, h = 0;
+        U32 kept_frame = 0;
+        bool kept = false;
+        bool failed = false;       // the program would not build: Big Screen in Vulkan mode stays UI-only, said once
+    };
+    VkBigScreen gVkBig;
 
     // [VR MOVE 2026-11-03] Paul: "left controller must move him". The headset's left stick, held now, and jump/fly
     // up/down held, applied every frame like held movement keys (llviewerinput.cpp agent_push_forwardbackward:
@@ -606,6 +634,184 @@ namespace
         gCap = Capture();
     }
 
+    // [VR BIG SCREEN VULKAN 2026-11-09] the three window-sized textures; the program is kept across sizes
+    void freeVkBigTextures()
+    {
+        GLuint fbos[3] = { gVkBig.world_fbo, gVkBig.ui_fbo, gVkBig.out_fbo };
+        GLuint texs[3] = { gVkBig.world_tex, gVkBig.ui_tex, gVkBig.out_tex };
+        for (int i = 0; i < 3; ++i)
+        {
+            if (fbos[i]) glDeleteFramebuffers(1, &fbos[i]);
+            if (texs[i]) glDeleteTextures(1, &texs[i]);
+        }
+        gVkBig.world_fbo = gVkBig.ui_fbo = gVkBig.out_fbo = 0;
+        gVkBig.world_tex = gVkBig.ui_tex = gVkBig.out_tex = 0;
+        gVkBig.w = gVkBig.h = 0;
+        gVkBig.kept = false;
+    }
+
+    void freeVkBig()
+    {
+        freeVkBigTextures();
+        if (gVkBig.prog) glDeleteProgram(gVkBig.prog);
+        if (gVkBig.vao) glDeleteVertexArrays(1, &gVkBig.vao);
+        gVkBig = VkBigScreen();
+    }
+
+    // one RGBA8 texture + framebuffer of the window's size (GL 4.6 core 8.5 glTexImage2D, 9.2.8 glFramebufferTexture2D)
+    bool makeVkBigTarget(GLuint& tex, GLuint& fbo, S32 w, S32 h)
+    {
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glGenFramebuffers(1, &fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+        const bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return ok;
+    }
+
+    // the composite program: compositeF.glsl's arithmetic for the world and UI layers (its scene layer is empty unless
+    // the debug overlay is on), one texel per pixel (texelFetch: the Vulkan composite samples each layer at its texel
+    // centres, compositeV.glsl), on a full-screen triangle from gl_VertexID (GLSL 3.30 core: the viewer's context)
+    bool makeVkBigProgram()
+    {
+        if (gVkBig.prog) return true;
+        if (gVkBig.failed) return false;
+        static const char* const vert =
+            "#version 330 core\n"
+            "void main()\n"
+            "{\n"
+            "    vec2 p = vec2((gl_VertexID == 1) ? 3.0 : -1.0, (gl_VertexID == 2) ? 3.0 : -1.0);\n"
+            "    gl_Position = vec4(p, 0.0, 1.0);\n"
+            "}\n";
+        static const char* const frag =
+            "#version 330 core\n"
+            "uniform sampler2D worldTex;\n"
+            "uniform sampler2D uiTex;\n"
+            "out vec4 frag_color;\n"
+            "void main()\n"
+            "{\n"
+            "    ivec2 p = ivec2(gl_FragCoord.xy);\n"
+            "    vec4 world = texelFetch(worldTex, p, 0);\n"
+            "    vec4 ui = texelFetch(uiTex, p, 0);\n"
+            "    frag_color = vec4(ui.rgb + world.rgb * (1.0 - ui.a), 1.0);\n"
+            "}\n";
+        auto compile = [](GLenum type, const char* src) -> GLuint
+        {
+            GLuint s = glCreateShader(type);
+            glShaderSource(s, 1, &src, nullptr);
+            glCompileShader(s);
+            GLint ok = GL_FALSE;
+            glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+            if (ok != GL_TRUE)
+            {
+                char log[512] = { 0 };
+                glGetShaderInfoLog(s, sizeof(log) - 1, nullptr, log);
+                LL_WARNS("WolfVR") << "Big Screen (Vulkan mode) composite shader: " << log << LL_ENDL;
+                glDeleteShader(s);
+                return 0;
+            }
+            return s;
+        };
+        const GLuint vs = compile(GL_VERTEX_SHADER, vert);
+        const GLuint fs = vs ? compile(GL_FRAGMENT_SHADER, frag) : 0;
+        GLint linked = GL_FALSE;
+        if (vs && fs)
+        {
+            gVkBig.prog = glCreateProgram();
+            glAttachShader(gVkBig.prog, vs);
+            glAttachShader(gVkBig.prog, fs);
+            glLinkProgram(gVkBig.prog);
+            glGetProgramiv(gVkBig.prog, GL_LINK_STATUS, &linked);
+        }
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        if (linked != GL_TRUE)
+        {
+            if (gVkBig.prog) glDeleteProgram(gVkBig.prog);
+            gVkBig.prog = 0;
+            gVkBig.failed = true;
+            LL_WARNS("WolfVR") << "Big Screen (Vulkan mode): the composite program would not build; the headset gets the interface without the world" << LL_ENDL;
+            return false;
+        }
+        gVkBig.loc_world = glGetUniformLocation(gVkBig.prog, "worldTex");
+        gVkBig.loc_ui = glGetUniformLocation(gVkBig.prog, "uiTex");
+        glGenVertexArrays(1, &gVkBig.vao);   // core profile: a vertex array must be bound to draw, even with no arrays
+        return true;
+    }
+
+    // the window-sized textures for this frame's window size (false: not available, Big Screen reads the back buffer)
+    bool ensureVkBigTextures(S32 w, S32 h)
+    {
+        if (w <= 0 || h <= 0) return false;
+        if (gVkBig.w == w && gVkBig.h == h && gVkBig.out_fbo) return true;
+        freeVkBigTextures();
+        if (!makeVkBigTarget(gVkBig.world_tex, gVkBig.world_fbo, w, h) || !makeVkBigTarget(gVkBig.ui_tex, gVkBig.ui_fbo, w, h)
+            || !makeVkBigTarget(gVkBig.out_tex, gVkBig.out_fbo, w, h))
+        {
+            freeVkBigTextures();
+            return false;
+        }
+        gVkBig.w = w;
+        gVkBig.h = h;
+        return true;
+    }
+
+    // [VR BIG SCREEN VULKAN] at swap: out = composite(kept world, back buffer's UI), as compositeF.glsl. Returns the
+    // framebuffer to read the Big Screen picture from, or 0 (the back buffer, as in OpenGL mode) when there is no kept
+    // world for this very frame (the login screen: the whole frame is then in the back buffer, as Vulkan composites it
+    // over an empty world) or the program is not available. The caller has saved the read/draw framebuffers and turned
+    // GL_FRAMEBUFFER_SRGB and the scissor test off (captureInto).
+    GLuint composeVkBigScreen(S32 ww, S32 wh)
+    {
+        const bool kept = gVkBig.kept && gVkBig.kept_frame == LLFrameTimer::getFrameCount();
+        gVkBig.kept = false;
+        if (!kept || ww != gVkBig.w || wh != gVkBig.h || !makeVkBigProgram()) return 0;
+        // the UI: the back buffer as it is at swap (GL 4.6 core 18.3.1 glBlitFramebuffer, same size, so 1:1)
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        glReadBuffer(GL_BACK);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gVkBig.ui_fbo);
+        glBlitFramebuffer(0, 0, ww, wh, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        // the pass, with every state it touches put back afterwards
+        GLint prog = 0, vao = 0, active = 0, tex0 = 0, tex1 = 0, vp[4] = { 0, 0, 0, 0 };
+        glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+        glGetIntegerv(GL_VIEWPORT, vp);
+        glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex0);
+        glActiveTexture(GL_TEXTURE1); glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex1);
+        const GLboolean blend = glIsEnabled(GL_BLEND), depth = glIsEnabled(GL_DEPTH_TEST), cull = glIsEnabled(GL_CULL_FACE);
+        GLboolean mask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+        glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gVkBig.out_fbo);
+        glDisable(GL_BLEND); glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glViewport(0, 0, ww, wh);
+        glUseProgram(gVkBig.prog);
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, gVkBig.world_tex);
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, gVkBig.ui_tex);
+        glUniform1i(gVkBig.loc_world, 0);
+        glUniform1i(gVkBig.loc_ui, 1);
+        glBindVertexArray(gVkBig.vao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray((GLuint)vao);
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, (GLuint)tex1);
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, (GLuint)tex0);
+        glActiveTexture((GLenum)active);
+        glUseProgram((GLuint)prog);
+        glViewport(vp[0], vp[1], vp[2], vp[3]);
+        glColorMask(mask[0], mask[1], mask[2], mask[3]);
+        if (blend) glEnable(GL_BLEND);
+        if (depth) glEnable(GL_DEPTH_TEST);
+        if (cull) glEnable(GL_CULL_FACE);
+        return gVkBig.out_fbo;
+    }
+
     bool makeGl(U32 w, U32 h)
     {
         freeGl();
@@ -642,7 +848,10 @@ namespace
             gCap.dh = h / 8;
             glGenRenderbuffers(1, &gCap.drb);
             glBindRenderbuffer(GL_RENDERBUFFER, gCap.drb);
-            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, (GLsizei)gCap.dw, (GLsizei)gCap.dh);
+            // the scene depth's own format (llrendertarget.cpp:100/:334: 32F under WolfDebugGLDepth32F), as the blit needs
+            gCap.dfmt = LLRenderTarget::sWolfDepth32F ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT24;
+            gCap.dsrc = 0;   // matched to the scene depth's real format at the first copy (matchDepthFormat)
+            glRenderbufferStorage(GL_RENDERBUFFER, gCap.dfmt, (GLsizei)gCap.dw, (GLsizei)gCap.dh);
             glBindRenderbuffer(GL_RENDERBUFFER, 0);
             glGenFramebuffers(1, &gCap.dfbo);
             glBindFramebuffer(GL_FRAMEBUFFER, gCap.dfbo);
@@ -665,6 +874,85 @@ namespace
             }
         }
         return true;
+    }
+
+    // [VR DEPTH FORMAT 2026-11-09] The depth blit needs the same format on both sides (glBlitFramebuffer, OpenGL 4.6 core
+    // 18.3.1). The scene depth is GL_DEPTH_COMPONENT24 in OpenGL mode (llrendertarget.cpp:334) but in Vulkan mode, with the
+    // G-buffer shared, it is the Vulkan-shared GL_DEPTH_COMPONENT32F (llrendertarget.cpp:316 allocateDepth ->
+    // wolfvkgbuffer.cpp depthTexture), so the 24-bit copy failed ("3D Mode: the scene's depth could not be copied",
+    // seen 2026-11-09 in a Vulkan session) and every picture went without depth. The renderbuffer now takes the scene
+    // depth's own internal format, asked of GL once per depth texture (id and size: the targets are remade on a resize
+    // or a sharing change), never per frame. A change of format re-runs the one-time copy check.
+    void matchDepthFormat(GLuint tex, U32 w, U32 h)
+    {
+        if (!gCap.drb || !tex || (tex == gCap.dsrc && w == gCap.dsrc_w && h == gCap.dsrc_h)) return;
+        gCap.dsrc = tex; gCap.dsrc_w = w; gCap.dsrc_h = h;
+        GLint bound = 0, fmt = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &fmt);
+        glBindTexture(GL_TEXTURE_2D, (GLuint)bound);
+        if (fmt != GL_DEPTH_COMPONENT24 && fmt != GL_DEPTH_COMPONENT32F) return;   // not a format this copy knows: as it was
+        if ((GLenum)fmt == gCap.dfmt) return;
+        gCap.dfmt = (GLenum)fmt;
+        glBindRenderbuffer(GL_RENDERBUFFER, gCap.drb);
+        glRenderbufferStorage(GL_RENDERBUFFER, gCap.dfmt, (GLsizei)gCap.dw, (GLsizei)gCap.dh);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        gCap.depth_checked = false;   // check the copy again with the new format
+        gCap.depth_ok = false;
+        LL_INFOS("WolfVR") << "3D Mode: the depth copy now uses the scene depth's own format ("
+                           << (fmt == GL_DEPTH_COMPONENT32F ? "32-bit float" : "24-bit") << ")" << LL_ENDL;
+    }
+
+    constexpr F64 kReadbackWaitMs = 25.0;   // [VR READBACK WAIT 2026-11-09] displayFrame: at most this long between the eyes
+
+    // [VR OVERSCAN 2026-11-09] Paul (Quest 3): "When I turn my head to the left and right there's a tiny bit of lag, where
+    // there is black"; the stretched edge the page tried next "was a bit worse". Each eye is drawn for a window wider
+    // than the headset's own, so a turn shows real picture past the edge of its view until the next picture comes.
+    // The headset page sends its eyes' own windows (wolfvr.js eyesOf, "pt"); until 2026-11-09 the page widened them by
+    // 4 degrees itself (wolfvr.js EYE_MARGIN_DEG, 2026-11-04) into the same picture size, so that margin cost the middle
+    // sharpness. Now the viewer widens them, by as much as the picture's extra pixels pay for (WolfVROverscan:
+    // WolfVRStream::frameSize's eye over WolfVRStream::eyeBase): the middle keeps exactly the sharpness the 4-degree
+    // window had at the step's own size - kOldMarginDeg of margin at eyeBase pixels, and whatever the extra pixels
+    // reach on top. One margin for all four edges and both eyes (the left eye's, solved on the horizontal span, the
+    // widest: a Quest 3 eye is 58 + 44 degrees across). The widened windows go out in the picture's header, so the page
+    // places the picture over exactly the window it was drawn for.
+    constexpr F32 kOldMarginDeg = 4.f;    // wolfvr.js EYE_MARGIN_DEG, 2026-11-04 to 2026-11-09
+    constexpr F32 kMaxEdgeDeg = 80.f;     // no edge further than this from straight ahead (tangents run away)
+    F32 widenTan(F32 t, F32 sign, F32 deg)
+    {
+        const F32 a = std::atan(t) + sign * deg * DEG_TO_RAD;
+        return std::tan(llclamp(a, -kMaxEdgeDeg * DEG_TO_RAD, kMaxEdgeDeg * DEG_TO_RAD));
+    }
+    F32 gOverscanDeg = 0.f;   // the margin used for the last pose (the log line below)
+    void widenEyeWindows(wolfvr::HeadPose& hp)
+    {
+        U32 pw = 0, ph = 0;
+        WolfVRStream::frameSize(pw, ph);
+        const U32 base = WolfVRStream::eyeBase();
+        const F32* w = hp.tan;   // the left eye's [L, R, B, T]
+        auto span = [&](F32 deg) { return widenTan(w[1], 1.f, deg) - widenTan(w[0], -1.f, deg); };
+        F32 deg = kOldMarginDeg;
+        if (base > 0 && ph > base && w[1] > w[0])
+        {
+            // pixels per tangent unit across the middle, as the 4-degree window at the base size had: the margin whose
+            // span the bigger picture covers at that same density (span grows with the margin: halve the interval)
+            const F32 want = span(kOldMarginDeg) * (F32)ph / (F32)base;
+            F32 lo = kOldMarginDeg, hi = 40.f;
+            for (int i = 0; i < 24; ++i)
+            {
+                const F32 mid = 0.5f * (lo + hi);
+                (span(mid) < want ? lo : hi) = mid;
+            }
+            deg = lo;
+        }
+        for (int i = 0; i < 8; ++i) hp.tan[i] = widenTan(hp.tan[i], (i % 2) ? 1.f : -1.f, deg);   // L, R, B, T: -, +, -, +
+        if (std::fabs(deg - gOverscanDeg) > 0.25f)
+        {
+            gOverscanDeg = deg;
+            LL_INFOS("WolfVR") << llformat("VR eye: windows widened %.1f degrees each way (picture eye %u px, %u px before "
+                                           "WolfVROverscan)", deg, ph, base) << LL_ENDL;   // once per change, not per frame
+        }
     }
 
     // The window, fitted into the picture keeping its shape (centred, black bars).
@@ -766,6 +1054,7 @@ namespace WolfVRScreen
 void release()
 {
     freeGl();
+    freeVkBig();   // [VR BIG SCREEN VULKAN 2026-11-09]
     freeLayer();
     if (!gEyeBound) gEyeTarget.release();   // [VR EYE OFFSCREEN] (never while bound: release() runs between frames)
     gEyeTargetFailed = false;
@@ -1145,9 +1434,28 @@ void maybeDumpEyes(const std::vector<uint8_t>& rgba, U32 w, U32 h, const wolfvr:
 // region, the biggest single delay between the head moving and the headset showing it. Now the NEWEST read whose copy
 // has finished is collected as soon as it has: right after it is issued (rarely done yet), and at the start of the next
 // frame (pumpInput, the idle loop), by when the GPU has finished it. An older one still in flight is dropped for it.
-void collectCapture()
+void collectCapture(F64 wait_ms = 0.0)
 {
     if (!gCap.fbo || !gCap.w || !gCap.h) return;
+    if (wait_ms > 0.0)
+    {
+        // [VR READBACK WAIT 2026-11-09] wait (at most wait_ms) for the newest picture's copy; see displayFrame
+        int newest = -1;
+        for (int i = 0; i < kSlots; ++i)
+            if (gCap.fence[i] && (newest < 0 || gCap.order[i] > gCap.order[newest])) newest = i;
+        if (newest >= 0)
+        {
+            const F64 w0 = LLTimer::getTotalSeconds();
+            const GLenum r = glClientWaitSync(gCap.fence[newest], 0, (GLuint64)(wait_ms * 1000000.0));
+            static F64 s_logged = 0;   // debug only (WolfVRDebugStats): what the wait did, every 2 s at most
+            if (gDebugStats && w0 - s_logged > 2.0)
+            {
+                s_logged = w0;
+                LL_INFOS("WolfVR") << llformat("VR readback wait: %.1f ms, %s, picture issued %.1f ms before", (LLTimer::getTotalSeconds() - w0) * 1000.0,
+                                               r == GL_TIMEOUT_EXPIRED ? "not done" : "done", (w0 - gCap.issued[newest]) * 1000.0) << LL_ENDL;
+            }
+        }
+    }
     int best = -1;
     for (int i = 0; i < kSlots; ++i)
     {
@@ -1244,10 +1552,12 @@ void captureInto(bool world)
     if (srgb) glDisable(GL_FRAMEBUFFER_SRGB);       // copy the pixels as they are on screen
     if (scissor) glDisable(GL_SCISSOR_TEST);
 
+    // [VR BIG SCREEN VULKAN 2026-11-09] Vulkan mode: the window's composite rebuilt in GL (composeVkBigScreen); 0 = back buffer
+    const GLuint vk_big = (!world && WolfVkBridge::isActive()) ? composeVkBigScreen(ww, wh) : 0;
     // 1. back buffer -> picture texture, scaled, upside down (so the read below comes out top row first)
     // [VR EYE OFFSCREEN] or the eye's own target, the same size as the picture's eye: copied 1:1
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, from_eye ? gEyeTarget.getFBO() : 0);
-    glReadBuffer(from_eye ? GL_COLOR_ATTACHMENT0 : GL_BACK);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, from_eye ? gEyeTarget.getFBO() : vk_big);
+    glReadBuffer((from_eye || vk_big) ? GL_COLOR_ATTACHMENT0 : GL_BACK);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gCap.fbo);
     if (refit)
     {
@@ -1272,6 +1582,7 @@ void captureInto(bool world)
         const F32 sx = (F32)ds.getWidth() / (F32)llmax(1, wv.getWidth()), sy = (F32)ds.getHeight() / (F32)llmax(1, wv.getHeight());
         const S32 half = stereo ? (S32)gCap.dw / 2 : (S32)gCap.dw;   // the centre view has the whole grid
         const S32 eye_x = stereo ? gEye * half : 0;
+        matchDepthFormat(ds.getDepth(), ds.getWidth(), ds.getHeight());   // [VR DEPTH FORMAT 2026-11-09]
         if (!gCap.depth_checked) while (glGetError() != GL_NO_ERROR) {}   // once: start the check clean
         glBindFramebuffer(GL_READ_FRAMEBUFFER, ds.getFBO());
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gCap.dfbo);
@@ -1449,6 +1760,23 @@ void cameraPreset()
         gRig.fwd.normVec();
     }
     gViewLog = "preset";
+}
+
+// [VR CAMERA BACK 2026-11-09] Paul (Quest 3, 15:36-15:40Z): "I used the camera move then flew then landed then tried to
+// see the floaters - and I couldn't see them in VR because they were on the ground with my avatar but my camera was
+// still in the air" (his log: the VR camera controls left the view 4.86 m up and nothing brought it back). On the desktop
+// the camera rejoins the avatar as soon as it moves: LLAgent::moveAt / moveLeft / moveUp / moveYaw call
+// LLAgentCamera::resetView(true, false, true), which (FSResetCameraOnMovement, on by default) clears the pan and orbit
+// (resetPanDiff, resetOrbitDiff). This is called from there, in the same place, so the headset's view does the same:
+// the camera controls' moves (gView fwd / left / up) go back to 0. Kept, as the desktop keeps them: the zoom (the desktop's
+// mCameraZoomFraction is not reset by resetView) and the rig's heading - in VR the orbit-left and the right stick's
+// comfort turn share it, and snapping it back would swing the world round the resident (the nausea rule, buildMap).
+void cameraReset()
+{
+    if (!gCameraOverridden || !gMap.valid) return;
+    if (gView.fwd == 0.f && gView.left == 0.f && gView.up == 0.f) return;   // nothing to undo (called every frame of a walk)
+    gView.fwd = gView.left = gView.up = 0.f;
+    gViewLog = "the avatar moved: back to the avatar";
 }
 // [VR SHARED CULL 2026-11-04] The eyes are 6.4 cm apart and the left eye is culled with the smallest SYMMETRIC frustum
 // that holds its window (applyHeadCamera), which on a headset whose eyes mirror each other also holds the right eye's
@@ -1689,6 +2017,7 @@ void displayFrame()
         display();
         unbindEyeTarget();   // [VR EYE OFFSCREEN] a pass that returned before captureWorld
         gDisplaySwapBuffers = true;
+        if (world && gCap.fbo) collectCapture();   // [VR READBACK POLL 2026-11-09] (see the stereo pass below)
     }
     else
     {
@@ -1697,6 +2026,14 @@ void displayFrame()
         bindEyeTarget();     // [VR EYE OFFSCREEN]
         display();
         unbindEyeTarget();
+        // [VR READBACK WAIT 2026-11-09] the last picture, waited for here up to kReadbackWaitMs. Measured in the emulator
+        // (os-vk1, Vulkan mode, 1360 px eyes): readback 44 ms of a 119 ms total, the graphics card finishing 20-21 ms after
+        // the processor ("GPU done after the CPU by 20 ms") - so the picture was not done at any look before the next
+        // right eye. When the card is behind like that the processor stops and waits for it later in this same frame
+        // anyway (LLPipeline's sky composite reads the sky back: "wolfsky composite R 22 ms" in the same log), so
+        // waiting for the picture here first costs the frame nothing and sends the picture about one frame sooner;
+        // when the card keeps up (OpenGL mode there: 3 ms behind) the copy is done already and nothing waits.
+        if (gCap.fbo) collectCapture(kReadbackWaitMs);
         t1 = LLTimer::getTotalSeconds();
         gStamp.eye0 = wolfvr::clockMs();   // [VR STAGES]
         gEye = 1;
@@ -1708,6 +2045,14 @@ void displayFrame()
         unbindEyeTarget();
         gEye = -1;
         gDisplaySwapBuffers = true;
+        // [VR READBACK POLL 2026-11-09] Paul (Quest 3): "When I turn my head to the left and right there's a tiny bit of
+        // lag, where there is black". His stages (15:32-15:34Z): readback 38-47 ms of a 140-180 ms head-pose-to-shown,
+        // about one whole frame (22-27 frames a second). The picture is read at the end of the right eye's world and was
+        // looked for again only at the start of the next frame (pumpInput) and at the next right eye: when the graphics
+        // card had not finished it by the next frame's start ("GPU done after the CPU by 18 ms" in his log), it waited a
+        // whole frame. Looked for here too, after the right eye's UI and swap, and between the next frame's eyes (above;
+        // about 20 ms after the read, past the card's 17-21 ms lag) - never waited for: the same copy, made sooner.
+        if (gCap.fbo) collectCapture();
         if (gParts.since > 0)   // [VR FRAME PARTS] counting this frame
         {
             const F64 t2 = LLTimer::getTotalSeconds();
@@ -1747,6 +2092,35 @@ void displayFrame()
 }
 
 void captureFrame() { captureInto(false); }
+
+void keepWorldForBigScreen()
+{
+    // [VR BIG SCREEN VULKAN 2026-11-09] see VkBigScreen. Only what captureInto(false) would use this frame: Vulkan mode,
+    // Big Screen streaming, a real frame (not a snapshot or reflection-probe pass)
+    if (!WolfVkBridge::isActive() || gSnapshot || gCubeSnapshot || !gViewerWindow || !WolfVRStream::bigScreenWanted()) return;
+    const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
+    if (!ensureVkBigTextures(ww, wh)) return;
+    GLint read_fb = 0, draw_fb = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
+    const GLboolean srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (srgb) glDisable(GL_FRAMEBUFFER_SRGB);   // the pixels as they are, as WolfVkShare::glCaptureWorld copies them
+    if (scissor) glDisable(GL_SCISSOR_TEST);
+    // the same copy WolfVkShare::glCaptureWorld makes into the shared world layer (default framebuffer, GL_BACK, the
+    // window's rectangle from 0,0), into GL's own texture
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gVkBig.world_fbo);
+    glBlitFramebuffer(0, 0, ww, wh, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fb);
+    if (read_fb == 0) glReadBuffer(GL_BACK);
+    if (srgb) glEnable(GL_FRAMEBUFFER_SRGB);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    gVkBig.kept = true;
+    gVkBig.kept_frame = LLFrameTimer::getFrameCount();
+}
 
 void captureWorld()
 {
@@ -1804,7 +2178,11 @@ void applyHeadCamera()
         gSavedView = cam->getView();
         gCameraOverridden = true;
     }
-    if (gEye != 1) buildMap(hp);   // once per frame: the right eye keeps the left eye's head
+    if (gEye != 1)
+    {
+        buildMap(hp);   // once per frame: the right eye keeps the left eye's head
+        if (hp.has_tan) widenEyeWindows(hp);   // [VR OVERSCAN 2026-11-09] (the right eye's gFramePose already is)
+    }
     LLVector3 at = headToAgent(gMap, 0.f, 0.f, -1.f), lft = headToAgent(gMap, -1.f, 0.f, 0.f), u = headToAgent(gMap, 0.f, 1.f, 0.f);
     at.normVec(); lft.normVec(); u.normVec();
     cam->setAxes(at, lft, u);

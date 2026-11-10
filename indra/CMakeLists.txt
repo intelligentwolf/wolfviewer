@@ -223,3 +223,6 @@ if (LL_TESTS)
   add_subdirectory(${INTEGRATION_TESTS_PREFIX}integration_tests)
 endif (LL_TESTS)
 
+# <WolfViewer 2026-11-08> ctest from the build root reaches the shader pre-compile check registered in
+# newview (indra/cmake/ShaderCheck.cmake): `ctest -R shader_check`. The LL_TESTS programs have their own runner.
+enable_testing()

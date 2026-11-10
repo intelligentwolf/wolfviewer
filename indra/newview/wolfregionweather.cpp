@@ -246,6 +246,7 @@ void WolfRegionWeather::onRegionChanged()
     readBirds(LLSD());       // [BIRDS 2026-11-02/] the old region's answer
     readSounds(LLSD());      // [NATURE SOUNDS 2026-11-03/] the old region's answer
     readSeaLife(LLSD());     // [SEA LIFE 2026-11-03/] the old region's answer
+    readUnderSea(LLSD());    // [UNDERSEA 2026-11-09/] the old region's answer
     mProfile = WolfWeatherProfile();
     mKind.clear();
     mRegionName.clear();
@@ -481,6 +482,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     self.readBirds(r);   // [BIRDS 2026-11-02/]
     self.readSounds(r);  // [NATURE SOUNDS 2026-11-03/]
     self.readSeaLife(r); // [SEA LIFE 2026-11-03/]
+    self.readUnderSea(r); // [UNDERSEA 2026-11-09/]
     self.mLastError.clear();
     if (include_parcel && self.mParcelGate.accepts(parcel_generation))
     {
@@ -740,6 +742,60 @@ void WolfRegionWeather::setSeaLifeLocal(const LLUUID& region, bool on)
     mSeaLifeOn = on;
 }
 
+// [UNDERSEA 2026-11-09] ticket 652. Source: wolfstorm/php/weather.php region_payload `undersea` = wolf_ambient_lib.php
+// wa_undersea_payload {ambient, default (true), on, warm?, cold?, lat?, near?}. No block, or anything malformed, is off; a
+// missing or malformed `warm` / `cold` is 0 (wa_undersea_climate's "no place": a temperate sea).
+void WolfRegionWeather::readUnderSea(const LLSD& row)
+{
+    const LLSD b = (row.isMap() && row.has("undersea") && row["undersea"].isMap()) ? row["undersea"] : LLSD();
+    const bool on = b.isMap() && b["on"].isBoolean() && b["on"].asBoolean();
+    auto unit = [&b, on](const char* key) -> F32
+    {
+        if (!on) return 0.f;
+        const LLSD& v = b[key];
+        if (v.isReal()) return llclamp((F32)v.asReal(), 0.f, 1.f);
+        if (v.isInteger()) return llclamp((F32)v.asInteger(), 0.f, 1.f);
+        return 0.f;
+    };
+    const F32 warm = unit("warm"), cold = unit("cold");
+    if (on != mUnderSeaOn || fabsf(warm - mUnderSeaWarm) > 0.005f || fabsf(cold - mUnderSeaCold) > 0.005f)
+    {
+        LL_INFOS("WolfUnderSea") << "fish and sea plants on this region: " << (on ? "on" : "off");
+        if (on) LL_CONT << ", warm " << warm << ", cold " << cold << " (latitude "
+                        << (b["lat"].isDefined() ? b["lat"].asString() : std::string("-")) << ")";
+        LL_CONT << LL_ENDL;
+    }
+    mUnderSeaOn = on;
+    mUnderSeaWarm = warm;
+    mUnderSeaCold = cold;
+    // Source: wolf_ambient_lib.php wa_undersea_near (lower-case uuid strings, only while on). Malformed entries are left out.
+    mUnderSeaNear.clear();
+    if (on && b["near"].isArray())
+    {
+        for (LLSD::array_const_iterator it = b["near"].beginArray(); it != b["near"].endArray(); ++it)
+        {
+            LLUUID id;
+            if (it->isString() && id.set(it->asString(), false) && id.notNull()) mUnderSeaNear.push_back(id);
+        }
+    }
+}
+
+bool WolfRegionWeather::underSeaNear(const LLUUID& id) const
+{
+    if (!underSeaAllowed()) return false;
+    return std::find(mUnderSeaNear.begin(), mUnderSeaNear.end(), id) != mUnderSeaNear.end();
+}
+
+void WolfRegionWeather::setUnderSeaLocal(const LLUUID& region, bool on)
+{
+    LLViewerRegion* here = gAgent.getRegion();
+    if (!here || here->getRegionID() != region) return;
+    LL_INFOS("WolfUnderSea") << "fish and sea plants on this region: " << (on ? "on" : "off") << " (saved in Region/Estate)" << LL_ENDL;
+    // turned on here: the climate and the neighbours come with the next weather read (within the minute)
+    if (!on || !mUnderSeaOn) { mUnderSeaWarm = 0.f; mUnderSeaCold = 0.f; mUnderSeaNear.clear(); }
+    mUnderSeaOn = on;
+}
+
 void WolfRegionWeather::applyPush(const LLSD& row)
 {
     if (!row.isMap()) return;
@@ -760,6 +816,7 @@ void WolfRegionWeather::applyPush(const LLSD& row)
     readBirds(row);   // [BIRDS 2026-11-02/] the POST reply is region_payload too
     readSounds(row);  // [NATURE SOUNDS 2026-11-03/] so is `sounds`
     readSeaLife(row); // [SEA LIFE 2026-11-03/] and `sealife`
+    readUnderSea(row); // [UNDERSEA 2026-11-09/] and `undersea`
     recomputeParcelApplies();
     mLastError.clear();
     mGeneration++;
@@ -920,6 +977,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
             self.readBirds(reply);   // [BIRDS 2026-11-02/]
             self.readSounds(reply);  // [NATURE SOUNDS 2026-11-03/]
             self.readSeaLife(reply); // [SEA LIFE 2026-11-03/]
+            self.readUnderSea(reply); // [UNDERSEA 2026-11-09/]
             self.recomputeParcelApplies();
         }
     }

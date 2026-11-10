@@ -50,6 +50,9 @@ namespace WolfVRStream
     bool bigScreenWanted();
     /** The picture size the stream was started with (0 x 0 when off). */
     void frameSize(U32& width, U32& height);
+    /** [VR OVERSCAN 2026-11-09] VR 3D Mode stereo: the quality step's eye size before WolfVROverscan made it bigger (0 until
+     *  a stereo stream was sized); frameSize's height over this is the overscan really applied. */
+    U32 eyeBase();
     /** Hands one picture (frameSize RGBA, top row first) to the stream; `rgba` gets back a buffer to reuse. */
     void submitFrame(std::vector<uint8_t>& rgba, double capture_ms);
     /** The headset's pointer and key events since the last call. */

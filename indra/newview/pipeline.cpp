@@ -149,6 +149,7 @@
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
+#include "wolfundersea.h"   // [UNDERSEA 2026-11-09/] ticket 652
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfterrainlevels.h"   // [WOLF SKY LEVELS 2026-11-05/]
@@ -859,6 +860,7 @@ void LLPipeline::resizeScreenTexture()
 bool LLPipeline::allocateScreenBuffer(U32 resX, U32 resY)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_DISPLAY;
+    LLRenderTarget::sWolfDepth32F = gSavedSettings.getBOOL("WolfDebugGLDepth32F");   // [AMD PERF 2026-11-08/] testing (llrendertarget.h)
     eFBOStatus ret = doAllocateScreenBuffer(resX, resY);
 
     return ret == FBO_SUCCESS_FULLRES;
@@ -1437,6 +1439,7 @@ void LLPipeline::releaseSpotShadowTargets()
 void LLPipeline::createGLBuffers()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_PIPELINE;
+    LLRenderTarget::sWolfDepth32F = gSavedSettings.getBOOL("WolfDebugGLDepth32F");   // [AMD PERF 2026-11-08/] testing (llrendertarget.h)
     stop_glerror();
     assertInitialized();
 
@@ -4419,6 +4422,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
             WolfFarGround::instance().renderDeferred();
             WolfBirds::instance().renderDeferred();   // [BIRDS 2026-11-02/] ticket 445: the wild birds, lit as the scene
             WolfSeaLife::instance().renderDeferred(); // [SEA LIFE 2026-11-03/] ticket 499: dolphins, whales and their spray
+            WolfUnderSea::instance().renderDeferred(); // [UNDERSEA 2026-11-09/] ticket 652: sea plants, fish and sharks
             WolfSwimBubbles::instance().renderDeferred();   // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles under the water
         }
         // </WolfViewer>

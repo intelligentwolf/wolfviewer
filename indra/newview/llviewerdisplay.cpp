@@ -28,6 +28,7 @@
 
 #include "llviewerdisplay.h"
 #include "wolfvrscreen.h"   // [VR BIG SCREEN 2026-11-03/] WolfVRScreen::captureFrame
+#include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/] WolfVkBridge::present in place of swapBuffers in Vulkan mode
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> far clip grows with height
 #include "wolfbuilder.h"       // [WOLF BUILDER 2026-10-13/] the builder's grid on the ground
 
@@ -176,6 +177,20 @@ namespace
         sFpsPrevBucketFrames = bucket_frames;
         sFpsPrevBucketSecs = usual_bucket ? bucket_secs : 0.0;
         sRealFps = (F32)(frames / secs);   // secs >= 0.5 here
+        // [VULKAN BACKEND 2026-11-08] WolfLogFrameRate: the same real frame rate in the log once a second, for the test rig's
+        // OpenGL-against-Vulkan measurements (the GL-call counter cannot see Vulkan's presents; this counts both).
+        static LLCachedControl<bool> log_rate(gSavedSettings, "WolfLogFrameRate", false);
+        if (log_rate)
+        {
+            static F64 last_log = 0.0;
+            const F64 now = LLTimer::getTotalSeconds();
+            if (now - last_log >= 1.0)
+            {
+                last_log = now;
+                LL_INFOS("WolfFrameRate") << "presented " << gPresentedFrameCount << " frames, real fps " << sRealFps
+                                          << ", frame ms " << (sRealFps > 0.f ? 1000.f / sRealFps : 0.f) << LL_ENDL;
+            }
+        }
     }
 }
 
@@ -210,6 +225,7 @@ void render_hud_attachments();
 void render_ui_3d();
 void render_ui_2d();
 void render_disconnected_background();
+void wolf_set_ui_coverage(bool on);   // [VULKAN UI COVERAGE 2026-11-09/] llrender.cpp (not in llrender.h: no whole-viewer rebuild)
 
 void getProfileStatsContext(boost::json::object& stats);
 std::string getProfileStatsFilename();
@@ -270,8 +286,13 @@ void display_startup()
     if (gViewerWindow && gViewerWindow->getWindow())
     {
         WolfVRScreen::captureFrame();   // [VR BIG SCREEN 2026-11-03/] the login screen goes to the headset too
-        gViewerWindow->getWindow()->swapBuffers();
+        // [VULKAN BACKEND 2026-11-08] in Vulkan mode the swapchain presents the frame and GL's swap is skipped
+        if (!WolfVkBridge::present())
+        {
+            gViewerWindow->getWindow()->swapBuffers();
+        }
         wolf_frame_presented();   // [WolfViewer 2026-10-16]
+        WolfVkBridge::onLoginScreenShown();   // [VULKAN BACKEND 2026-11-08/] a frame of the login screen is on the screen: the first-run marker
     }
 
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -605,7 +626,10 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Resize Window");
         gGL.flush();
         glClear(GL_COLOR_BUFFER_BIT);
-        gViewerWindow->getWindow()->swapBuffers();
+        if (!WolfVkBridge::present())   // [VULKAN BACKEND 2026-11-08/]
+        {
+            gViewerWindow->getWindow()->swapBuffers();
+        }
         wolf_frame_presented();   // [WolfViewer 2026-10-16]
         LLPipeline::refreshCachedSettings();
         gPipeline.resizeScreenTexture();
@@ -1790,8 +1814,17 @@ void render_ui(F32 zoom_factor, int subfield)
     { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui finalize R" : "ui finalize L");   // [VR FRAME PARTS 2026-11-05]
       gPipeline.renderFinalize(); }
     WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
+    // [VULKAN HUD 2026-11-09] In Vulkan mode the world layer is taken AFTER the HUD attachments (below), so a worn HUD is
+    // drawn by OpenGL straight over the world in the default framebuffer, exactly as in OpenGL mode, and only the 2D/3D UI
+    // goes onto the cleared UI layer. Taken before them, the HUD landed on that cleared (0,0,0,0) layer with alpha writes
+    // off (LLPipeline::renderGeomPostDeferred, setColorMask(true, false)) and its opaque faces carrying their shininess as
+    // alpha (llface.cpp getGeometryVolume, SHININESS_TO_ALPHA), so the composite (ui.rgb + world.rgb * (1 - ui.a)) ADDED
+    // the HUD to the world instead of covering it. (The Vulkan scene layer that the composite lays between them is the
+    // debug-only WolfVulkanOverlayFullbright, off by default.)
     if (WolfVRScreen::uiSkipped())   // [VR STEREO 2026-11-04/] the left eye's pass (or a paused desktop): no HUD or UI
     {
+        WolfVRScreen::keepWorldForBigScreen();   // [VR BIG SCREEN VULKAN 2026-11-09/] Vulkan mode: GL's own copy before the clear below
+        WolfVkBridge::captureWorld();   // [VULKAN BACKEND 2026-11-08/] the world layer for the Vulkan composite (no HUD in this pass)
         WolfVRScreen::captureLayer();   // [VR LEAN 2026-11-04/] the headset's HUDs layer still (a no-op for the left eye)
         if (!gSnapshot)
         {
@@ -1817,6 +1850,26 @@ void render_ui(F32 zoom_factor, int subfield)
         LLGLState::checkStates();
         { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui hudattachments R" : "ui hudattachments L");   // [VR FRAME PARTS 2026-11-05]
           render_hud_attachments(); }
+        // [VULKAN UI COVERAGE 2026-11-09] Paul, after his VR test: "the floaters are looking very transparent". In Vulkan
+        // mode the HUD and the UI are drawn onto a cleared (0,0,0,0) layer (WolfVkScene::captureWorld) that Vulkan lays
+        // over the world by the UI's own alpha (compositeF.glsl: ui.rgb + world.rgb * (1 - ui.a)), so the UI must write
+        // its alpha. It does when nothing else has changed the colour mask since renderFinalize (pipeline.cpp
+        // setColorMask(true, true)); but with a HUD attachment worn (Paul wears one: "HUD objects count: 1" in his log)
+        // render_hud_attachments ends in LLPipeline::renderGeomPostDeferred, which leaves alpha writes OFF
+        // (setColorMask(true, false), pipeline.cpp:4513). Every window, notice and name tag then kept alpha 0 and was
+        // added on top of the world instead of covering it. Not VR's doing (it only happened that he looked after VR).
+        // Alpha writes back on for the 3D and 2D UI in Vulkan mode - the state a frame without a HUD has - and written as
+        // coverage (wolf_set_ui_coverage below: before, a window of alpha a left a * a, so even without a HUD a 95%
+        // window let ~10% of the world through instead of 5%). OpenGL mode is left exactly as it was (its window's alpha
+        // is not used).
+        if (WolfVkBridge::isActive()) gGL.setColorMask(true, true);
+        // [VULKAN HUD 2026-11-09] (see above) the world layer now, the HUD in it; the UI then lands on a clear layer
+        WolfVRScreen::keepWorldForBigScreen();   // [VR BIG SCREEN VULKAN 2026-11-09/] Vulkan mode: GL's own copy before the clear
+        WolfVkBridge::captureWorld();   // [VULKAN BACKEND 2026-11-08/] the world layer for the Vulkan composite
+        // [VULKAN UI COVERAGE 2026-11-09] the UI goes onto that clear layer: its alpha written as coverage
+        // (llrender.cpp wolf_set_ui_coverage), so the composite shows it as OpenGL draws it over the world; switched off
+        // again at the end, before the headset's own layer (captureLayer draws into its own targets with its own rules)
+        if (WolfVkBridge::isActive()) wolf_set_ui_coverage(true);
 
         LLGLState::checkStates();
 
@@ -1869,6 +1922,7 @@ void render_ui(F32 zoom_factor, int subfield)
         { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui debugtext R" : "ui debugtext L");   // [VR FRAME PARTS 2026-11-05]
           gViewerWindow->drawDebugText(); }
     }
+    wolf_set_ui_coverage(false);   // [VULKAN UI COVERAGE 2026-11-09/] (see above)
     WolfVRScreen::captureLayer();   // [VR HUD LAYER 2026-11-04/] the HUDs and floaters again, on their own, for the headset
 
     if (!gSnapshot)
@@ -1883,10 +1937,15 @@ void swap()
     LLPerfStats::RecordSceneTime T ( LLPerfStats::StatType_t::RENDER_SWAP ); // render time capture - Swap buffer time - can signify excessive data transfer to/from GPU
     LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Swap");
     LL_PROFILE_GPU_ZONE("swap");
+    WolfVkBridge::LoopTimer wolf_loop_swap(WolfVkBridge::LoopStage::kSwap);   // [AMD PERF 2026-11-09/] WolfLogFrameRate
     if (gDisplaySwapBuffers)
     {
         WolfVRScreen::captureFrame();   // [VR BIG SCREEN 2026-11-03/] the finished frame, UI and all, to the headset
-        gViewerWindow->getWindow()->swapBuffers();
+        WolfVkBridge::glFrameStamp();   // [AMD PERF 2026-11-08/] WolfLogFrameRate: OpenGL's GPU time a frame, both renderers
+        if (!WolfVkBridge::present())   // [VULKAN BACKEND 2026-11-08/] Vulkan presents; GL's swap is skipped
+        {
+            gViewerWindow->getWindow()->swapBuffers();
+        }
         wolf_frame_presented();   // [WolfViewer 2026-10-16] a snapshot's render (gDisplaySwapBuffers false) is not shown
     }
     gDisplaySwapBuffers = true;

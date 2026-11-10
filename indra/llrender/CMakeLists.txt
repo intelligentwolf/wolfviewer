@@ -8,6 +8,7 @@ include(FreeType)
 include(LLCommon)
 include(LLImage)
 include(LLWindow)
+include(Vulkan)   # [VULKAN BACKEND 2026-11-08/] vendored headers for vk/
 
 set(llrender_SOURCE_FILES
     llcubemap.cpp
@@ -34,7 +35,23 @@ set(llrender_SOURCE_FILES
     lluiimage.cpp
     llvertexbuffer.cpp
     llglcommonfunc.cpp
+    vk/wolfvkloader.cpp
+    vk/wolfvkallocator.cpp
+    vk/wolfvkdevice.cpp
+    vk/wolfvksurface.cpp
+    vk/wolfvkswapchain.cpp
+    vk/wolfvkspirv.cpp
+    vk/wolfvkbuffer.cpp
+    vk/wolfvkimage.cpp
+    vk/wolfvkrendertarget.cpp
+    vk/wolfvkpipeline.cpp
+    vk/wolfvkshader.cpp
     )
+
+# [VULKAN BACKEND 2026-11-08] the Metal-layer helper for VK_EXT_metal_surface is Objective-C++
+if (DARWIN)
+  list(APPEND llrender_SOURCE_FILES vk/wolfvksurface_macosx.mm)
+endif (DARWIN)
     
 set(llrender_HEADER_FILES
     CMakeLists.txt
@@ -66,6 +83,17 @@ set(llrender_HEADER_FILES
     lluiimage.inl
     llvertexbuffer.h
     llglcommonfunc.h
+    vk/wolfvkloader.h
+    vk/wolfvkallocator.h
+    vk/wolfvkdevice.h
+    vk/wolfvksurface.h
+    vk/wolfvkswapchain.h
+    vk/wolfvkspirv.h
+    vk/wolfvkbuffer.h
+    vk/wolfvkimage.h
+    vk/wolfvkrendertarget.h
+    vk/wolfvkpipeline.h
+    vk/wolfvkshader.h
     )
 
 list(APPEND llrender_SOURCE_FILES ${llrender_HEADER_FILES})
@@ -104,6 +132,7 @@ target_link_libraries(llrender
         llxml
         llwindow
         ll::freetype
+        ll::vulkan_headers
         OpenGL::GL
         OpenGL::GLU
         )

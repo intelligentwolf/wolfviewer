@@ -27,6 +27,10 @@ const KEY = 'wolfvr.layer.';
 // [VR PANELS 2026-11-04] each viewer window as its own panel: radius, the angle a whole window's width would span (a
 // little bigger than on the band, for reading), the gap kept between panels, and how many cut-outs the band shader takes
 const PANEL_R = 1.3, PANEL_SCALE = 1.25, PANEL_GAP = 3 * Math.PI / 180, MAX_CUTS = 12;
+// [VR UI IN FRONT 2026-11-09] a window reopens where it was last only if that is within this angle of where the resident
+// looks: a Quest 3 eye's window spans -58..+44 degrees across (tangents L -1.6003 / R 0.9657, VR_HANDOVER.md section 6),
+// so 40 degrees either side keeps the panel's middle in view
+const PANEL_BACK = 40 * Math.PI / 180;
 const CLOSE_ARC = 7 * Math.PI / 180;   // the panel's Close: about 7 degrees wide - a big target
 let closeTex = null;
 function closeTexture() {
@@ -195,7 +199,13 @@ export class VRLayer {
                 const was = this.placed.get(r.k);
                 const hy = this._yawOf(this._head.q);
                 p.c.copy(this._head.p);
-                if (was) { p.yaw = was.yaw; p.c.y = was.y; }
+                // [VR UI IN FRONT 2026-11-09] Paul (Quest 3): "tried to see the floaters - and I couldn't see them in VR".
+                // A window that opens again came back where it was last this session, even when that place is now
+                // beside or behind the resident. It goes back there only while that place is still in front (within
+                // PANEL_BACK of where the resident looks, at a height the grip could have put it); otherwise it opens
+                // in front, as a new window does.
+                const off = was ? Math.atan2(Math.sin(was.yaw - hy), Math.cos(was.yaw - hy)) : 0;
+                if (was && Math.abs(off) <= PANEL_BACK && was.y >= this._head.p.y - 1.0 && was.y <= this._head.p.y + 0.8) { p.yaw = was.yaw; p.c.y = was.y; }
                 else { p.yaw = this._freeYaw(hy, arc); p.c.y = this._head.p.y - 0.08 + (0.5 - (y0 + y1) / 2) * 0.5; }
                 mesh.position.copy(p.c);
                 mesh.rotation.set(0, p.yaw, 0);

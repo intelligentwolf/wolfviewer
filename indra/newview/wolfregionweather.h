@@ -210,6 +210,22 @@ public:
      *  at the next minute's poll. Ignored for any region but the agent's. */
     void setSeaLifeLocal(const LLUUID& region, bool on);
 
+    /** [UNDERSEA 2026-11-09] ticket 652: weather.php's `undersea` block for this region (wolfstorm/php/wolf_ambient_lib.php
+     *  wa_undersea_payload: {ambient, default (true), on} and, while on, {warm, cold, lat, near}). Sea plants and fish live
+     *  in the sea unless the estate owner or a manager switched them off; no block (an older grid) or no row yet is off.
+     *  wolfundersea.cpp draws them. */
+    bool underSeaAllowed() const { return mHaveRow && mUnderSeaOn; }
+    /** [UNDERSEA 2026-11-09] 0..1: how tropical the region's sea is (corals, reef fish, sharks) and how cold (kelp and rock,
+     *  few seagrass meadows); wa_undersea_climate from the place's latitude. Both 0 when the place is not known. */
+    F32 underSeaWarm() const { return (mHaveRow && mUnderSeaOn) ? mUnderSeaWarm : 0.f; }
+    F32 underSeaCold() const { return (mHaveRow && mUnderSeaOn) ? mUnderSeaCold : 0.f; }
+    /** [UNDERSEA 2026-11-09] Whether the region `id` round this one may hold this region's plants and fish: this region's
+     *  undersea life is on and `id` is in `undersea.near` (wa_undersea_near: the regions within 150 m whose own switch is on). */
+    bool underSeaNear(const LLUUID& id) const;
+    /** [UNDERSEA 2026-11-09] Region/Estate saved a new choice for `region` (wolfpassingplanes.cpp): show it now instead of at
+     *  the next minute's poll. Ignored for any region but the agent's. */
+    void setUnderSeaLocal(const LLUUID& region, bool on);
+
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
 
@@ -233,6 +249,7 @@ private:
     void readBirds(const LLSD& row);     ///< [BIRDS 2026-11-02/] weather.php region payload `birds` (absent = no birds)
     void readSounds(const LLSD& row);    ///< [NATURE SOUNDS 2026-11-03/] weather.php region payload `sounds` (absent = off)
     void readSeaLife(const LLSD& row);   ///< [SEA LIFE 2026-11-03/] weather.php region payload `sealife` (absent = off)
+    void readUnderSea(const LLSD& row);  ///< [UNDERSEA 2026-11-09/] weather.php region payload `undersea` (absent = off)
 
     bool               mHaveRow = false;
     bool               mBirdsOn = false;        // [BIRDS 2026-11-02/] weather.php `birds.on`
@@ -242,6 +259,10 @@ private:
     bool               mSeaLifeOn = false;      // [SEA LIFE 2026-11-03/] weather.php `sealife.on`
     F32                mSeaLifeDolphins = 1.f;  // [SEA LIFE 2026-11-03/] weather.php `sealife.dolphins`, 0..1
     std::vector<LLUUID> mSeaLifeNear;           // [SEA LIFE EASY 2026-11-06/] weather.php `sealife.near`
+    bool               mUnderSeaOn = false;     // [UNDERSEA 2026-11-09/] weather.php `undersea.on`
+    F32                mUnderSeaWarm = 0.f;     // [UNDERSEA 2026-11-09/] weather.php `undersea.warm`, 0..1
+    F32                mUnderSeaCold = 0.f;     // [UNDERSEA 2026-11-09/] weather.php `undersea.cold`, 0..1
+    std::vector<LLUUID> mUnderSeaNear;          // [UNDERSEA 2026-11-09/] weather.php `undersea.near`
     bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
     bool               mAutoEnvSky = false;
     bool               mAutoEnvWeather = false;

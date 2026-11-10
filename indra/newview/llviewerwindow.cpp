@@ -231,6 +231,7 @@
 // [/RLVa:KB]
 #include "wolfai.h"   // [WOLF AI CREDITS 2026-10-24/] handleFocus
 #include "wolfvrscreen.h"   // [VR WORLD POINTER 2026-11-04/] WolfVRScreen::pointerActive
+#include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/] the Vulkan renderer: set up after gGL.init, resize, shutdown
 
 #if LL_WINDOWS
 #include <tchar.h> // For Unicode conversion methods
@@ -2156,6 +2157,10 @@ LLViewerWindow::LLViewerWindow(const Params& p)
         LLError::LLUserWarningMsg::show(LLTrans::getString("MBVideoDrvErr"));
         LL_ERRS() << "gGL not initialized" << LL_ENDL;
     }
+
+    // [VULKAN BACKEND 2026-11-08] gGL knows the OpenGL renderer now (vendor, device UUID): find the Vulkan device, and in
+    // Vulkan mode take the window over (surface, device, swapchain). Falls back to OpenGL with a notice on failure.
+    WolfVkBridge::initAfterGL(mWindow);
     // <FS:Ansariel> Exodus vignette
 
     if (LLFeatureManager::getInstance()->isSafe()
@@ -2667,6 +2672,7 @@ void LLViewerWindow::shutdownGL()
     //--------------------------------------------------------
     // Shutdown GL cleanly.  Order is very important here.
     //--------------------------------------------------------
+    WolfVkBridge::shutdown();   // [VULKAN BACKEND 2026-11-08/] the Vulkan device goes first, while the window still exists
     LLFontGL::destroyDefaultFonts();
     SUBSYSTEM_CLEANUP(LLFontManager);
     stop_glerror();
@@ -2775,6 +2781,7 @@ void LLViewerWindow::reshape(S32 width, S32 height)
     if (!LLApp::isExiting())
     {
         gWindowResized = true;
+        WolfVkBridge::onResize();   // [VULKAN BACKEND 2026-11-08/] the swapchain follows the window
 
         // update our window rectangle
         mWindowRectRaw.mRight = mWindowRectRaw.mLeft + width;

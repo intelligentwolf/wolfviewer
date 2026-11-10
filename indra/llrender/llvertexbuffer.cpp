@@ -682,6 +682,8 @@ U32 LLVertexBuffer::sGLRenderBuffer = 0;
 U32 LLVertexBuffer::sGLRenderIndices = 0;
 U32 LLVertexBuffer::sLastMask = 0;
 U32 LLVertexBuffer::sVertexCount = 0;
+void (*LLVertexBuffer::sWolfVkOnFlush)(LLVertexBuffer*, bool, U32, U32, const U8*) = nullptr;   // [VULKAN BACKEND 2026-11-08/]
+void (*LLVertexBuffer::sWolfVkOnDestroy)(LLVertexBuffer*) = nullptr;                             // [VULKAN BACKEND 2026-11-08/]
 
 // <WolfViewer 2026-11-07 tickets 589/619> the buffer and the shader attribute mask the vertex attribute pointers were
 // last specified for (setupVertexBuffer). sGLRenderBuffer only says which buffer is bound to GL_ARRAY_BUFFER: the pool's
@@ -1101,6 +1103,7 @@ U32 LLVertexBuffer::calcVertexSize(const U32& typemask)
 //virtual
 LLVertexBuffer::~LLVertexBuffer()
 {
+    if (sWolfVkOnDestroy) { sWolfVkOnDestroy(this); }   // [VULKAN BACKEND 2026-11-08/] the Vulkan copy goes first
     if (mMapped)
     { // is on the mapped buffer list but doesn't need to be flushed
         mMapped = false;
@@ -1395,6 +1398,11 @@ U8* LLVertexBuffer::mapIndexBuffer(U32 index, S32 count)
 //  dst -- mMappedData or mMappedIndexData
 void LLVertexBuffer::flush_vbo(GLenum target, U32 start, U32 end, void* data, U8* dst)
 {
+    // [VULKAN BACKEND 2026-11-08] the Vulkan copy of this buffer gets the same bytes (end inclusive, as below)
+    if (sWolfVkOnFlush && (end != 0 || gGLManager.mIsApple))
+    {
+        sWolfVkOnFlush(this, target == GL_ELEMENT_ARRAY_BUFFER, start, end, (const U8*)data);
+    }
     if (gGLManager.mIsApple)
     {
         // on OS X, flush_vbo doesn't actually write to the GL buffer, so be sure to call

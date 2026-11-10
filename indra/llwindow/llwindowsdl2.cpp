@@ -57,6 +57,7 @@ extern LLControlGroup gSavedSettings;
 #ifdef LL_GLIB
 #include <glib.h>
 #endif
+#include <signal.h> // sigaction (OSMessageBoxSDL)
 
 extern "C" {
 # include "fontconfig/fontconfig.h"
@@ -781,7 +782,13 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
     {
         const char* forced = getenv("SDL_VIDEODRIVER");
         const char* wl = getenv("WAYLAND_DISPLAY");
-        if ((!forced || !*forced) && wl && *wl && gSavedSettings.getBOOL("WolfNativeWayland"))
+        // [VULKAN WAYLAND 2026-11-09] not for a start that tries the Vulkan renderer (llwindow.h sWolfAvoidNativeWayland)
+        if ((!forced || !*forced) && wl && *wl && gSavedSettings.getBOOL("WolfNativeWayland") && LLWindow::sWolfAvoidNativeWayland)
+        {
+            LL_INFOS() << "Native Wayland not used this start: the Vulkan renderer is chosen, and it shares the window with "
+                          "OpenGL through XWayland" << LL_ENDL;
+        }
+        else if ((!forced || !*forced) && wl && *wl && gSavedSettings.getBOOL("WolfNativeWayland"))
         {
             SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland,x11");
             // On a laptop with an NVIDIA GPU beside the integrated one (Paul's: RTX 5090 + Radeon
@@ -3136,9 +3143,29 @@ S32 OSMessageBoxSDL(const std::string& text, const std::string& caption, U32 typ
             break;
     }
 
+    // [RUN-TIME STOP 2026-11-09] SDL's Wayland box runs zenity and reads the answer after waitpid() on it
+    // (SDL_waylandmessagebox.c, SDL 2.28.0). LLVivoxVoiceClient's constructor sets SIGCHLD to SIG_IGN (llvoicevivox.cpp,
+    // "Ignoring SIGCHLD should prevent zombies"), so the kernel reaps zenity itself and waitpid() fails with ECHILD: the
+    // box was shown and answered but SDL_ShowMessageBox reported "Waiting on zenity failed: No child processes"
+    // (chain42 nv-r49-stop; the viewer's SigIgn mask had bit 17 set). The default SIGCHLD action is put back only while
+    // the box is up, then the previous one restored.
+    struct sigaction old_chld {};
+    struct sigaction dfl_chld {};
+    dfl_chld.sa_handler = SIG_DFL;
+    sigemptyset(&dfl_chld.sa_mask);
+    const bool chld_swapped = (0 == sigaction(SIGCHLD, &dfl_chld, &old_chld));
+
     int btn{0};
-    if( 0 == SDL_ShowMessageBox( &oData, &btn ) )
+    const int shown = SDL_ShowMessageBox( &oData, &btn );
+    if (chld_swapped)
+    {
+        sigaction(SIGCHLD, &old_chld, nullptr);
+    }
+    if( 0 == shown )
         return btn;
+    // say why no box (SDL_waylandmessagebox.c sets the error for a failed fork, a zenity that could not start or
+    // reported >= 128, and a failed waitpid), so a log shows whether the resident saw anything
+    LL_WARNS() << "SDL_ShowMessageBox failed: " << SDL_GetError() << LL_ENDL;
     return OSBTN_CANCEL;
 }
 
@@ -3289,6 +3316,47 @@ void LLWindowSDL::openFile(const std::string& file_name)
 void *LLWindowSDL::getPlatformWindow()
 {
     return NULL;
+}
+
+// [VULKAN BACKEND 2026-11-08] The Vulkan window surface (llrender/vk/wolfvksurface.cpp) needs the X11 Display and
+// Window, or the Wayland display and wl_surface, of the SDL window. SDL 2.28 (packages/include/SDL2/SDL_version.h:60-62)
+// gives both through SDL_GetWindowWMInfo: SDL_syswm.h:174 info.x11 { display, window } and :295-296 info.wl { display,
+// surface }, the subsystem telling which (SDL_SYSWM_X11 :139, SDL_SYSWM_WAYLAND :143). The same call createContext
+// uses for the X11 clipboard (above, "Grab the window manager specific information").
+bool LLWindowSDL::getNativeHandles(NativeHandles& handles)
+{
+    handles = NativeHandles();
+    if (!mWindow)
+    {
+        return false;
+    }
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(mWindow, &info))
+    {
+        LL_WARNS("Vulkan") << "SDL_GetWindowWMInfo: " << SDL_GetError() << LL_ENDL;
+        return false;
+    }
+#if LL_X11
+    if (info.subsystem == SDL_SYSWM_X11)
+    {
+        handles.mKind = NativeHandles::KIND_X11;
+        handles.mDisplay = info.info.x11.display;
+        handles.mWindow = info.info.x11.window;
+        return true;
+    }
+#endif
+#if defined(SDL_VIDEO_DRIVER_WAYLAND)
+    if (info.subsystem == SDL_SYSWM_WAYLAND)
+    {
+        handles.mKind = NativeHandles::KIND_WAYLAND;
+        handles.mDisplay = info.info.wl.display;
+        handles.mSurface = info.info.wl.surface;
+        return true;
+    }
+#endif
+    LL_WARNS("Vulkan") << "SDL window subsystem " << int(info.subsystem) << " is neither X11 nor Wayland" << LL_ENDL;
+    return false;
 }
 
 // [VR KEYBOARD 2026-11-05] (llwindow.h). SDL_RaiseWindow: on Wayland an xdg-activation request for this window's own

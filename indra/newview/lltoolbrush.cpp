@@ -543,7 +543,13 @@ void LLToolBrushLand::render()
             determineAffectedRegions(regions, spot);
 
             // Now, for each region, render the overlay
-            LLVector3 pos_world = gAgent.getRegion()->getPosRegionFromGlobal(spot);
+            // [WOLF TERRAFORM 2026-11-09] Ticket 577 (Jimmy, SENJA 5120 m): the outline is drawn in agent space, which was the
+            // agent region's frame (stock: gAgent.getRegion()->getPosRegionFromGlobal). On a region wider than 2048 m the agent
+            // origin is rebased near the camera (llagent.h WOLF_ORIGIN_REBASE_*, LLAgent::updateHugeRegionOrigin), so the region
+            // frame is no longer agent space and the lines were drawn 1024 m multiples away, off screen. getPosAgentFromGlobal is
+            // pos - mAgentOriginGlobal, and mAgentOriginGlobal is the region origin whenever no rebase happened (LLAgent::setRegion),
+            // so a normal region gets exactly the stock value.
+            LLVector3 pos_world = gAgent.getPosAgentFromGlobal(spot);
             for(region_list_t::iterator iter = regions.begin();
                 iter != regions.end(); ++iter)
             {

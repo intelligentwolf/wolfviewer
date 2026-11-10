@@ -1446,20 +1446,49 @@ void LLRender::setSceneBlendType(eBlendType type)
     }
 }
 
+// [VULKAN UI COVERAGE 2026-11-09] While on, the two-factor blendFunc writes the destination's alpha as COVERAGE (alpha
+// "over": src.a + dst.a * (1 - src.a); additive blends leave it alone) instead of blending it with the colour's factors
+// (src.a * src.a + ...). For the HUD and UI drawn onto the Vulkan mode's cleared UI layer, which the Vulkan composite
+// lays over the world as premultiplied colour by that alpha (wolfvk compositeF.glsl: ui.rgb + world.rgb * (1 - ui.a)),
+// so a window comes out as OpenGL draws it straight over the world. The colour is blended exactly as before either way.
+// LLRender is the one gGL, so the flag is file-wide. Switched by wolf_set_ui_coverage (below).
+static bool sWolfUICoverage = false;
+
 void LLRender::blendFunc(eBlendFactor sfactor, eBlendFactor dfactor)
 {
     llassert(sfactor < BF_UNDEF);
     llassert(dfactor < BF_UNDEF);
+    // [VULKAN UI COVERAGE 2026-11-09] (wolf_set_ui_coverage) the alpha channel as coverage: "over" for the blends that lay a
+    // colour over what is there (SRC_ALPHA or ONE, ONE_MINUS_SRC_ALPHA), unchanged for additive ones (light adds colour,
+    // it covers nothing); any other blend as before
+    eBlendFactor alpha_s = sfactor, alpha_d = dfactor;
+    if (sWolfUICoverage && (sfactor == BF_SOURCE_ALPHA || sfactor == BF_ONE))
+    {
+        if (dfactor == BF_ONE_MINUS_SOURCE_ALPHA) { alpha_s = BF_ONE; alpha_d = BF_ONE_MINUS_SOURCE_ALPHA; }
+        else if (dfactor == BF_ONE) { alpha_s = BF_ZERO; alpha_d = BF_ONE; }
+    }
     if (mCurrBlendColorSFactor != sfactor || mCurrBlendColorDFactor != dfactor ||
-        mCurrBlendAlphaSFactor != sfactor || mCurrBlendAlphaDFactor != dfactor)
+        mCurrBlendAlphaSFactor != alpha_s || mCurrBlendAlphaDFactor != alpha_d)
     {
         mCurrBlendColorSFactor = sfactor;
-        mCurrBlendAlphaSFactor = sfactor;
+        mCurrBlendAlphaSFactor = alpha_s;
         mCurrBlendColorDFactor = dfactor;
-        mCurrBlendAlphaDFactor = dfactor;
+        mCurrBlendAlphaDFactor = alpha_d;
         flush();
-        glBlendFunc(sGLBlendFactor[sfactor], sGLBlendFactor[dfactor]);
+        if (alpha_s == sfactor && alpha_d == dfactor) glBlendFunc(sGLBlendFactor[sfactor], sGLBlendFactor[dfactor]);
+        else glBlendFuncSeparate(sGLBlendFactor[sfactor], sGLBlendFactor[dfactor], sGLBlendFactor[alpha_s], sGLBlendFactor[alpha_d]);
     }
+}
+
+// [VULKAN UI COVERAGE 2026-11-09] llviewerdisplay.cpp render_ui switches the rule (declared there, kept out of llrender.h
+// so the change does not rebuild the whole viewer). The blend in force is then set again under the new rule: the standard
+// alpha blend (BT_ALPHA), the state the UI code assumes and goes back to after its special blends (setSceneBlendType
+// callers), so the very next draw follows the rule whatever was cached.
+void wolf_set_ui_coverage(bool on)
+{
+    if (sWolfUICoverage == on) return;
+    sWolfUICoverage = on;
+    gGL.setSceneBlendType(LLRender::BT_ALPHA);
 }
 
 void LLRender::blendFunc(eBlendFactor color_sfactor, eBlendFactor color_dfactor,

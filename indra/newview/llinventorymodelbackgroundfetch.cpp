@@ -1539,9 +1539,49 @@ void BGFolderHttpHandler::onCompleted(LLCore::HttpHandle handle, LLCore::HttpRes
 }
 
 
+// [WOLF THUMBNAILS 2026-11-09, ticket 694] Without AIS a folder's picture reaches the viewer in one place only: the
+// "thumbnail" of its entry in the parent's FetchInventoryDescendents2 "categories" (WolfSim FetchInvDescHandler.cs adds
+// it for the cap's own agent; read by LLInventoryCategory::fromLLSD, llinventory.cpp:1388-1406). The stock loop below
+// applies that entry only to a folder that is neither recursive in this request nor complete, so after a relog the
+// pictures of most outfits were dropped: the login walk puts every folder it passes in recursive_cats (bulkFetch
+// "fetch_info.mFetchType >= FT_CONTENT_RECURSIVE"), and a folder fetched before its parent is complete. The cache then
+// kept "no picture" at the current version for good (LLInventoryModel::loadSkeleton keeps a cached thumbnail only while
+// the version matches). This takes just the picture from the entry for a folder we already hold, nothing else.
+// An entry WITHOUT a picture is ambiguous: the picture was removed, or the region could not read the resident's list
+// and answered without pictures (WolfInventoryThumbnailModule ForFetch returns null after 2 s or a grid failure). A
+// removal raises the folder's version (WolfInventoryThumbnailModule BumpVersions), so the picture is cleared only when
+// the listed version differs from the one we hold - a transient grid failure never wipes pictures that are still set.
+// (Each entry's "version" is the folder's, FetchInvDescHandler.cs AddElem_version(invFolder.Version) ->
+// OpenMetaverse osUTF8Const.XMLelement_version_Start "<key>version</key><integer>".)
+static void wolf_take_folder_thumbnail(const LLSD& entry, const LLViewerInventoryCategory* listed)
+{
+    LLViewerInventoryCategory* cat = gInventory.getCategory(listed->getUUID());
+    if (!cat)
+    {
+        return;
+    }
+    const LLUUID& listed_thumbnail = listed->getThumbnailUUID();
+    if (cat->getThumbnailUUID() == listed_thumbnail)
+    {
+        return;
+    }
+    if (listed_thumbnail.isNull()
+        && (!entry.has("version") || entry["version"].asInteger() == cat->getVersion()))
+    {
+        return;
+    }
+    cat->setThumbnailUUID(listed_thumbnail);
+    // Same notification the upload uses (llfloatersimplesnapshot.cpp:148): the outfit gallery, the inventory hover
+    // and the cache written at logout (LLViewerInventoryCategory::exportLLSD) all read the in-memory folder.
+    gInventory.addChangedMask(LLInventoryObserver::INTERNAL, cat->getUUID());
+}
+
 void BGFolderHttpHandler::processData(LLSD& content, LLCore::HttpResponse* response)
 {
     LLInventoryModelBackgroundFetch* fetcher(LLInventoryModelBackgroundFetch::getInstance());
+    // [WOLF THUMBNAILS 2026-11-09, ticket 694] only where the region serves Wolf inventory pictures (the same cap the
+    // Change Item / Folder Image floater uses, llviewerinventory.cpp wolf_post_inventory_thumbnail); stock elsewhere.
+    const bool wolf_thumbnails = !gAgent.getRegionCapability("WolfInventoryThumbnail").empty();
 
     // API V2 and earlier should probably be testing for "error" map
     // in response as an application-level error.
@@ -1625,10 +1665,18 @@ void BGFolderHttpHandler::processData(LLSD& content, LLCore::HttpResponse* respo
                 if (recursive)
                 {
                     fetcher->addRequestAtBack(tcategory->getUUID(), recursive, true);
+                    if (wolf_thumbnails)
+                    {
+                        wolf_take_folder_thumbnail(category, tcategory); // [WOLF THUMBNAILS 2026-11-09, ticket 694]
+                    }
                 }
                 else if (! gInventory.isCategoryComplete(tcategory->getUUID()))
                 {
                     gInventory.updateCategory(tcategory);
+                }
+                else if (wolf_thumbnails)
+                {
+                    wolf_take_folder_thumbnail(category, tcategory); // [WOLF THUMBNAILS 2026-11-09, ticket 694]
                 }
             }
 

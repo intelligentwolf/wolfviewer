@@ -26,6 +26,7 @@
 
 #include "linden_common.h"
 #include "llshadermgr.h"
+#include "vk/wolfvkshader.h"   // [VULKAN BACKEND 2026-11-08/] WolfVkShaderMirror::unitRecipe
 #include "llrender.h"
 #include "llfile.h"
 #include "lldir.h"
@@ -640,6 +641,19 @@ GLuint LLShaderMgr::loadShaderFile(const std::string& filename, S32 & shader_lev
             LL_WARNS("ShaderLoading") << "GLSL Shader file not found: " << open_file_name << LL_ENDL;
         }
         return 0;
+    }
+
+    // [VULKAN BACKEND 2026-11-08] remember how this object was stitched (class found, version line, defines, channels), so the
+    // Vulkan backend can name the SPIR-V the build made for the programs this object joins (WolfVkShaderMirror::create).
+    {
+        const std::string stage = (type == GL_VERTEX_SHADER) ? "vert" : (type == GL_FRAGMENT_SHADER ? "frag" : "geom");
+#if LL_DARWIN
+        const bool old_select = !gGLManager.mIsApple;   // :551-556 / llglslshader.cpp createShader OLD_SELECT
+#else
+        const bool old_select = false;
+#endif
+        mWolfVkUnitRecipes[stage + "|" + filename] = WolfVkShaderMirror::unitRecipe(stage, filename, gpu_class,
+            WolfVkShaderMirror::versionLine(type == GL_GEOMETRY_SHADER), defines, texture_index_channels, gGLManager.mIsAMD, old_select);
     }
 
     //we can't have any lines longer than 1024 characters
@@ -1767,4 +1781,22 @@ void LLShaderMgr::initAttribsAndUniforms()
         }
         dupe_check.insert(mReservedUniforms[i]);
     }
+}
+
+// [VULKAN BACKEND 2026-11-08] The same search loadShaderFile does (:600-627): class shader_level down to 1, the first file that exists.
+bool LLShaderMgr::wolfVkFindShaderClass(const std::string& filename, S32 shader_level, S32& found_level)
+{
+    for (S32 gpu_class = shader_level; gpu_class > 0; gpu_class--)
+    {
+        std::stringstream fname;
+        fname << getShaderDirPrefix();
+        fname << gpu_class << gDirUtilp->getDirDelimiter() << filename;
+        if (gDirUtilp->fileExists(fname.str()))
+        {
+            found_level = gpu_class;
+            return true;
+        }
+    }
+    found_level = 0;
+    return false;
 }

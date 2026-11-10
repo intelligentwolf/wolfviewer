@@ -4352,6 +4352,22 @@ void *LLWindowWin32::getPlatformWindow()
     return (void*)mWindowHandle;
 }
 
+// [VULKAN BACKEND 2026-11-08] vkCreateWin32SurfaceKHR wants the HINSTANCE and HWND (vulkan_win32.h:27-33
+// VkWin32SurfaceCreateInfoKHR { hinstance, hwnd }): mhInstance (GetModuleHandle(NULL), above in the constructor) and
+// the window handle. UNTESTED on this Linux laptop; the Windows CI build compiles it.
+bool LLWindowWin32::getNativeHandles(NativeHandles& handles)
+{
+    handles = NativeHandles();
+    if (!mWindowHandle)
+    {
+        return false;
+    }
+    handles.mKind = NativeHandles::KIND_WIN32;
+    handles.mInstance = mhInstance;
+    handles.mHandle = mWindowHandle;
+    return true;
+}
+
 void LLWindowWin32::bringToFront()
 {
     mWindowThread->post([=]()

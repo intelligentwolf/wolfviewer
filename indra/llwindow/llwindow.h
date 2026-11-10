@@ -191,6 +191,22 @@ public:
 // return a platform-specific window reference (HWND on Windows, WindowRef on the Mac, Gtk window on Linux)
     virtual void *getPlatformWindow() = 0;
 
+    // [VULKAN BACKEND 2026-11-08] The native handles a Vulkan window surface is made from (llrender/vk/wolfvksurface.cpp):
+    // X11 Display* + Window, Wayland wl_display* + wl_surface*, Win32 HINSTANCE + HWND, Cocoa NSView*. Each window
+    // layer fills what it has; false when it has nothing (headless, or a window layer without the information).
+    struct NativeHandles
+    {
+        // [CI 2026-11-09] prefixed: WIN32 is a predefined macro on Windows (MSVC C2143 in CI run 42595764440)
+        enum Kind { KIND_NONE, KIND_X11, KIND_WAYLAND, KIND_WIN32, KIND_COCOA };
+        Kind mKind = KIND_NONE;
+        void* mDisplay = nullptr;        // X11: Display*; Wayland: struct wl_display*
+        unsigned long mWindow = 0;       // X11: Window (an XID)
+        void* mSurface = nullptr;        // Wayland: struct wl_surface*
+        void* mInstance = nullptr;       // Win32: HINSTANCE
+        void* mHandle = nullptr;         // Win32: HWND; Cocoa: NSView* (the GL content view)
+    };
+    virtual bool getNativeHandles(NativeHandles& handles) { handles = NativeHandles(); return false; }
+
 // return the platform-specific window reference we use to initialize llmozlib (HWND on Windows, WindowRef on the Mac, Gtk window on Linux)
     virtual void *getMediaWindow();
 
@@ -203,6 +219,14 @@ public:
     virtual void openFile(const std::string& file_name) {};
 
     static std::vector<std::string> getDynamicFallbackFontList();
+    // [VULKAN WAYLAND 2026-11-09] Set by WolfVkBridge::decideBackend (before the window exists) when this start will try
+    // the Vulkan renderer: LLWindowSDL then does not ask SDL for native Wayland and the window runs through XWayland.
+    // SDL makes an EGL window surface on an OpenGL window's own wl_surface (SDL 2.28.0 src/video/wayland/
+    // SDL_waylandwindow.c:2082-2087), and NVIDIA's Vulkan WSI then fails vkCreateSwapchainKHR on that same surface with
+    // VK_ERROR_SURFACE_LOST_KHR and leaves the Wayland connection broken, which SDL turns into a quit
+    // (SDL_waylandevents.c:372-385; its reconnect is compiled out, SDL_waylandvideo.c:1118) - Paul's 12:06 run.
+    // On XWayland, GLX and the Vulkan Xlib surface share an X window (every Vulkan test so far ran that way).
+    static bool sWolfAvoidNativeWayland;
 
     // Provide native key event data
     virtual LLSD getNativeKeyData() { return LLSD::emptyMap(); }

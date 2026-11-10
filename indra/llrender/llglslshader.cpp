@@ -27,6 +27,7 @@
 #include "linden_common.h"
 
 #include "llglslshader.h"
+#include "vk/wolfvkshader.h"   // [VULKAN BACKEND 2026-11-08/]
 
 #include "llshadermgr.h"
 #include "llfile.h"
@@ -356,6 +357,10 @@ void LLGLSLShader::unload()
 void LLGLSLShader::unloadInternal()
 {
     sInstances.erase(this);
+    // [VULKAN BACKEND 2026-11-08] the Vulkan program goes with the GL one; the unit list is rebuilt by the next createShader
+    delete mWolfVk;
+    mWolfVk = nullptr;
+    mWolfVkFeatureObjects.clear();
 
     stop_glerror();
     mAttribute.clear();
@@ -420,6 +425,7 @@ bool LLGLSLShader::createShader()
     mLightHash = 0xFFFFFFFF;
 
     llassert_always(!mShaderFiles.empty());
+    mWolfVkFeatureObjects.clear();   // [VULKAN BACKEND 2026-11-08/] attachShaderFeatures fills it again below
 
 #if LL_DARWIN
     if(!gGLManager.mIsApple)
@@ -583,6 +589,7 @@ void dumpAttachObject(const char* func_name, GLuint program_object, const std::s
 
 bool LLGLSLShader::attachVertexObject(std::string object_path)
 {
+    mWolfVkFeatureObjects.push_back(std::make_pair(object_path, (GLenum)GL_VERTEX_SHADER));   // [VULKAN BACKEND 2026-11-08/] also when the GL program is a cached binary
     if (LLShaderMgr::instance()->mVertexShaderObjects.count(object_path) > 0)
     {
         stop_glerror();
@@ -602,6 +609,7 @@ bool LLGLSLShader::attachVertexObject(std::string object_path)
 
 bool LLGLSLShader::attachFragmentObject(std::string object_path)
 {
+    mWolfVkFeatureObjects.push_back(std::make_pair(object_path, (GLenum)GL_FRAGMENT_SHADER));   // [VULKAN BACKEND 2026-11-08/] also when the GL program is a cached binary
     if(mUsingBinaryProgram)
         return true;
 
@@ -1328,6 +1336,7 @@ S32 LLGLSLShader::disableTexture(S32 uniform, LLTexUnit::eTextureType mode)
 
 void LLGLSLShader::uniform1i(U32 index, GLint x)
 {
+    GLint wolf_v[1] = { x }; wolfVkSet(index, 4, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
     if (mProgramObject)
@@ -1353,6 +1362,7 @@ void LLGLSLShader::uniform1i(U32 index, GLint x)
 
 void LLGLSLShader::uniform1f(U32 index, GLfloat x)
 {
+    GLfloat wolf_v[1] = { x }; wolfVkSet(index, 0, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1379,6 +1389,7 @@ void LLGLSLShader::uniform1f(U32 index, GLfloat x)
 
 void LLGLSLShader::fastUniform1f(U32 index, GLfloat x)
 {
+    GLfloat wolf_v[1] = { x }; wolfVkSet(index, 0, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
     llassert(mProgramObject);
@@ -1389,6 +1400,7 @@ void LLGLSLShader::fastUniform1f(U32 index, GLfloat x)
 
 void LLGLSLShader::uniform2f(U32 index, GLfloat x, GLfloat y)
 {
+    GLfloat wolf_v[2] = { x, y }; wolfVkSet(index, 1, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1416,6 +1428,7 @@ void LLGLSLShader::uniform2f(U32 index, GLfloat x, GLfloat y)
 
 void LLGLSLShader::uniform3f(U32 index, GLfloat x, GLfloat y, GLfloat z)
 {
+    GLfloat wolf_v[3] = { x, y, z }; wolfVkSet(index, 2, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1443,6 +1456,7 @@ void LLGLSLShader::uniform3f(U32 index, GLfloat x, GLfloat y, GLfloat z)
 
 void LLGLSLShader::uniform4f(U32 index, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
+    GLfloat wolf_v[4] = { x, y, z, w }; wolfVkSet(index, 3, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1470,6 +1484,7 @@ void LLGLSLShader::uniform4f(U32 index, GLfloat x, GLfloat y, GLfloat z, GLfloat
 
 void LLGLSLShader::uniform1iv(U32 index, U32 count, const GLint* v)
 {
+    wolfVkSet(index, 4, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1497,6 +1512,7 @@ void LLGLSLShader::uniform1iv(U32 index, U32 count, const GLint* v)
 
 void LLGLSLShader::uniform4iv(U32 index, U32 count, const GLint* v)
 {
+    wolfVkSet(index, 6, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1525,6 +1541,7 @@ void LLGLSLShader::uniform4iv(U32 index, U32 count, const GLint* v)
 
 void LLGLSLShader::uniform1fv(U32 index, U32 count, const GLfloat* v)
 {
+    wolfVkSet(index, 0, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1552,6 +1569,7 @@ void LLGLSLShader::uniform1fv(U32 index, U32 count, const GLfloat* v)
 
 void LLGLSLShader::uniform2fv(U32 index, U32 count, const GLfloat* v)
 {
+    wolfVkSet(index, 1, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1579,6 +1597,7 @@ void LLGLSLShader::uniform2fv(U32 index, U32 count, const GLfloat* v)
 
 void LLGLSLShader::uniform3fv(U32 index, U32 count, const GLfloat* v)
 {
+    wolfVkSet(index, 2, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1606,6 +1625,7 @@ void LLGLSLShader::uniform3fv(U32 index, U32 count, const GLfloat* v)
 
 void LLGLSLShader::uniform4fv(U32 index, U32 count, const GLfloat* v)
 {
+    wolfVkSet(index, 3, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1634,6 +1654,7 @@ void LLGLSLShader::uniform4fv(U32 index, U32 count, const GLfloat* v)
 
 void LLGLSLShader::uniform4uiv(U32 index, U32 count, const GLuint* v)
 {
+    wolfVkSet(index, 7, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1662,6 +1683,7 @@ void LLGLSLShader::uniform4uiv(U32 index, U32 count, const GLuint* v)
 
 void LLGLSLShader::uniformMatrix2fv(U32 index, U32 count, GLboolean transpose, const GLfloat* v)
 {
+    wolfVkSet(index, 8, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1683,6 +1705,7 @@ void LLGLSLShader::uniformMatrix2fv(U32 index, U32 count, GLboolean transpose, c
 
 void LLGLSLShader::uniformMatrix3fv(U32 index, U32 count, GLboolean transpose, const GLfloat* v)
 {
+    wolfVkSet(index, 9, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1704,6 +1727,7 @@ void LLGLSLShader::uniformMatrix3fv(U32 index, U32 count, GLboolean transpose, c
 
 void LLGLSLShader::uniformMatrix3x4fv(U32 index, U32 count, GLboolean transpose, const GLfloat* v)
 {
+    wolfVkSet(index, 10, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1725,6 +1749,7 @@ void LLGLSLShader::uniformMatrix3x4fv(U32 index, U32 count, GLboolean transpose,
 
 void LLGLSLShader::uniformMatrix4fv(U32 index, U32 count, GLboolean transpose, const GLfloat* v)
 {
+    wolfVkSet(index, 11, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1804,6 +1829,7 @@ GLint LLGLSLShader::getAttribLocation(U32 attrib)
 
 void LLGLSLShader::uniform1i(const LLStaticHashedString& uniform, GLint v)
 {
+    GLint wolf_v[1] = { v }; wolfVkSet(uniform, 4, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1821,6 +1847,7 @@ void LLGLSLShader::uniform1i(const LLStaticHashedString& uniform, GLint v)
 
 void LLGLSLShader::uniform1iv(const LLStaticHashedString& uniform, U32 count, const GLint* v)
 {
+    wolfVkSet(uniform, 4, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1839,6 +1866,7 @@ void LLGLSLShader::uniform1iv(const LLStaticHashedString& uniform, U32 count, co
 
 void LLGLSLShader::uniform4iv(const LLStaticHashedString& uniform, U32 count, const GLint* v)
 {
+    wolfVkSet(uniform, 6, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1857,6 +1885,7 @@ void LLGLSLShader::uniform4iv(const LLStaticHashedString& uniform, U32 count, co
 
 void LLGLSLShader::uniform2i(const LLStaticHashedString& uniform, GLint i, GLint j)
 {
+    GLint wolf_v[2] = { i, j }; wolfVkSet(uniform, 5, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1875,6 +1904,7 @@ void LLGLSLShader::uniform2i(const LLStaticHashedString& uniform, GLint i, GLint
 
 void LLGLSLShader::uniform1f(const LLStaticHashedString& uniform, GLfloat v)
 {
+    GLfloat wolf_v[1] = { v }; wolfVkSet(uniform, 0, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1892,6 +1922,7 @@ void LLGLSLShader::uniform1f(const LLStaticHashedString& uniform, GLfloat v)
 
 void LLGLSLShader::uniform2f(const LLStaticHashedString& uniform, GLfloat x, GLfloat y)
 {
+    GLfloat wolf_v[2] = { x, y }; wolfVkSet(uniform, 1, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1910,6 +1941,7 @@ void LLGLSLShader::uniform2f(const LLStaticHashedString& uniform, GLfloat x, GLf
 
 void LLGLSLShader::uniform3f(const LLStaticHashedString& uniform, GLfloat x, GLfloat y, GLfloat z)
 {
+    GLfloat wolf_v[3] = { x, y, z }; wolfVkSet(uniform, 2, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1927,6 +1959,7 @@ void LLGLSLShader::uniform3f(const LLStaticHashedString& uniform, GLfloat x, GLf
 
 void LLGLSLShader::uniform4f(const LLStaticHashedString& uniform, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
+    GLfloat wolf_v[4] = { x, y, z, w }; wolfVkSet(uniform, 3, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1944,6 +1977,7 @@ void LLGLSLShader::uniform4f(const LLStaticHashedString& uniform, GLfloat x, GLf
 
 void LLGLSLShader::uniform1fv(const LLStaticHashedString& uniform, U32 count, const GLfloat* v)
 {
+    wolfVkSet(uniform, 0, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1961,6 +1995,7 @@ void LLGLSLShader::uniform1fv(const LLStaticHashedString& uniform, U32 count, co
 
 void LLGLSLShader::uniform2fv(const LLStaticHashedString& uniform, U32 count, const GLfloat* v)
 {
+    wolfVkSet(uniform, 1, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1978,6 +2013,7 @@ void LLGLSLShader::uniform2fv(const LLStaticHashedString& uniform, U32 count, co
 
 void LLGLSLShader::uniform3fv(const LLStaticHashedString& uniform, U32 count, const GLfloat* v)
 {
+    wolfVkSet(uniform, 2, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1995,6 +2031,7 @@ void LLGLSLShader::uniform3fv(const LLStaticHashedString& uniform, U32 count, co
 
 void LLGLSLShader::uniform4fv(const LLStaticHashedString& uniform, U32 count, const GLfloat* v)
 {
+    wolfVkSet(uniform, 3, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -2013,6 +2050,7 @@ void LLGLSLShader::uniform4fv(const LLStaticHashedString& uniform, U32 count, co
 
 void LLGLSLShader::uniform4uiv(const LLStaticHashedString& uniform, U32 count, const GLuint* v)
 {
+    wolfVkSet(uniform, 7, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -2031,6 +2069,7 @@ void LLGLSLShader::uniform4uiv(const LLStaticHashedString& uniform, U32 count, c
 
 void LLGLSLShader::uniformMatrix4fv(const LLStaticHashedString& uniform, U32 count, GLboolean transpose, const GLfloat* v)
 {
+    wolfVkSet(uniform, 11, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -2137,3 +2176,21 @@ void LLGLSLShader::setLabel(const char* label) {
     LL_LABEL_OBJECT_GL(GL_PROGRAM, mProgramObject, strlen(label), label);
 }
 #endif
+
+// [VULKAN BACKEND 2026-11-08] Every uniform setter above hands its value here as well; the reserved index becomes the uniform's
+// name (LLShaderMgr::mReservedUniforms, the names the shaders declare) and WolfVkShaderMirror writes it into the std140 block image.
+void LLGLSLShader::wolfVkSet(U32 index, int kind, U32 count, const void* data, bool transpose)
+{
+    if (!mWolfVk) return;
+    const std::vector<std::string>& names = LLShaderMgr::instance()->mReservedUniforms;
+    if (index < names.size())
+    {
+        mWolfVk->set(names[index], static_cast<WolfVkShaderMirror::Kind>(kind), count, data, transpose);
+    }
+}
+
+void LLGLSLShader::wolfVkSet(const LLStaticHashedString& uniform, int kind, U32 count, const void* data, bool transpose)
+{
+    if (!mWolfVk) return;
+    mWolfVk->set(uniform.String(), static_cast<WolfVkShaderMirror::Kind>(kind), count, data, transpose);
+}

@@ -112,6 +112,7 @@ public:
     bool dialogColorPicker(F32 *r, F32 *g, F32 *b ) override;
 
     void *getPlatformWindow() override;
+    bool getNativeHandles(NativeHandles& handles) override;   // [VULKAN BACKEND 2026-11-08/] HINSTANCE + HWND for the Vulkan surface
     void bringToFront() override;
     void focusClient() override;
     void requestKeyboardFocus() override;   // [VR KEYBOARD 2026-11-05]

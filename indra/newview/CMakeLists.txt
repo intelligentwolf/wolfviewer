@@ -50,6 +50,8 @@ include(ViewerMiscLibs)
 #include(ViewerManager) # <FS:Ansariel> Remove VMP
 include(VisualLeakDetector)
 include(VulkanGltf)
+include(ShaderCheck)   # <WolfViewer 2026-11-08> every shader program variant compiled before the viewer builds
+include(VulkanShaders)   # [VULKAN BACKEND 2026-11-08] the same variants as Vulkan SPIR-V for the Vulkan renderer
 include(ZLIBNG)
 include(LLPrimitive)
 include(Growl)
@@ -916,6 +918,7 @@ set(viewer_SOURCE_FILES
     wolfswimbubbles.cpp   # [SWIM BUBBLES 2026-11-02] ticket 346
     wolfnaturesounds.cpp   # [NATURE SOUNDS 2026-11-03] ticket 475
     wolfsealife.cpp   # [SEA LIFE 2026-11-03] ticket 499
+    wolfundersea.cpp   # [UNDERSEA 2026-11-09] ticket 652
     wolfboatrock.cpp
     wolfflight.cpp
     wolfflightdeck.cpp
@@ -935,6 +938,11 @@ set(viewer_SOURCE_FILES
     wolfvrdevice.cpp   # [VR SIMPLE 2026-11-03] the headset page id and browser name (no pairing)
     wolfvrstream.cpp   # [VR PIPE 2026-11-03] the setting, certificate, start/stop
     wolfvrscreen.cpp   # [VR BIG SCREEN 2026-11-03] the viewer window to the headset, its pointer and keys back
+    wolfvkbridge.cpp   # [VULKAN BACKEND 2026-11-08] the Vulkan renderer: settings, swapchain, present, fall-back
+    wolfvkscene.cpp    # [VULKAN BACKEND 2026-11-08] what Vulkan draws each frame
+    wolfvkmirror.cpp   # [VULKAN BACKEND 2026-11-08] Vulkan copies of the GL vertex buffers and textures it draws
+    wolfvkshare.cpp    # [SHARED IMAGES 2026-11-08] layers and semaphores shared between OpenGL and Vulkan
+    wolfvkgbuffer.cpp  # [VULKAN G-BUFFER 2026-11-08] the G-buffer shared with Vulkan, geometry passes drawn by Vulkan
     wolfvraudio.cpp   # [VR AUDIO 2026-11-04] the viewer's sound to the headset, the headset mic into voice
     wolfvrui.cpp   # [VR CONTROLS 2026-11-04] the in-VR action bar: toolbar commands from the headset, their state back
     wolffloatervrstream.cpp   # [VR PIPE 2026-11-03] Wolf World > VR in Your Headset Browser
@@ -1043,6 +1051,7 @@ set(viewer_SOURCE_FILES
     wolfweathersound.cpp
     wolfsoundeffects.cpp   # [SOUND EFFECTS 2026-11-06]
     wolffloatersoundeffects.cpp   # [SOUND EFFECTS 2026-11-06]
+    wolffloatervulkan.cpp   # [VULKAN BACKEND 2026-11-08] Wolf World > Vulkan Renderer
     wolfskis.cpp   # [SKIS 2026-11-06]
     wolfskihud.cpp   # [SKIS 2026-11-06]
     wolffloaterskis.cpp   # [SKIS 2026-11-06]
@@ -1940,6 +1949,7 @@ set(viewer_HEADER_FILES
     wolfswimbubbles.h   # [SWIM BUBBLES 2026-11-02]
     wolfnaturesounds.h   # [NATURE SOUNDS 2026-11-03]
     wolfsealife.h   # [SEA LIFE 2026-11-03]
+    wolfundersea.h   # [UNDERSEA 2026-11-09]
     wolfboatrock.h
     wolfflight.h
     wolfflightdeck.h
@@ -1962,6 +1972,11 @@ set(viewer_HEADER_FILES
     wolfvrdevice.h   # [VR SIMPLE 2026-11-03]
     wolfvrstream.h   # [VR PIPE 2026-11-03]
     wolfvrscreen.h   # [VR BIG SCREEN 2026-11-03]
+    wolfvkbridge.h   # [VULKAN BACKEND 2026-11-08]
+    wolfvkscene.h    # [VULKAN BACKEND 2026-11-08]
+    wolfvkmirror.h   # [VULKAN BACKEND 2026-11-08]
+    wolfvkshare.h    # [SHARED IMAGES 2026-11-08]
+    wolfvkgbuffer.h  # [VULKAN G-BUFFER 2026-11-08]
     wolfvraudio.h   # [VR AUDIO 2026-11-04]
     wolfvrui.h   # [VR CONTROLS 2026-11-04]
     wolffloatervrstream.h   # [VR PIPE 2026-11-03]
@@ -2069,6 +2084,7 @@ set(viewer_HEADER_FILES
     wolfweathersound.h
     wolfsoundeffects.h   # [SOUND EFFECTS 2026-11-06]
     wolffloatersoundeffects.h   # [SOUND EFFECTS 2026-11-06]
+    wolffloatervulkan.h   # [VULKAN BACKEND 2026-11-08]
     wolfskis.h   # [SKIS 2026-11-06]
     wolfskihud.h   # [SKIS 2026-11-06]
     wolffloaterskis.h   # [SKIS 2026-11-06]
@@ -2634,6 +2650,12 @@ add_executable(${VIEWER_BINARY_NAME}
     MACOSX_BUNDLE
     ${viewer_SOURCE_FILES}
     )
+
+# <WolfViewer 2026-11-08> Every shader program variant is compiled and linked with glslangValidator before
+# the viewer binary builds (indra/cmake/ShaderCheck.cmake, scripts/shader_check.py): a shader that will not
+# build fails here, not in a resident's viewer (ticket 643).
+check_shaders(${VIEWER_BINARY_NAME})
+wolfvk_compile_shaders(${VIEWER_BINARY_NAME})   # [VULKAN BACKEND 2026-11-08/] app_settings/shaders/spv
 
 # add package files
 file(GLOB EVENT_HOST_SCRIPT_GLOB_LIST

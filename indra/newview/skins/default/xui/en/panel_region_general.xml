@@ -518,6 +518,30 @@
      visible="false"
      width="442"
      wrap="true" />
+    <!-- [UNDERSEA 2026-11-09] ticket 652: sea plants, fish and (in warm seas) the odd shark under the water
+         (wolfundersea.cpp); on unless switched off -->
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Fish and sea plants on this region"
+     layout="topleft"
+     left="10"
+     name="wolf_undersea_check"
+     tool_tip="Seagrass, kelp and, in warm seas, corals on the sea bed; schools of fish that swim away from swimmers, and now and then a shark in warm water (it never comes near anyone). Only under the sea, never on land, in pools or inside builds. Each visitor sees them in their own viewer and can switch them off for themselves. Saved at once. Only the estate owner or an estate manager can change it."
+     top="654"
+     visible="false"
+     width="460" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="28"
+     name="wolf_undersea_state"
+     top="674"
+     visible="false"
+     width="442"
+     wrap="true" />
     <text
      follows="left|top"
      font="SansSerifSmall"
@@ -525,7 +549,7 @@
      layout="topleft"
      left="28"
      name="wolf_planes_status"
-     top="652"
+     top="692"
      visible="false"
      width="442"
      wrap="true" />
@@ -559,5 +583,9 @@
     <string name="sealife_saved_on">Saved: dolphins and whales may now swim here.</string>
     <string name="sealife_saved_off">Saved: no more dolphins and whales here.</string>
     <string name="sealife_save_failed">Could not save dolphins and whales:</string>
+    <string name="undersea_on_default">On: the default.</string>
+    <string name="undersea_saved_on">Saved: fish and sea plants may now live in this region's sea.</string>
+    <string name="undersea_saved_off">Saved: no more fish and sea plants here.</string>
+    <string name="undersea_save_failed">Could not save fish and sea plants:</string>
     <string name="planes_not_wolf">the region has not confirmed it is on Wolf Territories. Close and reopen this window to try again.</string>
 </panel>

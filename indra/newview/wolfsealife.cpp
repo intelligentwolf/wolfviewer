@@ -258,10 +258,19 @@ F32 WolfSeaLife::depth(const LLVector3& agent) const
         bool ok = false;
         r = neighbourAt(agent, ok);
         if (!r || !ok) return 0.f;
-        const LLSurfacePatch* patch = r->getLand().resolvePatchRegion(agent - r->getOriginAgent());
-        if (!patch || !patch->getHasReceivedData()) return 0.f;
     }
-    const F32 h = r->getLand().resolveHeightRegion(agent - r->getOriginAgent());
+    // [SEALIFE AGROUND 2026-11-08] Paul (Sandbox, 131,127): dolphins and whales swimming through the beach. The agent's
+    // own region skipped this check: LLSurface::getZ (llsurface.cpp:676-691) reads 0 m where no patch exists and a new
+    // patch's heights are zero-filled (llsurfacepatch.cpp initData: new F32[points]()), so until a region's terrain had
+    // come every point read 20 m deep, direct() wanted pods everywhere and pickPlace put the first one, in view, on land
+    // (log-nv-rez8: readSeaLife "on" at 15:50:33Z with 0 of 4096 patches, data from 15:50:43Z). A patch whose terrain
+    // has not come is not sea, on every region. getPatchesPerEdge (llsurface.cpp:634): a surface not created yet has 0
+    // patches and resolvePatchRegion would warn on every call (llsurface.cpp "No patches for current region!").
+    const LLVector3 pos_region = agent - r->getOriginAgent();
+    if (r->getLand().getPatchesPerEdge() <= 0) return 0.f;
+    const LLSurfacePatch* patch = r->getLand().resolvePatchRegion(pos_region);
+    if (!patch || !patch->getHasReceivedData()) return 0.f;
+    const F32 h = r->getLand().resolveHeightRegion(pos_region);
     return std::isfinite(h) ? llmax(0.f, here->getWaterHeight() - h) : 0.f;
 }
 
@@ -1035,6 +1044,29 @@ void WolfSeaLife::move(F32 dt, F64 now, const LLVector3& cam)
     const bool cam_under = camera_under_water();
     LLViewerCamera* camera = LLViewerCamera::getInstance();
     std::vector<S32> live(mGroups.size(), 0);
+    // [SEALIFE AGROUND 2026-11-08] a group aground goes at once, whole. The step gates (moveGroup step_to: >= 0.75 x the
+    // kind's depth, or deeper than here; steer step_to: >= 0.6 x, or deeper) never let a swimming group into water under
+    // half its depth, so a group found there has had the ground change under it: terrain that came after it was placed
+    // (depth(), before this fix), land raised under it on a sandbox, or the water height changed. The gates then refuse
+    // every step (0 > 0 is false, both ways), the pod stands still inside the land, moveDolphin holds it 0.5 m under the
+    // water line and moveWhale on floor_z = w - 2: swimming through the terrain for as long as the camera stays. Sending
+    // it away cannot help (a leaving group keeps the gates, "never aground" in moveGroup), so it is dropped.
+    // Source: wolf_sea_life.js _move (2026-11-08)
+    std::vector<bool> aground(mGroups.size(), false);
+    for (size_t gi = 0; gi < mGroups.size(); ++gi)
+    {
+        const Group& g = mGroups[gi];
+        const F32 limit = SPECIES[g.mKind].mDepthMin * 0.5f;
+        bool stranded = depth(g.mCentre) < limit;
+        for (size_t i = 0; i < mAnimals.size() && !stranded; ++i)
+        {
+            if (mAnimals[i].mGroup == (S32)gi && depth(mAnimals[i].mPos) < limit) stranded = true;
+        }
+        if (!stranded) continue;
+        aground[gi] = true;
+        LL_DEBUGS("WolfSeaLife") << "group " << g.mId << " (kind " << (S32)g.mKind << ") aground at " << g.mCentre
+                                 << ": dropped" << LL_ENDL;
+    }
     size_t keep = 0;
     for (size_t i = 0; i < mAnimals.size(); ++i)
     {
@@ -1042,7 +1074,7 @@ void WolfSeaLife::move(F32 dt, F64 now, const LLVector3& cam)
         const F32 d = (a.mPos - cam).length();
         // [SEA LIFE EASY 2026-11-06] flat: a camera high over the water keeps the pods under it (leaving ones as before).
         // Source: wolf_sea_life.js _move
-        bool drop = dist_flat(a.mPos, cam) > GONE_M * 1.6f;
+        bool drop = dist_flat(a.mPos, cam) > GONE_M * 1.6f || aground[(size_t)a.mGroup];   // [SEALIFE AGROUND 2026-11-08/]
         if (mGroups[(size_t)a.mGroup].mLeaving)
         {
             const bool under = a.mPos.mV[VZ] < w - (a.mKind == DOLPHIN ? 2.5f : 5.f);

@@ -44,6 +44,7 @@
 #include "fsgridhandler.h"
 #include "llworldmapmessage.h"
 #include "message.h"
+#include <algorithm>
 #include <regex>
 
 #define htxhop_log(format, ...) LL_DEBUGS("GridManager") << llformat(format, __VA_ARGS__) << LL_ENDL;
@@ -133,6 +134,7 @@ namespace hypergrid
     {
         std::string key{};
         std::string region_name{};
+        std::string search_key{};   // <WolfViewer 2026-10-31> extract_region of the name actually searched for
         hypergrid::url_callback_t arbitrary_callback;
         std::string arbitrary_slurl{};
         bool arbitrary_teleport{ false };
@@ -144,21 +146,29 @@ namespace hypergrid
 
 bool hypergrid::sendExactNamedRegionRequest(const std::string& region_name, const url_callback_t& callback, const std::string& callback_url, bool teleport)
 {
+    return sendExactNamedRegionRequest(region_name, region_name, callback, callback_url, teleport);
+}
+
+// <WolfViewer 2026-10-31> search_name: see fsworldmapmessage.h. The original function above passes region_name for it.
+bool hypergrid::sendExactNamedRegionRequest(const std::string& region_name, const std::string& search_name, const url_callback_t& callback, const std::string& callback_url, bool teleport)
+{
     if (!LLGridManager::instance().isInOpenSim() || !callback)
     {
         return false;
     }
 
     auto key = extract_region(region_name);
-    if (key.empty())
+    auto search_key = extract_region(search_name);
+    if (key.empty() || search_key.empty())
     {
         return false;
     }
-    region_name_queries.try_emplace(key, AdoptedRegionNameQuery{ key, region_name, callback, callback_url, teleport });
-    htxhop_log("Send Region Name '%s' (key: %s)", region_name.c_str(), key.c_str());
-    sendMapNameRequest(region_name, EXACT_FLAG);
+    region_name_queries.try_emplace(key, AdoptedRegionNameQuery{ key, region_name, search_key, callback, callback_url, teleport });
+    htxhop_log("Send Region Name '%s' (key: %s) searching '%s'", region_name.c_str(), key.c_str(), search_name.c_str());
+    sendMapNameRequest(search_name, EXACT_FLAG);
     return true;
 }
+// </WolfViewer>
 
 bool hypergrid::processExactNamedRegionResponse(LLMessageSystem* msg, U32 agent_flags)
 {
@@ -197,6 +207,14 @@ bool hypergrid::processExactNamedRegionResponse(LLMessageSystem* msg, U32 agent_
         }
 
         auto idx = region_name_queries.find(key);
+        // <WolfViewer 2026-10-31> a query that searched under another name (see fsworldmapmessage.h) and found nothing:
+        // the closing block carries the searched name at handle 0 (MapSearchModule.cs AddFinalBlock).
+        if (idx == region_name_queries.end() && !block.region_handle())
+        {
+            idx = std::find_if(region_name_queries.begin(), region_name_queries.end(),
+                [&key](const auto& entry) { return entry.second.search_key != entry.second.key && entry.second.search_key == key; });
+        }
+        // </WolfViewer>
         if (idx == region_name_queries.end())
         {
             continue;

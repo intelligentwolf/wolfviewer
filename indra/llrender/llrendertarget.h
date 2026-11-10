@@ -63,8 +63,26 @@ class LLRenderTarget
 public:
     // Whether or not to use FBO implementation
     static bool sUseFBO;
+    // [AMD PERF 2026-11-08] testing (WolfDebugGLDepth32F, set by LLPipeline before it allocates): GL's own depth buffers as
+    // GL_DEPTH_COMPONENT32F like the Vulkan-shared one, to measure that format's cost in OpenGL mode alone
+    static bool sWolfDepth32F;
     static U32 sBytesAllocated;
     static U32 sCurFBO;
+
+    // [VULKAN G-BUFFER 2026-11-08] A target marked shared gets its textures from this provider instead of
+    // LLImageGL::setManualImage: GL textures over memory the Vulkan renderer exported (wolfvkgbuffer.cpp), so Vulkan
+    // can draw into the same G-buffer. The provider owns those textures (release() tells it, never deletes them);
+    // colour formats it cannot share come back false and the target falls back to its own texture.
+    struct WolfVkProvider
+    {
+        virtual ~WolfVkProvider() = default;
+        virtual bool colorTexture(LLRenderTarget& target, U32 index, U32& color_fmt, U32& tex) = 0;   // may change color_fmt (GL_RGB16F -> GL_RGBA16F)
+        virtual bool depthTexture(LLRenderTarget& target, U32& tex) = 0;                             // GL_DEPTH_COMPONENT32F
+        virtual void released(LLRenderTarget& target) = 0;
+    };
+    static WolfVkProvider* sWolfVkProvider;
+    void setWolfVkShared(bool shared) { mWolfVkShared = shared; }
+    bool isWolfVkShared() const { return mWolfVkShared; }
     static U32 sCurResX;
     static U32 sCurResY;
 
@@ -185,6 +203,8 @@ protected:
 
     U32 mDepth;
     bool mUseDepth;
+    bool mWolfVkShared = false;          // [VULKAN G-BUFFER 2026-11-08] textures come from sWolfVkProvider
+    bool mWolfVkProvided = false;        // ... and did (so release() hands them back instead of deleting)
     LLTexUnit::eTextureMipGeneration mGenerateMipMaps;
     U32 mMipLevels;
 

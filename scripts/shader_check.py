@@ -2071,6 +2071,12 @@ def main(argv=None):
                 for i in sorted({(x[0], x[1]) for x in j.instances})[:12]:
                     print("    in %s: %s" % i)
             print("  files: " + " ".join("%s@c%d" % (u.filename, u.found_level) for u in j.units if not u.missing))
+            # [2026-11-10 W102] MSBuild treats any output line that starts "ERROR:" as a build error (its canonical
+            # "origin : error : text" format, shown as "CUSTOMBUILD : error"), so on Windows the glslang messages of a
+            # KNOWN or tolerated failure failed check_shaders/wolfvk_shaders (MSB8066) although this script returned 0
+            # (CI run 42755792141). Only a fatal failure may fail the build: rename the keyword on the others.
+            if not fatal:
+                detail = re.sub(r"(?im)^(\s*)ERROR:", r"\1glslang message (accepted):", detail)
             print(detail)
             if args.dump:
                 os.makedirs(args.dump, exist_ok=True)

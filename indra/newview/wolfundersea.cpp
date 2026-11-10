@@ -28,6 +28,7 @@
 #include "llrand.h"
 #include "llrender.h"
 #include "llsurface.h"
+#include "llspatialpartition.h"   // [T733/] LLSpatialGroup / LLSpatialBridge (scanObjects)
 #include "llsurfacepatch.h"
 #include "llvertexbuffer.h"
 #include "llviewercamera.h"
@@ -490,6 +491,26 @@ void WolfUnderSea::scanObjects(const LLVector3& cam)
         if (obj->getPCode() != LL_PCODE_VOLUME) continue;
         const LLVector4a* ext = obj->mDrawable->getSpatialExtents();
         if (!ext) continue;
+        // [T733 2026-11-10] an ACTIVE drawable's extents are in its spatial bridge's own frame, not the agent's: llface.cpp
+        // genVolumeBBoxes (904-910) adds the region offset only when !isActive(), and llvovolume.cpp updateRelativeXform
+        // (2129-2149) makes the active root's transform the identity and a child's relative to it. Such a build (anything
+        // the sim moved more than 8 times, llvovolume.cpp:714-721 onDrawableUpdateFromServer; a moving boat; a linkset with
+        // a moving part) was marked near the region's corner instead of where it is. Its box goes to the agent frame as the
+        // bridge itself does (lldrawable.cpp:1376-1377 LLSpatialBridge::updateSpatialExtents: the bridge drawable's xform
+        // world matrix: turn and place in the agent frame, no scale - lldrawable.cpp:754 "no scale in drawable transforms"),
+        // with matMulBoundBox (the box round the turned box, llface.cpp:902).
+        LLVector4a world[2];
+        if (obj->mDrawable->isActive())
+        {
+            LLSpatialGroup* group = obj->mDrawable->getSpatialGroup();
+            LLSpatialPartition* part = group ? group->getSpatialPartition() : nullptr;
+            LLSpatialBridge* bridge = part ? part->asBridge() : nullptr;
+            if (!bridge || !bridge->mDrawable) continue;   // not in a bridge yet: no box to place
+            LLMatrix4a to_agent;
+            to_agent.loadu(bridge->mDrawable->getXform()->getWorldMatrix());
+            matMulBoundBox(to_agent, ext, world);
+            ext = world;
+        }
         const F32* lo = ext[0].getF32ptr();
         const F32* hi = ext[1].getF32ptr();
         if (!std::isfinite(lo[0]) || !std::isfinite(hi[0]) || !std::isfinite(lo[2]) || !std::isfinite(hi[2])) continue;

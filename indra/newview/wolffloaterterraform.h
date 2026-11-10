@@ -27,6 +27,7 @@
 #include "wolfterraform.h"
 
 class LLButton;
+class LLComboBox;
 class LLCheckBoxCtrl;
 class LLPanel;
 class LLRadioGroup;
@@ -75,6 +76,10 @@ public:
     void renderRouteExtras(LLViewerRegion* rgn) override;
     bool joinClicks() const override;
     bool markersMovable() const override { return !mPicking; }
+    // [SKY LAND TOOLS 2026-11-10] on a sky level (the Shape chooser) the pen picks and draws on that level
+    bool customSurface() const override;
+    bool pickSurface(S32 x, S32 y, LLVector3& out) const override;
+    bool surfaceZ(F32 x, F32 y, F32& z) const override;
 
     // LLEditMenuHandler: Edit > Undo / Redo while this window is the edit handler
     void undo() override;
@@ -103,6 +108,9 @@ private:
     /** [ticket 355] The brush shape row as the tool needs it: the choice for the box tools, a note for the line tools. */
     void updateShapeControls();
     bool roundBrush() const;        // Round is chosen and the tool is a box tool
+    /** [SKY LAND TOOLS 2026-11-10] The Shape chooser: Ground and this region's sky levels, refilled when the list changes. */
+    void fillSurfaces();
+    S32 surfaceLevel() const;       // the chosen sky level's id, 0 for the ground
 
     WolfTerraform::ETool mTool = WolfTerraform::TOOL_LEVEL;
     std::vector<LLVector2> mClicks;
@@ -140,6 +148,10 @@ private:
     LLSliderCtrl* mRoundSoft = nullptr;         // [ticket 355] Soft rim %, Round only
     LLTextBox* mShapeNote = nullptr;            // [ticket 355] the line tools' note in its place
     LLScrollListCtrl* mHistory = nullptr;
+    LLComboBox* mSurface = nullptr;             // [SKY LAND TOOLS 2026-11-10] Ground / a sky level
+    LLTextBox* mSurfaceNote = nullptr;
+    U32 mSeenSkyChange = 0;
+    LLViewerRegion* mSeenSkyRegion = nullptr;
     WolfDigProgress* mDig = nullptr;
 };
 

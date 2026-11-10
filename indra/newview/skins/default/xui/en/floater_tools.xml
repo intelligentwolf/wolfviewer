@@ -815,6 +815,7 @@
          layout="topleft"
          left_delta="0"
          name="radio revert"
+         tool_tip="Puts the ground back to the region's saved shape. On sky land it does nothing: sky land has no saved shape to go back to."
          top_delta="15"
          width="114" />
 		 <radio_group.commit_callback

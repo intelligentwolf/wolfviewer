@@ -23,6 +23,7 @@
 
 #include "llagent.h"
 #include "llcoros.h"
+#include "lleventcoro.h"   // [SKY LAND TOOLS 2026-11-10] llcoro::suspendUntilTimeout (a busy region's retry_after)
 #include "llparcel.h"
 #include "llsurface.h"
 #include "llsurfacepatch.h"
@@ -33,6 +34,7 @@
 #include "wolffloatertunnels.h"
 #include "wolfgrid.h"
 #include "wolfterrainwriter.h"
+#include "wolfterrainlevels.h"   // [SKY LAND TOOLS 2026-11-10]
 
 using namespace WolfTerraformMath;
 
@@ -56,6 +58,25 @@ namespace WolfTerraform
         if (!patch || !patch->getHasReceivedData()) return false;
         z = land.getZ(x, y);
         return true;
+    }
+
+    // [SKY LAND TOOLS 2026-11-10] wolfterraform.h
+    bool knownHeightOn(LLViewerRegion* rgn, S32 level_id, S32 x, S32 y, F32& z)
+    {
+        if (!level_id) return knownHeight(rgn, x, y, z);
+        const WolfTerrainLevels* sky = rgn ? rgn->getWolfSkyLevels() : nullptr;
+        const WolfTerrainLevels::Level* level = sky ? sky->findLevel(level_id) : nullptr;
+        return level && sky->sample(*level, x, y, z);
+    }
+
+    F32 drawHeight(LLViewerRegion* rgn, S32 level_id, F32 x, F32 y)
+    {
+        if (!rgn) return 0.f;
+        const WolfTerrainLevels* sky = level_id ? rgn->getWolfSkyLevels() : nullptr;
+        const WolfTerrainLevels::Level* level = sky ? sky->findLevel(level_id) : nullptr;
+        if (!level) return rgn->getLand().resolveHeightRegion(x, y);
+        F32 z;
+        return sky->surface(*level, x, y, z) ? z : level->mBase;
     }
 
     std::string timeText(size_t floods)
@@ -106,6 +127,26 @@ namespace WolfTerraform
             plan.mError = "This region does not allow terraforming (Block Terraform is on): only its estate owner and managers can change the ground.";
             return plan;
         }
+        // [SKY LAND TOOLS 2026-11-10] a sky level: the region's own list (wolfterrainlevels.h), and the tools that have a meaning there.
+        // A level has no water (README.md 3.3 item 10: "A level has no water, and region water stays at the ground's water height").
+        plan.mLevel = p.skyLevel;
+        const WolfTerrainLevels* sky = p.skyLevel ? rgn->getWolfSkyLevels() : nullptr;
+        const WolfTerrainLevels::Level* sky_level = sky ? sky->findLevel(p.skyLevel) : nullptr;
+        if (p.skyLevel && !sky_level)
+        {
+            plan.mError = "That sky level is not in this region any more. Choose Ground or another level.";
+            return plan;
+        }
+        if (sky_level && tool == TOOL_BEACH)
+        {
+            plan.mError = "Beach shapes the shore at the water's edge, and sky land has no water. Choose Ground to make a beach.";
+            return plan;
+        }
+        if (sky_level && tool == TOOL_RIVER && p.riverToSea)
+        {
+            plan.mError = "Sky land has no sea to run into: untick Run into the sea, or choose Ground.";
+            return plan;
+        }
         if ((S32)clicks.size() < minClicks(tool)) return plan;   // not drawn yet: the window says what to click
 
         // the area the tool writes, and the ground it needs round it
@@ -149,11 +190,19 @@ namespace WolfTerraform
         // kept for Undo, so the job is refused rather than guessed.
         Grid ground = areaGrid(clip, margin, W);
         S32 unknown = 0;
+        // [SKY LAND TOOLS 2026-11-10] on a sky level: its heights, and where it has no ground the level's base stands in for the
+        // tools' maths only (`level_has` marks the real cells; the others are left alone below, so a tool never makes sky land)
+        Grid level_has = sky_level ? Grid(ground.x0, ground.y0, ground.w, ground.h) : Grid();
         for (S32 y = ground.y0; y < ground.y0 + ground.h; ++y)
             for (S32 x = ground.x0; x < ground.x0 + ground.w; ++x)
             {
                 F32 z;
-                if (knownHeight(rgn, x, y, z)) ground.ref(x, y) = z;
+                if (sky_level)
+                {
+                    if (sky->sample(*sky_level, x, y, z)) { ground.ref(x, y) = z; level_has.ref(x, y) = 1.f; }
+                    else ground.ref(x, y) = sky_level->mBase;
+                }
+                else if (knownHeight(rgn, x, y, z)) ground.ref(x, y) = z;
                 else if (x >= clip.x0 && x <= clip.x1 && y >= clip.y0 && y <= clip.y1) ++unknown;
             }
         if (unknown > 0)
@@ -263,12 +312,16 @@ namespace WolfTerraform
         plan.mBefore = Grid(t.x0, t.y0, t.w, t.h);
         LLViewerParcelOverlay* overlay = rgn->getParcelOverlay();
         const bool manager = rgn->canManageEstate();
+        // [SKY LAND TOOLS 2026-11-10] a level's ground stays between its base and the region's highest (WolfSkyLevelsModule.Edit.cs
+        // Apply refuses a whole request with one height outside), and only its own cells change
+        const F32 lo = sky_level ? sky_level->mBase : MIN_TERRAIN_M, hi = sky_level ? sky->maxHeight() : MAX_TERRAIN_M;
         for (S32 y = t.y0; y < t.y0 + t.h; ++y)
             for (S32 x = t.x0; x < t.x0 + t.w; ++x)
             {
                 F32& v = t.ref(x, y);
                 if (!has(v)) continue;
-                v = llclamp(v, MIN_TERRAIN_M, MAX_TERRAIN_M);
+                if (sky_level && !has(level_has.at(x, y))) { v = nan(); continue; }
+                v = llclamp(v, lo, hi);
                 const F32 g = ground.at(x, y);
                 plan.mBefore.ref(x, y) = g;
                 const F32 d = v - g;
@@ -284,7 +337,14 @@ namespace WolfTerraform
         plan.mRuns = planRuns(t, plan.mBefore, WRITE_BAND_M, WRITE_SKIP_M);
         if (plan.mRuns.empty())
         {
-            plan.mError = "Nothing to change: the ground there is already like that.";
+            plan.mError = sky_level ? "Nothing to change: the sky land there is already like that (or there is no sky land there)."
+                                    : "Nothing to change: the ground there is already like that.";
+            return plan;
+        }
+        if (sky_level)
+        {
+            // the region takes the heights themselves (no floods), so the flood limits below are not for it
+            plan.mLabel += " on " + sky_level->mName;
             return plan;
         }
         if ((S32)plan.mRuns.size() > MAX_FLOODS)
@@ -342,6 +402,7 @@ namespace WolfTerraform
     {
         auto it = mHistory.find(region);
         if (it == mHistory.end() || it->second.mDone == 0) return 0;
+        if (it->second.mSteps[it->second.mDone - 1].mLevel) return 0;   // [SKY LAND TOOLS 2026-11-10/] heights, no floods
         return floodsFromNow(it->second.mSteps[it->second.mDone - 1].mBefore);
     }
 
@@ -349,6 +410,7 @@ namespace WolfTerraform
     {
         auto it = mHistory.find(region);
         if (it == mHistory.end() || it->second.mDone >= it->second.mSteps.size()) return 0;
+        if (it->second.mSteps[it->second.mDone].mLevel) return 0;   // [SKY LAND TOOLS 2026-11-10/] heights, no floods
         return floodsFromNow(it->second.mSteps[it->second.mDone].mAfter);
     }
 
@@ -434,6 +496,7 @@ namespace WolfTerraform
         h.mSteps.resize(h.mDone);   // a new step drops what could have been redone
         Step st;
         st.mLabel = plan.mLabel;
+        st.mLevel = plan.mLevel;   // [SKY LAND TOOLS 2026-11-10/]
         st.mSeq = mNextSeq++;
         // every cell it may write (a run can cover a cell that already stood near its target and move it by up to WRITE_SKIP_M +
         // WRITE_BAND_M / 2); Undo's own plan then leaves out the cells that are still within WRITE_SKIP_M of these
@@ -447,14 +510,20 @@ namespace WolfTerraform
         const std::string verb = VERB[plan.mTool];
         start(verb + "...");
         const U64 seq = st.mSeq;
-        LLCoros::instance().launch("WolfTerraform apply", [this, plan, verb, seq]() { runCoro(KIND_APPLY, plan.mRegion, plan, verb, seq); });
+        LLCoros::instance().launch("WolfTerraform apply", [this, plan, verb, seq]()
+        {
+            if (plan.mLevel) levelCoro(KIND_APPLY, plan.mRegion, plan, verb, seq);   // [SKY LAND TOOLS 2026-11-10/]
+            else runCoro(KIND_APPLY, plan.mRegion, plan, verb, seq);
+        });
         return true;
     }
 
     namespace
     {
-        /** The heights now of `cells`' cells (those with a value), from this viewer's ground; false when one is not known. */
-        bool heightsNow(LLViewerRegion* rgn, const Grid& cells, Grid& out)
+        /** The heights now of `cells`' cells (those with a value), from this viewer's ground; false when one is not known.
+         *  [SKY LAND TOOLS 2026-11-10] On a sky level (level != 0) the level's heights; a cell where it has no ground now (removed
+         *  since) is simply left out. */
+        bool heightsNow(LLViewerRegion* rgn, S32 level, const Grid& cells, Grid& out)
         {
             out = Grid(cells.x0, cells.y0, cells.w, cells.h);
             for (S32 y = cells.y0; y < cells.y0 + cells.h; ++y)
@@ -462,7 +531,11 @@ namespace WolfTerraform
                 {
                     if (!has(cells.at(x, y))) continue;
                     F32 z;
-                    if (!knownHeight(rgn, x, y, z)) return false;
+                    if (!knownHeightOn(rgn, level, x, y, z))
+                    {
+                        if (level) continue;
+                        return false;
+                    }
                     out.ref(x, y) = z;
                 }
             return true;
@@ -476,7 +549,7 @@ namespace WolfTerraform
         if (why_not.empty() && (it == mHistory.end() || it->second.mDone == 0)) why_not = "There is nothing to undo here.";
         if (!why_not.empty()) return false;
         Step& st = it->second.mSteps[it->second.mDone - 1];
-        if ((S32)floodsFromNow(st.mBefore) > MAX_FLOODS)
+        if (!st.mLevel && (S32)floodsFromNow(st.mBefore) > MAX_FLOODS)
         {
             why_not = llformat("Undo of \"%s\" would need more than %d floods now, the most one job sends: the ground there has changed too much since.",
                                st.mLabel.c_str(), MAX_FLOODS);
@@ -484,7 +557,7 @@ namespace WolfTerraform
         }
         // Redo will put back what the step made: the ground as it is now, read before Undo writes over it
         Grid now;
-        if (!heightsNow(gAgent.getRegion(), st.mBefore, now))
+        if (!heightsNow(gAgent.getRegion(), st.mLevel, st.mBefore, now))
         {
             why_not = "Part of that ground has not reached this viewer - go nearer to it, then press Undo again.";
             return false;
@@ -493,6 +566,7 @@ namespace WolfTerraform
         if (!st.mUndoPartial) st.mAfter = now;
         Plan plan;
         plan.mRegion = region;
+        plan.mLevel = st.mLevel;   // [SKY LAND TOOLS 2026-11-10/]
         plan.mTarget = st.mBefore;
         plan.mBefore = now;
         plan.mLabel = st.mLabel;
@@ -500,7 +574,11 @@ namespace WolfTerraform
         trim(seq);   // (st may have moved: only the copies above are used from here)
         start("Undoing \"" + plan.mLabel + "\": putting the ground back...");
         const std::string verb = "Undoing \"" + plan.mLabel + "\": putting the ground back";
-        LLCoros::instance().launch("WolfTerraform undo", [this, region, plan, verb, seq]() { runCoro(KIND_UNDO, region, plan, verb, seq); });
+        LLCoros::instance().launch("WolfTerraform undo", [this, region, plan, verb, seq]()
+        {
+            if (plan.mLevel) levelCoro(KIND_UNDO, region, plan, verb, seq);   // [SKY LAND TOOLS 2026-11-10/]
+            else runCoro(KIND_UNDO, region, plan, verb, seq);
+        });
         return true;
     }
 
@@ -512,13 +590,13 @@ namespace WolfTerraform
         if (!why_not.empty()) return false;
         Step& st = it->second.mSteps[it->second.mDone];
         if (st.mAfter.cells() == 0) { why_not = "That step cannot be redone (its heights were not kept)."; return false; }
-        if ((S32)floodsFromNow(st.mAfter) > MAX_FLOODS)
+        if (!st.mLevel && (S32)floodsFromNow(st.mAfter) > MAX_FLOODS)
         {
             why_not = llformat("Redo of \"%s\" would need more than %d floods now, the most one job sends.", st.mLabel.c_str(), MAX_FLOODS);
             return false;
         }
         Grid now;
-        if (!heightsNow(gAgent.getRegion(), st.mAfter, now))
+        if (!heightsNow(gAgent.getRegion(), st.mLevel, st.mAfter, now))
         {
             why_not = "Part of that ground has not reached this viewer - go nearer to it, then press Redo again.";
             return false;
@@ -527,6 +605,7 @@ namespace WolfTerraform
         if (!st.mRedoPartial) st.mBefore = now;
         Plan plan;
         plan.mRegion = region;
+        plan.mLevel = st.mLevel;   // [SKY LAND TOOLS 2026-11-10/]
         plan.mTarget = st.mAfter;
         plan.mBefore = now;
         plan.mLabel = st.mLabel;
@@ -534,7 +613,11 @@ namespace WolfTerraform
         trim(seq);
         start("Redoing \"" + plan.mLabel + "\"...");
         const std::string verb = "Redoing \"" + plan.mLabel + "\"";
-        LLCoros::instance().launch("WolfTerraform redo", [this, region, plan, verb, seq]() { runCoro(KIND_REDO, region, plan, verb, seq); });
+        LLCoros::instance().launch("WolfTerraform redo", [this, region, plan, verb, seq]()
+        {
+            if (plan.mLevel) levelCoro(KIND_REDO, region, plan, verb, seq);   // [SKY LAND TOOLS 2026-11-10/]
+            else runCoro(KIND_REDO, region, plan, verb, seq);
+        });
         return true;
     }
 
@@ -698,6 +781,136 @@ namespace WolfTerraform
             return;
         }
         if (kind == KIND_APPLY) finish(true, "Done: " + plan.mLabel + ".");
+        else if (kind == KIND_UNDO) finish(true, "Undone: " + plan.mLabel + ".");
+        else finish(true, "Redone: " + plan.mLabel + ".");
+    }
+    // [SKY LAND TOOLS 2026-11-10] wolfterraform.h. A job on a sky level: the region takes the target heights themselves through the
+    // WolfSkyLevels cap's "apply" (WolfTerrainLevels::applyBody, as the Sky Land window and the land brush send), at most 256 m a
+    // side a request (TerrainModule.WolfTerraform.cs:47 WolfMaxApplySide), NaN where a cell is left alone. The region checks every
+    // cell (CanTerraformLand, WolfSkyLevelsModule.Edit.cs MayTerraform) and says what it would not change and why. The ground is
+    // never sent anything. A busy answer (30 changes a minute, WolfTerrainRate) waits retry_after and tries that block again.
+    void Jobs::levelCoro(EKind kind, LLUUID region, Plan plan, std::string verb, U64 seq)
+    {
+        constexpr S32 BLOCK = 256;
+        constexpr S32 BUSY_TRIES = 6;
+        const Grid& t = plan.mTarget;
+        auto here = [region]() -> LLViewerRegion*
+        {
+            LLViewerRegion* rgn = gAgent.getRegion();
+            return rgn && rgn->getRegionID() == region && WolfGrid::isOnWolfTerritoriesConfirmed() ? rgn : nullptr;
+        };
+        auto markStopped = [this, region, seq]()
+        {
+            if (Step* s = findStep(region, seq)) s->mStopped = true;
+            ++mHistoryVersion;
+        };
+        auto markPartial = [this, kind, region, seq](bool partial)
+        {
+            if (Step* s = findStep(region, seq)) (kind == KIND_UNDO ? s->mUndoPartial : s->mRedoPartial) = partial;
+            ++mHistoryVersion;
+        };
+        const std::string label = "\"" + plan.mLabel + "\"";
+        // the blocks with something to set
+        std::vector<std::pair<S32, S32>> blocks;
+        for (S32 by = t.y0; by < t.y0 + t.h; by += BLOCK)
+            for (S32 bx = t.x0; bx < t.x0 + t.w; bx += BLOCK)
+            {
+                bool any = false;
+                for (S32 y = by; y < llmin(by + BLOCK, t.y0 + t.h) && !any; ++y)
+                    for (S32 x = bx; x < llmin(bx + BLOCK, t.x0 + t.w) && !any; ++x)
+                        any = has(t.at(x, y));
+                if (any) blocks.emplace_back(bx, by);
+            }
+        S32 changed = 0, refused = 0, no_room = 0, sent = 0;
+        std::string reason;
+        auto stopped = [&](const std::string& why)
+        {
+            if (kind == KIND_APPLY)
+            {
+                markStopped();
+                finish(false, why + " part way through " + label + ". Undo puts back what it changed.");
+            }
+            else if (kind == KIND_UNDO) { markPartial(true); finish(false, why + " part way through undoing " + label + ". Press Undo again to finish putting it back."); }
+            else { markPartial(true); finish(false, why + " part way through redoing " + label + ". Press Redo again to finish it."); }
+        };
+        for (const auto& b : blocks)
+        {
+            if (mCancel) { stopped("Stopped as you asked"); return; }
+            const S32 x0 = b.first, y0 = b.second;
+            const S32 w = llmin(BLOCK, t.x0 + t.w - x0), h = llmin(BLOCK, t.y0 + t.h - y0);
+            std::vector<F32> heights((size_t)w * (size_t)h, nan());
+            for (S32 y = 0; y < h; ++y)
+                for (S32 x = 0; x < w; ++x)
+                    heights[(size_t)y * (size_t)w + (size_t)x] = t.at(x0 + x, y0 + y);
+            const LLSD body = WolfTerrainLevels::applyBody(plan.mLevel, x0, y0, w, h, heights, plan.mLabel);
+            LLSD answer;
+            for (S32 tries = 0; ; ++tries)
+            {
+                LLViewerRegion* rgn = here();   // looked up again after every wait: the region may be gone
+                if (!rgn) { stopped("Stopped: you left the region (or it stopped answering)"); return; }
+                answer = WolfTerrainLevels::postAndWait(rgn, body);
+                if (answer["success"].asBoolean() || !answer["busy"].asBoolean() || tries + 1 >= BUSY_TRIES) break;
+                mStatus = verb + ": the region asks to wait a moment...";
+                llcoro::suspendUntilTimeout((F32)llmax(1, answer["retry_after"].asInteger()));
+                if (mCancel) { stopped("Stopped as you asked"); return; }
+            }
+            if (!answer["success"].asBoolean())
+            {
+                if (sent == 0 && kind == KIND_APPLY)
+                {
+                    // nothing was changed: the step goes again (there is nothing to undo)
+                    auto it = mHistory.find(region);
+                    if (it != mHistory.end() && it->second.mDone > 0 && it->second.mSteps[it->second.mDone - 1].mSeq == seq)
+                    {
+                        it->second.mSteps.pop_back();
+                        it->second.mDone = it->second.mSteps.size();
+                        ++mHistoryVersion;
+                    }
+                    finish(false, label + " was not done. The region says: " + answer["message"].asString());
+                    return;
+                }
+                stopped("Stopped: the region says \"" + answer["message"].asString() + "\"");
+                return;
+            }
+            ++sent;
+            changed += answer["changed"].asInteger();
+            refused += answer["refused"].asInteger();
+            no_room += answer["no_room"].asInteger();
+            if ((answer["refused"].asInteger() > 0 || answer["no_room"].asInteger() > 0) && reason.empty()) reason = answer["message"].asString();
+            mProgress = (F32)sent / (F32)llmax((size_t)1, blocks.size());
+            mStatus = llformat("%s: the region has set %d of %d block%s", verb.c_str(), sent, (S32)blocks.size(), blocks.size() == 1 ? "" : "s");
+        }
+        // the history moves on once the job went through
+        auto it = mHistory.find(region);
+        if (it != mHistory.end())
+        {
+            if (kind == KIND_UNDO && it->second.mDone > 0) --it->second.mDone;
+            if (kind == KIND_REDO && it->second.mDone < it->second.mSteps.size()) ++it->second.mDone;
+        }
+        if (kind != KIND_APPLY) markPartial(false);
+        const std::string what = kind == KIND_APPLY ? label + " is done" : kind == KIND_UNDO ? "Undo of " + label + " is done" : "Redo of " + label + " is done";
+        if ((refused > 0 || no_room > 0) && changed == 0 && kind == KIND_APPLY)
+        {
+            // nothing at all went through (in-world test 11-10: every cell on land Shadow may not terraform): there is nothing to
+            // undo, so the step goes, and the words say it was not done (not "done, but")
+            auto h = mHistory.find(region);
+            if (h != mHistory.end() && h->second.mDone > 0 && h->second.mSteps[h->second.mDone - 1].mSeq == seq)
+            {
+                h->second.mSteps.erase(h->second.mSteps.begin() + (std::ptrdiff_t)(h->second.mDone - 1));
+                --h->second.mDone;
+                ++mHistoryVersion;
+            }
+            finish(false, label + " was not done. The region says: " + reason);
+            return;
+        }
+        if (refused > 0 || no_room > 0)
+        {
+            // Apply's Words(): the parcels and their owners it would not change
+            finish(false, llformat("%s, but %d m² did not change. The region says: %s", what.c_str(), refused + no_room, reason.c_str()));
+            if (kind == KIND_APPLY) markStopped();
+            return;
+        }
+        if (kind == KIND_APPLY) finish(true, llformat("Done: %s (%d m² of sky land changed).", plan.mLabel.c_str(), changed));
         else if (kind == KIND_UNDO) finish(true, "Undone: " + plan.mLabel + ".");
         else finish(true, "Redone: " + plan.mLabel + ".");
     }

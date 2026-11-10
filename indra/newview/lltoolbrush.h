@@ -31,6 +31,10 @@
 #include "v3math.h"
 #include "lleditmenuhandler.h"
 
+#include <functional>      // [SKY LAND TOOLS 2026-11-10]
+#include <unordered_map>
+#include <unordered_set>
+
 class LLSurface;
 class LLVector3d;
 class LLViewerRegion;
@@ -88,6 +92,19 @@ protected:
                                   const LLVector3d& spot) const;
     void renderOverlay(LLSurface& land, const LLVector3& pos_region,
                        const LLVector3& pos_world);
+    // [SKY LAND TOOLS 2026-11-10] renderOverlay's lines on any surface: z_at(i, j, z) gives the height at grid point (i, j),
+    // false where there is none (a sky level's ground ends); grids = the points a side.
+    void renderOverlayLines(const std::function<bool(S32, S32, F32&)>& z_at, S32 grids, const LLVector3& pos_region,
+                            const LLVector3& pos_world);
+    // [SKY LAND TOOLS 2026-11-10] The land under the pointer, a sky level's top included (WolfTerrainLevels::pickLand); during a
+    // stroke on a level, that level only (pickOnLevel), so the stroke never falls through to the ground below.
+    bool pickSpot(S32 x, S32 y, LLVector3d& spot, LLViewerRegion** regionp = nullptr, S32* level = nullptr);
+    // One dab of a stroke on mSkyLevel: the region's brush maths on the level's heights, kept in mSkyWork until sent.
+    void modifySkyLevelAtPoint(const LLVector3d& spot, F32 dab_seconds);
+    // Sends the cells changed since the last request (one 256 m block a request, one request at a time; the region allows
+    // 30 changes a minute, WolfTerrainHistory.cs WolfTerrainRate).
+    void sendSkyWork();
+    static void onSkyFlushIdle(void* brush_tool);
 
     bool canTerraformParcel(LLViewerRegion* regionp) const;
 
@@ -107,6 +124,18 @@ protected:
     bool mPickLevel = false;  // [WOLF TERRAFORM 2026-10-23] the next click picks the Level to height
     // Order doesn't matter and we do check for existance of regions, so use a set
     region_list_t mLastAffectedRegions;
+
+    // [SKY LAND TOOLS 2026-11-10] A stroke on a sky level (README.md 3.5: "When the pick hits a level, the brush works on that
+    // level ... applied by the cap"). The ground is never sent a ModifyLand while mSkyLevel is set.
+    S32 mSkyLevel = 0;                              // the level the stroke shapes; 0 = the ground (stock ModifyLand)
+    U64 mSkyRegion = 0;                             // its region's handle
+    std::unordered_map<U32, F32> mSkyWork;          // the stroke's heights so far, key x | y << 16 (region metres)
+    std::unordered_set<U32> mSkyDirty;              // cells of mSkyWork the region has not been sent yet
+    bool mSkyInFlight = false;
+    F64 mSkyNextPost = 0.0;                         // not before (pacing, or the region's retry_after)
+    S32 mSkyStrokeSteps = 0;                        // changes the region kept for the stroke going on / just ended
+    S32 mSkyUndoSteps = 0;                          // Edit > Undo puts back this many (the last stroke's) on mSkyUndoRegion
+    U64 mSkyUndoRegion = 0;
 
 private:
     U8 getBrushIndex();

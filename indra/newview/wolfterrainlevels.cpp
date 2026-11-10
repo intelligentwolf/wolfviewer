@@ -23,6 +23,7 @@
 #include <limits>
 
 #include "llagent.h"
+#include "llagentcamera.h"   // [SKY LAND TOOLS 2026-11-10] pickLand: the camera
 #include "llbitpack.h"
 #include "llcorehttputil.h"
 #include "llcoros.h"
@@ -37,6 +38,7 @@
 #include "llviewergenericmessage.h"
 #include "llviewerregion.h"
 #include "llviewershadermgr.h"
+#include "llviewerwindow.h"   // [SKY LAND TOOLS 2026-11-10] pickLand: the pointer's ray
 #include "llviewertexture.h"
 #include "llvlcomposition.h"
 #include "llworld.h"
@@ -699,6 +701,192 @@ void WolfTerrainLevels::postCoro(U64 handle, U32 serial, std::string url, LLSD b
     {
         done(answer);
     }
+}
+
+// [SKY LAND TOOLS 2026-11-10] wolfterrainlevels.h. Source: postCoro above (the same request); the caller is already a coroutine
+// (wolfterraform.cpp Jobs::levelCoro). regionp may be gone when this returns: it is looked up again by handle, never used after.
+// static
+LLSD WolfTerrainLevels::postAndWait(LLViewerRegion* regionp, const LLSD& body)
+{
+    WolfTerrainLevels* sky = regionp ? regionp->getWolfSkyLevels() : nullptr;
+    const std::string url = sky ? regionp->getCapability(CAP) : std::string();
+    if (url.empty())
+    {
+        return refusedAnswer("This region does not have sky land.");
+    }
+    const U64 handle = regionp->getHandle();
+    const U32 serial = sky->mSerial;
+    auto adapter = std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfSkyLevels", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+    LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+    LLSD result = adapter->postAndSuspend(request, url, body);
+    LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+    LLSD answer = status && result.isMap() && result.has("success") ? result
+                : refusedAnswer("The region did not answer (" + status.toString() + "). Please try again in a moment.");
+    if (WolfTerrainLevels* again = lookup(handle, serial))
+    {
+        again->refresh();
+    }
+    return answer;
+}
+
+F32 WolfTerrainLevels::maxHeight() const
+{
+    // Source: WolfSkyLevelsModule.cs OnRequest ["max_height"] = Constants.MaxTerrainHeightmap (Constants.cs:166, 4000 m); the
+    // same fallback as brush() above until the list has arrived.
+    const F32 cap = mInfo.isMap() && mInfo.has("max_height") ? (F32)mInfo["max_height"].asReal() : 4000.f;
+    return llmin(cap, 4000.f);
+}
+
+bool WolfTerrainLevels::rayTop(const Level& level, const LLVector3& o, const LLVector3& d, F32 max_t, F32& t_hit) const
+{
+    if (!level.mSurface || level.mPatches.empty() || !mRegionp || !(max_t > 0.f))
+    {
+        return false;
+    }
+    // only the part of the ray inside the level's height band can meet its top (half a metre either side for the rounding)
+    const F32 lo = level.mBase - 0.5f, hi = level.mTop + 0.5f;
+    F32 t0 = 0.f, t1 = max_t;
+    if (fabsf(d.mV[VZ]) < 1e-6f)
+    {
+        if (o.mV[VZ] < lo || o.mV[VZ] > hi)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        F32 a = (lo - o.mV[VZ]) / d.mV[VZ], b = (hi - o.mV[VZ]) / d.mV[VZ];
+        if (a > b)
+        {
+            std::swap(a, b);
+        }
+        t0 = llmax(t0, a);
+        t1 = llmin(t1, b);
+    }
+    if (!(t1 > t0))
+    {
+        return false;
+    }
+    const F32 W = mRegionp->getWidth();
+    // how far above the top the ray is at t (positive above; where the level has no ground, "above" while over its base, so
+    // the ray meets the wall of a patch it enters from the side)
+    auto over = [&](F32 t, bool& on) -> F32
+    {
+        const LLVector3 p = o + d * t;
+        F32 h;
+        on = p.mV[VX] >= 0.f && p.mV[VY] >= 0.f && p.mV[VX] < W && p.mV[VY] < W && surface(level, p.mV[VX], p.mV[VY], h);
+        if (on)
+        {
+            return p.mV[VZ] - h;
+        }
+        return p.mV[VZ] > level.mBase ? 1.f : -1.f;
+    };
+    // half a metre steps, as mousePointOnLandGlobal's first pass walks the ground (llviewerwindow.cpp: 1 m, then 0.1 m)
+    constexpr F32 STEP = 0.5f;
+    bool on = false;
+    F32 prev_t = t0;
+    F32 prev = over(t0, on);
+    for (F32 t = t0 + STEP; ; t += STEP)
+    {
+        const F32 tt = llmin(t, t1);
+        const F32 cur = over(tt, on);
+        if (prev > 0.f && cur <= 0.f && on)
+        {
+            // through the top between prev_t and tt: halve the gap down to a couple of centimetres
+            F32 a = prev_t, b = tt;
+            for (S32 k = 0; k < 6; ++k)
+            {
+                const F32 m = 0.5f * (a + b);
+                bool on_m = false;
+                if (over(m, on_m) > 0.f)
+                {
+                    a = m;
+                }
+                else
+                {
+                    b = m;
+                }
+            }
+            t_hit = b;
+            return true;
+        }
+        prev = cur;
+        prev_t = tt;
+        if (tt >= t1)
+        {
+            break;
+        }
+    }
+    return false;
+}
+
+// static
+bool WolfTerrainLevels::pickLand(S32 mx, S32 my, LLVector3d& hit_global, LLViewerRegion*& regionp, S32& level)
+{
+    level = 0;
+    regionp = nullptr;
+    // Source: llviewerwindow.cpp LLViewerWindow::mousePointOnLandGlobal - the camera position (gAgentCamera) and the pointer's
+    // direction (mouseDirectionGlobal), out to the draw distance.
+    LLVector3d ground;
+    const bool have_ground = gViewerWindow->mousePointOnLandGlobal(mx, my, &ground);
+    const LLVector3d cam = gAgentCamera.getCameraPositionGlobal();
+    const LLVector3 dir = gViewerWindow->mouseDirectionGlobal(mx, my);
+    F32 best = have_ground ? (F32)(ground - cam).magVec() : gAgentCamera.mDrawDistance;
+    bool found = false;
+    for (LLViewerRegion* r : LLWorld::getInstance()->getRegionList())
+    {
+        const WolfTerrainLevels* sky = r ? r->getWolfSkyLevels() : nullptr;
+        if (!sky || !sky->hasLevels())
+        {
+            continue;
+        }
+        const LLVector3 o = r->getPosRegionFromGlobal(cam);
+        for (const Level& l : sky->levels())
+        {
+            F32 t;
+            if (sky->rayTop(l, o, dir, best, t) && t < best)
+            {
+                best = t;
+                regionp = r;
+                level = l.mId;
+                found = true;
+            }
+        }
+    }
+    if (found)
+    {
+        hit_global = cam + LLVector3d(dir * best);
+        return true;
+    }
+    if (have_ground)
+    {
+        hit_global = ground;
+        regionp = LLWorld::getInstance()->getRegionFromPosGlobal(ground);
+        return true;
+    }
+    return false;
+}
+
+// static
+bool WolfTerrainLevels::pickOnLevel(S32 mx, S32 my, LLViewerRegion* regionp, S32 level_id, F32 plane_z, LLVector3d& hit_global)
+{
+    const WolfTerrainLevels* sky = regionp ? regionp->getWolfSkyLevels() : nullptr;
+    const Level* level = sky ? sky->findLevel(level_id) : nullptr;
+    if (!level)
+    {
+        return false;
+    }
+    const LLVector3d cam = gAgentCamera.getCameraPositionGlobal();
+    const LLVector3 dir = gViewerWindow->mouseDirectionGlobal(mx, my);
+    F32 t;
+    if (sky->rayTop(*level, regionp->getPosRegionFromGlobal(cam), dir, gAgentCamera.mDrawDistance, t))
+    {
+        hit_global = cam + LLVector3d(dir * t);
+        return true;
+    }
+    // Source: llviewerwindow.h mousePointOnPlaneGlobal (as wolffloatertunnels.cpp WolfToolTunnel::planeHit)
+    return gViewerWindow->mousePointOnPlaneGlobal(hit_global, mx, my, regionp->getPosGlobalFromRegion(LLVector3(0.f, 0.f, plane_z)),
+                                                  LLVector3::z_axis);
 }
 
 void WolfTerrainLevels::buildPieces(Level& level)

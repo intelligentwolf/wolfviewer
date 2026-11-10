@@ -19,6 +19,7 @@
 
 #include "wolffloaterterraform.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "llagent.h"
@@ -26,6 +27,7 @@
 #include "llapp.h"
 #include "llbutton.h"
 #include "llcheckboxctrl.h"
+#include "llcombobox.h"
 #include "lldraghandle.h"
 #include "llfloaterreg.h"
 #include "llfloatertools.h"
@@ -50,6 +52,7 @@
 #include "wolfgrid.h"
 #include "wolfpaint.h"
 #include "wolfterrainwriter.h"
+#include "wolfterrainlevels.h"   // [SKY LAND TOOLS 2026-11-10]
 
 using namespace WolfTerraform;
 using WolfTerraformMath::Grid;
@@ -66,7 +69,7 @@ namespace
     constexpr F32 SAME_CLICK_M = 0.5f;
     // Base and More options heights (floater_wolf_terraform.xml: 620 high - 596 until the brush shape row, ticket 355 - the More
     // options panels 60 high at its foot)
-    constexpr S32 BASE_H = 620, MORE_H = 64;
+    constexpr S32 BASE_H = 646, MORE_H = 64;   // [SKY LAND TOOLS 2026-11-10] 620 + the Shape row (floater_wolf_terraform.xml)
     // [ticket 355] the brush shape row's values (floater_wolf_terraform.xml tf_shape radio_item value=) and its settings
     // (app_settings/settings.xml WolfTerraformBrushShape, WolfTerraformRoundSoft)
     const char* const SHAPE_SQUARE = "square";
@@ -148,6 +151,17 @@ bool WolfFloaterTerraform::postBuild()
     mSmoothStrength = getChild<LLSliderCtrl>("tf_smooth_strength");
     mRoadGrade = getChild<LLRadioGroup>("tf_road_grade");
     mHistory = getChild<LLScrollListCtrl>("tf_history");
+    // [SKY LAND TOOLS 2026-11-10] the Shape chooser (filled in draw() from the region's sky levels)
+    mSurface = getChild<LLComboBox>("tf_surface");
+    mSurfaceNote = getChild<LLTextBox>("tf_surface_note");
+    mSurface->add("Ground", LLSD(0));
+    mSurface->selectByValue(LLSD(0));
+    mSurface->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        mPicking = false;
+        mLevelPick->setToggleState(false);
+        changed();
+    });
     mRoadGrade->setValue("follow");
     // [ticket 355] the brush shape, as it was left (Square, the whole box, unless Round was chosen)
     mShape = getChild<LLRadioGroup>("tf_shape");
@@ -291,6 +305,7 @@ void WolfFloaterTerraform::updateShapeControls()
 WolfTerraform::Params WolfFloaterTerraform::readParams() const
 {
     WolfTerraform::Params p;
+    p.skyLevel = surfaceLevel();   // [SKY LAND TOOLS 2026-11-10/]
     p.levelHeight = mLevelUse->get() ? mLevelHeight->getValueF32() : WolfTerraformMath::nan();
     p.levelEdge = mLevelEdge->getValueF32();
     p.rampWidth = mRampWidth->getValueF32();
@@ -340,8 +355,11 @@ void WolfFloaterTerraform::replan()
             s += llformat("Cuts up to %.1f m (red) and fills up to %.1f m (green)", mPlan.mMaxCut, mPlan.mMaxFill);
         else if (mPlan.mMaxCut > WRITE_SKIP_M) s += llformat("Cuts up to %.1f m (red)", mPlan.mMaxCut);
         else s += llformat("Fills up to %.1f m (green)", mPlan.mMaxFill);
-        s += llformat(" over %d m²: %d flood%s, %s.", mPlan.mCells, (S32)mPlan.mRuns.size(), mPlan.mRuns.size() == 1 ? "" : "s",
-                      timeText(mPlan.mRuns.size()).c_str());
+        if (mPlan.mLevel)   // [SKY LAND TOOLS 2026-11-10] the region takes the heights in one go: no floods
+            s += llformat(" over %d m² of sky land.", mPlan.mCells);
+        else
+            s += llformat(" over %d m²: %d flood%s, %s.", mPlan.mCells, (S32)mPlan.mRuns.size(), mPlan.mRuns.size() == 1 ? "" : "s",
+                          timeText(mPlan.mRuns.size()).c_str());
         if (mPlan.mNotYours > 0)
             s += llformat(" %d m² (grey stripes) is not land this viewer knows to be yours: the region decides, and leaves it as it is if you may not change it.",
                           mPlan.mNotYours);
@@ -356,9 +374,9 @@ void WolfFloaterTerraform::replan()
         F32 za = 0.f, zb = 0.f;
         const WolfTerraform::Params p = readParams();
         const bool a_ok = has(p.rampHeightA) ? (za = p.rampHeightA, true)
-                        : knownHeight(rgn, (S32)ll_round(mClicks[0].mV[0]), (S32)ll_round(mClicks[0].mV[1]), za);
+                        : knownHeightOn(rgn, p.skyLevel, (S32)ll_round(mClicks[0].mV[0]), (S32)ll_round(mClicks[0].mV[1]), za);
         const bool b_ok = has(p.rampHeightB) ? (zb = p.rampHeightB, true)
-                        : knownHeight(rgn, (S32)ll_round(mClicks[1].mV[0]), (S32)ll_round(mClicks[1].mV[1]), zb);
+                        : knownHeightOn(rgn, p.skyLevel, (S32)ll_round(mClicks[1].mV[0]), (S32)ll_round(mClicks[1].mV[1]), zb);
         const F32 g = WolfTerraformMath::grade(mClicks[0].mV[0], mClicks[0].mV[1], za, mClicks[1].mV[0], mClicks[1].mV[1], zb);
         mRampInfo->setText(a_ok && b_ok ? llformat("%.0f m long, %.1f m to %.1f m: %d%% grade", dist_vec(mClicks[0], mClicks[1]), za, zb,
                                                    (S32)ll_round(g * 100.f)) : std::string());
@@ -379,7 +397,9 @@ void WolfFloaterTerraform::buildPreview()
     mOutline.clear();
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
-    const LLSurface& land = rgn->getLand();
+    // [SKY LAND TOOLS 2026-11-10] on the chosen surface: the ground, or the sky level (drawHeight)
+    const S32 level = surfaceLevel();
+    auto surf = [rgn, level](F32 x, F32 y) { return drawHeight(rgn, level, x, y); };
     // the box tools' outline on the ground (the route tools' line is the pen's)
     if (isBoxTool(mTool) && mClicks.size() >= 2)
     {
@@ -394,8 +414,8 @@ void WolfFloaterTerraform::buildPreview()
             {
                 const F32 a0 = tau * (F32)i / (F32)OVAL_PARTS, a1 = tau * (F32)(i + 1) / (F32)OVAL_PARTS;
                 const F32 px0 = o.cx + o.a * cosf(a0), py0 = o.cy + o.b * sinf(a0), px1 = o.cx + o.a * cosf(a1), py1 = o.cy + o.b * sinf(a1);
-                mOutline.emplace_back(px0, py0, land.resolveHeightRegion(px0, py0) + 0.15f);
-                mOutline.emplace_back(px1, py1, land.resolveHeightRegion(px1, py1) + 0.15f);
+                mOutline.emplace_back(px0, py0, surf(px0, py0) + 0.15f);
+                mOutline.emplace_back(px1, py1, surf(px1, py1) + 0.15f);
             }
         }
         auto edge = [&](F32 ax, F32 ay, F32 bx, F32 by)
@@ -405,8 +425,8 @@ void WolfFloaterTerraform::buildPreview()
             {
                 const F32 u0 = (F32)i / parts, u1 = (F32)(i + 1) / parts;
                 const F32 px0 = ax + (bx - ax) * u0, py0 = ay + (by - ay) * u0, px1 = ax + (bx - ax) * u1, py1 = ay + (by - ay) * u1;
-                mOutline.emplace_back(px0, py0, land.resolveHeightRegion(px0, py0) + 0.15f);
-                mOutline.emplace_back(px1, py1, land.resolveHeightRegion(px1, py1) + 0.15f);
+                mOutline.emplace_back(px0, py0, surf(px0, py0) + 0.15f);
+                mOutline.emplace_back(px1, py1, surf(px1, py1) + 0.15f);
             }
         };
         if (!roundBrush())
@@ -433,7 +453,7 @@ void WolfFloaterTerraform::buildPreview()
             auto zat = [&](S32 cx, S32 cy)
             {
                 const F32 a = t.at(cx, cy);
-                return has(a) ? a : land.resolveHeightRegion((F32)cx, (F32)cy);
+                return has(a) ? a : surf((F32)cx, (F32)cy);
             };
             const LLVector3 p0((F32)x - h, (F32)y - h, zat(x, y)), p1((F32)x + h, (F32)y - h, zat(x + step, y));
             const LLVector3 p2((F32)x + h, (F32)y + h, zat(x + step, y + step)), p3((F32)x - h, (F32)y + h, zat(x, y + step));
@@ -503,7 +523,11 @@ void WolfFloaterTerraform::clickAt(F32 x, F32 y)
         mPicking = false;
         mLevelPick->setToggleState(false);
         F32 z;
-        if (!knownHeight(rgn, (S32)ll_round(x), (S32)ll_round(y), z)) { setStatus("That ground has not reached this viewer yet - click nearer.", true); return; }
+        if (!knownHeightOn(rgn, surfaceLevel(), (S32)ll_round(x), (S32)ll_round(y), z))   // [SKY LAND TOOLS 2026-11-10/] the chosen surface
+        {
+            setStatus(surfaceLevel() ? "There is no sky land of that level there - click on it." : "That ground has not reached this viewer yet - click nearer.", true);
+            return;
+        }
         mLevelHeight->set(ll_round(z * 100.f) / 100.f);
         mLevelUse->set(true);
         setStatus(llformat("Level to %.2f m: the ground where you clicked.", z), false);
@@ -604,7 +628,7 @@ F32 WolfFloaterTerraform::planeHeight() const
 {
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return 0.f;
-    if (!mClicks.empty()) return rgn->getLand().resolveHeightRegion(mClicks.back().mV[0], mClicks.back().mV[1]);
+    if (!mClicks.empty()) return drawHeight(rgn, surfaceLevel(), mClicks.back().mV[0], mClicks.back().mV[1]);   // [SKY LAND TOOLS 2026-11-10/]
     return rgn->getPosRegionFromAgent(gAgent.getPositionAgent()).mV[VZ] - 1.f;   // about where the avatar stands
 }
 
@@ -800,10 +824,75 @@ void WolfFloaterTerraform::draw()
         mSawJob = false;
         changed();   // the ground has changed: the next preview is worked out from it
     }
+    fillSurfaces();   // [SKY LAND TOOLS 2026-11-10/]
     fillHistory();
     updateControls();
     keepPen();
     LLFloater::draw();
+}
+
+// [SKY LAND TOOLS 2026-11-10] wolffloaterterraform.h. The region's sky levels (WolfTerrainLevels, which ticks changeCount on every
+// list or level change) by height; the choice is kept while its level is still there, else it goes back to Ground.
+void WolfFloaterTerraform::fillSurfaces()
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (WolfTerrainLevels::changeCount() == mSeenSkyChange && rgn == mSeenSkyRegion) return;
+    mSeenSkyChange = WolfTerrainLevels::changeCount();
+    mSeenSkyRegion = rgn;
+    const S32 keep = surfaceLevel();
+    const WolfTerrainLevels* sky = rgn ? rgn->getWolfSkyLevels() : nullptr;
+    std::vector<const WolfTerrainLevels::Level*> list;
+    if (sky) for (const WolfTerrainLevels::Level& l : sky->levels()) list.push_back(&l);
+    std::sort(list.begin(), list.end(), [](const auto* a, const auto* b) { return a->mBase < b->mBase; });
+    mSurface->removeall();
+    mSurface->add("Ground", LLSD(0));
+    bool kept = false;
+    for (const WolfTerrainLevels::Level* l : list)
+    {
+        mSurface->add(llformat("Sky land: %s (%d m)", l->mName.c_str(), (S32)ll_round(l->mBase)), LLSD(l->mId));
+        kept = kept || l->mId == keep;
+    }
+    mSurface->selectByValue(LLSD(kept ? keep : 0));
+    mSurface->setEnabled(!list.empty());
+    mSurfaceNote->setText(list.empty() ? std::string("No sky land here") : std::string());
+    if (keep) changed();   // the level went (the plan is the ground's now), or its heights changed (the preview follows them)
+}
+
+S32 WolfFloaterTerraform::surfaceLevel() const
+{
+    const LLSD v = mSurface ? mSurface->getValue() : LLSD();
+    return v.isDefined() ? v.asInteger() : 0;
+}
+
+bool WolfFloaterTerraform::customSurface() const
+{
+    return surfaceLevel() != 0;
+}
+
+bool WolfFloaterTerraform::pickSurface(S32 x, S32 y, LLVector3& out) const
+{
+    // the chosen level's top under the pointer, else the flat at its height (WolfTerrainLevels::pickOnLevel), inside this region
+    LLViewerRegion* rgn = gAgent.getRegion();
+    const S32 level = surfaceLevel();
+    const WolfTerrainLevels* sky = rgn ? rgn->getWolfSkyLevels() : nullptr;
+    const WolfTerrainLevels::Level* l = sky ? sky->findLevel(level) : nullptr;
+    if (!l) return false;
+    const F32 plane = mClicks.empty() ? l->mBase : drawHeight(rgn, level, mClicks.back().mV[0], mClicks.back().mV[1]);
+    LLVector3d g;
+    if (!WolfTerrainLevels::pickOnLevel(x, y, rgn, level, plane, g)) return false;
+    const LLVector3 p = rgn->getPosRegionFromGlobal(g);
+    const F32 w = rgn->getWidth();
+    if (!llfinite(p.mV[VX]) || !llfinite(p.mV[VY]) || p.mV[VX] < 0.f || p.mV[VY] < 0.f || p.mV[VX] >= w || p.mV[VY] >= w) return false;
+    out = p;
+    return true;
+}
+
+bool WolfFloaterTerraform::surfaceZ(F32 x, F32 y, F32& z) const
+{
+    const S32 level = surfaceLevel();
+    if (!level) return false;
+    z = drawHeight(gAgent.getRegion(), level, x, y);
+    return true;
 }
 
 void WolfFloaterTerraform::updateControls()
@@ -851,7 +940,8 @@ void WolfFloaterTerraform::fillHistory()
         mHistory->addElement(row);
     }
     std::string info;
-    if (done > 0) info = "Undo: " + steps[done - 1].mLabel + ", " + timeText(jobs.undoFloods(region)) + ".";
+    if (done > 0 && steps[done - 1].mLevel) info = "Undo: " + steps[done - 1].mLabel + ".";   // [SKY LAND TOOLS 2026-11-10/] no floods
+    else if (done > 0) info = "Undo: " + steps[done - 1].mLabel + ", " + timeText(jobs.undoFloods(region)) + ".";
     else if (done < steps.size()) info = "Redo: " + steps[done].mLabel + ".";
     else info = "Nothing to undo yet: each Apply is kept here (this region, this session, up to 20 steps).";
     mHistoryInfo->setText(info);
@@ -900,6 +990,7 @@ void WolfFloaterTerraform::paintBurrow()
     auto wide = [R](LLRect r) { if (!r.isEmpty()) { r.mLeft = L; r.mRight = R; } return r; };
     std::vector<LLView*> first(std::begin(mTiles), std::end(mTiles));
     for (LLView* v : { (LLView*)mHint, (LLView*)mUndoPoint, (LLView*)mStartOver, (LLView*)mDrawInfo, (LLView*)mShape }) first.push_back(v);
+    if (mSurface) first.push_back(mSurface);   // [SKY LAND TOOLS 2026-11-10/] the Shape row closes section 1
     drawSection(wide(around(first, this, 4, 16)), "1  PICK A TOOL, THEN CLICK ON THE GROUND");
     drawSection(wide(around({ mSimple[mTool] }, this, 2, 16)), "2  SETTINGS");
     drawSection(wide(around({ mSummary, mApply, mStop, mStatus }, this, 4, 16)), "3  SEE IT, THEN APPLY");

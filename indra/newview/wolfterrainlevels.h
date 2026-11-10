@@ -144,6 +144,24 @@ public:
     // Every region's undersides and walls, from LLPipeline::renderGeomDeferred beside the far terrain.
     static void renderDeferred();
 
+    // [SKY LAND TOOLS 2026-11-10] Paul: "fix the tools first, then announce" - the land brush (lltoolbrush.cpp) and the Terraform
+    // window (wolfterraform.cpp) shape a sky level too (README.md 3.5 Editing). What they share:
+    // The highest ground a level may have: the region's max_height (WolfSkyLevelsModule.cs OnRequest = Constants.MaxTerrainHeightmap,
+    // Constants.cs:166 4000 m); the region refuses a whole "apply" with any height above it or below the level's base
+    // (WolfSkyLevelsModule.Edit.cs Apply).
+    F32 maxHeight() const;
+    // Where the ray o + t * d (region metres, d a unit vector) first meets `level`'s top from above, 0 <= t <= max_t. A ray that
+    // reaches the level from below (its rock) never hits the top.
+    bool rayTop(const Level& level, const LLVector3& o, const LLVector3& d, F32 max_t, F32& t) const;
+    // The land under the pointer at window (mx, my): the nearest sky level top on the ray from the camera (any region's), else the
+    // ground (LLViewerWindow::mousePointOnLandGlobal, which knows only the ground). level = 0 for the ground.
+    static bool pickLand(S32 mx, S32 my, LLVector3d& hit_global, LLViewerRegion*& regionp, S32& level);
+    // Only `level` of `regionp`: its top under the pointer, else where the ray crosses the flat plane at plane_z (region metres),
+    // so a stroke or a box can go on past the level's edge.
+    static bool pickOnLevel(S32 mx, S32 my, LLViewerRegion* regionp, S32 level, F32 plane_z, LLVector3d& hit_global);
+    // post() for a coroutine: the region's answer (or {success:false, message}); the list is read again after it.
+    static LLSD postAndWait(LLViewerRegion* regionp, const LLSD& body);
+
 private:
     Level* findLevelMutable(S32 id);
     bool vertexTop(const Level& level, S32 X, S32 Y, S32 px, S32 py, F32& out) const;

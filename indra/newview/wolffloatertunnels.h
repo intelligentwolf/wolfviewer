@@ -228,6 +228,12 @@ public:
     // For a window other than the Tunnels one, which the pen draws itself (WolfToolTunnel::render / draw):
     /** The ring under the pointer, metres. */
     virtual F32 cursorRadius() const { return 0.5f; }
+    /** [SKY LAND TOOLS 2026-11-10] A window drawing on something other than the ground (the Terraform window on a sky level,
+     *  wolffloaterterraform.cpp): customSurface() true, and the pen picks with pickSurface (region metres) and stands its marks
+     *  at surfaceZ. Default: the ground, as before. */
+    virtual bool customSurface() const { return false; }
+    virtual bool pickSurface(S32 x, S32 y, LLVector3& out) const { return false; }
+    virtual bool surfaceZ(F32 x, F32 y, F32& z) const { return false; }
     /** Marker k's name in the world view. */
     virtual std::string markerLabel(size_t k) const { return llformat("%d", (S32)k + 1); }
     /** What to do next, at the top of the world view. */

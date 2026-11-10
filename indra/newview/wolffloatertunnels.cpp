@@ -4153,6 +4153,15 @@ bool WolfToolTunnel::shown() const
     return up(mFloater.get()) || up(LLFloaterReg::findInstance("wolf_tunnels"));
 }
 
+// [SKY LAND TOOLS 2026-11-10] The height the pen's marks stand at for window `f`: its own surface (a sky level) when it has one
+// there (WolfRouteHost::surfaceZ), else the ground (LLSurface::resolveHeightRegion), as every mark was before.
+static F32 wolf_host_z(const WolfRouteHost* f, LLViewerRegion* rgn, F32 x, F32 y)
+{
+    F32 z;
+    if (f && f->customSurface() && f->surfaceZ(x, y, z)) return z;
+    return rgn->getLand().resolveHeightRegion(x, y);
+}
+
 // Source: wolftooladventureplace.cpp WolfToolAdventurePlace::surface (llviewerwindow.h pickImmediate / mousePointOnLandGlobal).
 // mousePointOnLandGlobal (llviewerwindow.cpp:5788-5890) walks the pointer's ray from the camera until it first goes under the
 // height field, so it finds the ground from above whatever the terrain shader draws (the see-through ground does not change it).
@@ -4160,6 +4169,8 @@ bool WolfToolTunnel::surface(S32 x, S32 y, LLVector3& out) const
 {
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return false;
+    // [SKY LAND TOOLS 2026-11-10] a window drawing on a sky level picks on that level (WolfRouteHost::pickSurface)
+    if (const WolfRouteHost* f = host(); f && f->customSurface()) return f->pickSurface(x, y, out);
     LLVector3d g;
     if (!gViewerWindow->mousePointOnLandGlobal(x, y, &g)) return false;
     const LLVector3 p = rgn->getPosRegionFromGlobal(g);
@@ -4207,7 +4218,7 @@ bool WolfToolTunnel::place(S32 x, S32 y, LLVector3& ground) const
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!f || !rgn) return false;
     const F32 w = rgn->getWidth();
-    if (cameraUnderground())
+    if (cameraUnderground() && !f->customSurface())   // [SKY LAND TOOLS 2026-11-10/] a sky level is picked from wherever
     {
         F32 px, py;
         if (!planeHit(x, y, f->planeHeight(), px, py) || px < 0.f || py < 0.f || px >= w || py >= w) return false;
@@ -4227,13 +4238,12 @@ S32 WolfToolTunnel::pickMarker(S32 x, S32 y) const
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!f || !f->routeEditing() || !f->markersMovable() || !rgn) return -1;
     const std::vector<LLVector2>& c = f->clicks();
-    const LLSurface& land = rgn->getLand();
     LLViewerCamera* cam = LLViewerCamera::getInstance();
     S32 best = -1;
     F32 best_px = HANDLE_PICK_PX;
     for (size_t k = 0; k < c.size(); ++k)
     {
-        const LLVector3 h(c[k].mV[0], c[k].mV[1], land.resolveHeightRegion(c[k].mV[0], c[k].mV[1]));
+        const LLVector3 h(c[k].mV[0], c[k].mV[1], wolf_host_z(f, rgn, c[k].mV[0], c[k].mV[1]));   // [SKY LAND TOOLS 2026-11-10/]
         LLCoordGL sp;
         if (!cam->projectPosAgentToScreen(rgn->getPosAgentFromRegion(h), sp, true)) continue;
         const F32 dx = (F32)(sp.mX - x), dy = (F32)(sp.mY - y);
@@ -4400,10 +4410,11 @@ namespace
      *  pointer or dragged) brighter and `picked_k` amber. */
     struct RouteMarks { std::vector<LLVector3> ground, ghost, in_m, out_m, bends, hot, picked, bad; };
     void routeMarks(LLViewerRegion* rgn, const std::vector<LLVector2>& c, bool join, bool drawing_here, bool ghost_line,
-                    const LLVector3& cursor, F32 ring_r, S32 hover, S32 drag, S32 picked_k, bool bad_end, RouteMarks& m)
+                    const LLVector3& cursor, F32 ring_r, S32 hover, S32 drag, S32 picked_k, bool bad_end, RouteMarks& m,
+                    const WolfRouteHost* host = nullptr)
     {
-        const LLSurface& land = rgn->getLand();
-        auto gz = [&](const LLVector2& p) { return land.resolveHeightRegion(p.mV[0], p.mV[1]); };
+        // [SKY LAND TOOLS 2026-11-10] on the window's own surface (a sky level) when it has one, else the ground as before
+        auto gz = [&](const LLVector2& p) { return wolf_host_z(host, rgn, p.mV[0], p.mV[1]); };
         for (size_t k = 1; k < c.size() && join; ++k)
         {
             // a few points along each piece, so the line follows the hill
@@ -4541,7 +4552,7 @@ void WolfToolTunnel::render()
             RouteMarks m;
             const bool here = mActive && mHaveCursor && mDrag != DRAG_MOVE && mHover < 0;
             routeMarks(rgn, other->clicks(), other->joinClicks(), here, other->joinClicks() && mPen == PEN_ROUTE, mCursor,
-                       other->cursorRadius(), mActive ? mHover : -1, mActive ? mDragPoint : -1, -1, false, m);
+                       other->cursorRadius(), mActive ? mHover : -1, mActive ? mDragPoint : -1, -1, false, m, other);
             LLGLDepthTest depth(GL_FALSE);
             gGL.setLineWidth(2.f);
             gGL.color4f(1.f, 1.f, 1.f, 0.8f);
@@ -4675,7 +4686,7 @@ void WolfToolTunnel::draw()
         const std::vector<LLVector2>& c = other->clicks();
         for (size_t k = 0; k < c.size(); ++k)
         {
-            const F32 g = rgn->getLand().resolveHeightRegion(c[k].mV[0], c[k].mV[1]);
+            const F32 g = wolf_host_z(other, rgn, c[k].mV[0], c[k].mV[1]);   // [SKY LAND TOOLS 2026-11-10/]
             LLCoordGL sp;
             if (!cam->projectPosAgentToScreen(rgn->getPosAgentFromRegion(LLVector3(c[k].mV[0], c[k].mV[1], g)), sp, false)) continue;
             const bool is_in = k == 0, is_out = c.size() >= 2 && k + 1 == c.size();

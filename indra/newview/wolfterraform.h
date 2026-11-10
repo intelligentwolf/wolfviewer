@@ -55,6 +55,9 @@ namespace WolfTerraform
     /** Every tool's settings (the window's controls). NaN heights: from the ground where it was clicked. */
     struct Params
     {
+        // [SKY LAND TOOLS 2026-11-10] what the tool shapes: 0 = the ground (ModifyLand floods / the WolfTerraform cap, as before), else
+        // the id of one of the region's sky levels (wolfterrainlevels.h), written through the WolfSkyLevels cap's "apply" op
+        S32 skyLevel = 0;
         F32 levelHeight = WolfTerraformMath::nan();
         F32 levelEdge = 0.f;
         F32 rampWidth = 6.f, rampShoulder = 3.f;
@@ -87,6 +90,7 @@ namespace WolfTerraform
         std::vector<WolfTerraformMath::Run> mRuns;
         S32 mCells = 0;                         // cells it changes (more than WRITE_SKIP_M)
         S32 mNotYours = 0;                      // cells on land this viewer does not know to be yours (the region decides)
+        S32 mLevel = 0;                         // [SKY LAND TOOLS 2026-11-10] Params::skyLevel: 0 the ground, else the sky level
         F32 mMaxCut = 0.f, mMaxFill = 0.f;
         bool ok() const { return mError.empty() && !mRuns.empty(); }
     };
@@ -114,6 +118,7 @@ namespace WolfTerraform
     struct Step
     {
         std::string mLabel;
+        S32 mLevel = 0;                         // [SKY LAND TOOLS 2026-11-10] the sky level it shaped (0: the ground)
         U64 mSeq = 0;
         bool mStopped = false;                  // the job stopped part way (Undo still puts back what it changed)
         // an Undo / Redo of this step stopped part way: pressing it again must not take the half-way ground as the step's own
@@ -165,6 +170,8 @@ namespace WolfTerraform
         enum EKind { KIND_APPLY, KIND_UNDO, KIND_REDO };
         void start(const std::string& line);
         void runCoro(EKind kind, LLUUID region, Plan plan, std::string verb, U64 seq);
+        /** [SKY LAND TOOLS 2026-11-10] The same job for a sky level: the target in 256 m blocks through the WolfSkyLevels cap. */
+        void levelCoro(EKind kind, LLUUID region, Plan plan, std::string verb, U64 seq);
         void finish(bool ok, const std::string& text);
         /** Drop the oldest steps over the caps, never the step `keep_seq` (the one a job is about). */
         void trim(U64 keep_seq);
@@ -184,6 +191,10 @@ namespace WolfTerraform
 
     /** The ground this viewer holds at cell (x, y) of `rgn`: false where its patch has not arrived (its heights would be 0). */
     bool knownHeight(LLViewerRegion* rgn, S32 x, S32 y, F32& z);
+    /** [SKY LAND TOOLS 2026-11-10] knownHeight on `level` (0: the ground): false where that level has no ground. */
+    bool knownHeightOn(LLViewerRegion* rgn, S32 level, S32 x, S32 y, F32& z);
+    /** [SKY LAND TOOLS 2026-11-10] For drawing: the top of `level` at (x, y), its base where it has no ground; the ground for 0. */
+    F32 drawHeight(LLViewerRegion* rgn, S32 level, F32 x, F32 y);
 }
 
 #endif // WOLF_TERRAFORM_H

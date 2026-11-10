@@ -6,7 +6,11 @@
      -> Shape the ground where you stand (level, area, Make ground here, Raise / Lower / Flatten / Smooth) -> Undo my last change.
      The status line under the intro says what the last action did; a refusal stays there in the caution colour.
      Layout: one 8 px spacing grid, labels left at 12, controls at 132; main_panel holds everything after the status line and
-     is hidden (with "none" shown) where the region has no sky land. -->
+     is hidden (with "none" shown) where the region does not offer sky land: off Wolf Territories (wolfgrid.h), or a region the
+     WolfSkyLevels module does not offer it on - bigger than 12 x 12 standard regions (WolfSkyLevelsModule.PagedRefusal,
+     TerrainData.UsesPagedStorage) or a physics engine without sky levels (PhysicsScene.SupportsWolfSkyLevels: BulletS and ubOde
+     only). A region that offers it but has no levels yet shows main_panel with "No levels yet." (wolffloaterskylevels.cpp
+     refreshUI). [2026-11-10] Paul: sky land is on every Wolf Territories region, so "none" no longer says "a few regions first". -->
 <floater
  can_close="true"
  can_minimize="true"
@@ -21,7 +25,7 @@
  width="440">
     <text follows="left|top|right" height="48" layout="topleft" left="12" name="intro" top="24" width="416" wrap="true">Sky land is ground high above this region that you can walk on. It is made the same way as the ground below: add a level, go up to it, and make ground where you stand.</text>
     <text follows="left|top|right" height="36" layout="topleft" left="12" name="status" top="76" width="416" wrap="true" font.style="BOLD" />
-    <text follows="left|top|right" height="54" layout="topleft" left="12" name="none" top="116" width="416" wrap="true" visible="false">This region does not have sky land yet. It is being tried on a few regions first and comes to Wolf Territories regions (up to 12 by 12 regions in size) soon.</text>
+    <text follows="left|top|right" height="54" layout="topleft" left="12" name="none" top="116" width="416" wrap="true" visible="false">Sky land is not available here. You can have it on any Wolf Territories region up to 12 by 12 regions in size (3,072 metres a side).</text>
 
     <panel follows="all" height="428" layout="topleft" left="0" name="main_panel" top="116" width="440" visible="false">
         <text follows="left|top" height="16" layout="topleft" left="12" name="levels_heading" top="0" width="300" font.style="BOLD">Levels in this region</text>

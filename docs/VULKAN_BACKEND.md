@@ -1330,6 +1330,23 @@ VK_ERROR_INITIALIZATION_FAILED` and OpenGL carries on. `vkcube` works on the sam
 with the viewer's bundled loader (`LD_LIBRARY_PATH=/opt/wolfviewer/lib vkcube`). Her full `vulkaninfo` and the log lines
 before the fall-back were asked for on the ticket; not yet received when this was written.
 
+**Her full `vulkaninfo` (ticket post of 11:02Z, system loader 1.3.275; the viewer's bundled loader reports 1.4.357)
+against what `WolfVkSwapchain::build` asks for.** X11 surface on the RTX 4060 Ti: formats B8G8R8A8_UNORM and
+B8G8R8A8_SRGB, both SRGB_NONLINEAR (we take B8G8R8A8_UNORM, the first preference); present modes FIFO, FIFO_RELAXED,
+IMMEDIATE and FIFO_LATEST_READY (no MAILBOX: vsync off gives IMMEDIATE, on gives FIFO, both offered); minImageCount 3,
+maxImageCount 8 (we ask minImageCount + 1 = 4; her own note, that minImageCount is 3 while the viewer logs "2 frames in
+flight", is right that the two are unrelated: the frame count is the number of command-buffer slots, the image count
+is asked from the surface's own minimum); transforms identity only (we ask identity); composite alpha OPAQUE only (we
+ask OPAQUE); usage TRANSFER_SRC/DST, SAMPLED, STORAGE, COLOR_ATTACHMENT, INPUT_ATTACHMENT (we ask COLOR_ATTACHMENT |
+TRANSFER_DST | TRANSFER_SRC); maxImageArrayLayers 1 (we ask 1). So every field of the request was inside the
+capabilities, and the start-up log she attached shows the sequence as in the first report (instance, device by GL UUID,
+X11 surface, allocator, device, then the fall-back). The window itself is what is left, below. Also seen in her file:
+the NVIDIA 580 device offers VK_EXT_swapchain_maintenance1 (not the KHR one), and the viewer's device line shows no
+maintenance1 for it - the instance takes VK_KHR_surface_maintenance1 when the loader offers it and then only looks for
+the KHR device extension (wolfvkdevice.cpp:402-403), so NVIDIA 580 runs the no-present-fence path (8.2m fallback,
+"not used on either test GPU" until now). Not the cause of the refused swapchain (that fails before any present), but a
+path that has not run here; noted for its own fix.
+
 **What is different between vkcube and the viewer on that machine, from the code.**
 - The viewer's X window is made with `SDL_WINDOW_OPENGL` (llwindowsdl2.cpp:848) and the GL context is created and made
   current on it (`SDL_GL_CreateContext(mWindow)` :935, `SDL_GL_MakeCurrent(mWindow, ...)` :3575/:3612): the window
@@ -1382,16 +1399,97 @@ before the fall-back were asked for on the ticket; not yet received when this wa
   adds the X windows' depth, size and map state (`WolfVkSurface::describe`).
 - The W102 fall-back guard is unchanged: a refused swapchain still means OpenGL for that start, with the notice.
 
-**Tested here (XWayland, the same code path; chain-t724, 2026-11-10 11:08Z onwards).** Build from the W102 tree, clang
-macOS-flag check and -Wconversion clean on the three changed files, gdb break-at-main start-up check passed.
-- nv-t724-child (RTX 5090 by PRIME offload, Vulkan): "Window surface created (X11): viewer's window 0xe0000a depth 24
-  2522x1520 unmapped; Vulkan child window 0xe000f2 depth 24 2522x1520 mapped, parent unmapped" (the viewer's window is
-  still hidden under the splash at that point, as always), "Vulkan renderer active", the login screen drawn and
-  presented at ~114 frames/s, the swapchain followed Hyprland's placement (2522x1520 -> 618x366, 3 images,
-  B8G8R8A8_UNORM, immediate), no fall-back, no X protocol error. The login, the in-world shots and the resize/fill
-  checks (resizefill.py + fillcheck.py), then amd-t724-child (Radeon 890M, RADV) and the nv-t724-shared control
-  (WolfVulkanDebugSharedWindow=1) were still running when this was written: results in ~/.cache/vkbackend/chain.log,
-  log-*-t724-*.log and shots/*-t724-*/ (to be copied here).
+**Tested here (XWayland, the same code path; chains chain-t724 / chain-t724b / chain-t724c / chain-t724d, 2026-11-10 11:08-13:01Z).**
+Build from the W102 tree, clang macOS-flag check and -Wconversion clean on the three changed files, gdb break-at-main
+start-up check passed. Every session: Shadow Testwolf, The Caribbean quay, `--graphicslevel 6`, far clip 4096, the
+rig of section 8 (campaign.py login, 130 s settle, 45 s frame-rate window, resizefill.py + fillcheck.py; chain-t724b
+added inputcheck.py, chain-t724c the focus watch of chainlib.sh, chain-t724d inputcheck2.py: the same key sequence in a
+short fresh session with the X focus window recorded, shared control first, then the child). "child" = this change; "shared" =
+`WolfVulkanDebugSharedWindow=1`, the W101/W102 single window, as the control. Numbers from `~/.cache/vkbackend/chain.log`,
+`log-<session>.log` and the per-second `main loop per frame` / `breakdown per frame` lines (wolfvkbridge.cpp loopFrameEnd /
+presentFrame) averaged over each session's window; pictures in `~/.cache/vkbackend/shots/<session>/`.
+
+| session | GPU, surface | window (px) in the fps window | in world | Vulkan active / fell back / X errors | fps (frame ms) | main-thread wall ms: display / idle / swap+present / sleep block | 1-min load | focus in the window | resize grabs fill |
+|---|---|---|---|---|---|---|---|---|---|
+| amd-t724-child (11:08 chain) | Radeon 890M RADV, child | 1896x1030 | yes | 1 / 0 / 0 | 3.6 (287) | 190 / 91 / 2.3 / 0.4 | not sampled | held | 7/7 at 1.00x1.00 |
+| nv-t724b-child | RTX 5090 PRIME, child | 941x1030 | yes | 1 / 0 / 0 | 3.5 (297) | 160 / 94 / 2.5 / 41.5 | ~46 (15-min mean 46 at 12:02) | lost ~11:52:52 | 6/6 at 1.00x1.00 |
+| nv-t724b-shared (control) | RTX 5090 PRIME, shared | 618x749 | yes | 1 / 0 / 0 | 7.8 (134) | 92 / 40 / 1.7 / 0.4 | 36 | held | 5/5 at 1.00x1.00 |
+| amd-t724b-child | Radeon 890M RADV, child | 1250x749 | yes | 1 / 0 / 0 | 2.8 (369) | 189 / 135 / 2.2 / 41.1 | 39 | lost ~12:05:33 | 5/5 at 1.00x1.00 |
+| amd-t724c-shared (control) | Radeon 890M RADV, shared | 1896x1030 | yes | 1 / 0 / 0 | 5.9 (171) | 83 / 45 / 1.2 / 40.6 | 18 | unfocused 43 of 45 s | 7/7 at 1.00x1.00 |
+| amd-t724c-shared-re (control) | Radeon 890M RADV, shared | 2522x1520 | yes | 1 / 0 / 0 | 5.3 (189) | 89 / 58 / 1.1 / 40.4 | 22 | unfocused 42 s | (no resize on a rerun) |
+| amd-t724c-child | Radeon 890M RADV, child | 1250x1520 | yes | 1 / 0 / 0 | 6.6 (172) | 108 / 59 / 2.4 / 0.3 | 14-21 | hyprctl: unfocused 34 s; viewer: held | 6/6 at 1.00x1.00 |
+| amd-t724c-child-re | Radeon 890M RADV, child | 941x1030 | yes | 1 / 0 / 0 | 10.6 (95) | 40 / 14 / 0.7 / 40.1 | 9 | unfocused 44 s | (no resize on a rerun) |
+| nv-t724d-shared (control, key check) | RTX 5090 PRIME, shared | 1896x1030 | yes | 1 / 0 / 0 | (5 s window, not measured) | - | 9.5 | held; X focus = the viewer's window | (no resize) |
+| nv-t724d-child (key check) | RTX 5090 PRIME, child | 1896x1030 | yes | 1 / 0 / 0 | (5 s window, not measured) | - | 9.6 | held; X focus = the viewer's window | (no resize) |
+
+(nv-t724-child of the first chain reached the login screen on the child window at ~114 frames/s, swapchain 2522x1520 ->
+618x366 following Hyprland, and did not get in world: the grid's "already logged in" after the previous holder of the
+lock; nv-t724b-child's first attempt the same, its retry is the row above. nv-t724-shared of the first chain was a
+login-screen-only control: surface on the viewer's window, Vulkan active, no fall-back, the DebugSharedWindow warning
+logged once.)
+
+- **The surface, the swapchain, the window.** Every child session logged "Window surface created (X11): viewer's window
+  0x... depth 24 2522x1520 unmapped; Vulkan child window 0x... depth 24 2522x1520 mapped, parent unmapped" (the viewer's
+  window is still hidden under the splash at that point, as always), then "Vulkan renderer active"; no "Falling back to
+  OpenGL", no "stopped while running", no X protocol error, no login failure in any of the ten in-world sessions.
+  The swapchain followed every placement and resize Hyprland made (tile, un-fullscreen, float 1400x900 and 1100x700,
+  tiled again, moved to the 1.6-scale panel and back): the `Swapchain: WxH` sequence of each log matches the client
+  sizes the side script recorded, and all 36 resize grabs of the six resized sessions measure fill 1.00 x 1.00
+  (fillcheck.py: the picture reaches both window edges, no clamp smear), e.g. `shots/nv-t724b-child/rf_c_resize1.png`
+  1400x900, `shots/amd-t724c-child/rf_c_resize1.png` 2240x1440, `shots/amd-t724-child/rf_f_on_panel_1p6.png` 2522x1520.
+- **The UI over the world (looked at).** `shots/nv-t724b-child/world.png` (1896x1030), `rf_c_resize1.png` (1400x900),
+  `in_0_before.png` (941x1030) and the AMD child grabs: menu bar, navigation bar, bottom toolbar, mini-map thumbnail,
+  name tag and the floater borders all drawn over the Vulkan-presented world at the right size and place, in every
+  window size - so the UI / read-back layers taken from GL_BACK of the parent window are unchanged with the child mapped
+  over it, the pixel-ownership question of the design note above answered by the pictures on both drivers.
+- **Pointer input through the child window: proven.** inputcheck.py sent real X input through XTEST (xinput724,
+  `XTestFakeMotionEvent` / `XTestFakeButtonEvent`) at 30,9 of the viewer's window: the pointer sat over the child
+  window ("pointer now ... over child" = the viewer's top-level, as XQueryPointer reports it), the click opened the
+  first menu of the menu bar - the **Avatar** menu, not "Viewer" as the check's name says - over the world, on both
+  GPUs: `shots/nv-t724b-child/in_1_viewer_menu_clicked.png` and `shots/amd-t724b-child/in_1_viewer_menu_clicked.png`
+  (menu-area pixel difference against `in_0_before.png` 81 and 65 of 255). The pointer event lands on the child
+  (NoEventMask) and propagates to the SDL window that selected it, as designed.
+- **Keyboard input through the child window: proven (chain-t724d, 12:50-13:01Z, load 9-10, no builds running).** The first
+  key check (chain-t724b) had the three key steps after the click (Escape, Return, the typed "Hello t724 child window",
+  Escape) do nothing on either GPU: the menu area of `in_2` / `in_3` pixel-identical to `in_1` (0.00 / 0.01), no chat
+  bar, the text nowhere. On AMD the viewer had lost focus ~35 s before the keys (its "Viewer was backgrounded for 60s"
+  line at 12:06:33Z, keys at 12:06:10-16Z); on NVIDIA its own focus flag was still up, and the X focus window had not
+  been recorded. So the SAME XTEST sequence was run again (inputcheck2.py with xinput724b) on an NVIDIA shared-window
+  control (`WolfVulkanDebugSharedWindow=1`) and then an NVIDIA child-window session, each a fresh short session (login,
+  the check ~70 s after arrival, no resize, quit) with Hyprland's active window and the X focus window (XGetInputFocus)
+  recorded before the click, after it and after the keys: all six readings in both sessions were the viewer's window
+  0xe0000a. The result is identical in both: the click opened the Avatar menu (menu-area difference 75 of 255), Escape
+  closed it (`in_2` and `in_3` differ from `in_1` by 75), Return opened the Nearby Chat bar and the typed text stands in
+  it - `shots/nv-t724d-shared/in_2_typed_in_chat_bar.png` and `shots/nv-t724d-child/in_2_typed_in_chat_bar.png`
+  (1896x1030, "Nearby Chat | Hello t724 child window" bottom left). The child window passes key events exactly as the
+  single window does, as the X delivery rule says it must (dix/events.c DeliverFocusedEvent: the pointer's window when
+  it is an inferior of the focus window, propagating up to the first ancestor selecting KeyPress - the child has
+  NoEventMask and no do_not_propagate mask; SDL 2.28 takes core KeyPress, SDL_x11events.c:1084). No regression. The
+  chain-t724b failures were the rig: there the keys went straight after resizefill had floated, resized and moved the
+  window between monitors while the laptop was in use, and nothing recorded where the X focus was. Paul's real-keyboard
+  W103 test remains the user-level confirmation.
+- **Frame rate: the child window costs nothing measurable; the 3.6 / 3.5 / 2.8 fps were the laptop.** In every session,
+  child or shared, the present path is a few milliseconds: swap/present wall 0.7-2.5 ms a frame, Vulkan CPU steps
+  (acquire 0.0-0.2, slot wait 0.0-0.1, present 0.0-1.7 ms, hand-over sum 3-11 ms), GL hand-over span 2-11 ms and the
+  Vulkan pass 0.2-3.9 ms by GPU timestamps. The slow sessions spent their time in `display` AND `idle` alike, as
+  main-thread CPU time, not waiting (blocked = wall minus main-thread CPU: display 14-47 ms of 160-190, idle 6-13 ms
+  of 91-135); `idle` is network and object work that never touches a window. During every chain-t724b window two
+  ninja builds (`-j4` from 11:42:11Z, `-j5` from 11:46:44Z, nice 19) and up to 23 glslangValidator shader checks ran
+  on this 24-thread laptop (load means 1 / 5 / 15 min at 12:02Z: 36 / 48 / 46, 1-min 39 at 12:08Z; sampled every 30 s
+  from 12:02Z), and
+  the amd-t724-child window (11:33Z) has the same signature with its load unsampled. As the load fell the same child
+  window sped up in step: amd-t724c-child 172 ms at load 14-21, amd-t724c-child-re 95 ms at load 9 - of which 40 ms is
+  the background yield (`sleep block` 40.1 ms, BackgroundYieldTime, the session unfocused by the focus watch), leaving
+  ~55 ms of frame against the round-9 AMD Vulkan baseline of 62 ms (8.2, same spot). The shared-window controls were
+  no faster than the child window at the same load (amd-t724c-shared 171 / 189 ms at load 18-22 with the same 40 ms
+  yield, against the child's 172 ms at load 14-21 without it). The "GL GPU frame interval" lines add nothing beyond
+  the fps: glFrameStamp issues one GL_TIMESTAMP query a frame and reports the mean distance between them, i.e. the
+  frame period as the GPU saw it (wolfvkbridge.cpp glFrameStamp, the log line's :866), not GPU busy time; the AMD values (109-420 ms) are the
+  frame periods of the rows above, the "~30-60 ms" question of the brief is answered by the 95 ms / 40 ms-yield row.
+  What the chains did NOT give: a focused, same-size, same-load child/shared pair on either GPU - every t724c run was
+  unfocused for 34-44 of its 45 s (the laptop was in use: hyprctl's active window was a terminal and a browser), the
+  NVIDIA pair differs in size (941x1030 vs 618x749) and load. The breakdown above is the evidence that the window is
+  not where the time goes; a clean fps pair is still owed, on a quiet laptop.
 - Not tested anywhere: a pure NVIDIA X11 session (the reporting machine). The child window is the spec-backed change;
   whether that driver accepts it is for the ticket's next run, and the WARNING block tells the rest if it does not.
 

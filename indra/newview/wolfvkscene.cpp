@@ -1200,11 +1200,12 @@ void WolfVkScene::beginFrame()
 
 void WolfVkScene::setProbeArmed(bool armed)
 {
+    // disarming only stops the samples: the probe's images and host buffers may still be named by a frame in flight, so
+    // they go with the scene (destroy(), after the device is idle), not here
     if (armed == mProbeArmed) return;
     mProbeArmed = armed;
     mProbeLastTime = 0.0;
     mProbeDueThisFrame = false;
-    if (!armed) probeDestroy();
 }
 
 namespace
@@ -1423,6 +1424,10 @@ void WolfVkScene::probeVkCollect()
         maxRGB(data, PROBE_SIZE * PROBE_SIZE, mProbe.mVkMax, mProbe.mVkLit);
         mProbe.mVkSeq = mProbeVkPending[slot];
         mProbe.mVkValid = true;
+        WorldProbe::VkSample& v = mProbe.mVkRing[mProbe.mVkSeq % 4];
+        v.mSeq = mProbe.mVkSeq;
+        v.mMax = mProbe.mVkMax;
+        v.mLit = mProbe.mVkLit;
     }
     mProbeVkPending[slot] = 0;
 }

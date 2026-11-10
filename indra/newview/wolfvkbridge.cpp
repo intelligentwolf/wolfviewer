@@ -639,12 +639,13 @@ namespace
         sBlack.mLastGlSeq = p.mGlSeq;
         sBlack.mProbes++;
         const bool gl_black = p.mGlMax == 0;
-        // Vulkan's sample of the same frame, when the hand-over is shared and that sample is in (it lags a few frames;
-        // judged only when it belongs to this GL sample or a later one is not needed: the sequence numbers match)
-        const bool vk_known = p.mVkValid && p.mVkPossible && p.mVkSeq == p.mGlSeq;
-        const bool vk_black = vk_known && p.mVkMax == 0;
+        // Vulkan's sample of the same frame (the GL one is read two probes after it was taken, the Vulkan one a few
+        // frames after: looked up by the probe number in the scene's ring)
+        uint32_t vk_max = 0, vk_lit = 0;
+        const bool vk_known = p.mVkPossible && sScene->probe().vkSample(p.mGlSeq, vk_max, vk_lit);
+        const bool vk_black = vk_known && vk_max == 0;
         LL_INFOS("WolfVulkanCheck") << "World probe " << p.mGlSeq << ": GL max R/G/B " << p.mGlMax << " (" << p.mGlLit << " of 1024 points lit)"
-                                    << (vk_known ? llformat(", Vulkan's view max %u (%u lit)", p.mVkMax, p.mVkLit) : std::string(p.mVkPossible ? ", Vulkan's view pending" : ""))
+                                    << (vk_known ? llformat(", Vulkan's view max %u (%u lit)", vk_max, vk_lit) : std::string(p.mVkPossible ? ", no Vulkan sample for this probe" : ""))
                                     << ", stage " << static_cast<int>(sBlack.mStage) << LL_ENDL;
         // A. the import does not carry the picture
         if (!gl_black && vk_black) sBlack.mImportFaultRun++; else if (vk_known) sBlack.mImportFaultRun = 0;

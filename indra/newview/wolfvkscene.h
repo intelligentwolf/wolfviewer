@@ -104,6 +104,16 @@ public:
         uint32_t mVkSeq = 0;
         uint32_t mSeq = 0;          // samples issued
         bool mVkPossible = false;   // the shared world layer can be blitted (format features) and the hand-over is shared
+        // the last four Vulkan samples by number: the GL sample of a probe is read two probes later (its PBO), the
+        // Vulkan one a few frames later, so the one that belongs to a GL sample is looked up by its number
+        struct VkSample { uint32_t mSeq = 0; uint32_t mMax = 0; uint32_t mLit = 0; };
+        VkSample mVkRing[4];
+        bool vkSample(uint32_t seq, uint32_t& max, uint32_t& lit) const
+        {
+            const VkSample& v = mVkRing[seq % 4];
+            if (seq == 0 || v.mSeq != seq) return false;
+            max = v.mMax; lit = v.mLit; return true;
+        }
     };
     void setProbeArmed(bool armed);
     const WorldProbe& probe() const { return mProbe; }

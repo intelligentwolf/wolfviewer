@@ -20378,7 +20378,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanW101SpvRetryDone</key>
 		<map>
 			<key>Comment</key>
-			<string>[W102 2026-11-10] Internal, one-time: the first start of W102 or later has looked once for W101's missing-shaders fall-back in the previous run's log (wolfvkbridge.cpp decideBackend) and, only when that was why the last run fell back, put the renderer back to Vulkan.</string>
+			<string>[W102 2026-11-10] Internal, one-time: set at the first start of W102 or later. That start puts a WolfRenderBackend saved as "opengl" (by W101, whose download had no Vulkan shaders, so nearly every W101 Vulkan start fell back) back to "vulkan", once, except on macOS (wolfvkbridge.cpp decideBackend).</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>

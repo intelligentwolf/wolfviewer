@@ -151,13 +151,23 @@ namespace
         {
             if (request->mAbandoned.load()) return;   // the main thread gave up: nothing is created
             HWND child = createWin32ChildOnWindowThread(instance, parent, request->mWhy);
+            if (request->mAbandoned.load())
+            {
+                // the main thread gave up while this ran: a visible child nobody uses would cover the viewer's window, so
+                // it goes again here (the main thread's second look below, before this store, would have taken it)
+                if (child) DestroyWindow(child);
+                return;
+            }
             request->mResult.set_value(child);
         });
         if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
         {
             request->mAbandoned.store(true);
-            why = "the window thread did not answer within 5 s";
-            return nullptr;
+            if (future.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            {
+                why = "the window thread did not answer within 5 s";
+                return nullptr;
+            }
         }
         HWND child = future.get();
         if (!child) why = request->mWhy;

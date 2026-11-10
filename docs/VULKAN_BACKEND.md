@@ -1460,6 +1460,10 @@ the Windows window has no alpha plane, and the composite laid the UI over the wo
   GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE)`, glcorearb.h:1092): "Default framebuffer alpha bits: N" - 0 on Windows. Fewer
   copies a frame too: the world blit and the depth pass are gone from the hand-over. The world probe's Vulkan sample
   is now of the frame layer.
+- **macOS defaults to OpenGL, no box** (Paul, 2026-11-10; [MAC OPENGL], wolfvkbridge.cpp decideBackend): on LL_DARWIN the
+  control's default becomes "opengl" (`LLControlVariable::setDefaultValue`, llcontrol.cpp:276), any other value is set
+  to "opengl", and decideBackend returns before anything Vulkan - no fall-back, no `WolfVulkanFellBack`, the V button
+  disabled with its "not available" tooltip as before (no MoltenVK in the bundle).
 - The X11 and Win32 child windows (8.2s, above) stay: they are right by the spec and the Win32 one was never the cause
   of the black world (the UI showed through the same swapchain).
 

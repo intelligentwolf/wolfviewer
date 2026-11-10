@@ -767,6 +767,30 @@ void decideBackend()
         gSavedSettings.setString("WolfVulkanStoppedReason", "");
         rememberNotice("WolfVulkanStoppedLastRun", stopped);
     }
+#if LL_DARWIN
+    // [MAC OPENGL 2026-11-10] Paul: "Macs default to OpenGL with no Vulkan box". The bundle carries no MoltenVK
+    // (vk/wolfvkloader.cpp), so a Vulkan start on a Mac can only fall back and show WolfVulkanFellBack - W102 did that at
+    // every Mac start. The platform default is made here, where the setting is read, the way the per-platform globals
+    // are set from settings in LLAppViewer (llappviewer.cpp:666-698 "#if LL_DARWIN ... gSavedSettings"): the control's
+    // default becomes "opengl" (llcontrol.cpp:276-293 LLControlVariable::setDefaultValue: the value is reset to the
+    // default first, then the default replaced - a value still at the old default follows it; defaults are never saved,
+    // so nothing is written for the default state) and any other value is set to "opengl" as well (Vulkan cannot run
+    // here whatever was chosen; the V button is disabled with its "not available" tooltip by vulkanAvailable()). No
+    // fall-back, no notice: the start goes to OpenGL at once, exactly like a Windows or Linux start that chose OpenGL.
+    {
+        LLControlVariablePtr ctrl = gSavedSettings.getControl("WolfRenderBackend");
+        if (ctrl) ctrl->setDefaultValue(LLSD("opengl"));
+        if (gSavedSettings.getString("WolfRenderBackend") != "opengl")
+        {
+            LL_INFOS("Vulkan") << "macOS: WolfRenderBackend set to opengl (Vulkan is not available on a Mac; Paul 2026-11-10)" << LL_ENDL;
+            gSavedSettings.setString("WolfRenderBackend", "opengl");
+        }
+        gSavedSettings.setBOOL("WolfVulkanStartOK", true);   // no Vulkan start is under way, whatever an old profile says
+        sRequested = false;
+        sState = State::OPENGL;
+        return;
+    }
+#endif
     // [W102 2026-11-10] Once, at the first start of a viewer with this code, a saved "opengl" goes back to Vulkan.
     // W101 shipped without its SPIR-V (no glslang on CI, indra/cmake/VulkanShaders.cmake), so every W101 Vulkan start
     // that reached the scene fell back (WolfVkScene::init, wolfvkscene.cpp: the composite pair is missing) and fallBack()

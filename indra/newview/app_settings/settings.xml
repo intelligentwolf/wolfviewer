@@ -20180,7 +20180,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfRenderBackend</key>
 		<map>
 			<key>Comment</key>
-			<string>[VULKAN BACKEND 2026-11-08] Which renderer draws the window: "vulkan" (default from 2026-11-09, Paul) or "opengl" (WolfViewer's own Vulkan renderer, indra/llrender/vk + wolfvkbridge.cpp). Read once at start-up, so a change takes effect at the next start (Wolf World > Vulkan Renderer). If Vulkan cannot be set up, or the last Vulkan start never reached the login screen (WolfVulkanStartOK), the viewer runs on OpenGL, sets this back to "opengl" and says so.</string>
+			<string>[VULKAN BACKEND 2026-11-08] Which renderer draws the window: "vulkan" (default from 2026-11-09, Paul; on macOS the default is "opengl" and Vulkan is never tried - Paul 2026-11-10, wolfvkbridge.cpp decideBackend) or "opengl" (WolfViewer's own Vulkan renderer, indra/llrender/vk + wolfvkbridge.cpp). Read once at start-up, so a change takes effect at the next start (Wolf World > Vulkan Renderer). If Vulkan cannot be set up, or the last Vulkan start never reached the login screen (WolfVulkanStartOK), the viewer runs on OpenGL, sets this back to "opengl" and says so.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

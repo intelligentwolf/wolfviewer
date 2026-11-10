@@ -153,6 +153,27 @@ bool WolfVkScene::init(WolfVkDevice& device, WolfVkSwapchain& swapchain, std::st
     mPboUI = pbos[1];
     mPboDepth = pbos[2];
 
+    // [THE CAUSE 2026-11-10] The window's default framebuffer: has it an alpha plane? OpenGL 4.6 core 9.2.3 / glcorearb.h:1092
+    // glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT, GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE) on framebuffer 0
+    // (GL_ALPHA_BITS is gone from the core profile). Linux: SDL asks for 8 (llwindowsdl2.cpp:883 SDL_GL_ALPHA_SIZE); Windows:
+    // 0 (llwindowwin32.cpp:1599-1600 WGL_ALPHA_BITS_ARB 0). W101/W102 composited the UI over the world by the UI layer's
+    // alpha (compositeF.glsl: ui.rgb + world * (1 - ui.a)), and a framebuffer without an alpha plane reads alpha 1
+    // everywhere (OpenGL 4.6 17.4.1: "If the framebuffer has no alpha ... alpha is 1"): the world was multiplied by zero
+    // under every pixel - Omniwright's black world with the UI intact, reproduced with the W102 Windows binary under
+    // Wine on this laptop (docs 8.2t). The composite now takes the GL frame as one layer (captureWorld / readBackUI).
+    {
+        const GLenum WOLF_GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE = 0x8215;   // glcorearb.h:1092
+        GLint saved_fbo = 0, alpha_bits = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &saved_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        while (glGetError() != GL_NO_ERROR) {}
+        glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT, WOLF_GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE, &alpha_bits);
+        const GLenum e = glGetError();
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(saved_fbo));
+        mBackAlphaBits = (e == GL_NO_ERROR) ? static_cast<int>(alpha_bits) : -1;
+        LL_INFOS("Vulkan") << "Default framebuffer alpha bits: " << mBackAlphaBits << (mBackAlphaBits == 0 ? " (no alpha plane: the two-layer UI composite of W101/W102 would blank the world here)" : "") << LL_ENDL;
+    }
+
     // [SHARED IMAGES 2026-11-08] the layers shared with GL where the drivers allow it; otherwise the read-backs stay
     {
         std::string why;
@@ -423,9 +444,46 @@ void WolfVkScene::captureWorld()
             }
         }
     }
+    // [THE CAUSE 2026-11-10] The finished world is in the default framebuffer now (renderFinalize's last pass), the HUD
+    // on it; the 2D UI follows. From here the frame is ONE layer: nothing is copied and nothing is cleared, the UI is
+    // drawn over the world by OpenGL exactly as in OpenGL mode, and readBackUI hands the whole frame to Vulkan at the
+    // swap (the composite shows it as it is: worldMap transparent, uiMap the frame, compositeF.glsl ui.rgb + 0). The
+    // W101/W102 two-layer way (the world copied out here, the back buffer cleared to 0 alpha, the UI composited by its
+    // alpha) needs an alpha plane the Windows window has not got (init above) - it stays only for the debug overlay
+    // (WolfVulkanOverlayFullbright), where it is refused without alpha bits. The world probe samples the world here.
+    {
+        const LLRect world_rect = gViewerWindow->getWorldViewRectRaw();
+        mWorldRect[0] = world_rect.mLeft;
+        mWorldRect[1] = world_rect.mBottom;
+        mWorldRect[2] = world_rect.getWidth();
+        mWorldRect[3] = world_rect.getHeight();
+        mWidth = static_cast<uint32_t>(ww);
+        mHeight = static_cast<uint32_t>(wh);
+        mWorldThisFrame = true;
+        // [BLACK WORLD 2026-11-10] the probe's GL sample of the finished world (both hand-overs)
+        mProbeDueThisFrame = false;
+        if (mProbeArmed)
+        {
+            const F64 now = LLTimer::getTotalSeconds();
+            if (now - mProbeLastTime >= 1.0 && world_rect.getWidth() >= 32 && world_rect.getHeight() >= 32)
+            {
+                mProbeLastTime = now;
+                mProbe.mSeq++;
+                mProbeDueThisFrame = true;
+                probeGLSample();
+            }
+        }
+        if (!overlayActive())
+        {
+            mWorldCaptured = false;
+            mHaveWorld = false;
+            mHaveDepth = false;
+            return;
+        }
+    }
     if (mShare)
     {
-        // [SHARED IMAGES 2026-11-08] GL copies the finished world and the scene depth straight into the shared layers
+        // [SHARED IMAGES 2026-11-08] (overlay only) GL copies the finished world and the scene depth straight into the shared layers
         const LLRect world_rect = gViewerWindow->getWorldViewRectRaw();
         uint32_t depth_tex = 0, dw = 0, dh = 0;
         if (gPipeline.mRT && gPipeline.mRT->deferredScreen.getDepth())
@@ -453,19 +511,6 @@ void WolfVkScene::captureWorld()
         mDepthHeight = static_cast<uint32_t>(std::max(0, world_rect.getHeight()));
         mHaveDepth = depth_tex != 0;
         mHaveWorld = true;
-        // [BLACK WORLD 2026-11-10] the probe's GL sample of the finished world, before the clear below
-        mProbeDueThisFrame = false;
-        if (mProbeArmed)
-        {
-            const F64 now = LLTimer::getTotalSeconds();
-            if (now - mProbeLastTime >= 1.0 && world_rect.getWidth() >= 32 && world_rect.getHeight() >= 32)
-            {
-                mProbeLastTime = now;
-                mProbe.mSeq++;
-                mProbeDueThisFrame = true;
-                probeGLSample();
-            }
-        }
         // the UI goes onto a clear layer, as below
         GLfloat cc[4];
         glGetFloatv(GL_COLOR_CLEAR_VALUE, cc);
@@ -500,18 +545,6 @@ void WolfVkScene::captureWorld()
     }
     mWidth = static_cast<uint32_t>(ww);   // the layer images follow the window; onSwapchainChanged keeps them matched
     mHeight = static_cast<uint32_t>(wh);
-    // [BLACK WORLD 2026-11-10] the probe's sample from the CPU copy (nothing of Vulkan's to compare with on this path)
-    mProbeDueThisFrame = false;
-    if (mProbeArmed && mHaveWorld)
-    {
-        const F64 now = LLTimer::getTotalSeconds();
-        if (now - mProbeLastTime >= 1.0)
-        {
-            mProbeLastTime = now;
-            mProbe.mSeq++;
-            probeGLSampleFromPixels();
-        }
-    }
 
     // the scene depth: the deferred screen target's depth texture (GL_DEPTH_COMPONENT24, llrendertarget.cpp:307), read as float
     if (gPipeline.mRT && gPipeline.mRT->deferredScreen.getDepth())
@@ -861,8 +894,7 @@ void WolfVkScene::drawFullbright(VkCommandBuffer cmd)
     // [ONE RENDERER PER BATCH 2026-11-08] the fullbright OVERLAY (Vulkan drawing the unlit surfaces again, after GL's
     // post-processing, onto its own layer) was the proof stage; it is off unless asked for (WolfVulkanOverlayFullbright)
     // because the surfaces come out without the viewer's tone map, and when on, GL skips the batches it draws
-    static LLCachedControl<bool> overlay(gSavedSettings, "WolfVulkanOverlayFullbright", false);
-    if (!overlay) return;
+    if (!overlayActive()) return;   // [THE CAUSE 2026-11-10] and never without an alpha plane
     if (!mHaveDepth || mDepthWidth == 0 || mDepthHeight == 0) return;
     std::string error;
     // shared layers: the target is window-sized (its depth IS the shared depth) and the pass draws into the world view
@@ -1157,7 +1189,8 @@ void WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain,
         std::vector<VkDescriptorImageInfo> by_binding(4, fallback);
         WolfVkImage* world = mShare ? mShare->world() : mWorldImage.get();
         WolfVkImage* ui = mShare ? mShare->ui() : mUIImage.get();
-        // a shared world layer with no world this frame (login screen) holds whatever GL left; the GL frame is then all "UI"
+        // [THE CAUSE 2026-11-10] every frame now: the GL frame is the ui layer, the world layer unused (transparent here), so
+        // colour = ui.rgb + 0 whatever the frame's alpha; only the debug overlay still fills the world layer (captureWorld)
         if (mShare && !mHaveWorld) world = nullptr;
         by_binding[0] = { linear, (world && world->layout() == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) ? world->view() : mTransparent->view(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         WolfVkImage* scene = mScene ? mScene->image(0) : nullptr;
@@ -1197,6 +1230,19 @@ void WolfVkScene::beginFrame()
 
 // ---------------------------------------------------------------------------------------------------------------
 // [BLACK WORLD 2026-11-10] the world probe (wolfvkscene.h WorldProbe)
+
+bool WolfVkScene::overlayActive() const
+{
+    static LLCachedControl<bool> overlay(gSavedSettings, "WolfVulkanOverlayFullbright", false);
+    if (!overlay) return false;
+    if (mBackAlphaBits <= 0)
+    {
+        LL_WARNS_ONCE("Vulkan") << "WolfVulkanOverlayFullbright needs an alpha plane in the window's framebuffer (this one has "
+                                << mBackAlphaBits << " alpha bits): the overlay stays off" << LL_ENDL;
+        return false;
+    }
+    return true;
+}
 
 void WolfVkScene::setProbeArmed(bool armed)
 {
@@ -1305,37 +1351,11 @@ void WolfVkScene::probeGLSample()
     if (saved_scissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
 }
 
-void WolfVkScene::probeGLSampleFromPixels()
-{
-    // read-back hand-over: mWorldPixels is the whole window as GL drew it; 1024 points of the world view rect
-    if (!gViewerWindow || mWorldPixels.size() < static_cast<size_t>(mWidth) * mHeight * 4) return;
-    const LLRect rect = gViewerWindow->getWorldViewRectRaw();
-    const int32_t rw = rect.getWidth(), rh = rect.getHeight();
-    if (rw < 32 || rh < 32) return;
-    uint32_t max = 0, lit = 0;
-    for (uint32_t j = 0; j < PROBE_SIZE; ++j)
-    {
-        for (uint32_t i = 0; i < PROBE_SIZE; ++i)
-        {
-            const int32_t x = rect.mLeft + static_cast<int32_t>((static_cast<int64_t>(i) * rw) / PROBE_SIZE) + rw / (2 * static_cast<int32_t>(PROBE_SIZE));
-            const int32_t y = rect.mBottom + static_cast<int32_t>((static_cast<int64_t>(j) * rh) / PROBE_SIZE) + rh / (2 * static_cast<int32_t>(PROBE_SIZE));
-            if (x < 0 || y < 0 || static_cast<uint32_t>(x) >= mWidth || static_cast<uint32_t>(y) >= mHeight) continue;
-            const uint8_t* px = mWorldPixels.data() + (static_cast<size_t>(y) * mWidth + static_cast<size_t>(x)) * 4;
-            const uint8_t m = std::max(px[0], std::max(px[1], px[2]));
-            if (m > max) max = m;
-            if (m) ++lit;
-        }
-    }
-    mProbe.mGlMax = max;
-    mProbe.mGlLit = lit;
-    mProbe.mGlSeq = mProbe.mSeq;
-    mProbe.mGlValid = true;
-}
-
 void WolfVkScene::probeVkRecord(VkCommandBuffer cmd)
 {
-    if (!mDevice || !mShare || !mShare->world()) return;
-    WolfVkImage* world = mShare->world();
+    // [THE CAUSE 2026-11-10] the frame layer (ui): the whole GL frame as Vulkan composites it (captureWorld above)
+    if (!mDevice || !mShare || !mShare->ui()) return;
+    WolfVkImage* world = mShare->ui();
     if (!mProbeVkChecked)
     {
         mProbeVkChecked = true;
@@ -1369,7 +1389,7 @@ void WolfVkScene::probeVkRecord(VkCommandBuffer cmd)
         mProbe.mVkPossible = ok;
         if (!ok)
         {
-            LL_WARNS("WolfVulkanCheck") << "world probe: Vulkan's view of the shared world layer cannot be sampled ("
+            LL_WARNS("WolfVulkanCheck") << "world probe: Vulkan's view of the shared frame layer cannot be sampled ("
                                         << (features ? error : std::string("the formats cannot be blitted")) << "); GL samples only" << LL_ENDL;
             mProbeVkImage.reset();
             mProbeVkHost.clear();
@@ -1379,7 +1399,7 @@ void WolfVkScene::probeVkRecord(VkCommandBuffer cmd)
     if (!mProbe.mVkPossible) return;
     const uint32_t slot = mDevice->frameIndex();
     if (slot >= mProbeVkPending.size() || mProbeVkPending[slot] != 0) return;
-    // the world layer (SHADER_READ_ONLY after the acquire) to TRANSFER_SRC, the world view rect blitted to 32x32, copied
+    // the frame layer (SHADER_READ_ONLY after the acquire) to TRANSFER_SRC, the world view rect blitted to 32x32, copied
     // out to this slot's host buffer, the layer back to SHADER_READ_ONLY for the composite (release() takes layout())
     world->transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
     mProbeVkImage->transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -1485,7 +1505,7 @@ bool WolfVkScene::recordFrame(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, u
     // recorded and the caller falls back without submitting (review item 7; today this coincides with handOverBroken()).
     if (handOverBroken() || (mShare && !mLayersAcquired)) return false;
     // [BLACK WORLD 2026-11-10] Vulkan's view of the shared world layer, this very frame, after the acquire
-    if (mProbeDueThisFrame && mShare && mLayersAcquired && mHaveWorld) probeVkRecord(cmd);
+    if (mProbeDueThisFrame && mShare && mLayersAcquired && mHaveUI) probeVkRecord(cmd);
     mProbeDueThisFrame = false;
     drawFullbright(cmd);
     drawComposite(cmd, swapchain, image_index);

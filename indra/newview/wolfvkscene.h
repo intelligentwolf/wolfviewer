@@ -119,7 +119,10 @@ public:
     const WorldProbe& probe() const { return mProbe; }
     // [BLACK WORLD 2026-11-10] SPIR-V this session: programs mirrored and programs without SPIR-V (one line)
     std::string spirvSummary() const;
-    bool worldCapturedThisFrame() const { return mHaveWorld; }
+    // [BLACK WORLD 2026-11-10] true once per frame in which captureWorld ran with a world (consumed by the caller)
+    bool takeWorldCaptured() { const bool w = mWorldThisFrame; mWorldThisFrame = false; return w; }
+    // [THE CAUSE 2026-11-10] the window's default framebuffer alpha bits (0 on Windows: llwindowwin32.cpp WGL_ALPHA_BITS_ARB 0)
+    int backAlphaBits() const { return mBackAlphaBits; }
 
     // Statistics for the floater and the log (last frame).
     uint32_t drawsLastFrame() const { return mDrawsLastFrame; }
@@ -240,12 +243,16 @@ private:
     std::vector<uint32_t> mProbeVkPending;       // sample number in each slot's buffer (0 = none)
     bool mProbeVkChecked = false;                // format features looked up
     void probeGLSample();                        // at captureWorld: issue this probe's GL read, collect the previous one
-    void probeGLSampleFromPixels();              // read-back hand-over: the CPU copy is sampled directly
-    void probeVkRecord(VkCommandBuffer cmd);     // at recordFrame, after the acquire
+    void probeVkRecord(VkCommandBuffer cmd);     // at recordFrame, after the acquire: Vulkan's view of the frame layer
     void probeVkCollect();                       // at beginFrame: this slot's buffer is final
     void probeDestroy();
     static const uint32_t PROBE_SIZE = 32;
     uint32_t mMirrorsMade = 0;                   // [BLACK WORLD] shader mirrors made this session
+    bool mWorldThisFrame = false;                // [BLACK WORLD] captureWorld ran with a world this frame
+    int mBackAlphaBits = -1;                     // [THE CAUSE] default framebuffer alpha bits, read at init
+    // [THE CAUSE 2026-11-10] the two-layer hand-over (world layer + UI on a cleared back buffer, composited by the UI's
+    // alpha) needs an alpha plane in the default framebuffer; it is only used for the debug overlay now
+    bool overlayActive() const;
 };
 
 #endif // WOLF_VK_SCENE_H

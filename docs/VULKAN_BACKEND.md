@@ -1434,8 +1434,36 @@ coordinator's session (10.png). Branch `winvk-black` (worktree `wolfviewer-winvk
   image imported with GL_EXT_memory_object_win32, sampled by the composite, presented through the swapchain), and
   the login screen goes the same way.
 
-**What is left, ranked** (none provable from the source - the Windows interop paths had never run, 8.2n "Still
-unproven: Windows NVIDIA/AMD/Intel GL+Vulkan interop"):
+**THE CAUSE (found 12:14Z by running the W102 Windows binary under Wine, logged in as Shadow Testwolf at Sandbox):
+the Windows window has no alpha plane, and the composite laid the UI over the world by the UI layer's alpha.**
+- Reproduced: the W102 Windows AVX2 binary under Wine (winevulkan + Wine's opengl32 on the NVIDIA 615.78 Linux driver,
+  `~/.cache/winvk/wine-session.sh`, grabs `~/.cache/winvk/wine-w102-inworld/world_*_mid.png`): Vulkan active, shared
+  layers and the full G-buffer shared, `Shader mirror for "Deferred Diffuse Shader"` made, no Vulkan warning of any kind -
+  and the 3D view black with the UI, the name tags and the dialogs intact: 4973 of 5044 sampled points exactly 0.
+  Omniwright's picture, on a driver on which the native Linux build shows the world. So the fault is in the Windows
+  build's own path, not in a Windows driver.
+- The path: `LLWindowWin32::switchContext` asks for `WGL_ALPHA_BITS_ARB 0` (llwindowwin32.cpp:1599-1600; the log's pixel
+  format dump says `pfd.cAlphaBits: 0`), where `LLWindowSDL` asks SDL for `SDL_GL_ALPHA_SIZE` 8 (llwindowsdl2.cpp:883).
+  In W101/W102 `captureWorld` copied the finished world out, cleared the back buffer to (0,0,0,0), the 2D UI was drawn
+  on that with its alpha written as coverage (llviewerdisplay.cpp render_ui, llrender.cpp wolf_set_ui_coverage), the UI
+  layer was blitted from `GL_BACK`, and compositeF.glsl:47 did `colour = ui.rgb + world.rgb * (1.0 - ui.a)`. A
+  framebuffer without an alpha plane reads alpha as 1 everywhere (OpenGL 4.6 core 17.4.1 "If the framebuffer has no
+  alpha ... alpha is 1"), so `(1 - ui.a)` was 0 under every pixel: the world multiplied away, the UI's own RGB (and
+  black where it drew nothing) left. The login screen worked because that frame has no world capture: it goes through
+  the UI layer with the world layer transparent, `ui.rgb + 0`, alpha irrelevant - which is exactly the fix.
+- W103 ([THE CAUSE], wolfvkscene.cpp): the frame is ONE layer. `captureWorld` copies and clears nothing (it only records
+  the world rect and takes the world probe's GL sample); OpenGL draws the HUD and the UI over the world as in OpenGL
+  mode; `readBackUI` hands the whole frame to Vulkan at the swap as before; the composite shows it as it is (worldMap
+  transparent, uiMap the frame). No shader change. The two-layer way remains only for the debug overlay
+  (`WolfVulkanOverlayFullbright`), and `overlayActive()` refuses it without an alpha plane. `WolfVkScene::init` reads
+  and logs the default framebuffer's alpha bits (`glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT,
+  GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE)`, glcorearb.h:1092): "Default framebuffer alpha bits: N" - 0 on Windows. Fewer
+  copies a frame too: the world blit and the depth pass are gone from the hand-over. The world probe's Vulkan sample
+  is now of the frame layer.
+- The X11 and Win32 child windows (8.2s, above) stay: they are right by the spec and the Win32 one was never the cause
+  of the black world (the UI showed through the same swapchain).
+
+**What was ranked before the cause was found** (kept for the record; none of it was it):
 1. **The shared G-buffer.** In Vulkan mode `LLRenderTarget` takes deferredScreen's four colour attachments and the depth
    from Vulkan memory (wolfvkgbuffer.cpp colorTexture/depthTexture -> WolfVkSharedImage::create: glImportMemoryWin32HandleEXT
    + glTexStorageMem2DEXT, OPAQUE_WIN32 handles, dedicated allocation). OpenGL then draws the WHOLE deferred frame

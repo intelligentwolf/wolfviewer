@@ -631,13 +631,14 @@ namespace
         if (sBlack.mStage == BlackCheck::OFF)
         {
             // armed in-world, at the first frame that captured a world
-            if (LLStartUp::getStartupState() < STATE_STARTED || !sScene->worldCapturedThisFrame()) return;
+            if (LLStartUp::getStartupState() < STATE_STARTED || !sScene->takeWorldCaptured()) return;
             sBlack.mStage = BlackCheck::WATCH;
             sBlack.mStarted = LLTimer::getTotalSeconds();
             sBlack.mGBufferWasShared = sGBuffer != nullptr;
             sScene->setProbeArmed(true);
             LL_INFOS("WolfVulkanCheck") << "World check started: once a second for up to 90 s; GL samples its own frame"
-                                        << (sScene->sharedHandOver() ? ", Vulkan samples the shared world layer" : " (read-back hand-over: no Vulkan sample)")
+                                        << (sScene->sharedHandOver() ? ", Vulkan samples the shared frame layer" : " (read-back hand-over: no Vulkan sample)")
+                                        << "; default framebuffer alpha bits " << sScene->backAlphaBits()
                                         << "; G-buffer " << (sGBuffer ? "shared" : "not shared") << LL_ENDL;
             return;
         }
@@ -654,11 +655,12 @@ namespace
         LL_INFOS("WolfVulkanCheck") << "World probe " << p.mGlSeq << ": GL max R/G/B " << p.mGlMax << " (" << p.mGlLit << " of 1024 points lit)"
                                     << (vk_known ? llformat(", Vulkan's view max %u (%u lit)", vk_max, vk_lit) : std::string(p.mVkPossible ? ", no Vulkan sample for this probe" : ""))
                                     << ", stage " << static_cast<int>(sBlack.mStage) << LL_ENDL;
-        // A. the import does not carry the picture
+        // A. the import does not carry the picture (Vulkan's sample is of the whole frame, UI included, so a lit world can
+        // only read black in Vulkan when the hand-over lost it - the UI only adds light)
         if (!gl_black && vk_black) sBlack.mImportFaultRun++; else if (vk_known) sBlack.mImportFaultRun = 0;
         if (sBlack.mImportFaultRun >= 3)
         {
-            sBlack.mSummary = llformat("FAILED: OpenGL's frame had light (max %u) but Vulkan read the shared world layer black, 3 probes running", p.mGlMax);
+            sBlack.mSummary = llformat("FAILED: OpenGL's frame had light (max %u) but Vulkan read the shared frame layer black, 3 probes running", p.mGlMax);
             LL_WARNS("WolfVulkanCheck") << "World check " << sBlack.mSummary << LL_ENDL;
             sScene->setProbeArmed(false);
             stopAtRunTime("Vulkan drew nothing on this computer: the picture OpenGL drew did not reach Vulkan through the shared image");

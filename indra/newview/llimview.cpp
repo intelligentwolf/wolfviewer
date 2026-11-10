@@ -43,6 +43,7 @@
 #include "lltextutil.h"
 #include "lltrans.h"
 #include "lltranslate.h"
+#include "wolfvoicemessage.h"   // [VOICE MESSAGES 2026-11-10/]
 #include "lluictrlfactory.h"
 #include "llfloaterimsessiontab.h"
 #include "llagent.h"
@@ -1963,10 +1964,25 @@ void LLIMModel::proccessOnlineOfflineNotification(
 //void LLIMModel::addMessage(const LLUUID& session_id, const std::string& from, const LLUUID& from_id,
 //                         const std::string& utf8_text, bool log2file /* = true */, bool is_region_msg, /* = false */ U32 time_stamp /* = 0 */)
 void LLIMModel::addMessage(const LLUUID& session_id, const std::string& from, const LLUUID& from_id,
-                           const std::string& utf8_text, bool log2file /* = true */, bool is_region_msg /* = false */, U32 time_stamp /* = 0 */, bool is_announcement /* = false */, bool keyword_alert_performed /* = false */)
+                           const std::string& utf8_text_in, bool log2file /* = true */, bool is_region_msg /* = false */, U32 time_stamp /* = 0 */, bool is_announcement /* = false */, bool keyword_alert_performed /* = false */)
 {
+    // [VOICE MESSAGES 2026-11-10] In a one-to-one conversation the server's voice-message line shows as "Voice message
+    // (0:12) > Play" (wolfvoicemessage.cpp displayText); it is never sent to the translator. Any other line is unchanged.
+    std::string utf8_text = utf8_text_in;
+    bool voice_message = false;
+    if (from != SYSTEM_FROM && WolfVoiceMessage::isVoiceMessageLine(utf8_text_in))
+    {
+        const LLIMSession* session = findIMSession(session_id);
+        if (session && session->isP2PSessionType())
+        {
+            utf8_text = WolfVoiceMessage::displayText(utf8_text_in);
+            voice_message = true;
+        }
+    }
     //if (gSavedSettings.getBOOL("TranslateChat") && (from != SYSTEM_FROM))
-    if (gSavedSettings.getBOOL("TranslateChat") && (from != SYSTEM_FROM) && !is_announcement && !keyword_alert_performed)
+    // [IM TRANSLATOR 2026-11-10] or this conversation is translated on its own (lltranslate.h isSessionTranslated)
+    if ((gSavedSettings.getBOOL("TranslateChat") || LLTranslate::isSessionTranslated(session_id))
+        && (from != SYSTEM_FROM) && !is_announcement && !keyword_alert_performed && !voice_message)
     {
         const std::string from_lang = ""; // leave empty to trigger autodetect
         const std::string to_lang = LLTranslate::getTranslateLanguage();
@@ -2285,9 +2301,12 @@ void LLIMModel::sendMessage(const std::string& utf8_text,
     // <FS:WolfViewer> Outgoing IM translation, ported from WolfStorm
     // (chat_translator.js prepareOutgoing). Only person-to-person and group/ad-hoc
     // chat lines are translated — every other dialog value is a control message.
+    // [IM TRANSLATOR 2026-11-10] ...or when this conversation is translated on its own; [VOICE MESSAGES 2026-11-10] never
+    // the voice-message line (the receiving viewers match it exactly).
     if ((dialog == IM_NOTHING_SPECIAL || dialog == IM_SESSION_SEND)
-        && LLTranslate::isOutgoingTranslationActive()
-        && LLTranslate::worthTranslating(utf8_text))
+        && (LLTranslate::isOutgoingTranslationActive() || LLTranslate::isSessionTranslated(im_session_id))
+        && LLTranslate::worthTranslating(utf8_text)
+        && !WolfVoiceMessage::isVoiceMessageLine(utf8_text))
     {
         // [TRANSLATE MULTI 2026-09-29] Into one language, or every language the people in
         // this session write in. The send (and its local echo) runs INSIDE the callback,

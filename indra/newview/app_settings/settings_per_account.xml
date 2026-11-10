@@ -66,6 +66,17 @@
       <key>Value</key>
       <array />
     </map>
+    <key>WolfIMTranslate</key>
+    <map>
+      <key>Comment</key>
+      <string>[IM TRANSLATOR 2026-11-10] Conversations translated on their own (the IM window's globe button): IM session id -> {on, lang (what I send is translated into; auto = what they write in), t}. At most 200 (lltranslate.cpp setSessionTranslation).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>LLSD</string>
+      <key>Value</key>
+      <map />
+    </map>
     <key>WolfChatSeenGroups</key>
     <map>
       <key>Comment</key>

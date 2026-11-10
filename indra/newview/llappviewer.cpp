@@ -114,6 +114,7 @@
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
 #include "wolfbuilder.h"     // [WOLF BUILDER 2026-10-13/] floating object names
 #include "wolfspeech.h" // <WolfViewer> dictation + read aloud (Wolf Territories only)
+#include "wolfvoicemessage.h"   // [VOICE MESSAGES 2026-11-10/]
 #include "wolfscreenshare.h"
 #include "wolfweather.h" // <WolfViewer> rain and snow // <WolfViewer> share focus/zoom follow-up
 #include "wolffx.h"   // <WolfViewer 2026-10-10/>
@@ -6434,6 +6435,8 @@ void LLAppViewer::idle()
     { WolfVRScreen::SubPart wsp_("WolfBuilder"); WolfBuilder::instance().idle(); }
     // Dictation capture polling and the read-aloud queue (wolfspeech.cpp).
     { WolfVRScreen::SubPart wsp_("WolfSpeech"); WolfSpeech::instance().idle(); }
+    // [VOICE MESSAGES 2026-11-10] recording (the microphone polled every frame) and played clips' cleanup
+    if (WolfVoiceMessage::instanceExists()) WolfVoiceMessage::instance().idle();
     { WolfVRScreen::SubPart wsp_("WolfAIMode"); WolfAIMode::instance().idle(); }   // [AI MODE 2026-11-05/] hearing, the brain, speaking (wolfaimode.cpp)
     // Focus + zoom the shared face once its media exists (wolfscreenshare.cpp).
     { WolfVRScreen::SubPart wsp_("WolfScreenShare"); WolfScreenShare::instance().idle(); }

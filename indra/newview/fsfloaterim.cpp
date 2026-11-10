@@ -62,6 +62,8 @@
 #include "llinventoryfunctions.h"
 #include "llinventorymodel.h"
 #include "lllayoutstack.h"
+#include "lltranslate.h"           // [IM TRANSLATOR 2026-11-10/]
+#include "wolfvoicemessage.h"      // [VOICE MESSAGES 2026-11-10/]
 #include "lllogchat.h"
 #include "llnotifications.h"
 #include "llnotificationsutil.h"
@@ -232,6 +234,12 @@ void FSFloaterIM::onFocusReceived()
 // virtual
 void FSFloaterIM::onClose(bool app_quitting)
 {
+    // [VOICE MESSAGES 2026-11-10] a recording for this conversation stops with its window: the microphone is never left
+    // open behind a closed window (a recording already being sent still goes)
+    if (WolfVoiceMessage::instanceExists() && WolfVoiceMessage::instance().getSessionID() == mSessionID)
+    {
+        WolfVoiceMessage::instance().cancel();
+    }
     mEventTimer.stop();
 
     setTyping(false);
@@ -560,6 +568,99 @@ void FSFloaterIM::sendMsgFromInputEditor(EChatType type)
 void FSFloaterIM::onChatSearchButtonClicked()
 {
     LLFloaterSearchReplace::show(mChatHistory);
+}
+
+// [IM TRANSLATOR 2026-11-10]
+void FSFloaterIM::updateTranslateButton()
+{
+    if (mTranslateBtn)
+    {
+        mTranslateBtn->setToggleState(LLTranslate::isSessionTranslated(mSessionID));
+    }
+}
+
+// [VOICE MESSAGES 2026-11-10]
+bool FSFloaterIM::voiceMessagesOffered() const
+{
+    const LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(mSessionID);
+    return mDialog == IM_NOTHING_SPECIAL && mOtherParticipantUUID.notNull() && session && session->isP2PSessionType()
+        && WolfVoiceMessage::isAvailable();
+}
+
+void FSFloaterIM::onVoiceMsgButton()
+{
+    WolfVoiceMessage& vm = WolfVoiceMessage::instance();
+    if (vm.getState() == WolfVoiceMessage::RECORDING && vm.getSessionID() == mSessionID)
+    {
+        vm.stopAndSend();
+    }
+    else
+    {
+        vm.startRecording(mSessionID, mOtherParticipantUUID);
+    }
+    updateVoiceMsgButtons();
+}
+
+void FSFloaterIM::onVoiceMsgCancel()
+{
+    WolfVoiceMessage& vm = WolfVoiceMessage::instance();
+    if (vm.getSessionID() == mSessionID)
+    {
+        vm.cancel();
+    }
+    updateVoiceMsgButtons();
+}
+
+void FSFloaterIM::updateVoiceMsgButtons()
+{
+    if (!mVoiceMsgBtn || !mVoiceMsgPanel || !mVoiceCancelPanel)
+    {
+        return;
+    }
+    const bool offered = voiceMessagesOffered();
+    if (mVoiceMsgPanel->getVisible() != offered)
+    {
+        mVoiceMsgPanel->setVisible(offered);
+    }
+    std::string label = "Voice";
+    bool recording = false, sending = false;
+    if (offered && WolfVoiceMessage::instanceExists())
+    {
+        const WolfVoiceMessage& vm = WolfVoiceMessage::instance();
+        if (vm.getSessionID() == mSessionID)
+        {
+            if (vm.getState() == WolfVoiceMessage::RECORDING)
+            {
+                recording = true;
+                const S32 secs = (S32)vm.recordedSeconds();
+                label = llformat("Send %d:%02d", secs / 60, secs % 60);
+            }
+            else if (vm.getState() == WolfVoiceMessage::SENDING)
+            {
+                sending = true;
+                label = "Sending...";
+            }
+        }
+    }
+    if (label != mVoiceMsgLabel)
+    {
+        mVoiceMsgLabel = label;
+        mVoiceMsgBtn->setLabel(label);
+        mVoiceMsgBtn->setToolTip(recording ? std::string("Recording - press to send it (up to 1 minute), or Cancel")
+                                           : std::string("Record a voice message (up to 1 minute) and send it"));
+    }
+    mVoiceMsgBtn->setToggleState(recording);
+    mVoiceMsgBtn->setEnabled(!sending);
+    if (mVoiceCancelPanel->getVisible() != recording)
+    {
+        mVoiceCancelPanel->setVisible(recording);
+    }
+}
+
+void FSFloaterIM::draw()
+{
+    updateVoiceMsgButtons();
+    LLTransientDockableFloater::draw();
 }
 
 void FSFloaterIM::sendMsg(const std::string& msg)
@@ -1052,6 +1153,34 @@ bool FSFloaterIM::postBuild()
     mRecentEmojisUpdatedCallbackConnection = LLFloaterEmojiPicker::setRecentEmojisUpdatedCallback([this](const std::list<llwchar>& recent_emojis_list) { initEmojiRecentPanel(); });
 
     getChild<LLButton>("send_chat")->setCommitCallback(boost::bind(&FSFloaterIM::sendMsgFromInputEditor, this, CHAT_TYPE_NORMAL));
+
+    // [IM TRANSLATOR 2026-11-10] Ticket 631: this conversation's translator (wolffloaterimtranslate.cpp). findChild: a skin
+    // without the button (an older custom skin) simply has no translator button.
+    mTranslateBtn = findChild<LLButton>("im_translate_btn");
+    if (mTranslateBtn)
+    {
+        mTranslateBtn->setClickedCallback([this](LLUICtrl*, const LLSD&)
+        {
+            LLFloaterReg::showInstance("wolf_im_translate", LLSD(mSessionID), true);
+            updateTranslateButton();   // a toggle button flips itself on click; its state belongs to the setting
+        });
+        updateTranslateButton();
+    }
+    // [VOICE MESSAGES 2026-11-10] Ticket 631: Voice, then Send 0:07 / Cancel (wolfvoicemessage.cpp). One-to-one IMs on a
+    // Wolf Territories login only; the panels are hidden everywhere else.
+    mVoiceMsgBtn = findChild<LLButton>("voice_msg_btn");
+    mVoiceMsgPanel = findChild<LLLayoutPanel>("voice_msg_layout_panel");
+    mVoiceCancelPanel = findChild<LLLayoutPanel>("voice_cancel_layout_panel");
+    if (mVoiceMsgBtn && mVoiceMsgPanel && mVoiceCancelPanel)
+    {
+        mVoiceMsgBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onVoiceMsgButton(); });
+        if (LLButton* cancel = findChild<LLButton>("voice_cancel_btn"))
+        {
+            cancel->setCommitCallback([this](LLUICtrl*, const LLSD&) { onVoiceMsgCancel(); });
+        }
+        mVoiceCancelPanel->setVisible(false);
+        mVoiceMsgPanel->setVisible(voiceMessagesOffered());
+    }
     getChild<LLButton>("chat_search_btn")->setCommitCallback(boost::bind(&FSFloaterIM::onChatSearchButtonClicked, this));
 
     const bool isFSSupportGroup = FSData::getInstance()->isFirestormGroup(mSessionID);

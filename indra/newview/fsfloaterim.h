@@ -166,6 +166,11 @@ public:
 
     F32 onGetChatEditorOpacityCallback(ETypeTransparency type, F32 alpha);
 
+    // [IM TRANSLATOR 2026-11-10] the globe button is pressed while this conversation is translated on its own
+    void updateTranslateButton();
+    // [VOICE MESSAGES 2026-11-10] the Voice / Send 0:07 / Cancel buttons follow WolfVoiceMessage's state
+    void draw() override;
+
 protected:
     void onClickCloseBtn(bool app_quitting = false) override;
     bool applyRectControl() override;
@@ -232,6 +237,17 @@ private:
     void confirmSnooze();
     void snoozeDurationCallback(const LLSD& notification, const LLSD& response);
     void snooze(S32 duration = -1);
+
+    // [VOICE MESSAGES 2026-11-10] wolfvoicemessage.h
+    void onVoiceMsgButton();
+    void onVoiceMsgCancel();
+    void updateVoiceMsgButtons();
+    bool voiceMessagesOffered() const;
+    LLButton*       mTranslateBtn = nullptr;     // [IM TRANSLATOR 2026-11-10/]
+    LLButton*       mVoiceMsgBtn = nullptr;
+    LLLayoutPanel*  mVoiceMsgPanel = nullptr;
+    LLLayoutPanel*  mVoiceCancelPanel = nullptr;
+    std::string     mVoiceMsgLabel;              // the last label set, so draw() only relabels on a change
 
     void onAddButtonClicked();
     bool canAddSelectedToChat(const uuid_vec_t& uuids);

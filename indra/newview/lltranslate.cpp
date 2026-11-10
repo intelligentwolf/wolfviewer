@@ -1629,10 +1629,76 @@ std::vector<std::string> LLTranslate::getAudienceLanguages(const LLUUID& session
     return out;
 }
 
+// [IM TRANSLATOR 2026-11-10] Per-conversation translation (lltranslate.h). The per-account setting WolfIMTranslate is an
+// LLSD map: session id -> {on, lang, t (when last changed, Unix seconds)}; at most IM_TRANSLATE_MAX_SESSIONS, the oldest
+// dropped first, so it cannot grow for ever.
+static constexpr size_t IM_TRANSLATE_MAX_SESSIONS = 200;
+
+// static
+bool LLTranslate::isSessionTranslated(const LLUUID& session_id)
+{
+    if (session_id.isNull() || !gSavedPerAccountSettings.controlExists("WolfIMTranslate"))
+    {
+        return false;
+    }
+    const LLSD all = gSavedPerAccountSettings.getLLSD("WolfIMTranslate");
+    const std::string key = session_id.asString();
+    return all.isMap() && all.has(key) && all[key]["on"].asBoolean() && isTranslationConfigured();
+}
+
+// static
+std::string LLTranslate::getSessionLanguage(const LLUUID& session_id)
+{
+    if (session_id.isNull() || !gSavedPerAccountSettings.controlExists("WolfIMTranslate"))
+    {
+        return "auto";
+    }
+    const LLSD all = gSavedPerAccountSettings.getLLSD("WolfIMTranslate");
+    const std::string key = session_id.asString();
+    const std::string lang = all.isMap() && all.has(key) ? all[key]["lang"].asString() : std::string();
+    return lang.empty() ? std::string("auto") : lang;
+}
+
+// static
+void LLTranslate::setSessionTranslation(const LLUUID& session_id, bool on, const std::string& their_lang)
+{
+    if (session_id.isNull() || !gSavedPerAccountSettings.controlExists("WolfIMTranslate"))
+    {
+        return;
+    }
+    LLSD all = gSavedPerAccountSettings.getLLSD("WolfIMTranslate");
+    if (!all.isMap())
+    {
+        all = LLSD::emptyMap();
+    }
+    LLSD entry;
+    entry["on"] = on;
+    entry["lang"] = their_lang.empty() ? std::string("auto") : their_lang;
+    entry["t"] = LLDate::now().secondsSinceEpoch();
+    all[session_id.asString()] = entry;
+    while (all.size() > IM_TRANSLATE_MAX_SESSIONS)
+    {
+        std::string oldest;
+        F64 oldest_t = 0.0;
+        for (auto it = all.beginMap(); it != all.endMap(); ++it)
+        {
+            const F64 t = it->second["t"].asReal();
+            if (oldest.empty() || t < oldest_t)
+            {
+                oldest = it->first;
+                oldest_t = t;
+            }
+        }
+        all.erase(oldest);
+    }
+    gSavedPerAccountSettings.setLLSD("WolfIMTranslate", all);
+}
+
 // static
 std::vector<std::string> LLTranslate::getOutgoingTargets(const LLUUID& session_id)
 {
-    const std::string their_lang = getOutgoingLanguage();
+    // [IM TRANSLATOR 2026-11-10] a conversation translated on its own uses the language chosen for it
+    const std::string their_lang = isSessionTranslated(session_id) ? getSessionLanguage(session_id) : getOutgoingLanguage();
     if (their_lang.empty() || their_lang == "auto")
     {
         return getAudienceLanguages(session_id);

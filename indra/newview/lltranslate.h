@@ -119,6 +119,16 @@ public :
     static std::string combineWithOriginal(const std::string& translation, const std::string& original);
     /** False for text with fewer than two letters once URLs are ignored — nothing to translate. */
     static bool worthTranslating(const std::string& mesg);
+
+    // [IM TRANSLATOR 2026-11-10] Ticket 631, Jimmy Olsen: "Translator and auto-translator mode - one picks up language to be
+    // translated and if auto-translate is on, text is translated automatically to the destinatary". One conversation (IM
+    // session) translated both ways whatever the global Preferences say: incoming into my language, outgoing into the
+    // language chosen for it ("auto" = what they write in, getAudienceLanguages). Kept per account in WolfIMTranslate.
+    /** This conversation is translated automatically (wolffloaterimtranslate.cpp). */
+    static bool isSessionTranslated(const LLUUID& session_id);
+    /** The language chosen for what I send in this conversation: a code, or "auto". */
+    static std::string getSessionLanguage(const LLUUID& session_id);
+    static void setSessionTranslation(const LLUUID& session_id, bool on, const std::string& their_lang);
     // </FS:WolfViewer>
 
     void logCharsSeen(size_t count);

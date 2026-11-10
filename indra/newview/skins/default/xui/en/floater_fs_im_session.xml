@@ -650,6 +650,28 @@
               right="-3"
               wrap="true" />
             </layout_panel>
+            <!-- [IM TRANSLATOR 2026-11-10] ticket 631: this conversation's translator (wolffloaterimtranslate.cpp) -->
+            <layout_panel
+              auto_resize="false"
+              user_resize="false"
+              name="im_translate_layout_panel"
+              width="30">
+              <button
+               follows="right|bottom"
+               bottom="-1"
+               height="24"
+               width="27"
+               image_hover_unselected="Toolbar_Middle_Over"
+               image_selected="Toolbar_Middle_Selected"
+               image_unselected="Toolbar_Middle_Off"
+               image_overlay="TabIcon_Translate_Off"
+               is_toggle="true"
+               label=""
+               left="0"
+               name="im_translate_btn"
+               tool_tip="Translator for this conversation"
+              />
+            </layout_panel>
             <layout_panel
               visibility_control="FSShowEmojiButton"
               auto_resize="false"
@@ -687,6 +709,41 @@
                tool_tip="Shows/hides recent emojis"
                left_pad="0"
                width="10"/>
+            </layout_panel>
+            <!-- [VOICE MESSAGES 2026-11-10] ticket 631: Voice, then "Send 0:07" + Cancel while recording (wolfvoicemessage.cpp).
+                 Shown in one-to-one conversations on Wolf Territories only (fsfloaterim.cpp voiceMessagesOffered). -->
+            <layout_panel
+              auto_resize="false"
+              user_resize="false"
+              name="voice_msg_layout_panel"
+              width="78">
+              <button
+              layout="topleft"
+              left="1"
+              right="-1"
+              bottom="24"
+              height="24"
+              follows="left|right|bottom"
+              name="voice_msg_btn"
+              label="Voice"
+              tool_tip="Record a voice message (up to 1 minute) and send it" />
+            </layout_panel>
+            <layout_panel
+              auto_resize="false"
+              user_resize="false"
+              name="voice_cancel_layout_panel"
+              visible="false"
+              width="64">
+              <button
+              layout="topleft"
+              left="1"
+              right="-1"
+              bottom="24"
+              height="24"
+              follows="left|right|bottom"
+              name="voice_cancel_btn"
+              label="Cancel"
+              tool_tip="Throw this recording away" />
             </layout_panel>
             <layout_panel
               visibility_control="FSShowIMSendButton"

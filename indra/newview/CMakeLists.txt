@@ -1010,6 +1010,8 @@ set(viewer_SOURCE_FILES
     wolfaimode.cpp
     wolffloateraimode.cpp
     wolfspeech.cpp
+    wolfvoicemessage.cpp
+    wolffloaterimtranslate.cpp
     wolfoceanfft.cpp
     wolfwakefield.cpp
     wolfwaterfield.cpp
@@ -2052,6 +2054,8 @@ set(viewer_HEADER_FILES
     wolfaimode.h
     wolffloateraimode.h
     wolfspeech.h
+    wolfvoicemessage.h
+    wolffloaterimtranslate.h
     wolfoceanfft.h
     wolfseastate.h
     wolfwakefield.h

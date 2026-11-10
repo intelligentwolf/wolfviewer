@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [IM TRANSLATOR 2026-11-10] One conversation's translator (wolffloaterimtranslate.cpp), opened by the globe button in an IM
+     window. Ticket 631, Jimmy Olsen: "Translator and auto-translator mode - one picks up language to be translated and if
+     auto-translate is on, text is translated automatically to the destinatary." Who: a resident talking with someone who
+     writes another language, often older or new to viewers. Story: tick "Translate this conversation automatically", pick
+     the language they write (or let it be detected), talk; or press "Translate their last message" for just one line.
+     Large text, few controls, the status line keeps any problem in view until the next action.
+     The language list is floater_translation_settings.xml wolf_their_language_combo (the LibreTranslate languages). -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="false"
+ height="300"
+ layout="topleft"
+ name="wolf_im_translate"
+ save_rect="true"
+ single_instance="false"
+ title="Translator"
+ width="440">
+    <string name="heading">Translator for your conversation with [NAME]</string>
+    <string name="my_language">Your language: [LANG]</string>
+    <string name="not_set_up">The translator is not set up. Press Translation settings and choose the Wolf Territories translator.</string>
+    <string name="on_status">On: [NAME]'s messages appear in your language, and what you send is translated for them.</string>
+    <string name="off_status">Off: messages appear as they were written.</string>
+    <string name="working">Translating...</string>
+    <string name="nothing_yet">[NAME] has not written anything in this conversation yet.</string>
+    <string name="same_language">That message is already in your language.</string>
+    <string name="done">Done - the translation is in the conversation.</string>
+    <string name="failed">The translator did not answer: [REASON]. Try again in a moment.</string>
+    <string name="added_line">Translation of [NAME]'s last message: [TEXT]</string>
+    <text
+     follows="left|top"
+     font="SansSerifLarge"
+     height="22"
+     layout="topleft"
+     left="16"
+     name="heading_text"
+     top="12"
+     use_ellipses="true"
+     width="408">Translator</text>
+    <check_box
+     follows="left|top"
+     font="SansSerifLarge"
+     height="22"
+     label="Translate this conversation automatically"
+     layout="topleft"
+     left="16"
+     name="auto_cb"
+     tool_tip="Their messages are translated into your language, and what you send is translated into theirs."
+     top_pad="12"
+     width="408" />
+    <text
+     follows="left|top"
+     font="SansSerif"
+     height="20"
+     layout="topleft"
+     left="16"
+     name="their_lang_label"
+     top_pad="12"
+     width="130">They write in:</text>
+    <combo_box
+     allow_text_entry="false"
+     follows="left|top"
+     height="23"
+     layout="topleft"
+     left_pad="6"
+     max_chars="135"
+     name="their_lang_combo"
+     tool_tip="Automatic: the language their messages are written in is found for you."
+     top_delta="-3"
+     width="250">
+  <combo_box.item
+   label="Detect it for me (automatic)"
+   name="Auto"
+   value="auto" />
+  <combo_box.item
+   label="English"
+   name="English"
+   value="en" />
+  <combo_box.item
+   label="Dansk (Danish)"
+   name="Danish"
+   value="da" />
+  <combo_box.item
+   label="Deutsch (German)"
+   name="German"
+   value="de" />
+  <combo_box.item
+   label="Español (Spanish)"
+   name="Spanish"
+   value="es" />
+  <combo_box.item
+   label="Français (French)"
+   name="French"
+   value="fr" />
+  <combo_box.item
+   label="Italiano (Italian)"
+   name="Italian"
+   value="it" />
+  <combo_box.item
+   label="Magyar (Hungarian)"
+   name="Hungarian"
+   value="hu" />
+  <combo_box.item
+   label="Nederlands (Dutch)"
+   name="Dutch"
+   value="nl" />
+  <combo_box.item
+   label="Polski (Polish)"
+   name="Polish"
+   value="pl" />
+  <combo_box.item
+   label="Português (Portuguese)"
+   name="Portugese"
+   value="pt" />
+  <combo_box.item
+   label="Русский (Russian)"
+   name="Russian"
+   value="ru" />
+  <combo_box.item
+   label="Türkçe (Turkish)"
+   name="Turkish"
+   value="tr" />
+  <combo_box.item
+   label="Українська (Ukrainian)"
+   name="Ukrainian"
+   value="uk" />
+  <combo_box.item
+   label="中文 (正體) (Chinese)"
+   name="Chinese"
+   value="zh" />
+  <combo_box.item
+   label="日本語 (Japanese)"
+   name="Japanese"
+   value="ja" />
+  <combo_box.item
+   label="한국어 (Korean)"
+   name="Korean"
+   value="ko" />
+ </combo_box>
+    <text
+     follows="left|top"
+     font="SansSerif"
+     height="20"
+     layout="topleft"
+     left="16"
+     name="my_lang_text"
+     top_pad="12"
+     width="250">Your language:</text>
+    <button
+     follows="left|top"
+     height="23"
+     label="Translation settings..."
+     layout="topleft"
+     left_pad="6"
+     name="settings_btn"
+     tool_tip="Choose your own language and the translator"
+     top_delta="-3"
+     width="152" />
+    <button
+     follows="left|top"
+     font="SansSerifLarge"
+     height="28"
+     label="Translate their last message"
+     layout="topleft"
+     left="16"
+     name="translate_last_btn"
+     tool_tip="Translate just the newest message they sent, into your language"
+     top_pad="16"
+     width="260" />
+    <text
+     follows="left|top"
+     font="SansSerif"
+     height="56"
+     layout="topleft"
+     left="16"
+     name="status_text"
+     top_pad="14"
+     width="408"
+     wrap="true"> </text>
+    <button
+     follows="right|bottom"
+     height="23"
+     label="Close"
+     layout="topleft"
+     left="334"
+     name="close_btn"
+     top="266"
+     width="90" />
+</floater>

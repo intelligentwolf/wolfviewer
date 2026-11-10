@@ -154,6 +154,7 @@
 #include "wolffloaterplanebuilder.h"   // [PLANE BUILDER 2026-11-01/]
 #include "wolffloateraimode.h"   // [AI MODE 2026-11-05/]
 #include "wolffloateranimator.h"      // [WOLF ANIMATOR 2026-11-05/]
+#include "wolffloaterimtranslate.h"   // [IM TRANSLATOR 2026-11-10/]
 #include "wolffloaterbuildinggen.h"   // [BUILDING GENERATOR 2026-11-01/]
 #include "wolffloaterterraform.h" // [WOLF TERRAFORM 2026-10-23/] the Terraform window
 #include "wolffloaterlifts.h"     // [WOLF LIFTS 2026-11-10/] Cable Cars and Ski Lifts (ticket 691)
@@ -717,6 +718,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_ship_builder", "floater_wolf_ship_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterShipBuilder>);   // [SHIP BUILDER 2026-10-29/] design a ship, the shipyard builds her
     LLFloaterReg::add("wolf_plane_builder", "floater_wolf_plane_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPlaneBuilder>);   // [PLANE BUILDER 2026-11-01/] design a fighter, the yard builds it
     LLFloaterReg::add("wolf_aimode", "floater_wolf_aimode.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAIMode>);   // [AI MODE 2026-11-05/] personality and voice
+    LLFloaterReg::add("wolf_im_translate", "floater_wolf_im_translate.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterIMTranslate>);   // [IM TRANSLATOR 2026-11-10/] ticket 631
     LLFloaterReg::add("wolf_animator", "floater_wolf_animator.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAnimator>);   // [WOLF ANIMATOR 2026-11-05/] describe a movement, get an animation (ticket 547)
     LLFloaterReg::add("wolf_building_gen", "floater_wolf_building_gen.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBuildingGen>);   // [BUILDING GENERATOR 2026-11-01/] describe a building, the yard plans and builds it
     LLFloaterReg::add("wolf_lifts", "floater_wolf_lifts.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLifts>);   // [WOLF LIFTS 2026-11-10/] ticket 691

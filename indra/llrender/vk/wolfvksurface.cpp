@@ -71,6 +71,16 @@ namespace
             // and WM_SETCURSOR go to it, with coordinates relative to it (the child sits at 0,0), exactly as without
             // the child. Keyboard input goes to the focus window, which the child never takes (no WS_TABSTOP, no SetFocus).
             return HTTRANSPARENT;
+        case WM_MOUSEACTIVATE:
+            // [WIN32 CHILD FOCUS 2026-11-10] a click never activates or focuses this window (WM_MOUSEACTIVATE documentation:
+            // MA_NOACTIVATE "does not activate the window, and does not discard the mouse message")
+            return MA_NOACTIVATE;
+        case WM_SETFOCUS:
+            // [WIN32 CHILD FOCUS 2026-11-10] the keyboard belongs to the viewer's window (its WM_KEYDOWN/WM_CHAR handling in
+            // llwindowwin32.cpp mainWindowProc); if this window ever gets the focus (an activation that picks the first
+            // child), it is handed straight back to the parent - same thread, so SetFocus is allowed (SetFocus documentation)
+            if (HWND parent = GetParent(hwnd)) SetFocus(parent);
+            return 0;
         case WM_ERASEBKGND:
             return 1;   // nothing of GDI's is painted: the swapchain owns every pixel (WM_ERASEBKGND: non-zero = erased)
         case WM_PAINT:

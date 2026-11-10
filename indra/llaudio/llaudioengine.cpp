@@ -1211,7 +1211,10 @@ void LLAudioEngine::startNextTransfer()
         }
     }
 
-    if (asset_id.notNull())
+    // [WolfViewer 2026-11-10] gAssetStorage is made at login: a UI sound before then (audio on, an empty cache, a click
+    // on a login-screen dialog) came here and crashed in getAssetData (SIGSEGV, backtrace LLModalDialog::handleMouseDown
+    // -> make_ui_sound -> triggerSound -> play -> startNextTransfer). The sound is skipped until the asset system exists.
+    if (asset_id.notNull() && gAssetStorage)
     {
         //LL_INFOS() << "Getting asset data for: " << asset_id << LL_ENDL;
         mCurrentTransfer = asset_id;

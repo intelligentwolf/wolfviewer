@@ -203,6 +203,7 @@ bool WolfFloaterLifts::postBuild()
     mTopViewBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { lookFromAbove(); });
     mBuildBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onBuild(); });
     mProgress->setVisible(false);
+    mKind->setSelectedIndex(0);   // Cable car until the resident picks
     return true;
 }
 
@@ -364,7 +365,7 @@ std::string WolfFloaterLifts::routeHint() const
 {
     if (mBuilding) return "Building your lift - the parts are being put in place.";
     if (mClicks.empty()) return "Click on the ground where the BOTTOM station goes.";
-    if (mClicks.size() == 1) return "Now click where the TOP station goes. (To make the line bend, click the bend first.)";
+    if (mClicks.size() == 1) return "Now click where the TOP station goes (to bend the line, click the bend first). Too far to click? Alt + drag moves the camera.";
     if (mBox != BOX_READY) return "Getting your lift kit ready...";
     if (mPlanDirty) return "Working out where the towers go...";
     if (!mPlanOk) return "This line cannot be built yet - see the window. Drag a point to move it.";
@@ -721,7 +722,11 @@ void WolfFloaterLifts::lookFromAbove()
     }
     const F32 g = rgn->getLand().resolveHeightRegion(c.mV[0], c.mV[1]);
     const F32 half = llmax(0.05f, tanf(LLViewerCamera::getInstance()->getView() * 0.5f));
-    const F32 h = llmax(TOP_VIEW_M, 0.6f * span / half);
+    // A click finds the ground only within the draw distance (llviewerwindow.cpp mousePointOnLandGlobal walks the ray to
+    // gAgentCamera.mDrawDistance; the default is 128 m): the camera stays low enough for the whole view to be clickable.
+    // A longer line is laid out by moving the camera along it (Alt + drag, or the camera controls) between clicks.
+    const F32 reach = llmax(40.f, gAgentCamera.mDrawDistance * 0.55f);
+    const F32 h = llmin(reach, llmax(TOP_VIEW_M, 0.6f * span / half));
     const LLVector3d focus = rgn->getPosGlobalFromRegion(LLVector3(c.mV[0], c.mV[1], g));
     const LLVector3d cam = focus + LLVector3d(0.0, -(F64)(h * TOP_VIEW_TILT), (F64)h);
     gAgentCamera.setFocusOnAvatar(false, false);

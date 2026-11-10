@@ -254,26 +254,24 @@ void WolfFloaterGreedy::setMode(const std::string& mode, bool remember)
     table->setVisible(mode == "table");
     strip->setVisible(mode == "strip");
     LLView* shown = mode == "table" ? table : mode == "strip" ? strip : full;
-    const S32 header = getRect().getHeight() - full->getRect().mTop;   // the title bar above the panels
+    // the panels follow left|top only (floater_wolf_greedy.xml), so reshaping the floater keeps each one under the
+    // title bar and leaves its children alone; the floater takes the shown panel's size plus the title bar
+    const S32 header = getRect().getHeight() - full->getRect().mTop;
     const LLRect old = getRect();
     const S32 w = shown->getRect().getWidth(), h = shown->getRect().getHeight() + header;
-    LLRect r(old.mLeft, old.mTop, old.mLeft + w, old.mTop - h);
+    reshape(w, h, false);
     if (mode == "strip" && gFloaterView)
     {
         // along the bottom of the screen, above the toolbars (getSnapRect leaves them out), centred
         const LLRect snap = gFloaterView->getSnapRect();
         const S32 left = snap.mLeft + (snap.getWidth() - w) / 2;
-        r.setLeftTopAndSize(left, snap.mBottom + 6 + h, w, h);
+        setOrigin(left, snap.mBottom + 6);
     }
-    reshape(w, h, false);
-    setRect(r);
-    // the panels sit under the title bar, whatever the floater's height now is
-    for (LLView* p : { full, table, strip })
+    else
     {
-        LLRect pr = p->getRect();
-        pr.setLeftTopAndSize(0, h - header, pr.getWidth(), pr.getHeight());
-        p->setRect(pr);
+        setOrigin(old.mLeft, old.mTop - h);   // the top-left corner stays where it was
     }
+    if (gFloaterView) gFloaterView->adjustToFitScreen(this, false);
     for (const char* p : { "f_", "t_" })
     {
         const std::string pre(p);
@@ -286,6 +284,15 @@ void WolfFloaterGreedy::setMode(const std::string& mode, bool remember)
 
 void WolfFloaterGreedy::draw()
 {
+    // the view buttons are toggles: a click flips the one pressed after our callback ran (LLButton), so the three are
+    // put right here every frame (the 14:23Z screenshots showed "Full" lit in the Table view)
+    for (const char* p : { "f_", "t_" })
+    {
+        const std::string pre(p);
+        getChild<LLButton>(pre + "mode_full")->setToggleState(mMode == "full");
+        getChild<LLButton>(pre + "mode_table")->setToggleState(mMode == "table");
+        getChild<LLButton>(pre + "mode_strip")->setToggleState(mMode == "strip");
+    }
     LLFloater::draw();
     if (!mGame || mBusy || !WolfGrid::isWolfTerritories()) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();

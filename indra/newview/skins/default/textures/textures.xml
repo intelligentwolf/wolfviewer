@@ -1299,6 +1299,8 @@ with the same filename but different name
      wolfgame/CREDITS.txt (also shown on the game window's Help page). -->
 <!-- [GREEDY WINDOW 2026-11-10] the Greedy window's dice (wolffloatergreedy.cpp): our own art, cut from
      region-terrain-work/greedy-dice-2026-11-10/art/make_art.py dice.png; 0 = no die (an outline) -->
+<texture name="WolfGreedy_Wood" file_name="wolfgreedy/greedy_wood.png" preload="false" />
+<texture name="WolfGreedy_Plate" file_name="wolfgreedy/greedy_plate.png" preload="false" scale.left="4" scale.top="252" scale.right="252" scale.bottom="4" />
 <texture name="WolfGreedy_Die0" file_name="wolfgreedy/greedy_die_0.png" preload="false" />
 <texture name="WolfGreedy_Die1" file_name="wolfgreedy/greedy_die_1.png" preload="false" />
 <texture name="WolfGreedy_Die2" file_name="wolfgreedy/greedy_die_2.png" preload="false" />

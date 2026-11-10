@@ -30,11 +30,10 @@
 #include "lltoolbarview.h"
 #include "lllayoutstack.h"
 #include "wolfgrid.h" // <WolfViewer> Wolf Territories-only toolbar buttons
-#include "wolfflight.h"   // <WolfViewer 2026-10-06/> the Plane / Boat deck toggles
-#include "wolfgame.h"     // <WolfViewer 2026-10-09/> the Game Mode icon
-#include "wolfdrive.h"    // <WolfViewer 2026-10-09/> the Car Dashboard icon
-#include "wolfhelm.h"     // <WolfViewer 2026-10-28/> the Captain's Helm icon
-#include "wolfskis.h"     // [SKIS 2026-11-06/] the Skis and Snowboards icon; the Ski HUD folds the bar away
+#include "wolfflight.h"   // <WolfViewer 2026-10-06/> the deck folds the bar away
+#include "wolfgame.h"     // <WolfViewer 2026-10-09/> the game HUD folds the bar away; Game Mode's dot on the HUDs button
+#include "wolfdrive.h"    // <WolfViewer 2026-10-09/> the dashboard folds the bar away
+#include "wolfskis.h"     // [SKIS 2026-11-06/] the Ski HUD folds the bar away
 
 #include "llapp.h"
 #include "llappviewer.h"
@@ -149,80 +148,15 @@ bool LLToolBarView::postBuild()
         gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", false);
         applyBottomToolbarHidden(false);
     }
-    // <WolfViewer 2026-10-06> beside it, the Flight Mode and Sailing Mode decks' show / hide
-    mWolfPlaneToggle = findChild<LLButton>("wolf_plane_toggle");
-    if (mWolfPlaneToggle)
+    // [HUDS BUTTON 2026-11-10] Paul: "on the bottom left of the screen all those tiny buttons look messy - have a Huds
+    // button in the bottom right control that opens a colourful floater with each different hud as an illustrated
+    // button". The nine tiny show / hide icons that sat beside the toolbar icon (plane, boat, game, car, speedboat,
+    // spaceship, submarine, ship, skis) are now the tiles of Wolf HUDs: each tile runs the command its icon ran
+    // (wolffloaterhuds.cpp onTile) and is lit by the same test (tileOn). This one labelled button opens and closes it.
+    mWolfHudsButton = findChild<LLButton>("wolf_huds_button");
+    if (mWolfHudsButton)
     {
-        mWolfPlaneToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfFlight::instance().toggleDeck(false); });
-    }
-    mWolfBoatToggle = findChild<LLButton>("wolf_boat_toggle");
-    if (mWolfBoatToggle)
-    {
-        mWolfBoatToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfFlight::instance().toggleDeck(true); });
-    }
-    // <WolfViewer 2026-10-09> Paul: "there should be an icon down the bottom ... for the gaming
-    // system as well as car, plane and boat and normal control panel". They run the same commands
-    // as World > Game Mode and World > Car Dashboard (llviewermenu.cpp), so the refusals and the
-    // forced-region lock behave the same wherever they are pressed.
-    auto run = [](const char* fn)
-    {
-        if (LLUICtrl::CommitCallbackRegistry::ptr_value_t cb = LLUICtrl::CommitCallbackRegistry::getValue(fn))
-        {
-            (*cb)(nullptr, LLSD());
-        }
-    };
-    mWolfGameToggle = findChild<LLButton>("wolf_game_toggle");
-    if (mWolfGameToggle)
-    {
-        // [GAME HUD 2026-10-09] like Plane / Boat: with Game Mode off the icon switches it on (the
-        // same command as World > Game Mode, so its refusals say why); with it on, the icon shows
-        // or hides the game HUD across the bottom and the game keeps running while it is hidden.
-        mWolfGameToggle->setCommitCallback([run](LLUICtrl*, const LLSD&)
-        {
-            WolfGame& g = WolfGame::instance();
-            const bool on = g.gameModeShownOn();
-            if (on) g.toggleHud();
-            else run("WolfGame.ToggleGameMode");
-        });
-    }
-    mWolfCarToggle = findChild<LLButton>("wolf_car_toggle");
-    if (mWolfCarToggle)
-    {
-        // <WolfViewer 2026-10-11> the road designs (car / truck / bike); the speedboat and spaceship have their own icons
-        mWolfCarToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDrive::instance().toggleDesign(WolfDrive::TYPE_CAR); });
-    }
-    // <WolfViewer 2026-10-11> w65 Space Rabbit. Paul: the speedboat HUD "goes next to the sailing hud"; the spaceship
-    // HUD beside the plane. Each opens the dashboard in its design, or closes it when that design shows
-    // (WolfDrive::toggleDesign - Wolf Territories only, refused silently elsewhere like the car icon).
-    mWolfSpeedboatToggle = findChild<LLButton>("wolf_speedboat_toggle");
-    if (mWolfSpeedboatToggle)
-    {
-        mWolfSpeedboatToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SPEEDBOAT); });
-    }
-    mWolfSpaceshipToggle = findChild<LLButton>("wolf_spaceship_toggle");
-    if (mWolfSpaceshipToggle)
-    {
-        mWolfSpaceshipToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SPACESHIP); });
-    }
-    // Paul, the same day: "add another hud for driving a submarine" - its icon beside the speedboat's
-    mWolfSubmarineToggle = findChild<LLButton>("wolf_submarine_toggle");
-    if (mWolfSubmarineToggle)
-    {
-        mWolfSubmarineToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SUBMARINE); });
-    }
-    // <WolfViewer 2026-10-28> Paul: the Captain's Helm "should also be in the tiny icons as well" - the tall ship beside the
-    // sailing deck's boat (WolfHelm::toggleHud - Wolf Territories only, refused silently elsewhere like the car icon)
-    mWolfShipToggle = findChild<LLButton>("wolf_ship_toggle");
-    if (mWolfShipToggle)
-    {
-        mWolfShipToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfHelm::instance().toggleHud(); });
-    }
-    // [SKIS 2026-11-06] Paul: "add it to the bottom row of tiny icons" - opens / closes Wolf World > Skis and Snowboards...
-    // (the window says why and closes off Wolf, wolffloaterskis.cpp onOpen; the icon is not shown there anyway)
-    mWolfSkisToggle = findChild<LLButton>("wolf_skis_toggle");
-    if (mWolfSkisToggle)
-    {
-        mWolfSkisToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::toggleInstance("wolf_skis"); });
+        mWolfHudsButton->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::toggleInstance("wolf_huds"); });
     }
     // </WolfViewer>
 
@@ -1240,84 +1174,32 @@ void LLToolBarView::draw()
         }
     }
     // </WolfViewer>
-    // <WolfViewer 2026-10-06> the Plane / Boat icons lit while their deck shows
-    {
-        const WolfFlight& wf = WolfFlight::instance();
-        const bool deck = wf.active() && !wf.deckHidden();
-        if (mWolfPlaneToggle) mWolfPlaneToggle->setToggleState(deck && !wf.sailing());
-        if (mWolfBoatToggle) mWolfBoatToggle->setToggleState(deck && wf.sailing());
-        // Flight and Sailing Mode are Wolf Territories only (WolfFlight::requestMode)
-        const bool wolf = WolfGrid::isOnWolfTerritories();
-        if (mWolfPlaneToggle) mWolfPlaneToggle->setVisible(wolf && !hide_icons);
-        if (mWolfBoatToggle) mWolfBoatToggle->setVisible(wolf && !hide_icons);
-    }
-    // <WolfViewer 2026-10-09> the Game and Car icons: Game lit while the game HUD shows (as Plane
-    // and Boat are while their deck shows), Car while the dashboard shows; Wolf Territories only,
-    // like Plane and Boat. The tooltip says what a press does now (a forced region: Game Mode is
-    // locked on, VIEWER_SPEC.md §6, but the HUD can still be hidden).
+    // [HUDS BUTTON 2026-11-10] the HUDs button: Wolf Territories only, as every icon it replaced was (Flight and Sailing
+    // Mode, the game, the dashboard, the helm and the skis all are); lit while Wolf HUDs is open. The tooltip says when
+    // Game Mode is on with its HUD hidden, the case the paw's green dot told (t622, drawn on this button below).
     {
         const bool wolf = WolfGrid::isOnWolfTerritories();
-        if (mWolfGameToggle)
+        if (mWolfHudsButton)
         {
+            mWolfHudsButton->setVisible(wolf && !hide_icons);
+            mWolfHudsButton->setToggleState(LLFloaterReg::instanceVisible("wolf_huds"));
             const WolfGame& g = WolfGame::instance();
-            const bool on = g.gameModeShownOn();
-            const bool showing = on && g.hudShowing();
-            mWolfGameToggle->setVisible(wolf && !hide_icons);
-            // Paul 2026-10-09: "the game paw stays highlighted even when i've closed it" - lit while
-            // the game HUD shows, like Plane / Boat / Car; the HUD's own GAME switch and the tooltip
-            // say whether Game Mode is on.
-            mWolfGameToggle->setToggleState(showing);
-            std::string tip;
-            if (g.gameModeConnecting() && !g.forced()) tip = "Game Mode: connecting...";
-            else if (!on) tip = "Game Mode: OFF - click to switch it on and show the game HUD (Wolf Territories)";
-            else if (showing) tip = "Game Mode: ON - click to hide the game HUD (Game Mode keeps running)";
-            else if (!g.hudHidden() && WolfGame::bottomTaken()) tip = "Game HUD: the flight deck or car dashboard has the bottom - click to show the game HUD instead";
-            else tip = "Game Mode: ON, HUD hidden - click to show the game HUD";
-            if (g.forced()) tip += "\nGame Mode is locked on: this region requires it";
-            if (mWolfGameToggle->getToolTip() != tip) mWolfGameToggle->setToolTip(tip);
-        }
-        if (mWolfCarToggle)
-        {
-            mWolfCarToggle->setVisible(wolf && !hide_icons);
-            // <WolfViewer 2026-10-11> lit for the road designs only: the speedboat and spaceship light their own
-            mWolfCarToggle->setToggleState(WolfDrive::instance().showingDesign(WolfDrive::TYPE_CAR));
-        }
-        // <WolfViewer 2026-10-11> w65: the Speedboat Helm and Spaceship HUD icons, lit while their design shows
-        if (mWolfSpeedboatToggle)
-        {
-            mWolfSpeedboatToggle->setVisible(wolf && !hide_icons);
-            mWolfSpeedboatToggle->setToggleState(WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPEEDBOAT));
-        }
-        if (mWolfSpaceshipToggle)
-        {
-            mWolfSpaceshipToggle->setVisible(wolf && !hide_icons);
-            mWolfSpaceshipToggle->setToggleState(WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPACESHIP));
-        }
-        if (mWolfSubmarineToggle)
-        {
-            mWolfSubmarineToggle->setVisible(wolf && !hide_icons);
-            mWolfSubmarineToggle->setToggleState(WolfDrive::instance().showingDesign(WolfDrive::TYPE_SUBMARINE));
-        }
-        // <WolfViewer 2026-10-28> the Captain's Helm icon, lit while the helm HUD shows
-        if (mWolfShipToggle)
-        {
-            mWolfShipToggle->setVisible(wolf && !hide_icons);
-            mWolfShipToggle->setToggleState(WolfHelm::instance().hudShowing());
-        }
-        // [SKIS 2026-11-06] the skis icon, lit while riding Wolf skis or a snowboard; Wolf Territories only like the others
-        if (mWolfSkisToggle)
-        {
-            mWolfSkisToggle->setVisible(wolf && !hide_icons);
-            mWolfSkisToggle->setToggleState(WolfSkis::instance().riding());
+            std::string tip = "Wolf HUDs: the game, flight, sailing, driving and winter HUDs - pick one to show or hide it";
+            if (wolf && g.gameModeShownOn() && !g.hudShowing())
+            {
+                tip += g.forced() ? "\nGame Mode is locked on here (its HUD is hidden)" : "\nGame Mode is ON (its HUD is hidden)";
+            }
+            if (mWolfHudsButton->getToolTip() != tip) mWolfHudsButton->setToolTip(tip);
         }
         // <WolfViewer 2026-10-11> WolfHideToolbarIcons (Wolf World > Show Wolf Icons): a resident (Spax) asked "how do
         // I disable and completely remove the blue button on the lower right". With it on every bottom-right Wolf
-        // icon is gone - toolbar, game, car, plane, spaceship, boat, speedboat, submarine - on every grid. The toolbar's own
+        // icon is gone - toolbar, game, car, plane, spaceship, boat, speedboat, submarine - on every grid ([HUDS BUTTON
+        // 2026-11-10] now the toolbar icon and the HUDs button, which took the others' place). The toolbar's own
         // icon is the only way to bring a hidden toolbar back, so the moment the icons go the toolbar is put back
         // (and, while a bottom panel has it folded away, it is marked to come back when that panel closes): the safe
         // choice - a resident can never be left with no toolbar and no icon to show it. The panels' own close
-        // buttons and the Wolf World menu still open and close every mode. (The other icons follow hide_icons where
-        // their Wolf gate sets them, above.)
+        // buttons and the Wolf World menu still open and close every mode. (The HUDs button follows hide_icons where
+        // its Wolf gate sets it, above.)
         if (mWolfToolbarToggle && mWolfToolbarToggle->getVisible() == (bool)hide_icons)
         {
             mWolfToolbarToggle->setVisible(!hide_icons);   // the toolbar icon shows on every grid unless hidden
@@ -1374,10 +1256,10 @@ void LLToolBarView::draw()
         // centre sat half the corner left of the screen's (63 px with five icons, 99 px with eight). Now it is trimmed
         // EQUALLY on both sides about the screen centre, just enough to clear the corner: centred whatever the icons.
         // Panel-local: the screen centre is at (panel_w - strip_w) / 2 (the panel starts strip_w right of the screen's
-        // left edge); the bar may reach left to 0 and right to panel_w - corner. 246: the ten show / hide icons'
-        // corner (10 x 24 + 6, panel_toolbar_view.xml; the ship's joined on 2026-10-28, the skis' on 2026-11-06); 0 when
-        // the icons are hidden (WolfHideToolbarIcons).
-        const S32 corner = (mWolfToolbarToggle && mWolfToolbarToggle->getVisible()) ? 246 : 0;
+        // left edge); the bar may reach left to 0 and right to panel_w - corner. [HUDS BUTTON 2026-11-10] 102: the
+        // toolbar icon and the HUDs button (panel_toolbar_view.xml: the toolbar icon's left edge is 96 px from the right,
+        // right="-74" width="22"; + 6), was 246 for the ten tiny icons; 0 when the icons are hidden (WolfHideToolbarIcons).
+        const S32 corner = (mWolfToolbarToggle && mWolfToolbarToggle->getVisible()) ? 102 : 0;
         const S32 centre = (panel_w - strip_w) / 2;
         const S32 half = llmax(0, llmin(centre, panel_w - corner - centre));
         S32 want = 2 * half;
@@ -1450,13 +1332,15 @@ for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i
     // while the game HUD shows (Paul 2026-10-09, kept), so Game Mode on with the HUD closed looked exactly like off.
     // A small green "on" dot with a dark ring in the paw's top-right corner says Game Mode is running whatever the HUD
     // does (Paul 2026-11-07 "do 1 and 2"). Drawn after the buttons so it sits on top; the tooltip (above) says why.
-    if (mWolfGameToggle && mWolfGameToggle->getVisible() && WolfGrid::isOnWolfTerritories())
+    // [HUDS BUTTON 2026-11-10] the paw is now a tile in Wolf HUDs (which says "ON - HUD hidden" in words), so the dot moved
+    // to the HUDs button's top-right corner: it still shows at the bottom of the screen without opening anything.
+    if (mWolfHudsButton && mWolfHudsButton->getVisible() && WolfGrid::isOnWolfTerritories())
     {
         const WolfGame& g = WolfGame::instance();
         if (g.gameModeShownOn() && !g.hudShowing())
         {
             LLRect r;
-            mWolfGameToggle->localRectToOtherView(mWolfGameToggle->getLocalRect(), &r, this);
+            mWolfHudsButton->localRectToOtherView(mWolfHudsButton->getLocalRect(), &r, this);
             const F32 radius = llmax(3.f, (F32)llmin(r.getWidth(), r.getHeight()) * 0.16f);
             const F32 cx = (F32)r.mRight - radius - 1.f, cy = (F32)r.mTop - radius - 1.f;
             gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);

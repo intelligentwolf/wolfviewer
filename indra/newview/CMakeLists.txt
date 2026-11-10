@@ -1057,6 +1057,7 @@ set(viewer_SOURCE_FILES
     wolfskis.cpp   # [SKIS 2026-11-06]
     wolfskihud.cpp   # [SKIS 2026-11-06]
     wolffloaterskis.cpp   # [SKIS 2026-11-06]
+    wolffloaterhuds.cpp   # [HUDS BUTTON 2026-11-10]
     wolfai.cpp
     wolfairports.cpp
     wolflslcomplete.cpp
@@ -2095,6 +2096,7 @@ set(viewer_HEADER_FILES
     wolfskis.h   # [SKIS 2026-11-06]
     wolfskihud.h   # [SKIS 2026-11-06]
     wolffloaterskis.h   # [SKIS 2026-11-06]
+    wolffloaterhuds.h   # [HUDS BUTTON 2026-11-10]
     wolfai.h
     wolfpaint.h  # [LOOK 2026-10-20] the painting kit of the Upload Model and Create with AI windows
     wolfairports.h

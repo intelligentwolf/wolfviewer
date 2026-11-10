@@ -2058,6 +2058,15 @@
             </menu_item_check>
         </menu>
         <menu create_jump_keys="true" label="Vehicles &amp; Travel" name="WolfGroupVehicles" tear_off="true">
+            <!-- [HUDS BUTTON 2026-11-10] Wolf HUDs (wolffloaterhuds.cpp), the window the HUDs button at the bottom right opens:
+                 a picture tile for every Wolf HUD. Paul's rule: every Wolf feature also under Wolf World. Wolf Territories only. -->
+            <menu_item_call label="Wolf HUDs..." name="WolfHuds">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_huds" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
+            <menu_item_separator>
+                <menu_item_separator.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_separator>
             <!-- [WOLF GRID GATE 2026-10-17] every section here but the border's is Wolf only, so the separators go with them
              off Wolf (llmenugl.cpp hides no separator by itself): off Wolf the group is Border Warnings and Teleport Across. -->
             <!-- [WOLF DRIVE 2026-10-09] wolfdrive.cpp / wolfdashboard.cpp: the car / truck / bike dashboard

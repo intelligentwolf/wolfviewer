@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [HUDS BUTTON 2026-11-10] Wolf HUDs (wolffloaterhuds.cpp), opened by the labelled HUDs button at the bottom right
+     (panel_toolbar_view.xml wolf_huds_button). Paul: "on the bottom left of the screen all those tiny buttons look messy -
+     have a Huds button in the bottom right control that opens a colourful floater with each different hud as an
+     illustrated button".
+     Who and why: a resident (35-65, perhaps with weaker eyesight) wants the flight deck or the game HUD without hunting for
+     a 22 px icon. Flow: press HUDs, see a big picture, a plain name, one line saying what it is and ON / OFF for every HUD;
+     press one: it shows or hides exactly as its old tiny icon did; switching one ON closes this window so the HUD can be
+     seen. Each tile is ONE button (the whole tile, so the name and words are pressable too: the picture and words on it
+     are mouse_opaque="false" and let the press through, llview.cpp childrenHandleMouseEvent / blockMouseEvent); Tab moves
+     between tiles, Enter or Space presses. Pictures: our own artwork, textures/icons/wolf_huds_<id>.png
+     (region-terrain-work/huds-button-2026-11-10/make_hud_art.py), the same as WolfStorm's icons/huds/<id>.svg.
+     Same tiles, order and words as WolfStorm floater_wolf_huds.js (which has the HUDs WolfStorm has). -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="452"
+ layout="topleft"
+ name="wolf_huds"
+ save_rect="true"
+ single_instance="true"
+ title="Wolf HUDs"
+ width="808">
+    <text follows="left|top" font="SansSerifLarge" height="28" layout="topleft" left="12" name="intro" top="30" width="784" wrap="true">Press a picture to show or hide that HUD. A green dot and ON mean it is showing.</text>
+    <!-- Game Mode -->
+    <button follows="left|top" layout="topleft" left="12" top="64" width="256" height="108" name="tile_game" is_toggle="true" label="" tab_stop="true" tool_tip="Game Mode: Your character, actions and bag across the bottom of the screen." />
+    <icon follows="left|top" layout="topleft" left="22" top="78" width="80" height="80" name="pic_game" image_name="WolfHuds_game" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="112" top="74" width="148" height="20" name="name_game" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Game Mode</text>
+    <text follows="left|top" layout="topleft" left="112" top="96" width="148" height="46" name="desc_game" font="SansSerif" wrap="true" mouse_opaque="false">Your character, actions and bag across the bottom of the screen.</text>
+    <text follows="left|top" layout="topleft" left="112" top="146" width="148" height="18" name="state_game" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Car Dashboard -->
+    <button follows="left|top" layout="topleft" left="276" top="64" width="256" height="108" name="tile_car" is_toggle="true" label="" tab_stop="true" tool_tip="Car Dashboard: Speedometer, gears and a steering wheel for a car, truck or bike." />
+    <icon follows="left|top" layout="topleft" left="286" top="78" width="80" height="80" name="pic_car" image_name="WolfHuds_car" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="376" top="74" width="148" height="20" name="name_car" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Car Dashboard</text>
+    <text follows="left|top" layout="topleft" left="376" top="96" width="148" height="46" name="desc_car" font="SansSerif" wrap="true" mouse_opaque="false">Speedometer, gears and a steering wheel for a car, truck or bike.</text>
+    <text follows="left|top" layout="topleft" left="376" top="146" width="148" height="18" name="state_car" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Winter Fun -->
+    <button follows="left|top" layout="topleft" left="540" top="64" width="256" height="108" name="tile_skis" is_toggle="true" label="" tab_stop="true" tool_tip="Winter Fun: Skis, a snowboard, a sledge or a snow disc for the snowy hills." />
+    <icon follows="left|top" layout="topleft" left="550" top="78" width="80" height="80" name="pic_skis" image_name="WolfHuds_skis" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="640" top="74" width="148" height="20" name="name_skis" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Winter Fun</text>
+    <text follows="left|top" layout="topleft" left="640" top="96" width="148" height="46" name="desc_skis" font="SansSerif" wrap="true" mouse_opaque="false">Skis, a snowboard, a sledge or a snow disc for the snowy hills.</text>
+    <text follows="left|top" layout="topleft" left="640" top="146" width="148" height="18" name="state_skis" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Flight Deck -->
+    <button follows="left|top" layout="topleft" left="12" top="180" width="256" height="108" name="tile_plane" is_toggle="true" label="" tab_stop="true" tool_tip="Flight Deck: Flying instruments and the autopilot for aeroplanes." />
+    <icon follows="left|top" layout="topleft" left="22" top="194" width="80" height="80" name="pic_plane" image_name="WolfHuds_plane" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="112" top="190" width="148" height="20" name="name_plane" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Flight Deck</text>
+    <text follows="left|top" layout="topleft" left="112" top="212" width="148" height="46" name="desc_plane" font="SansSerif" wrap="true" mouse_opaque="false">Flying instruments and the autopilot for aeroplanes.</text>
+    <text follows="left|top" layout="topleft" left="112" top="262" width="148" height="18" name="state_plane" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Spaceship -->
+    <button follows="left|top" layout="topleft" left="276" top="180" width="256" height="108" name="tile_spaceship" is_toggle="true" label="" tab_stop="true" tool_tip="Spaceship: Instruments for spaceships and rockets." />
+    <icon follows="left|top" layout="topleft" left="286" top="194" width="80" height="80" name="pic_spaceship" image_name="WolfHuds_spaceship" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="376" top="190" width="148" height="20" name="name_spaceship" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Spaceship</text>
+    <text follows="left|top" layout="topleft" left="376" top="212" width="148" height="46" name="desc_spaceship" font="SansSerif" wrap="true" mouse_opaque="false">Instruments for spaceships and rockets.</text>
+    <text follows="left|top" layout="topleft" left="376" top="262" width="148" height="18" name="state_spaceship" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Sailing Deck -->
+    <button follows="left|top" layout="topleft" left="540" top="180" width="256" height="108" name="tile_boat" is_toggle="true" label="" tab_stop="true" tool_tip="Sailing Deck: Sailing instruments and the autopilot for boats." />
+    <icon follows="left|top" layout="topleft" left="550" top="194" width="80" height="80" name="pic_boat" image_name="WolfHuds_boat" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="640" top="190" width="148" height="20" name="name_boat" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Sailing Deck</text>
+    <text follows="left|top" layout="topleft" left="640" top="212" width="148" height="46" name="desc_boat" font="SansSerif" wrap="true" mouse_opaque="false">Sailing instruments and the autopilot for boats.</text>
+    <text follows="left|top" layout="topleft" left="640" top="262" width="148" height="18" name="state_boat" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Captain's Helm -->
+    <button follows="left|top" layout="topleft" left="12" top="296" width="256" height="108" name="tile_ship" is_toggle="true" label="" tab_stop="true" tool_tip="Captain's Helm: The tall ship's wheel, sails, compass, wind and guns." />
+    <icon follows="left|top" layout="topleft" left="22" top="310" width="80" height="80" name="pic_ship" image_name="WolfHuds_ship" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="112" top="306" width="148" height="20" name="name_ship" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Captain's Helm</text>
+    <text follows="left|top" layout="topleft" left="112" top="328" width="148" height="46" name="desc_ship" font="SansSerif" wrap="true" mouse_opaque="false">The tall ship's wheel, sails, compass, wind and guns.</text>
+    <text follows="left|top" layout="topleft" left="112" top="378" width="148" height="18" name="state_ship" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Speedboat -->
+    <button follows="left|top" layout="topleft" left="276" top="296" width="256" height="108" name="tile_speedboat" is_toggle="true" label="" tab_stop="true" tool_tip="Speedboat: Instruments for a fast motor boat." />
+    <icon follows="left|top" layout="topleft" left="286" top="310" width="80" height="80" name="pic_speedboat" image_name="WolfHuds_speedboat" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="376" top="306" width="148" height="20" name="name_speedboat" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Speedboat</text>
+    <text follows="left|top" layout="topleft" left="376" top="328" width="148" height="46" name="desc_speedboat" font="SansSerif" wrap="true" mouse_opaque="false">Instruments for a fast motor boat.</text>
+    <text follows="left|top" layout="topleft" left="376" top="378" width="148" height="18" name="state_speedboat" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Submarine -->
+    <button follows="left|top" layout="topleft" left="540" top="296" width="256" height="108" name="tile_submarine" is_toggle="true" label="" tab_stop="true" tool_tip="Submarine: Instruments and sonar for going under the sea." />
+    <icon follows="left|top" layout="topleft" left="550" top="310" width="80" height="80" name="pic_submarine" image_name="WolfHuds_submarine" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="640" top="306" width="148" height="20" name="name_submarine" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Submarine</text>
+    <text follows="left|top" layout="topleft" left="640" top="328" width="148" height="46" name="desc_submarine" font="SansSerif" wrap="true" mouse_opaque="false">Instruments and sonar for going under the sea.</text>
+    <text follows="left|top" layout="topleft" left="640" top="378" width="148" height="18" name="state_submarine" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="12" name="status" top="414" width="784" wrap="true" />
+</floater>

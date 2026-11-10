@@ -58,28 +58,21 @@ with the same filename but different name
 
   <texture name="Arrow_Down" file_name="widgets/Arrow_Down.png"	preload="true" />
   <texture name="Arrow_Up" file_name="widgets/Arrow_Up.png" preload="true" />
-  <!-- WolfViewer 2026-10-06: the bottom-right toggles for the toolbar, Flight Mode and Sailing Mode -->
+  <!-- WolfViewer 2026-10-06: the bottom-right toolbar show / hide toggle ([HUDS BUTTON 2026-11-10] the other tiny
+       icons are now the Wolf HUDs tiles below) -->
   <texture name="WolfTb_Toolbar_Off" file_name="icons/wolf_tb_toolbar_off.png" preload="true" />
   <texture name="WolfTb_Toolbar_On" file_name="icons/wolf_tb_toolbar_on.png" preload="true" />
-  <texture name="WolfTb_Plane_Off" file_name="icons/wolf_tb_plane_off.png" preload="true" />
-  <texture name="WolfTb_Plane_On" file_name="icons/wolf_tb_plane_on.png" preload="true" />
-  <texture name="WolfTb_Boat_Off" file_name="icons/wolf_tb_boat_off.png" preload="true" />
-  <texture name="WolfTb_Boat_On" file_name="icons/wolf_tb_boat_on.png" preload="true" />
-  <texture name="WolfTb_Game_Off" file_name="icons/wolf_tb_game_off.png" preload="true" />
-  <texture name="WolfTb_Game_On" file_name="icons/wolf_tb_game_on.png" preload="true" />
-  <texture name="WolfTb_Car_Off" file_name="icons/wolf_tb_car_off.png" preload="true" />
-  <texture name="WolfTb_Car_On" file_name="icons/wolf_tb_car_on.png" preload="true" />
-  <!-- WolfViewer 2026-10-11 (w65): the Speedboat Helm (beside the boat), Spaceship HUD (beside the plane) and Submarine Helm (beside the speedboat) toggles -->
-  <texture name="WolfTb_Speedboat_Off" file_name="icons/wolf_tb_speedboat_off.png" preload="true" />
-  <texture name="WolfTb_Speedboat_On" file_name="icons/wolf_tb_speedboat_on.png" preload="true" />
-  <texture name="WolfTb_Spaceship_Off" file_name="icons/wolf_tb_spaceship_off.png" preload="true" />
-  <texture name="WolfTb_Spaceship_On" file_name="icons/wolf_tb_spaceship_on.png" preload="true" />
-  <texture name="WolfTb_Submarine_Off" file_name="icons/wolf_tb_submarine_off.png" preload="true" />
-  <texture name="WolfTb_Submarine_On" file_name="icons/wolf_tb_submarine_on.png" preload="true" />
-  <texture name="WolfTb_Skis_Off" file_name="icons/wolf_tb_skis_off.png" preload="true" />   <!-- [SKIS 2026-11-06] skis and poles (skis-2026-11-06/make_toolbar_icon.py) -->
-  <texture name="WolfTb_Skis_On" file_name="icons/wolf_tb_skis_on.png" preload="true" />
-  <texture name="WolfTb_Ship_Off" file_name="icons/wolf_tb_ship_off.png" preload="true" />   <!-- [CAPTAIN'S HELM 2026-10-28] a tall ship -->
-  <texture name="WolfTb_Ship_On" file_name="icons/wolf_tb_ship_on.png" preload="true" />
+  <!-- [HUDS BUTTON 2026-11-10] Wolf HUDs tiles (floater_wolf_huds.xml): our own artwork,
+       region-terrain-work/huds-button-2026-11-10/make_hud_art.py; the same pictures as WolfStorm icons/huds/ -->
+  <texture name="WolfHuds_game" file_name="icons/wolf_huds_game.png" preload="false" />
+  <texture name="WolfHuds_car" file_name="icons/wolf_huds_car.png" preload="false" />
+  <texture name="WolfHuds_skis" file_name="icons/wolf_huds_skis.png" preload="false" />
+  <texture name="WolfHuds_plane" file_name="icons/wolf_huds_plane.png" preload="false" />
+  <texture name="WolfHuds_spaceship" file_name="icons/wolf_huds_spaceship.png" preload="false" />
+  <texture name="WolfHuds_boat" file_name="icons/wolf_huds_boat.png" preload="false" />
+  <texture name="WolfHuds_ship" file_name="icons/wolf_huds_ship.png" preload="false" />
+  <texture name="WolfHuds_speedboat" file_name="icons/wolf_huds_speedboat.png" preload="false" />
+  <texture name="WolfHuds_submarine" file_name="icons/wolf_huds_submarine.png" preload="false" />
   <texture name="Arrow_Left" file_name="widgets/Arrow_Left.png" preload="true" />
   <texture name="Arrow_Right" file_name="widgets/Arrow_Right.png" preload="true" />
 

@@ -376,7 +376,7 @@ public:
     /** The HUD is on screen now: wanted, not hidden by the player, the bottom free. */
     bool hudShowing() const;
     bool hudHidden() const { return mHudHidden; }
-    /** The corner icon (lltoolbarview.cpp wolf_game_toggle) while Game Mode is on: hide the HUD
+    /** The Game Mode tile (wolffloaterhuds.cpp; was the corner icon) while Game Mode is on: hide the HUD
      *  when it shows (the game keeps running), else show it, taking the bottom. */
     void toggleHud();
     /** Show the HUD and take the bottom from the deck (hidden, its mode and autopilot running)

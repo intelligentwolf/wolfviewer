@@ -160,15 +160,9 @@ private:
     LLButton*           mWolfToolbarToggle = nullptr;   // <WolfViewer 2026-09-10>
     S32                 mBottomToolbarShownDim = 90;    // <WolfViewer 2026-10-06> the skin's own bottom_toolbar_panel height
     bool                mWolfSingleBarApplied = false;  // <WolfViewer 2026-10-20> single bar state last given to the bar
-    LLButton*           mWolfPlaneToggle = nullptr;     // <WolfViewer 2026-10-06> Flight Mode deck
-    LLButton*           mWolfBoatToggle = nullptr;      // <WolfViewer 2026-10-06> Sailing Mode deck
-    LLButton*           mWolfGameToggle = nullptr;      // <WolfViewer 2026-10-09> Game Mode
-    LLButton*           mWolfCarToggle = nullptr;       // <WolfViewer 2026-10-09> Car Dashboard
-    LLButton*           mWolfSpeedboatToggle = nullptr; // <WolfViewer 2026-10-11> Speedboat Helm (w65)
-    LLButton*           mWolfSpaceshipToggle = nullptr; // <WolfViewer 2026-10-11> Spaceship HUD (w65)
-    LLButton*           mWolfSubmarineToggle = nullptr; // <WolfViewer 2026-10-11> Submarine Helm (w65)
-    LLButton*           mWolfShipToggle = nullptr;      // <WolfViewer 2026-10-28> Captain's Helm (sailing ships)
-    LLButton*           mWolfSkisToggle = nullptr;      // [SKIS 2026-11-06] Skis and Snowboards (wolfskis.h)
+    // [HUDS BUTTON 2026-11-10] the labelled HUDs button that opens Wolf HUDs (wolffloaterhuds.cpp); it replaced the nine
+    // tiny show / hide icons (plane, boat, game, car, speedboat, spaceship, submarine, ship, skis)
+    LLButton*           mWolfHudsButton = nullptr;
     bool                mWolfPanelUp = false;           // <WolfViewer 2026-10-09> a bottom panel (deck, dashboard, game HUD) shows
     bool                mWolfBarWasHidden = false;      // <WolfViewer 2026-10-09> the bar's own state before it did
 

@@ -925,7 +925,19 @@ void WolfWeather::bindSnowCover(LLGLSLShader* shader, LLViewerRegion* regionp)
     static LLStaticHashedString s_cover("wolf_snow_cover");
     static LLStaticHashedString s_origin("wolf_shelter_origin");
     static LLStaticHashedString s_size("wolf_shelter_size");
+    static LLStaticHashedString s_level("wolf_water_level");
     if (!shader) return;
+    // <WolfViewer 2026-11-10> Ticket 709: snow lay on the sea bed. The cover's water-line fade
+    // in terrainF.glsl / pbrterrainF.glsl wolfSnowCover reads wolf_water_level, but only
+    // lldrawpoolterrain.cpp wolf_bind_caustics set it - and only past its early return, i.e.
+    // in sunlight with WolfViewerWaterCaustics on, and never on PBR terrain painted by height
+    // (it is called in the paint-map branch only). At night, with caustics off, or on those
+    // regions the fade read 0 m (or another region's level) and the cover reached the whole
+    // sea bed. Set here, for every terrain draw that gets the cover, from the same source the
+    // caustics use. WolfStorm already sets uWaterLevel on every terrain unconditionally
+    // (terrain_manager.js setWaterHeight and the splat-uniform rebuild).
+    if (regionp) shader->uniform1f(s_level, regionp->getWaterHeight());
+    // </WolfViewer>
     if (mSnowCover <= 0.f || !regionp || !mShelterInit || !mShelter.ready())
     {
         shader->uniform1f(s_cover, 0.f);

@@ -105,6 +105,7 @@ namespace
     BlackCheck sBlack;
     bool sGBufferGLOnly = false;         // [BLACK WORLD] stage 1: Vulkan draws no pass and no depth rewrite runs
     bool sGBufferUnsharePending = false; // [BLACK WORLD] stage 2: the target gives the shared textures back at its next allocate
+    bool sGBufferReshareWanted = false;  // [BLACK WORLD] after a dark-scene verdict: share again once the unshare has finished
     void stopAtRunTime(const std::string& reason);
     bool shareGBuffer(const char* why);
     void unshareGBuffer(const std::string& why);
@@ -370,6 +371,7 @@ namespace
         sBlack.mStage = BlackCheck::DONE;
         sGBufferGLOnly = false;
         sGBufferUnsharePending = false;
+        sGBufferReshareWanted = false;
         // the G-buffer first: the render target stops being shared and gets ordinary GL textures at its next allocation
         if (gPipeline.mRT) gPipeline.mMainRT.deferredScreen.setWolfVkShared(false);
         LLRenderTarget::sWolfVkProvider = nullptr;
@@ -613,6 +615,11 @@ namespace
         sGBuffer = nullptr;
         sGBufferUnsharePending = false;
         LL_INFOS("WolfVulkanCheck") << "G-buffer sharing ended: OpenGL draws every pass into its own textures" << LL_ENDL;
+        if (sGBufferReshareWanted)
+        {
+            sGBufferReshareWanted = false;
+            shareGBuffer("restored after the world check");
+        }
     }
 
     // [BLACK WORLD 2026-11-10] the world check, once per new GL probe sample (presentFrame, after the frame went out)
@@ -730,10 +737,11 @@ namespace
             }
             if (sBlack.mGlBlackRun >= 3)
             {
-                // black with and without Vulkan's part: a dark scene. The normal mode comes back.
+                // black with and without Vulkan's part: a dark scene. The normal mode comes back (the share again once
+                // the target has given the old images back: finishUnshare, this frame or a later one).
                 sGBufferGLOnly = false;
+                sGBufferReshareWanted = sBlack.mGBufferWasShared;
                 finishUnshare();
-                if (sBlack.mGBufferWasShared && !sGBuffer) shareGBuffer("restored after the world check");
                 end_check("ended: OpenGL's frame black with and without the shared G-buffer - a dark scene, not a Vulkan fault; sharing restored", false);
             }
             break;

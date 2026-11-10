@@ -1547,13 +1547,18 @@ provider cannot share ends the sharing for the session instead of leaving a hole
   ...; G-buffer ...; world check ..." at the end. `reportFields()` gains `vulkan_self_test`, `vulkan_world_check`,
   `vulkan_spirv` (viewer stats, crash and bug reports).
 
-**Tested here.** Linux build (reflinked W102 tree), clang macOS-flag check and -Wconversion on the changed files, gdb
-start-up check, and a Linux session (NVIDIA, shared layers + shared G-buffer) proving the self-tests pass and the world
-check ends "passed" without firing. The Windows binary was run under Wine (winevulkan + Wine's opengl32 on the NVIDIA
-Linux driver): that exercises the Windows build's own code paths (keys, paths, the Win32 child window, the read-back
-hand-over where Wine's GL lacks GL_EXT_memory_object_win32) but not a Windows driver. The real Windows test is the TEST
-installer (/downloads/wolfviewer/test/WolfViewer-vulkan-test-windows64-AVX2-Setup.exe) on a Windows PC with a real GPU
-and Vulkan driver (a GPU-less VM never starts Vulkan and proves nothing); the results per machine are the log lines above.
+**Tested here (2026-11-10).** Linux build (reflinked W102 tree), clang macOS-flag check and -Wconversion clean on every
+changed file, gdb break-at-main passed. Linux session lin-vkcheck3 (NVIDIA RTX 5090 by PRIME offload, X11 child window,
+Shadow Testwolf at Sandbox, `~/.cache/winvk/rig/log-lin-vkcheck3.log`, `shots/lin-vkcheck3/world_end.png`): the world
+drawn through the single-layer composite, "Default framebuffer alpha bits: 8", every self-test OK (layers: world RGBA8
+and depth D32F; G-buffer: D32F, RGBA8 x2, RGBA16, RGBA16F, at every resize), "G-buffer shared and ready for Vulkan
+passes: 1896x1011, 4 colour attachments", the Deferred Diffuse mirror made (the Vulkan G-buffer pass ran), and the
+world check "passed: OpenGL's frame lit in 10 probes running (last max 255), Vulkan sees it too" - it did not fire; a
+clean logout. The W102 Windows binary under Wine reproduced the black world (above); the W103 Windows binary from CI
+run 42815452819 is to be run the same way (`~/.cache/winvk/wine-session.sh`) as soon as it lands, and is the TEST
+installer (/downloads/wolfviewer/test/WolfViewer-vulkan-test-windows64-AVX2-Setup.exe) for Paul's cloud Windows PC and
+the Windows volunteers - a Windows PC with a real GPU and Vulkan driver (a GPU-less VM never starts Vulkan and proves
+nothing); what each machine says is in the log lines above. The macOS build of the branch is CI run 42816005089.
 
 ## 8.5 Design for the next pass: `PASS_SIMPLE` into the G-buffer (stage 4 proper)
 

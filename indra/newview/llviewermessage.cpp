@@ -33,6 +33,7 @@
 #include "wolfhelm.h"            // <WolfViewer 2026-10-28/> the Captain's Helm hears its ship
 #include "wolfskis.h"            // [SKIS 2026-11-06/] skis and snowboards hear their ride
 #include "wolfair.h"             // <WolfViewer 2026-11-01/> Wolf Air: the flight deck's dogfight band hears its plane
+#include "wolffloaterlifts.h"    // [WOLF LIFTS 2026-11-10/] the lift kit's "WolfLift1|" lines
 #include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
 // Linden libraries
@@ -2870,6 +2871,12 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
         // <WolfViewer 2026-11-01> Wolf Air (wolfair.h; region-terrain-work/aircraft-dogfight-2026-11-01/a-research/DESIGN.md
         // s2): a warplane's "WolfAir1|..." line to the flight deck's dogfight band, taken the same way. </WolfViewer>
         if (WolfAir::instance().onObjectChat(from_id, type_temp, helm_line))
+        {
+            return;
+        }
+        // [WOLF LIFTS 2026-11-10] the lift kit's "WolfLift1|..." lines to the Cable Cars and Ski Lifts window
+        // (wolffloaterlifts.h), taken the same way. </WolfViewer>
+        if (WolfLifts::onObjectChat(from_id, type_temp, helm_line))
         {
             return;
         }

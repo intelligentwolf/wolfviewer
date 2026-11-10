@@ -1069,6 +1069,7 @@ set(viewer_SOURCE_FILES
     wolfterraincap.cpp # [WOLF TERRAFORM 2026-10-23 Phase 3] the writer's fast route, the region's WolfTerraform capability
     wolfterraform.cpp # [WOLF TERRAFORM 2026-10-23] the Terraform tools: plans, history (Undo / Redo), jobs
     wolffloaterterraform.cpp # [WOLF TERRAFORM 2026-10-23] the Terraform window
+    wolffloaterlifts.cpp # [WOLF LIFTS 2026-11-10] Cable Cars and Ski Lifts (ticket 691)
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
     wolfmapchart.cpp
@@ -2107,6 +2108,7 @@ set(viewer_HEADER_FILES
     wolfterraincapmath.h   # [WOLF TERRAFORM 2026-10-23 Phase 3] pure batching (tests/wolfterraincapmath_test.cpp)
     wolfterraform.h
     wolffloaterterraform.h
+    wolffloaterlifts.h
     wolfsurfcurl.h
     wolfmapglobe.h
     wolfmapchart.h

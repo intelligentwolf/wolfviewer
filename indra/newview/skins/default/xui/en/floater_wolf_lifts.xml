@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF LIFTS 2026-11-10] Cable Cars and Ski Lifts (wolffloaterlifts.cpp). Ticket 691, Indi Moon: "Cable cars and ski lifts
+     that can be laid out in a similar way to how we create the paths for tunnels. Ski lift and cable cars slopes will follow
+     the slope and angles of the terrain." Paul: built into the viewer, not a HUD; simple for older residents.
+     Persona: a region owner on a snowy mountain who has never built a lift.
+     Story: "I click where the bottom station goes and where the top station goes, I see the towers, I press Build."
+     Flow: the window opens drawing (camera from above, the Tunnel tool's pen) -> 1. Cable car or Chair lift -> 2. click the
+     bottom station, any bends, the top station; the towers show in the world -> 3. Build. The hint says the next step; the
+     line under the plan says the length and towers, or why it cannot be built; the status line under Build says what is
+     happening. No codes, no countdowns; every failure is said in the status line (caution colour) or an alert. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="330"
+ layout="topleft"
+ name="wolf_lifts"
+ help_topic="wolf_lifts"
+ save_rect="true"
+ single_instance="true"
+ title="Cable Cars and Ski Lifts"
+ width="460">
+    <text follows="left|top" font="SansSerifBold" height="40" layout="topleft" left="16" name="lifts_hint" top="26" width="428" word_wrap="true" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="kind_heading" top="70" width="428">1. What kind of lift?</text>
+    <radio_group follows="left|top" height="22" layout="topleft" left="16" name="lifts_kind" top="92" width="428"
+     tool_tip="Cable car: a cabin that carries people between the two stations. Chair lift: chairs that go round and round, for skiers.">
+        <radio_item height="20" label="Cable car" layout="topleft" left="0" name="car" top="0" value="car" width="160" />
+        <radio_item height="20" label="Chair lift (ski lift)" layout="topleft" left="180" name="chair" top="0" value="chair" width="220" />
+    </radio_group>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="where_heading" top="124" width="428">2. Click the stations on the ground</text>
+    <button follows="left|top" height="26" label="Undo last point" layout="topleft" left="16" name="lifts_undo" top="148" width="136"
+     tool_tip="Take the last point you clicked back (Backspace)" />
+    <button follows="left|top" height="26" label="Start over" layout="topleft" left="160" name="lifts_start_over" top="148" width="110"
+     tool_tip="Clear the drawing and click a new line" />
+    <button follows="left|top" height="26" label="Look from above" layout="topleft" left="278" name="lifts_top_view" top="148" width="166"
+     tool_tip="Turn the camera to look down on the line, so a click lands where you point" />
+    <text follows="left|top" height="36" layout="topleft" left="16" name="lifts_plan" top="182" width="428" word_wrap="true" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="build_heading" top="220" width="428">3. Build it</text>
+    <button follows="left|top" font="SansSerifLarge" height="36" label="Build" layout="topleft" left="16" name="lifts_build" top="244" width="200"
+     tool_tip="Make the stations, towers, cable and cabins or chairs here" />
+    <progress_bar color_bar="0.3 0.85 0.4 1" follows="left|top" height="10" layout="topleft" left="228" name="lifts_progress" top="257" visible="false" width="216" />
+    <text follows="left|top" height="44" layout="topleft" left="16" name="lifts_status" top="284" width="428" word_wrap="true">To take a lift down, touch one of its stations.</text>
+</floater>

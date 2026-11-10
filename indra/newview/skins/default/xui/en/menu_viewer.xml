@@ -2410,6 +2410,12 @@
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_plane_builder" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
+            <!-- [WOLF LIFTS 2026-11-10] Ticket 691 (Indi Moon): "Cable cars and ski lifts that can be laid out in a similar way to
+             how we create the paths for tunnels" (wolffloaterlifts.cpp). Wolf Territories only, as Terraform. -->
+            <menu_item_call label="Cable Cars and Ski Lifts..." name="WolfWorldLifts">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_lifts" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <menu_item_call label="Terraform..." name="WolfWorldTerraform">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_terraform" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />

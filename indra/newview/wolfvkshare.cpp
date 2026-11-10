@@ -480,6 +480,16 @@ namespace
         case VK_FORMAT_R16G16B16A16_SFLOAT:
             for (int c = 0; c < 4; ++c) { uint16_t v; memcpy(&v, at + c * 2, 2); out[c] = halfToFloat(v); }
             channels = 4; tolerance = 0.001f; return true;
+        case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+        {
+            // [VINTAGE G-BUFFER 2026-11-10] vulkan_core.h: one 32-bit word, A in bits 31:30, B 29:20, G 19:10, R 9:0
+            uint32_t v; memcpy(&v, at, 4);
+            out[0] = static_cast<float>(v & 0x3FFu) / 1023.f;
+            out[1] = static_cast<float>((v >> 10) & 0x3FFu) / 1023.f;
+            out[2] = static_cast<float>((v >> 20) & 0x3FFu) / 1023.f;
+            out[3] = static_cast<float>((v >> 30) & 0x3u) / 3.f;   // 1.0 -> 3, exact
+            channels = 4; tolerance = 1.5f / 1023.f; return true;
+        }
         case VK_FORMAT_D32_SFLOAT:
             memcpy(&out[0], at, 4); out[1] = out[2] = out[3] = 0.f;
             channels = 1; tolerance = 0.0001f; return true;

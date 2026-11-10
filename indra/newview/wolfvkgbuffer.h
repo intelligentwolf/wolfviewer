@@ -9,9 +9,11 @@
  * (pipeline.cpp allocateScreenBufferInternal + addDeferredAttachments), as shared:
  *   0 GL_RGBA (diffuse)   -> GL_RGBA8   / VK_FORMAT_R8G8B8A8_UNORM
  *   1 GL_RGBA (orm)       -> GL_RGBA8   / VK_FORMAT_R8G8B8A8_UNORM
- *   2 GL_RGBA16 (normal)  -> GL_RGBA16  / VK_FORMAT_R16G16B16A16_UNORM
+ *   2 GL_RGBA16 (normal)  -> GL_RGBA16  / VK_FORMAT_R16G16B16A16_UNORM; with HDR off (vintage mode: graphics quality
+ *                            Low/LowMid/Mid) GL_RGB10_A2 -> GL_RGB10_A2 / VK_FORMAT_A2B10G10R10_UNORM_PACK32
  *   3 GL_RGB16F (emissive)-> GL_RGBA16F / VK_FORMAT_R16G16B16A16_SFLOAT (three-channel 16-bit images are not exportable; the
- *                            alpha is written 0 by the shaders and read by nobody)
+ *                            alpha is written 0 by the shaders and read by nobody); vintage: GL_RGB -> GL_RGBA8; absent
+ *                            altogether without RenderEnableEmissiveBuffer (three colour attachments, colorCount())
  *   depth GL_DEPTH_COMPONENT24 -> GL_DEPTH_COMPONENT32F / VK_FORMAT_D32_SFLOAT (RADV has no D24; vkglshare probe)
  * mRT->screen shares the depth texture as before (LLRenderTarget::shareDepthBuffer).
  *
@@ -67,8 +69,10 @@ public:
     bool depthTexture(LLRenderTarget& target, U32& tex) override;
     void released(LLRenderTarget& target) override;
 
-    // The shared G-buffer is complete (four colours + depth, same size) and the Vulkan target over it is built.
+    // The shared G-buffer is complete (three or four colours + depth, same size) and the Vulkan target over it is built.
     bool ready() const;
+    // [VINTAGE G-BUFFER 2026-11-10] the leading valid colour attachments (3 without the emissive buffer, 4 with)
+    uint32_t colorCount() const;
     // Builds the Vulkan target over the five images when they are all there and it is not built yet; true = ready().
     bool prepare();
     uint32_t width() const { return mWidth; }

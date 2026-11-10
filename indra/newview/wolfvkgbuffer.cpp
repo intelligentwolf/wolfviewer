@@ -35,15 +35,40 @@ namespace
     const GLenum WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT = 0x9586;
     const GLenum WOLF_GL_HANDLE_TYPE_OPAQUE_WIN32_EXT = 0x9587;
 
-    // the five attachments as shared (wolfvkgbuffer.h table): GL internal format and the Vulkan format
+    // [VINTAGE G-BUFFER 2026-11-10] The attachments as shared, by what the viewer asks for (pipeline.cpp
+    // allocateScreenBufferInternal / addDeferredAttachments:394-420): the normal is GL_RGBA16 with HDR on and GL_RGB10_A2
+    // without (RenderHDREnabled off, which graphics quality Low/LowMid/Mid set through RenderDisableVintageMode 0,
+    // featuretable.txt:140/185/411-459 -> llviewercontrol.cpp handleDisableVintageMode); the emissive attachment is
+    // GL_RGB16F with HDR on, GL_RGB without, and is absent altogether when RenderEnableEmissiveBuffer is off (the same
+    // levels) - three colour attachments then. Before this, index 2 was only ever GL_RGBA16: a vintage-mode G-buffer
+    // got attachments 0, 1 and the depth shared and the normal refused - half shared, which the init comment below
+    // calls worse than none, and no Vulkan pass ever ran (prepare() wanted four). Found in the W102 Windows binary under
+    // Wine (gpu benchmark -> Class1 -> level 1 -> vintage): "G-buffer attachment 2 asked for GL format 0x8059".
     struct Slot { uint32_t mGlInternal; uint32_t mGlPixelType; };
-    const Slot sColorSlots[4] =
+    const Slot sSlotRGBA8   = { GL_RGBA8,    GL_UNSIGNED_BYTE };
+    const Slot sSlotRGBA16  = { GL_RGBA16,   GL_UNSIGNED_SHORT };
+    const Slot sSlotRGB10A2 = { GL_RGB10_A2, GL_UNSIGNED_INT_2_10_10_10_REV };
+    const Slot sSlotRGBA16F = { GL_RGBA16F,  GL_HALF_FLOAT };
+    // the slot for a request, or null when this provider does not share that format at that index
+    const Slot* slotFor(uint32_t index, uint32_t color_fmt)
     {
-        { GL_RGBA8,   GL_UNSIGNED_BYTE },    // 0 diffuse  (pipeline.cpp allocate GL_RGBA)
-        { GL_RGBA8,   GL_UNSIGNED_BYTE },    // 1 orm      (addDeferredAttachments GL_RGBA)
-        { GL_RGBA16,  GL_UNSIGNED_SHORT },   // 2 normal   (GL_RGBA16)
-        { GL_RGBA16F, GL_HALF_FLOAT },       // 3 emissive (GL_RGB16F widened to four channels)
-    };
+        switch (index)
+        {
+        case 0: case 1:   // diffuse (allocate GL_RGBA), orm (GL_RGBA)
+            return (color_fmt == GL_RGBA || color_fmt == GL_RGBA8) ? &sSlotRGBA8 : nullptr;
+        case 2:           // normal: GL_RGBA16 (HDR) or GL_RGB10_A2 (vintage)
+            if (color_fmt == GL_RGBA16) return &sSlotRGBA16;
+            if (color_fmt == GL_RGB10_A2) return &sSlotRGB10A2;
+            return nullptr;
+        case 3:           // emissive: GL_RGB16F (HDR, widened to four channels) or GL_RGB (vintage, widened to RGBA8)
+            if (color_fmt == GL_RGB16F || color_fmt == GL_RGBA16F) return &sSlotRGBA16F;
+            if (color_fmt == GL_RGB || color_fmt == GL_RGB8 || color_fmt == GL_RGBA || color_fmt == GL_RGBA8) return &sSlotRGBA8;
+            return nullptr;
+        default:
+            return nullptr;
+        }
+    }
+    const Slot* const sAllSlots[4] = { &sSlotRGBA8, &sSlotRGBA16, &sSlotRGB10A2, &sSlotRGBA16F };
 
     // the GL_EXT_semaphore entry points, fetched by name (the share class keeps its own table private)
     PFNGLGENSEMAPHORESEXTPROC sGenSemaphoresEXT = nullptr;
@@ -117,9 +142,9 @@ bool WolfVkGBuffer::init(WolfVkDevice& device, bool self_test, std::string& erro
     bool dedicated_only = false;
     const VkImageUsageFlags colour_usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     const VkImageUsageFlags depth_usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    for (const Slot& slot : sColorSlots)
+    for (const Slot* slot : sAllSlots)
     {
-        if (!WolfVkImage::externalFormatSupported(device, WolfVkImage::formatFor(slot.mGlInternal, slot.mGlPixelType), colour_usage, dedicated_only, error))
+        if (!WolfVkImage::externalFormatSupported(device, WolfVkImage::formatFor(slot->mGlInternal, slot->mGlPixelType), colour_usage, dedicated_only, error))
         {
             mDevice = nullptr;
             return false;
@@ -153,7 +178,7 @@ bool WolfVkGBuffer::init(WolfVkDevice& device, bool self_test, std::string& erro
         return false;
     }
     mAvailable = true;
-    LL_INFOS("Vulkan") << "G-buffer sharing ready: RGBA8, RGBA8, RGBA16, RGBA16F + D32_SFLOAT exportable; pass semaphores made" << LL_ENDL;
+    LL_INFOS("Vulkan") << "G-buffer sharing ready: RGBA8, RGBA16, RGB10_A2, RGBA16F + D32_SFLOAT exportable; pass semaphores made" << LL_ENDL;
     return true;
 }
 
@@ -283,16 +308,19 @@ bool WolfVkGBuffer::colorTexture(LLRenderTarget& target, U32 index, U32& color_f
     if (!mAvailable || !mDevice || index >= 4) return false;
     const U32 w = target.getWidth(), h = target.getHeight();
     if (w == 0 || h == 0) return false;
-    // the slot's format as shared; the viewer's request is checked against it (pipeline.cpp formats)
-    const Slot& slot = sColorSlots[index];
-    const bool expected = (index <= 1 && (color_fmt == GL_RGBA || color_fmt == GL_RGBA8))
-                       || (index == 2 && color_fmt == GL_RGBA16)
-                       || (index == 3 && (color_fmt == GL_RGB16F || color_fmt == GL_RGBA16F));
-    if (!expected)
+    // the slot's format as shared, by the viewer's request (slotFor above). A format this provider does not share ends
+    // the sharing for the session (never half a G-buffer: the attachments already handed out stay until the target
+    // releases them, the rest and every later allocation are OpenGL's own, no Vulkan pass runs)
+    const Slot* slot_ptr = slotFor(index, color_fmt);
+    if (!slot_ptr)
     {
-        LL_WARNS_ONCE("Vulkan") << "G-buffer attachment " << index << " asked for GL format 0x" << std::hex << color_fmt << std::dec << ", not the one this provider shares; left to GL" << LL_ENDL;
+        LL_WARNS("Vulkan") << "G-buffer attachment " << index << " asked for GL format 0x" << std::hex << color_fmt << std::dec
+                           << ", which this provider does not share: G-buffer sharing ends, OpenGL draws every pass" << LL_ENDL;
+        mDisabledReason = llformat("attachment %u asked for GL format 0x%x, not shared", index, color_fmt);
+        mAvailable = false;
         return false;
     }
+    const Slot& slot = *slot_ptr;
     if (mWidth != w || mHeight != h)
     {
         // a new size: everything is remade as the target asks for each attachment
@@ -344,17 +372,26 @@ void WolfVkGBuffer::released(LLRenderTarget& /*target*/)
     mWidth = mHeight = 0;
 }
 
+uint32_t WolfVkGBuffer::colorCount() const
+{
+    // [VINTAGE G-BUFFER 2026-11-10] the leading valid colour attachments: 4 with the emissive buffer, 3 without
+    // (pipeline.cpp addDeferredAttachments: diffuse, orm, normal always; emissive with RenderEnableEmissiveBuffer)
+    uint32_t n = 0;
+    while (n < 4 && mColor[n].isValid()) ++n;
+    return n;
+}
+
 bool WolfVkGBuffer::ready() const
 {
     if (!mAvailable || !mDepth.isValid()) return false;
-    for (const WolfVkSharedImage& c : mColor) if (!c.isValid()) return false;
+    if (colorCount() < 3) return false;
     return mTarget && !mTargetDirty;
 }
 
 bool WolfVkGBuffer::prepare()
 {
     if (!mAvailable || !mDepth.isValid()) return false;
-    for (const WolfVkSharedImage& c : mColor) if (!c.isValid()) return false;
+    if (colorCount() < 3) return false;
     if (!mTarget || mTargetDirty)
     {
         std::string error;
@@ -363,7 +400,7 @@ bool WolfVkGBuffer::prepare()
             LL_WARNS_ONCE("Vulkan") << "G-buffer Vulkan target: " << error << LL_ENDL;
             return false;
         }
-        LL_INFOS("Vulkan") << "G-buffer shared and ready for Vulkan passes: " << mWidth << "x" << mHeight << ", 4 colour attachments + D32_SFLOAT depth" << LL_ENDL;
+        LL_INFOS("Vulkan") << "G-buffer shared and ready for Vulkan passes: " << mWidth << "x" << mHeight << ", " << colorCount() << " colour attachments + D32_SFLOAT depth" << LL_ENDL;
     }
     return true;
 }
@@ -372,9 +409,10 @@ bool WolfVkGBuffer::buildTarget(std::string& error)
 {
     mTarget.reset(new WolfVkRenderTarget());
     mTarget->init(*mDevice);
-    for (WolfVkSharedImage& c : mColor)
+    const uint32_t count = colorCount();
+    for (uint32_t i = 0; i < count; ++i)
     {
-        if (!mTarget->addExternalColorAttachment(c.image(), error)) { mTarget.reset(); return false; }
+        if (!mTarget->addExternalColorAttachment(mColor[i].image(), error)) { mTarget.reset(); return false; }
     }
     mTarget->setExternalDepth(mDepth.image());
     mTarget->setColorLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);   // handed to and from GL as attachments
@@ -387,9 +425,11 @@ bool WolfVkGBuffer::recordDump(VkCommandBuffer cmd, std::string& error)
     if (!prepare()) { error = "G-buffer not shared"; return false; }
     mDumpBuffers.clear();
     WolfVkImage* images[5] = { mColor[0].image(), mColor[1].image(), mColor[2].image(), mColor[3].image(), mDepth.image() };
+    const uint32_t count = colorCount();
     acquire(cmd);
-    for (int i = 0; i < 5; ++i)
+    for (uint32_t i = 0; i < 5; ++i)
     {
+        if (i < 4 && i >= count) continue;   // [VINTAGE G-BUFFER] no emissive attachment
         WolfVkImage* img = images[i];
         const bool depth = img->format().mDepth;
         const uint32_t bpt = depth ? 4u : img->format().mTexelBytes;
@@ -425,15 +465,19 @@ bool WolfVkGBuffer::recordDump(VkCommandBuffer cmd, std::string& error)
 
 bool WolfVkGBuffer::writeDump(const std::string& dir, std::string& error)
 {
-    if (mDumpBuffers.size() != 5) { error = "no dump recorded"; return false; }
+    const uint32_t count = colorCount();
+    if (mDumpBuffers.size() != static_cast<size_t>(count) + 1) { error = "no dump recorded"; return false; }
     WolfVkImage* images[5] = { mColor[0].image(), mColor[1].image(), mColor[2].image(), mColor[3].image(), mDepth.image() };
+    size_t buffer = 0;
     for (size_t i = 0; i < 5; ++i)   // size_t: indexes mDumpBuffers (-Wsign-conversion)
     {
+        if (i < 4 && i >= count) continue;   // [VINTAGE G-BUFFER] the file numbers keep the slot: 4 is always the depth
         const uint32_t bpt = images[i]->format().mDepth ? 4u : images[i]->format().mTexelBytes;
         const std::string path = dir + llformat("/gbuf_%zu_%ux%u_%u.raw", i, images[i]->width(), images[i]->height(), bpt);
         std::ofstream out(path, std::ios::binary);
         if (!out) { error = "cannot write " + path; mDumpBuffers.clear(); return false; }
-        out.write(reinterpret_cast<const char*>(mDumpBuffers[i]->hostData()), static_cast<std::streamsize>(mDumpBuffers[i]->size()));
+        out.write(reinterpret_cast<const char*>(mDumpBuffers[buffer]->hostData()), static_cast<std::streamsize>(mDumpBuffers[buffer]->size()));
+        buffer++;
     }
     mDumpBuffers.clear();
     return true;
@@ -444,11 +488,20 @@ bool WolfVkGBuffer::writeGLViewDump(const std::string& dir, const std::string& p
     if (!ready()) { error = "G-buffer not shared"; return false; }
     // GL formats as shared (sColorSlots above / wolfvkgbuffer.h): RGBA8, RGBA8, RGBA16, RGBA16F, DEPTH_COMPONENT32F;
     // read back in their own type so the bytes compare one to one with the Vulkan copy (OpenGL 4.6 8.11.4 glGetTexImage)
+    // [VINTAGE G-BUFFER 2026-11-10] each colour attachment read in its own type: RGBA8 as bytes, RGBA16 as shorts,
+    // RGB10_A2 as the packed word, RGBA16F as halves (the formats slotFor shares)
     struct Read { uint32_t tex; GLenum format; GLenum type; uint32_t bpt; };
-    const Read reads[5] = {
-        { mColor[0].glTexture(), GL_RGBA, GL_UNSIGNED_BYTE, 4 }, { mColor[1].glTexture(), GL_RGBA, GL_UNSIGNED_BYTE, 4 },
-        { mColor[2].glTexture(), GL_RGBA, GL_UNSIGNED_SHORT, 8 }, { mColor[3].glTexture(), GL_RGBA, GL_HALF_FLOAT, 8 },
-        { mDepth.glTexture(), GL_DEPTH_COMPONENT, GL_FLOAT, 4 } };
+    auto read_of = [&](const WolfVkSharedImage& c) -> Read
+    {
+        const VkFormat f = c.image() ? c.image()->format().mFormat : VK_FORMAT_UNDEFINED;
+        if (f == VK_FORMAT_R16G16B16A16_UNORM) return { c.glTexture(), GL_RGBA, GL_UNSIGNED_SHORT, 8 };
+        if (f == VK_FORMAT_R16G16B16A16_SFLOAT) return { c.glTexture(), GL_RGBA, GL_HALF_FLOAT, 8 };
+        if (f == VK_FORMAT_A2B10G10R10_UNORM_PACK32) return { c.glTexture(), GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, 4 };
+        return { c.glTexture(), GL_RGBA, GL_UNSIGNED_BYTE, 4 };
+    };
+    const uint32_t count = colorCount();
+    const Read reads[5] = { read_of(mColor[0]), read_of(mColor[1]), read_of(mColor[2]), read_of(mColor[3]),
+                            { mDepth.glTexture(), GL_DEPTH_COMPONENT, GL_FLOAT, 4 } };
     GLint saved_tex = 0, saved_pack = 0, saved_align = 4;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &saved_tex);
     glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &saved_pack);
@@ -457,14 +510,15 @@ bool WolfVkGBuffer::writeGLViewDump(const std::string& dir, const std::string& p
     glPixelStorei(GL_PACK_ALIGNMENT, 4);   // rows of 4- and 8-byte texels: no padding either way
     std::vector<uint8_t> data;
     bool ok = true;
-    for (int i = 0; i < 5 && ok; ++i)
+    for (uint32_t i = 0; i < 5 && ok; ++i)
     {
+        if (i < 4 && i >= count) continue;
         data.resize(static_cast<size_t>(mWidth) * mHeight * reads[i].bpt);
         glBindTexture(GL_TEXTURE_2D, reads[i].tex);
         glGetTexImage(GL_TEXTURE_2D, 0, reads[i].format, reads[i].type, data.data());
         const std::string e = glErrorsHere();
         if (!e.empty()) { error = llformat("glGetTexImage attachment %d: GL error %s", i, e.c_str()); ok = false; break; }
-        const std::string path = dir + llformat("/gbufglview_%s_%d_%ux%u_%u.raw", prefix.c_str(), i, mWidth, mHeight, reads[i].bpt);
+        const std::string path = dir + llformat("/gbufglview_%s_%u_%ux%u_%u.raw", prefix.c_str(), i, mWidth, mHeight, reads[i].bpt);
         std::ofstream out(path, std::ios::binary);
         if (!out) { error = "cannot write " + path; ok = false; break; }
         out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
@@ -607,6 +661,7 @@ void WolfVkGBuffer::glLayouts(uint32_t textures[5], uint32_t layouts[5], uint32_
     count = 0;
     for (const WolfVkSharedImage& c : mColor)
     {
+        if (!c.isValid()) continue;   // [VINTAGE G-BUFFER] three colour attachments without the emissive buffer
         textures[count] = c.glTexture();
         layouts[count] = WOLF_GL_LAYOUT_COLOR_ATTACHMENT_EXT;
         count++;

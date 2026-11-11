@@ -42,8 +42,9 @@ namespace
 {
     const F32 PI_F = 3.14159265f;
 
-    // Source: wolfskihud.cpp (as wolffishingoverlay.cpp) - the family's night blue and ice, its status colours and its two
-    // insets: band on, or nothing behind the read-outs at all (BACKGROUND off) with the words outlined to read over any sky.
+    // Source: wolfskihud.cpp - the family's night blue and ice and its status colours. Its two insets: band on, or (ours, as
+    // Paul asked of the Fishing HUD 11-11) nothing behind the read-outs at all with BACKGROUND off, the words outlined to read
+    // over any sky.
     const LLColor4 NAVY_HI(0.09f, 0.17f, 0.28f, 0.94f), NAVY_LO(0.02f, 0.05f, 0.09f, 0.94f);
     const LLColor4 INSET_ON(0.f, 0.f, 0.f, 0.42f);
     const LLColor4 INSET_OFF(0.f, 0.f, 0.f, 0.f);
@@ -152,7 +153,7 @@ namespace
     {
         if (OUTLINE)
         {
-            // Source: wolffishingoverlay.cpp text() - a dark outline about a pixel round each letter (background off)
+            // [W104 FEATFIX 2026-11-11] ours: a dark outline about a pixel round each letter (background off)
             const F32 o = 1.f / llmax(0.1f, WolfHudScale::current());
             const LLColor4 dark(0.01f, 0.03f, 0.06f, 0.85f * c.mV[VALPHA]);
             WolfHudScale::text(f, s, x - o, y, dark, h, v);
@@ -194,7 +195,7 @@ namespace
         return best;
     }
 
-    // THE LAYOUT, in the dashboards' frame (Source: wolfskihud.cpp "THE LAYOUT", as wolffishingoverlay.cpp): 1600 x 900 with the
+    // THE LAYOUT, in the dashboards' frame (Source: wolfskihud.cpp "THE LAYOUT"): 1600 x 900 with the
     // panel from y 596 to 900 (y down), scaled by u; the left part keeps its distance from the left edge (L), the centre stays
     // centred (C), the buttons keep theirs from the right edge (R). LESS: only the top row, y 596 to 716.
     struct Anchor { F32 ox = 0.f, top0 = 900.f, u = 1.f; };
@@ -212,7 +213,8 @@ namespace
     F32 YM(F32 y) { return g.cur.top0 - y * g.cur.u; }
     F32 S(F32 v) { return v * g.cur.u; }
 
-    // Source: wolffishingoverlay.cpp TEXT_UP (Paul 11-11: "can you make the text slightly bigger please, it's difficult to read")
+    // [W104 FEATFIX 2026-11-11] (CHOSEN) every word a step bigger than the Ski HUD's sizes: Paul 11-11 of the Fishing HUD, "can
+    // you make the text slightly bigger please, it's difficult to read"
     constexpr F32 TEXT_UP = 1.22f;
 
     const LLFontGL* font(F32 mock_px, bool bold = false, bool mono = false)
@@ -251,8 +253,8 @@ namespace
         text(f, str, x, y, c, h, LLFontGL::VCENTER);
     }
 
-    /** A message in lines no wider than `maxw` (at most `max_lines`), centred from `top` down. Source: wolffishingoverlay.cpp
-     *  msgT. Returns the height it took. */
+    /** [W104 FEATFIX 2026-11-11] A message in lines no wider than `maxw` (at most `max_lines`, the last cut by fitT), centred
+     *  from `top` down. Returns the height it took. */
     F32 msgT(F32 x, F32 top, const std::string& str, F32 px, F32 maxw, S32 max_lines, const LLColor4& c)
     {
         const LLFontGL* f = font(px);
@@ -289,8 +291,8 @@ namespace
         S32 pressed;
     };
 
-    // Source: wolffishingoverlay.cpp button() (wolfskihud.cpp's) - one rounded button, its face lit from above, a pale rim,
-    // B612 bold; `enabled` false: drawn dim with grey words and no hit
+    // Source: wolfskihud.cpp button() - one rounded button, its face lit from above, a pale rim, B612 bold; [W104 FEATFIX]
+    // `enabled` false: drawn dim with grey words and no hit
     void button(Ctx& c, F32 l, F32 b, F32 r, F32 t, const std::string& label, WolfGreedyHud::EHit id, const std::string& tip,
                 F32 px, const LLColor4& face_hi, const LLColor4& face_lo, bool enabled = true)
     {
@@ -353,7 +355,7 @@ bool WolfGreedyHud::onPanel(S32 x, S32 y) const
 {
     if (!mDrawn) return false;
     if (hitAt(x, y)) return true;
-    // Source: wolffishingoverlay.cpp onPanel - with the background on the whole band is solid; off, only the controls
+    // Source: wolfskihud.cpp onPanel - with the background on the whole band is solid; off, only the controls
     if (!gSavedPerAccountSettings.getBOOL("WolfGreedyHudBackground")) return false;
     return (F32)y >= mPanelB && (F32)y <= mPanelT;
 }
@@ -386,16 +388,30 @@ void WolfGreedyHud::draw()
     mDrawn = false;
     if (!WolfGreedyGame::instanceExists() || !WolfGreedyGame::instance().hudOn() || !WolfGrid::isOnWolfTerritories())
     {
+        mOtherWasUp = WolfGreedyGame::instanceExists() && !WolfGreedyGame::bottomTakenBy().empty();
         if (hasMouseCapture()) gFocusMgr.setMouseCapture(nullptr);
         mPressed = H_NONE;
         mResize.hide();
         return;
     }
     WolfGreedyGame& s = WolfGreedyGame::instance();
+    // [W104 FEATFIX review 2026-11-11] one bottom panel at a time (wolffloatergreedy.h bottomTakenBy): another switched on after
+    // this one puts this one away - the game goes on, and Wolf World > Greedy brings the HUD back
+    const std::string other = WolfGreedyGame::bottomTakenBy();
+    const bool other_up = !other.empty();
+    const bool newly = other_up && !mOtherWasUp;
+    mOtherWasUp = other_up;
+    if (newly)
+    {
+        s.setMessage("The Greedy HUD made way for the " + other + ". Your game goes on: Wolf World > Greedy brings the HUD back.", false);
+        WolfGreedyGame::closeHud();
+        mResize.hide();
+        return;
+    }
     s.tick(false);
     const bool less = gSavedPerAccountSettings.getBOOL("WolfGreedyHudLess");
 
-    // the band, as wolffishingoverlay.cpp draw() (wolfskihud.cpp's): above the bottom toolbar, its height a share of the
+    // the band, as wolfskihud.cpp draw(): above the bottom toolbar, its height a share of the
     // window times UI Size
     const F32 screen_w = (F32)getRect().getWidth();
     const F32 Hv = (F32)getRect().getHeight();
@@ -584,14 +600,15 @@ void WolfGreedyHud::draw()
     use(g.R);
     {
         const bool wolf = WolfGrid::isOnWolfTerritories();
-        const bool canRoll = inGame && (buttons.find('R') != std::string::npos || buttons.find('S') != std::string::npos || buttons.find('A') != std::string::npos);
+        const bool free = !s.changeInFlight();   // [W104 FEATFIX review 2026-11-11] change buttons off while one is out
+        const bool canRoll = free && inGame && (buttons.find('R') != std::string::npos || buttons.find('S') != std::string::npos || buttons.find('A') != std::string::npos);
         const std::string rollLabel = buttons.find('S') != std::string::npos ? "START" : buttons.find('A') != std::string::npos ? "PLAY AGAIN" : "ROLL";
         const F32 rr = less ? R_L + 200.f : R_L + 268.f;   // LESS: room on the row for MORE and CLOSE
         const F32 bl = less ? R_L + 206.f : R_L + 280.f, br = less ? R_L + 406.f : 1588.f;
         button(c, X(R_L), YM(700.f), X(rr), YM(612.f), rollLabel, H_ROLL,
                "Roll the dice that are left (the Greedy server rolls them, so nobody can cheat)", 18.f, BTN_GO_HI, BTN_GO_LO, wolf && canRoll);
         button(c, X(bl), YM(700.f), X(br), YM(612.f), "BANK", H_BANK, "Keep this turn's points; then it is the next player's turn",
-               18.f, BTN_GOLD_HI, BTN_GOLD_LO, wolf && inGame && buttons.find('B') != std::string::npos);
+               18.f, BTN_GOLD_HI, BTN_GOLD_LO, wolf && free && inGame && buttons.find('B') != std::string::npos);
         if (less)
         {
             button(c, X(R_L + 412.f), YM(700.f), X(R_L + 478.f), YM(612.f), "MORE", H_LESS, "Show the whole Greedy HUD again", 10.f, BTN_HI, BTN_LO);
@@ -602,18 +619,18 @@ void WolfGreedyHud::draw()
         {
             if (inGame)
             {
-                button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "LEAVE", H_LEAVE, "Leave this game", 12.f, BTN_HI, BTN_LO);
+                button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "LEAVE", H_LEAVE, "Leave this game", 12.f, BTN_HI, BTN_LO, free);
                 button(c, X(R_L + 182.f), YM(780.f), X(R_L + 358.f), YM(716.f), "PASS THEIR TURN", H_PASS,
-                       "When the player whose turn it is has been away for a few minutes", 11.f, BTN_HI, BTN_LO, going && !gm["my_turn"].asBoolean());
+                       "When the player whose turn it is has been away for a few minutes", 11.f, BTN_HI, BTN_LO, free && going && !gm["my_turn"].asBoolean());
                 button(c, X(R_L + 364.f), YM(780.f), X(1588.f), YM(716.f), "WINDOW", H_WINDOW,
                        "The Greedy window: the whole game, every player, and games to join", 12.f, BTN_HI, BTN_LO);
             }
             else
             {
                 button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "NEW GAME", H_NEW,
-                       "Start a game to 10,000 that others can join from their Greedy HUD or window, or a Greedy table", 12.f, BTN_MAIN_HI, BTN_MAIN_LO, wolf);
+                       "Start a game to 10,000 that others can join from their Greedy HUD or window, or a Greedy table", 12.f, BTN_MAIN_HI, BTN_MAIN_LO, wolf && free);
                 button(c, X(R_L + 182.f), YM(780.f), X(R_L + 358.f), YM(716.f), "PRACTICE", H_PRACTICE,
-                       "A game on your own with tips. Nothing is saved and it is not ranked.", 12.f, BTN_HI, BTN_LO, wolf);
+                       "A game on your own with tips. Nothing is saved and it is not ranked.", 12.f, BTN_HI, BTN_LO, wolf && free);
                 button(c, X(R_L + 364.f), YM(780.f), X(1588.f), YM(716.f), "JOIN A GAME", H_JOIN,
                        "The games being played now (the Greedy window)", 12.f, BTN_HI, BTN_LO, wolf);
             }
@@ -709,7 +726,7 @@ bool WolfGreedyHud::handleDoubleClick(S32 x, S32 y, MASK mask)
     {
         return false;
     }
-    // Source: wolffishingoverlay.cpp handleDoubleClick - the second click of a double-click is ignored here on every button:
+    // [W104 FEATFIX 2026-11-11] the second click of a double-click is ignored here on every button:
     // each is a switch or must not go twice (ROLL, BANK, a new game), and many residents double-click buttons
     return true;
 }

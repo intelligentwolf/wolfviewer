@@ -62,6 +62,14 @@ public:
     static void toggleHud();
     static void openHud();
     static void closeHud();
+    /** [W104 FEATFIX review 2026-11-11] ONE BOTTOM PANEL AT A TIME (the rule of wolfgame.cpp / wolfhelm.cpp / wolfskis.cpp
+     *  claimBottom): the name of another panel across the bottom of the screen showing now ("" none) - the car / spaceship /
+     *  speedboat / submarine dashboard, the flight or sailing deck, the Captain's Helm, the Ski HUD, the game HUD. The Greedy
+     *  HUD switched on puts those away (claimBottom, and says so in its message area); one of them switched on later puts the
+     *  Greedy HUD away (WolfGreedyHud::draw). At the fishing-overlay merge: add the Fishing HUD to both (bottomTakenBy and
+     *  claimBottom here), and have the Fishing HUD close this one as it claims the bottom. */
+    static std::string bottomTakenBy();
+    static void claimBottom();
 
     /** Every frame from a view that shows (minimised = the window is minimised): the polling. */
     void tick(bool minimised);
@@ -83,6 +91,9 @@ public:
     const LLSD& games() const { return mGames; }   // the last "list" answer
     bool inGame() const { return mGame && mState["game"]["in_game"].asBoolean(); }
     bool busy() const { return mBusy; }
+    /** [W104 FEATFIX review 2026-11-11] a press that changes the game (new, start, roll, bank, pass, leave, join) is out and
+     *  not answered yet: the views show those buttons off until it is (no second roll pressed on an unchanged screen). */
+    bool changeInFlight() const { return mBusy && !mInFlight.empty() && mInFlight != "poll" && mInFlight != "list" && mInFlight != "mine"; }
     const std::vector<Msg>& messages() const { return mLog; }
     const std::string& message() const { return mMessage; }   // the line under the window's controls ("" none)
     bool messageIsError() const { return mMessageError; }
@@ -113,6 +124,8 @@ private:
     LLSD mGames;
     bool mBusy = false;
     std::string mQueued;            // one action pressed while a request was out
+    std::string mInFlight;          // [review] the request out now ("" none)
+    std::vector<LLPointer<LLUIImage>> mHeldImages;   // [review] the dice faces and tumble frames, loaded while a view is open
     F64 mNextPoll = 0.0;
     F64 mLastActivity = 0.0;        // [A6] the last press, game change or return to a view: the poll pace slows after it
     bool mWasMinimised = false;     // [A6] no polls while the only view is minimised; one at once when it is opened out
@@ -174,7 +187,6 @@ private:
     bool mBoardEmpty = true;        // the scoreboard's empty state shows (no game)
     bool mHasTips = false;          // a practice game's tips show under the scoreboard
     bool mWasRolling = false;
-    std::vector<LLPointer<LLUIImage>> mHeldImages;   // the tumble's frames, kept loaded so the first roll does not flicker
 };
 
 class WolfGreedy : public LLSingleton<WolfGreedy>

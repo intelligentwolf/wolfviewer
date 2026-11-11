@@ -29,6 +29,7 @@
 #include "llcombobox.h"
 #include "llcorehttputil.h"
 #include "llcoros.h"
+#include "lleventcoro.h"   // [W104 FEATFIX review/] llcoro::suspendUntilTimeout (WolfGreedyDebugDelaySecs)
 #include "llfloaterreg.h"
 #include "llframetimer.h"
 #include "llhttpconstants.h"
@@ -45,7 +46,12 @@
 #include "llviewerregion.h"
 #include "llvoavatarself.h"
 #include "llui.h"
+#include "wolfdrive.h"   // [W104 FEATFIX review/] one bottom panel at a time (bottomTakenBy / claimBottom)
+#include "wolfflight.h"
+#include "wolfgame.h"
 #include "wolfgrid.h"
+#include "wolfhelm.h"
+#include "wolfskis.h"
 #include "wolfobjectprops.h"
 
 namespace
@@ -74,6 +80,9 @@ namespace
     const F64 POLL_LOBBY_MAX_S = 15.0;
     const F64 POLL_LONG_QUIET_S = 600.0;
     const F64 POLL_QUIET_MAX_S = 60.0;
+    // [W104 FEATFIX review 2026-11-11] a game going is never polled less than every 15 s (others' turns still show soon); the
+    // 60 s is for a lobby only
+    const F64 POLL_PLAYING_QUIET_MAX_S = 15.0;
     // Source: region-terrain-work/greedy-dice-2026-11-10/test/delivery_lonewolf.json "sounds" (our own, art/make_art.py)
     const char* SND_ROLL = "2888b686-e2c2-48c0-bc92-3ec2ad4c63fd";
     const char* SND_BUST = "db99ff28-3bc3-432a-a991-a4bf8a4adf11";
@@ -232,6 +241,13 @@ void WolfGreedyGame::viewOpened(EView v)
 {
     const bool was = mViews != 0;
     mViews |= (U32)v;
+    if (mHeldImages.empty())
+    {
+        // [W104 FEATFIX review 2026-11-11] the dice faces and the tumble's frames, loaded as a view opens (the HUD on its own as
+        // well as the window), so the first roll does not flicker while they arrive
+        for (S32 i = 0; i < ROLL_FRAMES; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Roll%d", i)));
+        for (S32 i = 0; i <= 6; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Die%d", i)));
+    }
     noteActivity();   // [A6] opened (again): the quick pace, and a poll at once
     mNextPoll = 0.0;
     if (!WolfGrid::isWolfTerritories())
@@ -258,12 +274,47 @@ void WolfGreedyGame::openHud()
 {
     WolfGreedyGame& g = instance();
     if (g.hudOn()) return;
+    if (WolfGrid::isOnWolfTerritories()) claimBottom();   // [W104 FEATFIX review 2026-11-11/] one bottom panel at a time
     g.viewOpened(VIEW_HUD);
     // the first time: the guide's cards (as the window did, WolfGreedyGuideSeen)
     if (WolfGrid::isWolfTerritories() && !gSavedSettings.getBOOL("WolfGreedyGuideSeen"))
     {
         gSavedSettings.setBOOL("WolfGreedyGuideSeen", true);
         WolfFloaterGreedy::showGuideWindow();
+    }
+}
+
+// static
+std::string WolfGreedyGame::bottomTakenBy()
+{
+    // Source: wolfgame.cpp WolfGame::bottomTaken (the deck on screen while active and not hidden; the dashboard; the helm),
+    // and the Ski HUD and the game HUD, which give way to each other the same way (wolfskis.cpp, wolfgame.cpp claimBottom)
+    const WolfFlight& wf = WolfFlight::instance();
+    if (wf.active() && !wf.deckHidden()) return wf.sailing() ? "sailing deck" : "flight deck";
+    if (WolfDrive::instance().dashboardOn()) return "dashboard";
+    if (WolfHelm::instance().hudShowing()) return "Captain's Helm";
+    if (WolfSkis::instance().hudShowing()) return "Ski HUD";
+    if (WolfGame::instance().hudShowing()) return "game HUD";
+    return std::string();
+}
+
+// static
+void WolfGreedyGame::claimBottom()
+{
+    // Source: wolfskis.cpp WolfSkis::claimBottom - the dashboard closes (requestDashboard(false) does not reopen it for this
+    // seat), the deck is hidden (its mode keeps running), the Captain's Helm gives way; and here the Ski HUD and the game HUD
+    // too (the game keeps running with its HUD hidden, WolfGame::toggleHud)
+    std::string put_away = bottomTakenBy();
+    if (WolfDrive::instance().dashboardOn()) WolfDrive::instance().requestDashboard(false);
+    WolfFlight& wf = WolfFlight::instance();
+    if (wf.active() && !wf.deckHidden()) wf.toggleDeck(wf.sailing());
+    if (WolfHelm::instance().hudShowing()) WolfHelm::instance().showHud(false);
+    if (WolfSkis::instance().hudShowing()) WolfSkis::instance().showHud(false);
+    if (WolfGame::instance().hudShowing()) WolfGame::instance().toggleHud();
+    if (!put_away.empty())
+    {
+        instance().setMessage("The " + put_away + " was put away so Greedy can sit along the bottom of the screen "
+                              "(the Wolf HUDs window brings it back).", false);
     }
 }
 
@@ -394,10 +445,15 @@ void WolfGreedyGame::send(const std::string& op, const std::string& extra)
 {
     if (mBusy)
     {
-        if (op != "poll") mQueued = op + "\n" + extra;   // the newest press wins; it goes when the answer comes
+        // the newest press wins; it goes when the answer comes. [W104 FEATFIX review 2026-11-11] the same press as the one out
+        // now is dropped: a second ROLL / BANK / NEW GAME pressed before the first was answered was made on an unchanged
+        // screen, and sent after it would roll twice or make a second game. (A different press - "leave" then "new" - waits.)
+        if (op != "poll" && op != mInFlight) mQueued = op + "\n" + extra;
+        else if (op != "poll") LL_INFOS("WolfGreedy") << "a second " << op << " while the first is out: dropped" << LL_ENDL;
         return;
     }
     mBusy = true;
+    mInFlight = op;
     if (op != "poll") noteActivity();   // [A6/] a press: the quick pace again
     // [A6/] DEBUG only (logcontrol tag WolfGreedy): every request, to count the polls of an idle view
     LL_DEBUGS("WolfGreedy") << "request " << op << " game " << mGame << " quiet " << (S32)(LLFrameTimer::getElapsedSeconds() - mLastActivity) << " s" << LL_ENDL;
@@ -410,6 +466,9 @@ void WolfGreedyGame::send(const std::string& op, const std::string& extra)
 void WolfGreedyGame::sendCoro(std::string op, std::string body)
 {
     LLCore::HttpStatus status;
+    // [W104 FEATFIX review 2026-11-11] for tests only (off: 0): every request waits this long first, a slow link
+    static LLCachedControl<F32> debug_delay(gSavedSettings, "WolfGreedyDebugDelaySecs", 0.f);
+    if (debug_delay() > 0.f) llcoro::suspendUntilTimeout(llmin((F32)debug_delay(), 30.f));
     // [W104 FEATFIX 2026-11-11 A3] a read is asked again (LLCore's retries, then the second host); a change goes once, and to
     // the second host only when it certainly never reached the first (never_sent): no roll, bank or new game twice
     const bool safe = safe_to_repeat(op);
@@ -440,6 +499,7 @@ void WolfGreedyGame::sendCoro(std::string op, std::string body)
 void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std::string& error, bool uncertain)
 {
     mBusy = false;
+    mInFlight.clear();
     changed();
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!error.empty())
@@ -536,7 +596,8 @@ void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std
     const bool going = st == "playing" || st == "final";
     const F64 quiet = now - mLastActivity;
     const F64 base = going ? POLL_PLAYING_S : POLL_WAITING_S;
-    const F64 cap = quiet > POLL_LONG_QUIET_S ? POLL_QUIET_MAX_S : going ? POLL_PLAYING_MAX_S : POLL_LOBBY_MAX_S;
+    const F64 cap = going ? (quiet > POLL_LONG_QUIET_S ? POLL_PLAYING_QUIET_MAX_S : POLL_PLAYING_MAX_S)
+                          : (quiet > POLL_LONG_QUIET_S ? POLL_QUIET_MAX_S : POLL_LOBBY_MAX_S);
     mNextPoll = now + llclamp(quiet * POLL_SLOWING, base, cap);
     if (!mQueued.empty())
     {
@@ -642,9 +703,6 @@ bool WolfFloaterGreedy::postBuild()
     target->add("5,000", LLSD(5000));
     target->add("2,000", LLSD(2000));
     target->selectFirstItem();
-    // [W104 FEATFIX 2026-11-11] the tumble's frames and the dice faces, loaded now so the first roll does not flicker
-    for (S32 i = 0; i < ROLL_FRAMES; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Roll%d", i)));
-    for (S32 i = 0; i <= 6; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Die%d", i)));
     std::string mode = gSavedSettings.getString("WolfGreedyMode");
     if (mode != "table") mode = "full";   // ("strip", the old bar, is the HUD now)
     setMode(mode, false);
@@ -980,14 +1038,17 @@ void WolfFloaterGreedy::refreshButtons()
         const std::string pre(p);
         LLButton* roll = getChild<LLButton>(pre + "roll");
         roll->setLabel(rollLabel);
-        roll->setEnabled(inGame && (b.find('R') != std::string::npos || b.find('S') != std::string::npos || b.find('A') != std::string::npos));
-        getChild<LLButton>(pre + "bank")->setEnabled(inGame && b.find('B') != std::string::npos);
+        // [W104 FEATFIX review 2026-11-11] off while a press that changes the game is out (changeInFlight)
+        const bool free = !game.changeInFlight();
+        roll->setEnabled(free && inGame && (b.find('R') != std::string::npos || b.find('S') != std::string::npos || b.find('A') != std::string::npos));
+        getChild<LLButton>(pre + "bank")->setEnabled(free && inGame && b.find('B') != std::string::npos);
+        getChild<LLButton>(pre + "leave")->setEnabled(free && inGame);
     }
     const bool guide = mGuidePage >= 0;
     for (const char* n : { "f_target_label", "f_target", "f_new", "f_practice", "f_games", "f_join", "f_refresh" })
         getChild<LLUICtrl>(n)->setVisible(!guide && !inGame);
     for (const char* n : { "f_leave", "f_pass" }) getChild<LLUICtrl>(n)->setVisible(!guide && inGame);
-    getChild<LLUICtrl>("t_leave")->setEnabled(inGame);
+    for (const char* n : { "f_pass", "f_new", "f_practice", "f_join" }) getChild<LLUICtrl>(n)->setEnabled(!game.changeInFlight());
     getChild<LLUICtrl>("f_help")->setVisible(!guide);
     for (const char* n : { "f_board", "f_turn_label", "f_turn", "f_dice_left", "f_event", "f_roll", "f_bank", "f_status" })
         getChild<LLUICtrl>(n)->setVisible(!guide);

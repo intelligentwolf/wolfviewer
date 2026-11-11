@@ -31,8 +31,8 @@
  * JOIN (the window's list of games) -> ROLL (the dice tumble and land) -> ROLL again or BANK -> "You banked 350!" / "Bust!".
  * HOW TO PLAY opens the guide's cards (the Greedy window). LESS shrinks it to one row; CLOSE switches it off.
  *
- * One control the width of the screen in main_view.xml ("wolf_greedy_hud"), in the dashboard family exactly as the Fishing
- * HUD (wolffishingoverlay.cpp, branch fishing-overlay) and the Ski HUD (wolfskihud.cpp): the 1600 x 304 mock band with left /
+ * One control the width of the screen in main_view.xml ("wolf_greedy_hud"), in the dashboard family exactly as the Ski HUD
+ * (wolfskihud.cpp; the Fishing HUD of branch fishing-overlay is built the same way): the 1600 x 304 mock band with left /
  * centre / right anchors above the bottom toolbar, its height a share of the window times UI Size, the night-blue band with
  * the frosted top edge or (BACKGROUND off, per resident: WolfGreedyHudBackground) only the controls and outlined words over the
  * world, B612 lettering, the same rounded buttons, the same size handle on its top edge (WolfGreedyHudScale, wolfhudscale.h).
@@ -79,6 +79,7 @@ private:
     F32 mHitScale = 1.f;
     bool mDrawn = false;
     S32 mPressed = H_NONE;
+    bool mOtherWasUp = false;           // [review] another bottom panel was showing last frame (WolfGreedyGame::bottomTakenBy)
 
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;

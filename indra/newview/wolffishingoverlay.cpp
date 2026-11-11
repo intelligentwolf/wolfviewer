@@ -138,11 +138,12 @@ namespace
 
     /** The login's background inventory fetch has nothing left to do: queues empty, nothing in flight
      *  (Source: llinventorymodelbackgroundfetch.cpp setAllFoldersFetched clears folderFetchActive once the folder queue is done;
-     *  isBulkFetchProcessingComplete: both queues empty and no fetch outstanding). */
+     *  isBulkFetchProcessingComplete: both queues empty and no fetch outstanding). Before start() runs those are
+     *  also empty, so "idle" also needs inventoryFetchStarted() (Source: llinventorymodelbackgroundfetch.cpp:236). */
     bool backgroundFetchIdle()
     {
         const LLInventoryModelBackgroundFetch& f = LLInventoryModelBackgroundFetch::instance();
-        return !f.folderFetchActive() && f.isBulkFetchProcessingComplete();
+        return f.inventoryFetchStarted() && !f.folderFetchActive() && f.isBulkFetchProcessingComplete();
     }
 
     const char* const NOT_ON_WOLF = "Fishing is on Wolf Territories regions. Come to Wolf Territories to fish.";

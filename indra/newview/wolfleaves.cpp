@@ -265,7 +265,11 @@ void WolfLeaves::sweep(F64 now)
 F32 WolfLeaves::groundAt(const LLVector3& p, F32 floor) const
 {
     F32 g = LLWorld::getInstance()->resolveLandHeightAgent(p);
-    if (LLViewerRegion* r = gAgent.getRegion()) g = llmax(g, r->getWaterHeight());   // the sea: it floats there
+    // the sea: it floats there. [W104 FEATFIX 2026-11-11 B7] the water of the region the leaf is over (a neighbour's tree drops
+    // onto its own region's water), the agent's region only where none is known there
+    LLViewerRegion* r = LLWorld::getInstance()->getRegionFromPosAgent(p);
+    if (!r) r = gAgent.getRegion();
+    if (r) g = llmax(g, r->getWaterHeight());
     return llmax(g, floor);
 }
 

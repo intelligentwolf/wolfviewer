@@ -3031,6 +3031,29 @@ bool LLInventoryModel::loadSkeleton(
             // does not match, invalidate the version.
             cat_set_t::iterator not_cached = temp_cats.end();
             uuid_set_t cached_ids;
+            // [WOLF THUMBNAILS 2026-11-11, ticket 793] Without AIS a folder's picture is not part of the folder's own
+            // contents: it arrives only in its PARENT's FetchInventoryDescendents2 listing (BGFolderHttpHandler::processData,
+            // wolf_take_folder_thumbnail), and a parent is listed again only when the parent's own version differs
+            // (bulkFetch asks for VERSION_UNKNOWN folders only). So on an OpenSim grid these parents are listed again:
+            //  - the parent of a folder whose cached picture is dropped below because the folder's own version moved on.
+            //    Nothing else brings that picture back while the parent's cached version is current. An outfit photo
+            //    gets there: WolfSim raises the outfit folder's version and My Outfits' (WolfInventoryThumbnailModule.cs
+            //    BumpVersions) and the viewer learns neither; when My Outfits is then listed again in the same session
+            //    (a hypergrid trip does it: HGInventoryAccessModule.cs ProcessInventoryForHypergriding and
+            //    ProcessInventoryForComingHome send every top folder in a BulkUpdateInventory, which
+            //    processBulkUpdateInventory below turns into VERSION_UNKNOWN and a fetch) the cache written at logout
+            //    holds My Outfits at its current version and the outfit folder at its old one;
+            //  - My Outfits itself, at every login: one request, and the outfit pictures no longer depend on what an
+            //    earlier session cached, so pictures a cache has already lost (ticket 694 and this one) come back by
+            //    themselves.
+            // The login background fetch asks for every VERSION_UNKNOWN folder (llstartup.cpp STATE_INVENTORY_SEND2).
+            // Second Life is left as it was (AIS sends a folder's thumbnail with the folder itself).
+#ifdef OPENSIM
+            const bool wolf_parent_listed_thumbnails = !LLGridManager::getInstance()->isInSecondLife();
+#else
+            const bool wolf_parent_listed_thumbnails = false;
+#endif
+            uuid_set_t wolf_list_again;
             for (auto& cat : categories)
             {
                 cat_set_t::iterator cit = temp_cats.find(cat);
@@ -3058,6 +3081,10 @@ bool LLInventoryModel::loadSkeleton(
                     // throw away the version we have so we can fetch the
                     // correct contents the next time the viewer opens the folder.
                     tcat->setVersion(NO_VERSION);
+                    if (wolf_parent_listed_thumbnails && cat->getThumbnailUUID().notNull())
+                    {
+                        wolf_list_again.insert(tcat->getParentUUID()); // [WOLF THUMBNAILS 2026-11-11, ticket 793]
+                    }
                 }
                 else
                 {
@@ -3067,6 +3094,23 @@ bool LLInventoryModel::loadSkeleton(
                     // uuid or favorite, use values from cache
                     tcat->setThumbnailUUID(cat->getThumbnailUUID());
                     tcat->setFavorite(cat->getIsFavorite());
+                }
+            }
+
+            // [WOLF THUMBNAILS 2026-11-11, ticket 793] the parents to list again (see above): not "cached", so the
+            // loop below gives them NO_VERSION and their direct items come with the listing instead of from the cache.
+            if (wolf_parent_listed_thumbnails)
+            {
+                for (const LLPointer<LLViewerInventoryCategory>& skel_cat : temp_cats)
+                {
+                    if (skel_cat->getPreferredType() == LLFolderType::FT_MY_OUTFITS && owner_id == gAgent.getID())
+                    {
+                        wolf_list_again.insert(skel_cat->getUUID());
+                    }
+                }
+                for (const LLUUID& list_again_id : wolf_list_again)
+                {
+                    cached_ids.erase(list_again_id);
                 }
             }
 
@@ -4288,6 +4332,14 @@ void LLInventoryModel::processBulkUpdateInventory(LLMessageSystem* msg, void**)
 
     for (cat_array_t::iterator cit = folders.begin(); cit != folders.end(); ++cit)
     {
+        // [WOLF THUMBNAILS 2026-11-11, ticket 793] FolderData carries FolderID, ParentID, Type and Name only
+        // (LLInventoryCategory::unpackMessage), so the unpacked folder has no picture and no favourite mark, and
+        // updateCategory copied that over a folder we already hold (copyViewerCategory). Keep what the message cannot say.
+        if (const LLViewerInventoryCategory* known = gInventory.getCategory((*cit)->getUUID()))
+        {
+            (*cit)->setThumbnailUUID(known->getThumbnailUUID());
+            (*cit)->setFavorite(known->getIsFavorite());
+        }
         gInventory.updateCategory(*cit);
         if ((*cit)->getVersion() != LLViewerInventoryCategory::VERSION_UNKNOWN)
         {

@@ -21,6 +21,7 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -38,6 +39,7 @@
 #include "llinventoryfunctions.h"
 #include "llinventorymodel.h"
 #include "llinventorymodelbackgroundfetch.h"
+#include "llinventoryobserver.h"
 #include "llrand.h"
 #include "llrender.h"
 #include "lluiimage.h"
@@ -109,13 +111,13 @@ namespace
         }
     };
 
-    /** The rod in the inventory (outside the Trash): one being worn first, else the first found. */
-    LLViewerInventoryItem* findRod()
+    /** The rod under a folder (outside the Trash): one being worn first, else the first found. */
+    LLViewerInventoryItem* findRodIn(const LLUUID& folder)
     {
         LLInventoryModel::cat_array_t cats;
         LLInventoryModel::item_array_t items;
         RodItems match;
-        gInventory.collectDescendentsIf(gInventory.getRootFolderID(), cats, items, LLInventoryModel::EXCLUDE_TRASH, match);
+        gInventory.collectDescendentsIf(folder, cats, items, LLInventoryModel::EXCLUDE_TRASH, match);
         LLViewerInventoryItem* first = nullptr;
         for (const LLPointer<LLViewerInventoryItem>& p : items)
         {
@@ -126,15 +128,24 @@ namespace
         return first;
     }
 
-    // [FISHFIX 2026-11-11] Paul's W104 test: "getting one for you", then "...could not see it yet", again and again, while his
-    // rod WAS in Objects > Fishing on the grid (made 11-11 04:34). CAUSE, reproduced with the w104-merge build and Shadow
-    // Testwolf: the rod and its Fishing folder were put on the grid during a login without the viewer being told (no
-    // inventory offer reached it), so this login's model never had them. The old search only looked at loaded folders; the
-    // grid then answered "you have one" ({have: true}, no folder id) and the 30 s wait fetched nothing, every time until a
-    // new login (Paul's next login loaded it: his inventory cache written 13:39 holds it). Fix: the folders that can hold the
-    // rod are asked for again - Objects (so a folder new to this login appears) and every "Fishing" folder under it - and the
-    // grid is not asked until the login's inventory fetch has finished. The same reproduction with this build finds the rod
-    // 2 s after the grid's answer.
+    /** The rod anywhere in the inventory (outside the Trash). */
+    LLViewerInventoryItem* findRod() { return findRodIn(gInventory.getRootFolderID()); }
+
+    // [FISHFIX 2026-11-11] Why: a rod (and its Fishing folder) given by the grid while the resident is logged in reaches the
+    // grid's inventory without the viewer being told, so this login's model never has it and a search of the loaded folders
+    // cannot find it. So the folders that can hold the rod are asked for again - Objects (a folder new to this login appears)
+    // and every "Fishing" folder under it - and the grid is not asked for a rod until the login's inventory fetch is done.
+
+    /** The login's background inventory fetch has nothing left to do: queues empty, nothing in flight
+     *  (Source: llinventorymodelbackgroundfetch.cpp setAllFoldersFetched clears folderFetchActive once the folder queue is done;
+     *  isBulkFetchProcessingComplete: both queues empty and no fetch outstanding). */
+    bool backgroundFetchIdle()
+    {
+        const LLInventoryModelBackgroundFetch& f = LLInventoryModelBackgroundFetch::instance();
+        return !f.folderFetchActive() && f.isBulkFetchProcessingComplete();
+    }
+
+    const char* const NOT_ON_WOLF = "Fishing is on Wolf Territories regions. Come to Wolf Territories to fish.";
 
     /** Objects (Source: wolfai.cpp collectBuild, findUserDefinedCategoryUUIDForType). */
     LLUUID objectsFolder() { return gInventory.findUserDefinedCategoryUUIDForType(LLFolderType::FT_OBJECT); }
@@ -157,11 +168,12 @@ namespace
         return out;
     }
 
-    /** Ask the region for a folder's contents again (once per folder per search: `asked`). False: the viewer does not know
-     *  the folder (yet). */
+    /** Ask the region for a folder's contents again (once per folder per search: `asked`). False: no folder id yet, or the
+     *  viewer does not know the folder (yet). */
     bool refetchFolder(const LLUUID& id, std::vector<LLUUID>& asked, const char* what)
     {
-        if (id.isNull() || std::find(asked.begin(), asked.end(), id) != asked.end()) return true;
+        if (id.isNull()) return false;   // nothing to ask for (yet): the caller tries again
+        if (std::find(asked.begin(), asked.end(), id) != asked.end()) return true;
         LLViewerInventoryCategory* cat = gInventory.getCategory(id);
         if (!cat)
         {
@@ -174,6 +186,74 @@ namespace
         LL_INFOS("WolfFishing") << "rod search: asked again for the " << what << " folder '" << cat->getName() << "' " << id << LL_ENDL;
         return true;
     }
+
+    /** The rod search's scans while it waits. The whole tree (63,000 items for some residents) is scanned only when something
+     *  could have changed since a scan that found nothing - the model told its observers of a change, its item count moved,
+     *  or the login's background fetch finished - and then at most every WHOLE_SCAN_S; in between only the Fishing folders,
+     *  where the grid puts the rod. Whatever either finds, the answer is findRod()'s, so it is the same rod a whole scan
+     *  gives; the caller ends every wait with one plain findRod(). A found rod is never kept (the search ends on it). */
+    class RodWatch
+    {
+    public:
+        // gInventory.cleanupInventory() deletes every observer still added (llinventorymodel.cpp), so the observer lives on
+        // the heap and shares its state with this watch: the watch removes and deletes it only while it is alive
+        RodWatch() : mState(std::make_shared<State>()), mObserver(new Observer(mState)) { gInventory.addObserver(mObserver); }
+        ~RodWatch()
+        {
+            if (mState->mAlive)
+            {
+                gInventory.removeObserver(mObserver);
+                delete mObserver;
+            }
+        }
+        RodWatch(const RodWatch&) = delete;
+        RodWatch& operator=(const RodWatch&) = delete;
+
+        LLViewerInventoryItem* find()
+        {
+            const S32 count = gInventory.getItemCount();
+            const bool all = LLInventoryModelBackgroundFetch::instance().isEverythingFetched();
+            const bool dirty = !mState->mAlive || mState->mDirty;
+            if (!dirty && count == mCount && all == mAll) return nullptr;   // the last whole scan found none; nothing changed
+            const F64 t = LLFrameTimer::getTotalSeconds();
+            if (mWholeAt < 0.0 || t - mWholeAt >= WHOLE_SCAN_S)
+            {
+                mWholeAt = t;
+                mState->mDirty = false;
+                mCount = count;
+                mAll = all;
+                return findRod();
+            }
+            for (const LLUUID& f : fishingFolders())
+            {
+                if (findRodIn(f)) return findRod();
+            }
+            return nullptr;   // still marked changed: the next whole scan is due within WHOLE_SCAN_S
+        }
+
+    private:
+        struct State
+        {
+            bool mDirty = true;
+            bool mAlive = true;
+        };
+        class Observer : public LLInventoryObserver
+        {
+        public:
+            explicit Observer(const std::shared_ptr<State>& state) : mState(state) {}
+            ~Observer() override { mState->mAlive = false; }
+            void changed(U32) override { mState->mDirty = true; }
+        private:
+            std::shared_ptr<State> mState;
+        };
+
+        static constexpr F64 WHOLE_SCAN_S = 5.0;   // CHOSEN
+        std::shared_ptr<State> mState;
+        Observer* mObserver;
+        S32 mCount = -1;
+        bool mAll = false;
+        F64 mWholeAt = -1.0;
+    };
 
     /** "a|b||c" -> {"a", "b", "", "c"} (empty fields kept). */
     std::vector<std::string> fields(const std::string& s)
@@ -347,7 +427,7 @@ void WolfFishingSession::viewOpened(EView v)
     mHelloTries = 0;
     if (!onWolf())
     {
-        setStatus("Fishing is on Wolf Territories regions. Come to Wolf Territories to fish.", true);
+        setStatus(NOT_ON_WOLF, true);
         return;
     }
     refreshWeek();
@@ -714,28 +794,36 @@ void WolfFishingSession::rodCoro(U32 gen)
     if (!s) return;
     if (s->mRod == ROD_READY) { s->mRodCoroRunning = false; return; }
     // 2. the rod in the inventory; when there is none, the grid gives one (php/wolffishing.php) and it is waited for.
-    // [FISHFIX 2026-11-11] never on a half-loaded inventory: the login's background fetch finishes first (a big inventory -
-    // Paul's has 62,945 items - takes a while), and the Fishing folders are asked for again, before the grid is asked
-    LLViewerInventoryItem* rod = findRod();
+    // [FISHFIX 2026-11-11] never on a half-loaded inventory: the login's background fetch finishes (or goes idle) first, and the
+    // Fishing folders are asked for again, before the grid is asked
+    RodWatch watch;
+    LLViewerInventoryItem* rod = watch.find();
     std::vector<LLUUID> asked;
     if (!rod)
     {
         LL_INFOS("WolfFishing") << "rod search: not in the loaded inventory; background fetch "
-                                << (LLInventoryModelBackgroundFetch::instance().isEverythingFetched() ? "complete" : "still running")
+                                << (LLInventoryModelBackgroundFetch::instance().isEverythingFetched() ? "complete"
+                                    : (backgroundFetchIdle() ? "idle" : "still running"))
                                 << ", Objects " << objectsFolder() << ", Fishing folders " << fishingFolders().size() << LL_ENDL;
         s->setStatus("Looking through your inventory for your fishing rod...", false, true);
         for (const LLUUID& f : fishingFolders()) refetchFolder(f, asked, "Fishing");
-        // CHOSEN: up to 60 s for the inventory to finish loading, then 6 s for the Fishing folders to come back
+        // CHOSEN: up to 60 s for the inventory to finish loading (less once the fetch has nothing left to do), then at least
+        // 6 s for the Fishing folders to come back
         for (S32 i = 0; i < 66 && !rod; ++i)
         {
             const bool loaded = LLInventoryModelBackgroundFetch::instance().isEverythingFetched();
-            if (loaded && i >= 6) break;
+            if ((loaded || backgroundFetchIdle()) && i >= 6)
+            {
+                LL_INFOS("WolfFishing") << "rod search: background fetch " << (loaded ? "complete" : "idle") << " after " << i << " s" << LL_ENDL;
+                break;
+            }
             llcoro::suspendUntilTimeout(1.f);
             s = live(gen);
             if (!s) return;
             for (const LLUUID& f : fishingFolders()) refetchFolder(f, asked, "Fishing");
-            rod = findRod();
+            rod = watch.find();
         }
+        if (!rod) rod = findRod();   // one whole scan before the grid is asked
         LL_INFOS("WolfFishing") << "rod search: " << (rod ? "found " + rod->getUUID().asString() + " after the folders came back"
                                                          : std::string("still none - asking the grid")) << LL_ENDL;
     }
@@ -745,6 +833,8 @@ void WolfFishingSession::rodCoro(U32 gen)
     }
     if (!rod)
     {
+        // the waits above are long: off Wolf Territories meanwhile, no rod is asked for
+        if (!onWolf()) { LL_INFOS("WolfFishing") << "rod search: left Wolf Territories - stopped" << LL_ENDL; s->rodFailed(NOT_ON_WOLF); return; }
         s->setStatus("You have no fishing rod yet - getting one for you (it goes into Objects > Fishing)...", false);
         const std::string body("{\"action\":\"give\"}");
         LLSD result = WolfCaves::serviceRequest(API_URL, &body, API_TIMEOUT_S);
@@ -784,10 +874,11 @@ void WolfFishingSession::rodCoro(U32 gen)
             if (!live(gen)) return;
             rod = item_id.notNull() ? gInventory.getItem(item_id) : nullptr;
             if (rod && !rod->isFinished()) rod = nullptr;
-            if (!rod) rod = findRod();
+            if (!rod) rod = watch.find();
         }
         s = live(gen);
         if (!s) return;
+        if (!rod) rod = findRod();   // one whole scan before giving up
         LL_INFOS("WolfFishing") << "rod give: " << (rod ? "found " + rod->getUUID().asString() : std::string("not seen after 30 s")) << LL_ENDL;
         if (!rod)
         {
@@ -796,6 +887,8 @@ void WolfFishingSession::rodCoro(U32 gen)
             return;
         }
     }
+    // off Wolf Territories after the waits: the rod is not put on
+    if (!onWolf()) { LL_INFOS("WolfFishing") << "rod search: left Wolf Territories - stopped" << LL_ENDL; s->rodFailed(NOT_ON_WOLF); return; }
     // 3. put it on (in the right hand: the rod's own attach point), added beside anything already worn there - only for a
     // session still open (live() above, after the last wait)
     const LLUUID rod_id = rod->getUUID();
@@ -1036,7 +1129,6 @@ namespace
         gGL.end();
     }
 
-    void triF(F32 x1, F32 y1, F32 x2, F32 y2, F32 x3, F32 y3, const LLColor4& c);
     void ellipseF(F32 cx, F32 cy, F32 rx, F32 ry, const LLColor4& c, S32 seg = 24);
 
     void triF(F32 x1, F32 y1, F32 x2, F32 y2, F32 x3, F32 y3, const LLColor4& c)
@@ -1251,7 +1343,10 @@ namespace
         rectG(0.f, surf, W, top, SURF_HI, SURF_LO);
         rectG(0.f, bottom, W, surf, SURF_LO, DEEP);
         // the waves along the top edge: a row of soft crests rising above the band's line, and the foam on them
+        // (one batch, the triangles in the same order as one triF() each: the same blending, so the same picture)
         const F32 wl = S(46.f), amp = S(5.f);
+        noTex();
+        gGL.begin(LLRender::TRIANGLES);
         for (F32 x = 0.f; x < W; x += wl)
         {
             const S32 steps = 8;
@@ -1259,12 +1354,13 @@ namespace
             {
                 const F32 x0 = x + wl * (F32)i / (F32)steps, x1 = x + wl * (F32)(i + 1) / (F32)steps;
                 const F32 y0 = top + amp * sinf(PI_F * (F32)i / (F32)steps), y1 = top + amp * sinf(PI_F * (F32)(i + 1) / (F32)steps);
-                triF(x0, top, x1, top, x1, y1, SURF_HI);
-                triF(x0, top, x1, y1, x0, y0, SURF_HI);
-                triF(x0, y0 - S(1.f), x1, y1 - S(1.f), x1, y1, FOAM);
-                triF(x0, y0 - S(1.f), x1, y1, x0, y0, FOAM);
+                vtx(x0, top, SURF_HI); vtx(x1, top, SURF_HI); vtx(x1, y1, SURF_HI);
+                vtx(x0, top, SURF_HI); vtx(x1, y1, SURF_HI); vtx(x0, y0, SURF_HI);
+                vtx(x0, y0 - S(1.f), FOAM); vtx(x1, y1 - S(1.f), FOAM); vtx(x1, y1, FOAM);
+                vtx(x0, y0 - S(1.f), FOAM); vtx(x1, y1, FOAM); vtx(x0, y0, FOAM);
             }
         }
+        gGL.end();
         // sun shafts: slanted, very faint (2.5 % white at most), from the surface down
         for (S32 k = 0; k < 6; ++k)
         {

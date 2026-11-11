@@ -122,7 +122,11 @@ namespace
     // showed (a skipped frame, a failed acquire, a composite with no descriptor set, a black child window), so a black
     // login screen was remembered as a good start. Now the start is good only once a frame was PRESENTED and a sample of
     // that very picture (WolfVkScene::FrameCheck, 1024 pixels of the swapchain image after the composite) has light in
-    // it. LOGIN_BLACK_SAMPLES black samples running (about 2 s: one is asked for every LOGIN_SAMPLE_SPACING s) end the
+    // it. A sample counts against Vulkan only when OpenGL's own frame (the same pixels of its back buffer, same frame)
+    // has light: the login page may take seconds to load, and a frame black in both says nothing (run t1-normal,
+    // 2026-11-11: without this rule a healthy NVIDIA start failed on 8 black samples in its first 2 s). LOGIN_BLACK_SAMPLES
+    // such samples running (about 2 s: one is asked
+    // for every LOGIN_SAMPLE_SPACING s) end the
     // Vulkan renderer for this session (loginCheckFailed: OpenGL takes over the window at once, with the notice; on a
     // native Wayland window, where that is not safe, the run-time stop). Without a way to sample the picture (no
     // TRANSFER_SRC on the swapchain, another format) a presented frame with the composite drawn over the GL frame layer
@@ -1014,21 +1018,30 @@ namespace
             sLogin.mSamples++;
             const uint32_t lit = black_login ? 0u : c.mLit;
             const uint32_t max = black_login ? 0u : c.mMax;
-            LL_DEBUGS("WolfVulkanCheck") << "Login check sample " << c.mSeq << ": max " << max << ", " << lit << " of 1024 lit, composite " << (c.mComposited ? "drawn" : "not drawn") << LL_ENDL;
+            LL_DEBUGS("WolfVulkanCheck") << "Login check sample " << c.mSeq << ": Vulkan max " << max << ", " << lit << " of 1024 lit, composite "
+                                         << (c.mComposited ? "drawn" : "not drawn") << "; OpenGL's frame max " << c.mGlMax << ", " << c.mGlLit << " lit" << LL_ENDL;
             if (c.mComposited && lit >= LOGIN_LIT_POINTS)
             {
-                loginCheckPassed(llformat("the presented picture has light (sample %u: max %u, %u of 1024 points lit)", c.mSeq, max, lit));
+                loginCheckPassed(llformat("the presented picture has light (sample %u: max %u, %u of 1024 points lit; OpenGL's frame %u lit)", c.mSeq, max, lit, c.mGlLit));
                 return;
+            }
+            // a frame OpenGL drew black as well (the login page still loading, a fade) says nothing about Vulkan: only a
+            // picture OpenGL drew and Vulkan did not show counts against it (the world check's rule A, wolfvkscene.h)
+            if (c.mGlLit < LOGIN_LIT_POINTS)
+            {
+                if (sLogin.mSamples == 1 || sLogin.mSamples % 40 == 0)
+                    LL_INFOS("WolfVulkanCheck") << "Login check: OpenGL's own frame is black too (sample " << c.mSeq << "); waiting for a picture" << LL_ENDL;
+                continue;
             }
             sLogin.mBlackRun++;
             if (sLogin.mBlackRun == 1 || sLogin.mBlackRun == LOGIN_BLACK_SAMPLES / 2)
             {
-                LL_WARNS("WolfVulkanCheck") << "Login check: the presented picture is black (sample " << c.mSeq << ", composite "
-                                            << (c.mComposited ? "drawn" : "NOT drawn") << ")" << (black_login ? " [test: WolfVulkanDebugBlackLogin]" : "") << LL_ENDL;
+                LL_WARNS("WolfVulkanCheck") << "Login check: OpenGL's frame has light (" << c.mGlLit << " of 1024 points) but the presented picture is black (sample "
+                                            << c.mSeq << ", composite " << (c.mComposited ? "drawn" : "NOT drawn") << ")" << (black_login ? " [test: WolfVulkanDebugBlackLogin]" : "") << LL_ENDL;
             }
             if (sLogin.mBlackRun >= LOGIN_BLACK_SAMPLES)
             {
-                loginCheckFailed(llformat("the login screen Vulkan showed was black (%u samples of the picture running%s)", sLogin.mBlackRun,
+                loginCheckFailed(llformat("the login screen Vulkan showed was black while OpenGL had drawn it (%u samples of the picture running%s)", sLogin.mBlackRun,
                                           black_login ? ", test: WolfVulkanDebugBlackLogin" : ""));
                 return;
             }

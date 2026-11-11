@@ -1325,6 +1325,8 @@ void WolfVkScene::frameCheckRecord(VkCommandBuffer cmd, WolfVkSwapchain& swapcha
     mFrameCheckSeq++;
     mFrameCheckPending[slot] = mFrameCheckSeq;
     mFrameCheckComposited[slot] = mLastComposited ? 1 : 0;
+    mFrameCheckGl[slot * 2] = mFrameCheckGlNow[0];
+    mFrameCheckGl[slot * 2 + 1] = mFrameCheckGlNow[1];
     mFrameCheckFormat = swapchain.format();
     mFrameCheckRecorded = mFrameCheckSeq;
 }
@@ -1340,6 +1342,8 @@ void WolfVkScene::frameCheckCollect()
     FrameCheck c;
     c.mSeq = mFrameCheckPending[slot];
     c.mComposited = mFrameCheckComposited[slot] != 0;
+    c.mGlMax = mFrameCheckGl[slot * 2];
+    c.mGlLit = mFrameCheckGl[slot * 2 + 1];
     if (data)
     {
         const uint32_t count = CHECK_TILES * CHECK_TILES * CHECK_TILE * CHECK_TILE;
@@ -1415,6 +1419,41 @@ namespace
             if (m) ++lit;
         }
     }
+}
+
+void WolfVkScene::frameCheckGLSample(uint32_t& max, uint32_t& lit)
+{
+    // the same 16 tiles of 8x8 as frameCheckRecord, from OpenGL's back buffer (the finished frame: Vulkan mode never swaps
+    // it), read synchronously into client memory - only for the login check's samples (4 a second until it passes). The
+    // tile centres are symmetric under GL's bottom-up rows, so the set of tiles is the same one Vulkan reads.
+    max = 0;
+    lit = 0;
+    const S32 ww = gViewerWindow ? gViewerWindow->getWindowWidthRaw() : 0;
+    const S32 wh = gViewerWindow ? gViewerWindow->getWindowHeightRaw() : 0;
+    if (ww < static_cast<S32>(CHECK_TILES * CHECK_TILE) || wh < static_cast<S32>(CHECK_TILES * CHECK_TILE)) return;
+    GLReadbackScope scope;
+    GLint saved_align = 4;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &saved_align);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    uint8_t px[CHECK_TILE * CHECK_TILE * 4];
+    const uint32_t w = static_cast<uint32_t>(ww), h = static_cast<uint32_t>(wh);
+    for (uint32_t ty = 0; ty < CHECK_TILES; ++ty)
+    {
+        for (uint32_t tx = 0; tx < CHECK_TILES; ++tx)
+        {
+            const uint32_t x = std::min((2 * tx + 1) * w / (2 * CHECK_TILES) - CHECK_TILE / 2, w - CHECK_TILE);
+            const uint32_t y = std::min((2 * ty + 1) * h / (2 * CHECK_TILES) - CHECK_TILE / 2, h - CHECK_TILE);
+            glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(CHECK_TILE), static_cast<GLsizei>(CHECK_TILE), GL_RGBA, GL_UNSIGNED_BYTE, px);
+            uint32_t m = 0, l = 0;
+            maxRGB(px, CHECK_TILE * CHECK_TILE, m, l);
+            max = std::max(max, m);
+            lit += l;
+        }
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, saved_align);
 }
 
 void WolfVkScene::probeGLSample()
@@ -1646,6 +1685,9 @@ bool WolfVkScene::recordFrame(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, u
         }
     }
     mLayersAcquired = false;
+    // [G2 2026-11-11] the login check compares with OpenGL's own frame: a picture GL drew that Vulkan shows black is a
+    // fault; a frame that is black in GL too (the login page still loading) proves nothing either way
+    if (mFrameCheckWanted) frameCheckGLSample(mFrameCheckGlNow[0], mFrameCheckGlNow[1]);
     readBackUI();
     uploadLayers(cmd);
     // [HAND-OVER 2026-11-08 8.2k] Shared layers not acquired from GL this frame (GL did not release them): the scene pass
@@ -1668,6 +1710,7 @@ bool WolfVkScene::recordFrame(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, u
             mFrameCheckHost.clear();
             mFrameCheckPending.assign(slots, 0);
             mFrameCheckComposited.assign(slots, 0);
+            mFrameCheckGl.assign(static_cast<size_t>(slots) * 2, 0);
             for (uint32_t i = 0; i < slots; ++i)
             {
                 std::unique_ptr<WolfVkBuffer> b(new WolfVkBuffer());

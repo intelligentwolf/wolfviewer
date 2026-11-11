@@ -135,6 +135,8 @@ public:
         uint32_t mMax = 0;          // largest R/G/B (0..255) over the 1024 sampled pixels
         uint32_t mLit = 0;          // pixels with any R/G/B > 0
         bool mComposited = false;   // the composite's draw was recorded in that frame, with the frame layer bound
+        uint32_t mGlMax = 0;        // the same 16 tiles of OpenGL's own frame (its back buffer) in that frame
+        uint32_t mGlLit = 0;
     };
     void requestFrameCheck() { mFrameCheckWanted = true; }
     // false: the swapchain images cannot be copied (no TRANSFER_SRC usage, or a format other than the 4-byte ones)
@@ -205,6 +207,9 @@ private:
     bool drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index, bool check_pass);
     void frameCheckRecord(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index);
     void frameCheckCollect();
+    void frameCheckGLSample(uint32_t& max, uint32_t& lit);   // OpenGL's back buffer, the same tiles (synchronous read)
+    uint32_t mFrameCheckGlNow[2] = { 0, 0 };  // this frame's GL sample (max, lit)
+    std::vector<uint32_t> mFrameCheckGl;      // per slot: max, lit
     bool mFrameCheckWanted = false;
     uint32_t mFrameCheckSeq = 0;              // samples issued
     uint32_t mFrameCheckRecorded = 0;         // the sample the last recorded frame took

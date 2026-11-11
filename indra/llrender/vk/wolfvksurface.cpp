@@ -22,6 +22,7 @@
 #include <future>
 #include <atomic>
 #include <memory>
+#include <ios>      // [V2 2026-11-11] std::hex for the child window id
 
 #if LL_WINDOWS
 #include <windows.h>
@@ -481,6 +482,47 @@ void destroy(VkInstance instance, VkSurfaceKHR surface)
     sWin32Parent = nullptr;
     sWin32Child = nullptr;
     sWin32Post = nullptr;
+#else
+    // [V2 2026-11-11] the GL view gets its own layer back (after the surface made on the Metal layer)
+    metalLayerDetach();
+#endif
+    sKind.clear();
+}
+
+void abandon()
+{
+    // [V2 2026-11-11] The device is hung, or a swapchain on the surface could not be destroyed (its presents did not
+    // finish): the surface must stay (VUID-vkDestroySurfaceKHR-surface-01266: "All VkSwapchainKHR objects created for
+    // surface must have been destroyed prior to destroying surface"), and so must the native window the live swapchain
+    // presents to. But the window must not stay on top of the viewer's own: OpenGL carries on in the viewer's window, and
+    // a child covering it is a black screen over a working OpenGL (the W103 black splash after a start-up hang). Hiding
+    // a window needs no Vulkan device, so the child is unmapped / hidden here and left, never destroyed, for the rest of
+    // the process (a swapchain that presents to an unmapped or hidden window shows nothing). The handles are forgotten.
+#if !LL_WINDOWS && !LL_DARWIN
+    if (sX11Display && sX11Child != 0)
+    {
+        XUnmapWindow(sX11Display, sX11Child);   // Xlib.h:3515; the parent's area shows again (its own contents, GL's swaps)
+        XFlush(sX11Display);                     // Xlib.h:2517
+        LL_INFOS("Vulkan") << "Vulkan child window 0x" << std::hex << sX11Child << std::dec << " unmapped and left (the surface could not be destroyed)" << LL_ENDL;
+    }
+    sX11Display = nullptr;
+    sX11Parent = 0;
+    sX11Child = 0;
+#elif LL_WINDOWS
+    // ShowWindow(SW_HIDE) on the window thread, which owns the child (as destroy above); WS_CLIPCHILDREN on the parent
+    // clips only visible children, so the parent's area shows again
+    if (sWin32Child && sWin32Post)
+    {
+        HWND child = sWin32Child;
+        sWin32Post([child]() { if (IsWindow(child)) ShowWindow(child, SW_HIDE); });
+        LL_INFOS("Vulkan") << "Vulkan child window hidden and left (the surface could not be destroyed)" << LL_ENDL;
+    }
+    sWin32Parent = nullptr;
+    sWin32Child = nullptr;
+    sWin32Post = nullptr;
+#else
+    // the CAMetalLayer goes off the GL view (MoltenVK keeps its own reference for the live swapchain)
+    metalLayerDetach();
 #endif
     sKind.clear();
 }

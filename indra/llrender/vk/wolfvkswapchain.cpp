@@ -94,6 +94,7 @@ bool WolfVkSwapchain::recreate(uint32_t width, uint32_t height, bool vsync, std:
 
 bool WolfVkSwapchain::build(uint32_t width, uint32_t height, bool vsync, VkSwapchainKHR old, std::string& error)
 {
+    mNoSize = false;
     VkPhysicalDevice physical = mDevice->physical();
     VkDevice device = mDevice->device();
 
@@ -183,9 +184,14 @@ bool WolfVkSwapchain::build(uint32_t width, uint32_t height, bool vsync, VkSwapc
         mExtent.width = std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width);
         mExtent.height = std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
-    if (mExtent.width == 0 || mExtent.height == 0)
+    // [V1 2026-11-11] VkSwapchainCreateInfoKHR imageExtent: "On some platforms, it is normal that maxImageExtent may become
+    // (0, 0), for example when the window is minimized" - then "it is not possible to create a swapchain" (VUID-
+    // VkSwapchainCreateInfoKHR-imageExtent-01689: width and height must both be non-zero). Only this case is a wait for
+    // the window to come back (noSize()); every other failure below is a real error the caller must not retry for ever.
+    if (mExtent.width == 0 || mExtent.height == 0 || caps.maxImageExtent.width == 0 || caps.maxImageExtent.height == 0)
     {
         error = "window has no size (minimised)";
+        mNoSize = true;
         return false;
     }
 
@@ -211,6 +217,7 @@ bool WolfVkSwapchain::build(uint32_t width, uint32_t height, bool vsync, VkSwapc
     VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;   // :2812, required by the spec for every surface
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;   // :2809
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;   // :2808
+    mUsage = usage;
 
     // Source: vulkan_core.h:9095 VkSwapchainCreateInfoKHR { sType, pNext, flags, surface, minImageCount, imageFormat, imageColorSpace,
     // imageExtent, imageArrayLayers, imageUsage, imageSharingMode, queueFamilyIndexCount, pQueueFamilyIndices, preTransform,
@@ -281,7 +288,7 @@ bool WolfVkSwapchain::build(uint32_t width, uint32_t height, bool vsync, VkSwapc
         if (res != VK_SUCCESS)
         {
             error = std::string("vkCreateSemaphore (swapchain): ") + WolfVkLoader::resultString(res);
-            destroy();
+            discardPartialBuild();
             return false;
         }
         // Source: vulkan_core.h:3939 VkImageViewCreateInfo { sType, pNext, flags, image, viewType, format, components, subresourceRange };
@@ -297,7 +304,7 @@ bool WolfVkSwapchain::build(uint32_t width, uint32_t height, bool vsync, VkSwapc
         if (res != VK_SUCCESS)
         {
             error = std::string("vkCreateImageView (swapchain): ") + WolfVkLoader::resultString(res);
-            destroy();
+            discardPartialBuild();
             return false;
         }
     }
@@ -305,6 +312,21 @@ bool WolfVkSwapchain::build(uint32_t width, uint32_t height, bool vsync, VkSwapc
     LL_INFOS("Vulkan") << "Swapchain: " << mExtent.width << "x" << mExtent.height << ", " << n << " images, "
                        << formatString() << ", " << presentModeString() << (vsync ? " (vsync on)" : " (vsync off)") << LL_ENDL;
     return true;
+}
+
+void WolfVkSwapchain::discardPartialBuild()
+{
+    // [V3 2026-11-11] build() created the swapchain but not all of its views/semaphores. Before, it called destroy(),
+    // which nulled mDevice and mSurface - recreate() then dereferenced mDevice (retiring the old swapchain, the present
+    // fence test) and crashed, and the swapchain passed as oldSwapchain (retired by the call whatever its result:
+    // "oldSwapchain is retired - even if creation of the new swapchain fails", VkSwapchainCreateInfoKHR) was dropped
+    // without being destroyed. Now only what this build made goes: its views and semaphores, and the new swapchain, which
+    // was never acquired from or presented to (nothing can be using it: VUID-vkDestroySwapchainKHR-swapchain-01282). The
+    // device, surface, retired list and present fences stay, so recreate() retires `old` as for any failed build.
+    destroyViews();
+    destroySemaphores(mRenderDone);
+    if (mSwapchain != VK_NULL_HANDLE) gVk.vkDestroySwapchainKHR(mDevice->device(), mSwapchain, nullptr);   // :9172
+    mSwapchain = VK_NULL_HANDLE;
 }
 
 void WolfVkSwapchain::destroyViews()
@@ -425,11 +447,14 @@ bool WolfVkSwapchain::drainPresents()
     }
     else
     {
-        // No present fence exists without swapchain_maintenance1. vkQueueWaitIdle (vulkan_core.h:4549) is what is left; it
-        // takes no timeout - documented in docs/VULKAN_BACKEND.md 8.2m as the one unbounded wait, used only here (shutdown,
-        // or more than MAX_RETIRED swapchains waiting for their gate) and only on a device without the extension.
-        const VkResult res = gVk.vkQueueWaitIdle(mDevice->queue());
-        if (res != VK_SUCCESS) { mDevice->lost(res, "vkQueueWaitIdle (presents)"); return false; }
+        // No present fence exists without swapchain_maintenance1. [V4 2026-11-11] This was vkQueueWaitIdle, which takes no
+        // timeout. The specification defines it as no more than the device's own bounded wait: "vkQueueWaitIdle is
+        // equivalent to having submitted a valid fence to every previously executed queue submission command that accepts
+        // a fence, then waiting for all of those fences to signal using vkWaitForFences with an infinite timeout"
+        // (vkQueueWaitIdle refpage), and without the extension vkQueuePresentKHR accepts no fence. Every batch this
+        // backend submits is tracked by WolfVkDevice (timeline value or fence), so waitIdle() is that same wait with the
+        // 8 s limit; on a timeout the device is marked hung and the caller abandons the swapchains instead of destroying.
+        if (!mDevice->waitIdle()) return false;
     }
     for (Retired& r : mRetired) releaseRetired(r);
     mRetired.clear();
@@ -438,11 +463,16 @@ bool WolfVkSwapchain::drainPresents()
     return true;
 }
 
-void WolfVkSwapchain::destroy()
+bool WolfVkSwapchain::destroy()
 {
     // [HANG GUARD 2026-11-08 8.2k] bounded idle (WolfVkDevice::waitIdle); on a hung device the handles are left to it
     // [PRESENT FENCES 2026-11-08] and then every present finished (drainPresents) before the swapchains, their semaphores
     // and the present fences go; if either wait runs out, they are left to the device
+    // [V4 2026-11-11] ...and the caller is told (false), because a swapchain left alive pins its surface and native window
+    // (VUID-vkDestroySurfaceKHR-surface-01266) and its device (VUID-vkDestroyDevice-device-05137): the owner then abandons
+    // those as well (WolfVkSurface::abandon, WolfVkDevice::abandon) instead of destroying them under a live swapchain.
+    const bool had_swapchains = mSwapchain != VK_NULL_HANDLE || !mRetired.empty();
+    bool all_gone = !had_swapchains;
     if (mDevice && mDevice->device() != VK_NULL_HANDLE && mDevice->waitIdle() && drainPresents())
     {
         destroyViews();
@@ -452,6 +482,12 @@ void WolfVkSwapchain::destroy()
             gVk.vkDestroySwapchainKHR(mDevice->device(), mSwapchain, nullptr);
         }
         for (VkFence f : mFreeFences) gVk.vkDestroyFence(mDevice->device(), f, nullptr);   // all signalled-and-reset or never used
+        all_gone = true;
+    }
+    else if (had_swapchains)
+    {
+        LL_WARNS("Vulkan") << "Swapchain not destroyed (" << (mDevice && mDevice->hung() ? "the device is hung: " + mDevice->hungReason() : std::string("its presents did not finish in time"))
+                           << "): it is left to the device with " << mRetired.size() << " retired swapchain(s)" << LL_ENDL;
     }
     mFreeFences.clear();
     mPendingPresentFences.clear();
@@ -463,6 +499,8 @@ void WolfVkSwapchain::destroy()
     mRenderDone.clear();
     mDevice = nullptr;
     mSurface = VK_NULL_HANDLE;
+    mNoSize = false;
+    return all_gone;
 }
 
 bool WolfVkSwapchain::acquire(VkSemaphore signal, uint32_t& image_index, bool& out_of_date, bool& timed_out, std::string& error)
@@ -558,6 +596,12 @@ bool WolfVkSwapchain::present(VkQueue queue, VkSemaphore render_done, uint32_t i
         {
             // kept for every other result, as ANGLE does (SurfaceVk.cpp:2887-2903: the fence goes into the present history
             // before the result is looked at); a fence that never signals only makes a later bounded wait run out
+            // [V12 2026-11-11] reviewed: for VK_ERROR_OUT_OF_DATE_KHR / VK_ERROR_SURFACE_LOST_KHR the spec says "the set of
+            // queue operations is still considered to be enqueued and thus any semaphore wait operation specified in
+            // VkPresentInfoKHR will execute when the corresponding queue operation is complete" (vkQueuePresentKHR), and the
+            // fence is signalled "when the relevant operations on the associated swapchain have completed"
+            // (VkSwapchainPresentFenceInfoKHR::pFences) - so it is kept, not reused. If a driver never signals it, the
+            // worst case is drainPresents running out: the swapchain is then abandoned, not destroyed (V4).
             mPendingPresentFences.push_back(fence);
         }
     }

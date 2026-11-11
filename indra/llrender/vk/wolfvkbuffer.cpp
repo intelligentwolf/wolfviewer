@@ -127,6 +127,12 @@ void WolfVkBuffer::destroy()
     mDevice = nullptr;
 }
 
+void WolfVkBuffer::invalidateForRead()
+{
+    if (!mDevice || mSize == 0) return;
+    mDevice->allocator().invalidate(mHostOnly ? mAllocation : mStagingAllocation, 0, mSize);
+}
+
 void WolfVkBuffer::write(VkDeviceSize offset, const void* data, VkDeviceSize size)
 {
     uint8_t* host = hostData();

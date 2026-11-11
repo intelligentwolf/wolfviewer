@@ -53,7 +53,12 @@ namespace WolfVkSurface
     // frame's layers are taken from there as before. shared_x11_window = true is the W101/W102 behaviour, for the test
     // setting WolfVulkanDebugSharedWindow.
     VkSurfaceKHR create(VkInstance instance, LLWindow* window, bool shared_x11_window, std::string& error);
+    // Healthy device, every swapchain on the surface destroyed: the surface, then its child window / Metal layer.
     void destroy(VkInstance instance, VkSurfaceKHR surface);
+    // [V2 2026-11-11] The surface cannot be destroyed (hung device, or a swapchain still alive): it is left, but the
+    // child window is unmapped (X11) / hidden (Win32) and the Metal layer taken off the view (macOS), so that the
+    // viewer's own window - where OpenGL carries on - is never covered. Needs no device. Wayland has no child.
+    void abandon();
 
     // [T724] X11 child window: moved to (0,0) and resized to width x height (the viewer's window's drawable size), then
     // XSync, so that vkGetPhysicalDeviceSurfaceCapabilitiesKHR's currentExtent is the new size. Called before every
@@ -71,6 +76,8 @@ namespace WolfVkSurface
     // Implemented in wolfvksurface_macosx.mm: makes the NSView layer-backed with a CAMetalLayer and returns it
     // (the view keeps its own OpenGL drawing; the layer is what MoltenVK presents into). Null on failure.
     void* metalLayerForView(void* nsview, std::string& error);
+    // [V2 2026-11-11] gives the view back the layer state it had before metalLayerForView (no-op if nothing was attached)
+    void metalLayerDetach();
 #endif
 }
 

@@ -56,6 +56,7 @@
 #include <map>
 #include <string>
 #include <unordered_map>
+#include <functional>   // [V5] forget()
 #include <vector>
 
 class WolfVkDevice;
@@ -158,6 +159,10 @@ public:
     // The pipeline for program + state in render_pass (subpass 0); created on first use. VK_NULL_HANDLE on failure (logged once).
     VkPipeline get(const WolfVkProgram& program, const WolfVkPipelineState& state, VkRenderPass render_pass);
     uint32_t pipelineCount() const { return static_cast<uint32_t>(mPipelines.size()); }
+    // [V5 2026-11-11] A render pass or program is going away: every live cache drops (and destroys, deferred) the
+    // pipelines made for it. Called by their owners before the object's own destruction is filed.
+    static void forgetRenderPass(VkRenderPass pass);
+    static void forgetProgram(const WolfVkProgram* program);
 
 private:
     struct Key
@@ -168,6 +173,7 @@ private:
     };
     struct KeyHash { size_t operator()(const Key& k) const; };
     struct KeyEq { bool operator()(const Key& a, const Key& b) const; };
+    void forget(const std::function<bool(const Key&)>& match);
 
     VkPipeline build(const WolfVkProgram& program, const WolfVkPipelineState& state, VkRenderPass render_pass, std::string& error);
 

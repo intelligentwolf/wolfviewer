@@ -18,6 +18,7 @@
 #include "linden_common.h"
 #include "wolfvkrendertarget.h"
 #include "wolfvkdevice.h"
+#include "wolfvkpipeline.h"   // [V5 2026-11-11] WolfVkPipelineCache::forgetRenderPass
 #include "llglheaders.h"
 #include <algorithm>
 
@@ -120,6 +121,7 @@ void WolfVkRenderTarget::setExternalDepth(WolfVkImage* depth)
 
 void WolfVkRenderTarget::destroyPass()
 {
+    for (VkRenderPass rp : mPasses) WolfVkPipelineCache::forgetRenderPass(rp);   // [V5 2026-11-11] its pipelines first
     if (mDevice && mDevice->hasDevice())
     {
         WolfVkDevice* device = mDevice;

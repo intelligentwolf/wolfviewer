@@ -474,6 +474,13 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
         {
             continue;
         }
+        // [V7 2026-11-11] never a CPU implementation (llvmpipe/lavapipe, SwiftShader): VK_PHYSICAL_DEVICE_TYPE_CPU
+        // (vulkan_core.h:2237), "the device is typically running on the same processors as the host" (VkPhysicalDeviceType)
+        if (d.mProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
+        {
+            LL_INFOS("Vulkan") << "Device skipped, it runs on the processor (VK_PHYSICAL_DEVICE_TYPE_CPU): " << d.name() << LL_ENDL;
+            continue;
+        }
         for (uint32_t family = 0; family < d.mQueueFamilies.size(); ++family)
         {
             // Source: vulkan_core.h:3720 VkQueueFamilyProperties { queueFlags, queueCount, ... }; :2869 VK_QUEUE_GRAPHICS_BIT
@@ -501,7 +508,7 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
     }
     if (candidates.empty())
     {
-        error = "No Vulkan device can draw to this window (no graphics queue with presentation, or no VK_KHR_swapchain)";
+        error = "No Vulkan graphics card can draw to this window (no graphics queue with presentation, no VK_KHR_swapchain, or only a processor-based device)";
         return false;
     }
 
@@ -534,6 +541,12 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
                 return true;
             }
         }
+        // [V7 2026-11-11] OpenGL named its card and no Vulkan graphics card is that one (OpenGL on a software renderer, or
+        // on a card this Vulkan loader does not list): Vulkan on another card could share no image with OpenGL, so it is
+        // not started at all (the caller falls back to OpenGL with this reason). Was: c.-e. picked any other device.
+        error = "no Vulkan graphics card is the one OpenGL draws with (" + std::to_string(candidates.size()) + " other Vulkan device(s) offered)";
+        LL_WARNS("Vulkan") << error << LL_ENDL;
+        return false;
     }
     // c. the OpenGL vendor
     if (mConfig.mGLVendorID)
@@ -547,6 +560,10 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
                 return true;
             }
         }
+        // [V7 2026-11-11] as for b.: OpenGL's maker is known and none of the Vulkan graphics cards is by that maker
+        error = llformat("no Vulkan graphics card is by the maker of the one OpenGL draws with (vendor 0x%04x)", mConfig.mGLVendorID);
+        LL_WARNS("Vulkan") << error << LL_ENDL;
+        return false;
     }
     // d. first discrete
     for (const WolfVkPhysicalDeviceInfo& d : candidates)
@@ -707,7 +724,9 @@ bool WolfVkDevice::createDevice(VkSurfaceKHR surface, std::string& error)
 
     if (!createFrames(error))
     {
-        destroy();
+        // [V11 2026-11-11] the device only: destroy() would also end the instance, under the window surface the caller
+        // still holds (VUID-vkDestroyInstance-instance-00629) - the caller destroys the surface, then the instance
+        destroyDeviceObjects();
         return false;
     }
 
@@ -895,7 +914,15 @@ WolfVkDevice::Frame& WolfVkDevice::beginFrame()
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    gVk.vkBeginCommandBuffer(f.mCmd, &begin);
+    // [V10 2026-11-11] vkBeginCommandBuffer can fail (VK_ERROR_OUT_OF_HOST_MEMORY / _DEVICE_MEMORY, vkBeginCommandBuffer
+    // refpage); recording into or ending a buffer that did not begin is invalid, so the device is marked unusable the way
+    // a hang marks it (every caller of beginFrame checks hung() and falls back to OpenGL)
+    const VkResult begun = gVk.vkBeginCommandBuffer(f.mCmd, &begin);
+    if (begun != VK_SUCCESS)
+    {
+        declareHung(std::string("vkBeginCommandBuffer (frame): ") + WolfVkLoader::resultString(begun));
+        return f;
+    }
     mRecording = true;
     return f;
 }
@@ -1030,7 +1057,14 @@ VkCommandBuffer WolfVkDevice::beginMidFrame()
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    gVk.vkBeginCommandBuffer(cmd, &begin);
+    // [V10 2026-11-11] a buffer that did not begin is not handed out (the caller then lets OpenGL draw the pass); it stays
+    // in the slot's pool in the initial state, which beginFrame's pool reset allows
+    const VkResult begun = gVk.vkBeginCommandBuffer(cmd, &begin);
+    if (begun != VK_SUCCESS)
+    {
+        LL_WARNS("Vulkan") << "vkBeginCommandBuffer (mid-frame): " << WolfVkLoader::resultString(begun) << LL_ENDL;
+        return VK_NULL_HANDLE;
+    }
     return cmd;
 }
 
@@ -1275,7 +1309,14 @@ bool WolfVkDevice::submitSync(VkCommandBuffer cmd, const ExtraSync& extra, bool 
     {
         VkFenceCreateInfo fi{};
         fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        gVk.vkCreateFence(mDevice, &fi, nullptr, &fence);
+        // [V10 2026-11-11] checked: without the fence the submit could not be waited for (nor the buffer freed after it)
+        const VkResult made = gVk.vkCreateFence(mDevice, &fi, nullptr, &fence);
+        if (made != VK_SUCCESS)
+        {
+            error = std::string("vkCreateFence (sync): ") + WolfVkLoader::resultString(made);
+            if (cmd != VK_NULL_HANDLE) gVk.vkFreeCommandBuffers(mDevice, mOneTimePool, 1, &cmd);
+            return false;
+        }
     }
     VkResult res = gVk.vkQueueSubmit(mQueue, 1, &submit, fence);
     bool ok = res == VK_SUCCESS;
@@ -1351,7 +1392,13 @@ VkCommandBuffer WolfVkDevice::beginOneTime()
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    gVk.vkBeginCommandBuffer(cmd, &begin);
+    const VkResult begun = gVk.vkBeginCommandBuffer(cmd, &begin);   // [V10 2026-11-11] checked
+    if (begun != VK_SUCCESS)
+    {
+        LL_WARNS("Vulkan") << "vkBeginCommandBuffer (one-time): " << WolfVkLoader::resultString(begun) << LL_ENDL;
+        gVk.vkFreeCommandBuffers(mDevice, mOneTimePool, 1, &cmd);
+        return VK_NULL_HANDLE;
+    }
     mOneTimeOpen++;
     return cmd;
 }
@@ -1381,7 +1428,14 @@ bool WolfVkDevice::endOneTimeAndWait(VkCommandBuffer cmd, std::string& error)
     VkFenceCreateInfo fence_info{};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     VkFence fence = VK_NULL_HANDLE;
-    gVk.vkCreateFence(mDevice, &fence_info, nullptr, &fence);
+    // [V10 2026-11-11] checked: a null fence would make the wait below wait on nothing and free a buffer still executing
+    res = gVk.vkCreateFence(mDevice, &fence_info, nullptr, &fence);
+    if (res != VK_SUCCESS)
+    {
+        error = std::string("vkCreateFence (one-time): ") + WolfVkLoader::resultString(res);
+        gVk.vkFreeCommandBuffers(mDevice, mOneTimePool, 1, &cmd);
+        return false;
+    }
 
     VkSubmitInfo submit{};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1504,6 +1558,33 @@ void WolfVkDevice::waitIdleAndFlushDeferred()
     }
 }
 
+void WolfVkDevice::destroyDeviceObjects()
+{
+    // [V11 2026-11-11] createDevice's failure path: the frames made so far (destroyFrames skips the null handles of a
+    // half-made slot), the allocator and the device; nothing was submitted, so nothing is waited for. The instance stays.
+    if (mDevice != VK_NULL_HANDLE)
+    {
+        destroyFrames();
+        mAllocator.destroy();
+        gVk.vkDestroyDevice(mDevice, nullptr);
+    }
+    mDevice = VK_NULL_HANDLE;
+    mQueue = VK_NULL_HANDLE;
+    mPresentFences = false;
+    mGlDepthRange = false;
+    mCompressionQuery = false;
+}
+
+void WolfVkDevice::abandon(const std::string& why)
+{
+    // [V4 2026-11-11] see the header: a swapchain the owner could not destroy pins the device and the instance
+    LL_WARNS("Vulkan") << "Vulkan device and instance abandoned without destruction: " << why << LL_ENDL;
+    mAbandoned = true;
+    mDevice = VK_NULL_HANDLE;
+    mQueue = VK_NULL_HANDLE;
+    mFrames.clear();
+}
+
 void WolfVkDevice::destroy()
 {
     mPresentFences = false;
@@ -1513,6 +1594,7 @@ void WolfVkDevice::destroy()
     {
         // nothing can be waited for or safely destroyed: the handles are abandoned to the driver (process exit cleans up)
         LL_WARNS("Vulkan") << "Vulkan device abandoned without destruction (hung): " << mHungReason << LL_ENDL;
+        mAbandoned = true;
         mDevice = VK_NULL_HANDLE;
         mFrames.clear();
         return;
@@ -1521,8 +1603,16 @@ void WolfVkDevice::destroy()
     {
         // [HANG GUARD 2026-11-08 8.2k] the bounded wait ran out: abandoned exactly as above
         LL_WARNS("Vulkan") << "Vulkan device abandoned without destruction (hung at shutdown): " << mHungReason << LL_ENDL;
+        mAbandoned = true;
         mDevice = VK_NULL_HANDLE;
         mFrames.clear();
+        return;
+    }
+    if (mAbandoned)
+    {
+        // [V4 2026-11-11] a later call (shutdown after a fall-back): the abandoned device's swapchain and surface are still
+        // alive, so the instance they belong to stays too (VUID-vkDestroyInstance-instance-00629) and the loader stays
+        // loaded under it; the process ends them
         return;
     }
     if (mDevice != VK_NULL_HANDLE)

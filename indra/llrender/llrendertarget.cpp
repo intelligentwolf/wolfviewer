@@ -234,7 +234,7 @@ bool LLRenderTarget::addColorAttachment(U32 color_fmt)
     {
         // [VULKAN G-BUFFER 2026-11-08] a texture over memory the Vulkan renderer exported (llrendertarget.h WolfVkProvider)
         provided = sWolfVkProvider->colorTexture(*this, offset, color_fmt, tex);
-        if (provided) mWolfVkProvided = true;
+        if (provided) mWolfVkProvidedNames.push_back(tex);   // [G8 2026-11-11]
     }
     if (!provided)
     {
@@ -318,7 +318,7 @@ bool LLRenderTarget::allocateDepth()
         if (sWolfVkProvider->depthTexture(*this, tex))
         {
             mDepth = tex;
-            mWolfVkProvided = true;
+            mWolfVkProvidedNames.push_back(tex);   // [G8 2026-11-11]
             gGL.getTexUnit(0)->bindManual(mUsage, mDepth);
             gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_POINT);
             sBytesAllocated += mResX*mResY*4;
@@ -384,16 +384,18 @@ void LLRenderTarget::release()
     llassert(!isBoundInStack());
 
     // [VULKAN G-BUFFER 2026-11-08] textures from the provider belong to it: it hears of the release and deletes them itself
-    const bool provided = mWolfVkProvided;
-    if (provided && sWolfVkProvider)
+    // [G8 2026-11-11] only those: every texture the target made itself is deleted here as before
+    std::vector<U32> provided_names;
+    provided_names.swap(mWolfVkProvidedNames);
+    const auto provided = [&provided_names](U32 tex) { return std::find(provided_names.begin(), provided_names.end(), tex) != provided_names.end(); };
+    if (!provided_names.empty() && sWolfVkProvider)
     {
         sWolfVkProvider->released(*this);
     }
-    mWolfVkProvided = false;
 
     if (mDepth)
     {
-        if (!provided) LLImageGL::deleteTextures(1, &mDepth);
+        if (!provided(mDepth)) LLImageGL::deleteTextures(1, &mDepth);
 
         mDepth = 0;
 
@@ -423,7 +425,7 @@ void LLRenderTarget::release()
         {
             sBytesAllocated -= mResX*mResY*4;
             glFramebufferTexture2D(GL_FRAMEBUFFER, static_cast<GLenum>(GL_COLOR_ATTACHMENT0+z), LLTexUnit::getInternalType(mUsage), 0, 0);
-            if (!provided) LLImageGL::deleteTextures(1, &mTex[z]);
+            if (!provided(mTex[z])) LLImageGL::deleteTextures(1, &mTex[z]);
         }
         glBindFramebuffer(GL_FRAMEBUFFER, sCurFBO);
     }
@@ -443,7 +445,7 @@ void LLRenderTarget::release()
     if (mTex.size() > 0)
     {
         sBytesAllocated -= mResX*mResY*4;
-        if (!provided) LLImageGL::deleteTextures(1, &mTex[0]);
+        if (!provided(mTex[0])) LLImageGL::deleteTextures(1, &mTex[0]);
     }
 
     mTex.clear();

@@ -32,7 +32,8 @@
  *   - without it there is no fence to wait for; the old swapchain goes when the first image presented on its successor
  *     has been acquired again, which is ANGLE's rule for the same case (SurfaceVk.cpp:1521-1523 "scheduled for destruction
  *     when the semaphore of the first image of the next swapchain can be recycled"), and at shutdown or past the retired
- *     cap after vkQueueWaitIdle, which takes no timeout (the one wait here that cannot be bounded; that path is not
+ *     cap after WolfVkDevice::waitIdle ([V4 2026-11-11] was vkQueueWaitIdle, which takes no timeout; the spec defines
+ *     it as a fence wait on every submit that accepts a fence, which waitIdle does with the 8 s limit; that path is not
  *     used on either test GPU).
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
@@ -69,7 +70,11 @@ public:
     // [AMD PERF 2026-11-08] testing: the present mode to use instead of the vsync rule when the surface offers it
     // (VK_PRESENT_MODE_MAX_ENUM_KHR = no override; WolfVulkanPresentMode in wolfvkbridge.cpp)
     void setPresentModeOverride(VkPresentModeKHR mode) { mPresentOverride = mode; }
-    void destroy();
+    // [V4 2026-11-11] true when no swapchain (current or retired) is left alive; false when one had to be left to the
+    // device (hung, or its presents did not finish within the bounded wait) - the surface must then not be destroyed
+    bool destroy();
+    // [V1 2026-11-11] the last create/recreate failed only because the window has no size (minimised): wait, not an error
+    bool noSize() const { return mNoSize; }
 
     // Acquires the next image, signalling the frame's acquire semaphore. Returns false with out_of_date = true when
     // the swapchain must be recreated (nothing acquired); false with timed_out = true when no image came within
@@ -82,6 +87,7 @@ public:
 
     bool isValid() const { return mSwapchain != VK_NULL_HANDLE; }
     VkFormat format() const { return mFormat.format; }
+    VkImageUsageFlags usage() const { return mUsage; }   // [G2 2026-11-11] TRANSFER_SRC when the surface offers it
     bool isSrgb() const { return mFormat.format == VK_FORMAT_B8G8R8A8_SRGB || mFormat.format == VK_FORMAT_R8G8B8A8_SRGB; }
     VkExtent2D extent() const { return mExtent; }
     uint32_t imageCount() const { return static_cast<uint32_t>(mImages.size()); }
@@ -100,6 +106,7 @@ public:
 private:
     bool build(uint32_t width, uint32_t height, bool vsync, VkSwapchainKHR old, std::string& error);
     void destroyViews();
+    void discardPartialBuild();   // [V3 2026-11-11] build() failed after vkCreateSwapchainKHR succeeded
     void destroySemaphores(std::vector<VkSemaphore>& semaphores);
 
     // [PRESENT FENCES 2026-11-08] see the header comment
@@ -131,6 +138,8 @@ private:
     VkPresentModeKHR mPresentMode = VK_PRESENT_MODE_FIFO_KHR;
     VkPresentModeKHR mPresentOverride = VK_PRESENT_MODE_MAX_ENUM_KHR;
     VkExtent2D mExtent{};
+    bool mNoSize = false;
+    VkImageUsageFlags mUsage = 0;
     std::vector<VkImage> mImages;
     std::vector<VkImageView> mViews;
     std::vector<VkSemaphore> mRenderDone;

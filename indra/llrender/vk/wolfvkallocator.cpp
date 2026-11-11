@@ -423,12 +423,8 @@ void WolfVkAllocator::free(WolfVkAllocation& allocation)
     allocation = WolfVkAllocation();
 }
 
-void WolfVkAllocator::flush(const WolfVkAllocation& allocation, VkDeviceSize offset, VkDeviceSize size)
+VkMappedMemoryRange WolfVkAllocator::mappedRange(const WolfVkAllocation& allocation, VkDeviceSize offset, VkDeviceSize size) const
 {
-    if (!allocation.isValid() || allocation.mCoherent || !allocation.mMapped || size == 0)
-    {
-        return;
-    }
     // Source: vulkan_core.h:213 VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE; VkMappedMemoryRange { sType, pNext, memory, offset, size }.
     // Valid usage: offset a multiple of nonCoherentAtomSize (vulkan_core.h:3690); size a multiple of it, or VK_WHOLE_SIZE,
     // or reaching the end of the memory object.
@@ -449,9 +445,38 @@ void WolfVkAllocator::flush(const WolfVkAllocation& allocation, VkDeviceSize off
     range.memory = allocation.mMemory;
     range.offset = begin;
     range.size = end - begin;
+    return range;
+}
+
+void WolfVkAllocator::flush(const WolfVkAllocation& allocation, VkDeviceSize offset, VkDeviceSize size)
+{
+    if (!allocation.isValid() || allocation.mCoherent || !allocation.mMapped || size == 0)
+    {
+        return;
+    }
+    const VkMappedMemoryRange range = mappedRange(allocation, offset, size);
     VkResult res = gVk.vkFlushMappedMemoryRanges(mDevice, 1, &range);
     if (res != VK_SUCCESS)
     {
         LL_WARNS_ONCE("Vulkan") << "vkFlushMappedMemoryRanges: " << WolfVkLoader::resultString(res) << LL_ENDL;
+    }
+}
+
+void WolfVkAllocator::invalidate(const WolfVkAllocation& allocation, VkDeviceSize offset, VkDeviceSize size)
+{
+    // [V14 2026-11-11] device writes (a copy into a read-back buffer) become visible to the host only through this on a
+    // memory type without HOST_COHERENT: "Mapping non-coherent memory does not implicitly invalidate that memory", and
+    // vkInvalidateMappedMemoryRanges "guarantees that device writes to the memory ranges ... are made visible to the host"
+    // (vkInvalidateMappedMemoryRanges refpage). The same range rules as flush (VkMappedMemoryRange, nonCoherentAtomSize).
+    if (!allocation.isValid() || allocation.mCoherent || !allocation.mMapped || size == 0)
+    {
+        return;
+    }
+    const VkMappedMemoryRange range = mappedRange(allocation, offset, size);
+    // Source: vulkan_core.h:4556 PFN_vkInvalidateMappedMemoryRanges(device, memoryRangeCount, pMemoryRanges)
+    VkResult res = gVk.vkInvalidateMappedMemoryRanges(mDevice, 1, &range);
+    if (res != VK_SUCCESS)
+    {
+        LL_WARNS_ONCE("Vulkan") << "vkInvalidateMappedMemoryRanges: " << WolfVkLoader::resultString(res) << LL_ENDL;
     }
 }

@@ -17,10 +17,14 @@
  *   b. the device whose VkPhysicalDeviceIDProperties::deviceUUID (vulkan_core.h:5941) equals the OpenGL context's
  *      GL_DEVICE_UUID_EXT (GL_EXT_memory_object, glext.h:7736): the very card OpenGL is drawing with, which the
  *      staged hand-over (GL and Vulkan sharing images) needs. Proven on NVIDIA and radeonsi by the vkglshare probe.
- *   c. the device whose vendor matches the OpenGL renderer's vendor (gGLManager.mIsNVIDIA/mIsAMD/mIsIntel)
+ *      [V7 2026-11-11] When OpenGL gave its UUID and no device has it, the choice FAILS (no c.-e.): the caller falls
+ *      back to OpenGL with the reason.
+ *   c. the device whose vendor matches the OpenGL renderer's vendor (gGLManager.mIsNVIDIA/mIsAMD/mIsIntel); [V7] when the
+ *      vendor is known and no device matches, the choice fails likewise
  *   d. the first VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU (vulkan_core.h:2235)
  *   e. the first device
- * Devices without VK_KHR_swapchain or without a graphics queue that can present are skipped.
+ * Devices without VK_KHR_swapchain, without a graphics queue that can present, or of VK_PHYSICAL_DEVICE_TYPE_CPU
+ * (vulkan_core.h:2237, llvmpipe/lavapipe/SwiftShader; [V7]) are skipped.
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer Source Code
@@ -138,6 +142,10 @@ public:
     // surface: the window surface to present to (VK_NULL_HANDLE allowed for an off-screen device, e.g. tests)
     bool createDevice(VkSurfaceKHR surface, std::string& error);
     void destroy();
+    // [V4 2026-11-11] The owner could not destroy a swapchain (its presents did not finish within the bounded wait), so
+    // the device (VUID-vkDestroyDevice-device-05137) and the instance under its surface must not be destroyed either:
+    // both are dropped without destruction, as for a hung device, and later destroy() calls leave the instance alone.
+    void abandon(const std::string& why);
 
     bool hasInstance() const { return mInstance != VK_NULL_HANDLE; }
     bool hasDevice() const { return mDevice != VK_NULL_HANDLE; }
@@ -262,6 +270,7 @@ private:
     bool queryPhysicalDevices(std::string& error);
     bool choosePhysicalDevice(VkSurfaceKHR surface, std::string& error);
     bool createFrames(std::string& error);
+    void destroyDeviceObjects();   // [V11 2026-11-11] createDevice failed: device-level objects only, the instance stays
     void destroyFrames();
     void runDeferred(Frame& frame);
     // [HANG GUARD 2026-11-08 8.2k] every submitted batch finished (timeline value mTimelineNext, submitted frame fences,
@@ -298,6 +307,7 @@ private:
     uint32_t mOneTimeCount = 0;   // [AMD PERF] takeOneTimeStats
     double mOneTimeMs = 0.0;
     bool mHung = false;
+    bool mAbandoned = false;   // [V4 2026-11-11] the device was dropped undestroyed: the instance stays for the process
     std::string mHungReason;
     VkSemaphore mTimeline = VK_NULL_HANDLE;   // timeline semaphore: value = number of frames completed
     uint64_t mTimelineNext = 0;

@@ -28,8 +28,31 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+namespace
+{
+    // [V2 2026-11-11] what metalLayerForView replaced, so metalLayerDetach can give it back. This file is built without
+    // ARC (no -fobjc-arc in indra/cmake or llrender/CMakeLists.txt), so the old layer is retained by hand.
+    NSView* sMetalView = nil;
+    CALayer* sPreviousLayer = nil;
+    BOOL sPreviousWantsLayer = NO;
+}
+
 namespace WolfVkSurface
 {
+
+void metalLayerDetach()
+{
+    if (!sMetalView) return;
+    void (^detach)(void) = ^{
+        [sMetalView setLayer:sPreviousLayer];
+        [sMetalView setWantsLayer:sPreviousWantsLayer];
+        [sPreviousLayer release];
+        sPreviousLayer = nil;
+        sMetalView = nil;
+    };
+    if ([NSThread isMainThread]) detach();
+    else dispatch_sync(dispatch_get_main_queue(), detach);
+}
 
 void* metalLayerForView(void* nsview, std::string& error)
 {
@@ -51,6 +74,9 @@ void* metalLayerForView(void* nsview, std::string& error)
         // The layer's pixel size follows the view's backing scale (Retina), as NSView convertSizeToBacking does for
         // the GL drawable (llwindowmacosx-objc.mm getDeviceUnitSize).
         layer.contentsScale = [[view window] backingScaleFactor];
+        sMetalView = view;
+        sPreviousLayer = [existing retain];
+        sPreviousWantsLayer = [view wantsLayer];
         [view setWantsLayer:YES];
         [view setLayer:layer];
         result = layer;

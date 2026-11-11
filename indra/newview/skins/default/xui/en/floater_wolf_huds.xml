@@ -15,7 +15,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="452"
+ height="568"
  layout="topleft"
  name="wolf_huds"
  save_rect="true"
@@ -77,5 +77,11 @@
     <text follows="left|top" layout="topleft" left="640" top="306" width="148" height="20" name="name_submarine" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Submarine</text>
     <text follows="left|top" layout="topleft" left="640" top="328" width="148" height="46" name="desc_submarine" font="SansSerif" wrap="true" mouse_opaque="false">Instruments and sonar for going under the sea.</text>
     <text follows="left|top" layout="topleft" left="640" top="378" width="148" height="18" name="state_submarine" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="12" name="status" top="414" width="784" wrap="true" />
+    <!-- [FISHING HUD 2026-11-11] Fishing: the Fishing HUD (wolffishingoverlay.cpp), as Wolf World > Fishing -->
+    <button follows="left|top" layout="topleft" left="12" top="412" width="256" height="108" name="tile_fishing" is_toggle="true" label="" tab_stop="true" tool_tip="Fishing: Cast and Reel in buttons, your catch and your week across the bottom of the screen." />
+    <icon follows="left|top" layout="topleft" left="22" top="426" width="80" height="80" name="pic_fishing" image_name="WolfHuds_fishing" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="112" top="422" width="148" height="20" name="name_fishing" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Fishing</text>
+    <text follows="left|top" layout="topleft" left="112" top="444" width="148" height="46" name="desc_fishing" font="SansSerif" wrap="true" mouse_opaque="false">Cast, reel in, your catch and your week, across the bottom.</text>
+    <text follows="left|top" layout="topleft" left="112" top="494" width="148" height="18" name="state_fishing" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="12" name="status" top="530" width="784" wrap="true" />
 </floater>

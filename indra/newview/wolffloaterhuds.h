@@ -31,7 +31,9 @@ public:
     void onOpen(const LLSD& key) override;
     void draw() override;
 
-    enum ETile { T_GAME = 0, T_CAR, T_SKIS, T_PLANE, T_SPACESHIP, T_BOAT, T_SHIP, T_SPEEDBOAT, T_SUBMARINE, T_COUNT };
+    enum ETile { T_GAME = 0, T_CAR, T_SKIS, T_PLANE, T_SPACESHIP, T_BOAT, T_SHIP, T_SPEEDBOAT, T_SUBMARINE,
+                 T_FISHING,   // [FISHING HUD 2026-11-11] Paul: the HUDs window lists every on-screen HUD
+                 T_COUNT };
 
     /** Lit as its old icon was (the HUD shows). */
     static bool tileOn(ETile t);

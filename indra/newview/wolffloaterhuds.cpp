@@ -16,6 +16,7 @@
 #include "lltextbox.h"
 #include "lluicolortable.h"
 #include "wolfdrive.h"
+#include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/]
 #include "wolfflight.h"
 #include "wolfgame.h"
 #include "wolfgrid.h"
@@ -27,7 +28,8 @@ namespace
     // Source: floater_wolf_huds.xml tile_<id> / state_<id>; the order is ETile's.
     const char* const TILE_IDS[WolfFloaterHuds::T_COUNT] =
     {
-        "game", "car", "skis", "plane", "spaceship", "boat", "ship", "speedboat", "submarine"
+        "game", "car", "skis", "plane", "spaceship", "boat", "ship", "speedboat", "submarine",
+        "fishing"   // [FISHING HUD 2026-11-11/]
     };
 
     // Source: lltoolbarview.cpp postBuild before 2026-11-10 (the Game icon's `run` lambda): the same command as
@@ -102,6 +104,8 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_SHIP:      return WolfHelm::instance().hudShowing();
         case T_SPEEDBOAT: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPEEDBOAT);
         case T_SUBMARINE: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SUBMARINE);
+        // [FISHING HUD 2026-11-11] on while the Fishing HUD shows (wolffishingoverlay.cpp)
+        case T_FISHING:   return WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn();
         default:          return false;
     }
 }
@@ -135,6 +139,8 @@ void WolfFloaterHuds::onTile(ETile t)
         case T_SHIP:      WolfHelm::instance().toggleHud(); break;
         case T_SPEEDBOAT: WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SPEEDBOAT); break;
         case T_SUBMARINE: WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SUBMARINE); break;
+        // [FISHING HUD 2026-11-11] the same as Wolf World > Fishing (on) and the HUD's CLOSE (off: the rod's touch menu)
+        case T_FISHING:   if (was_on) WolfFishingSession::closeAll(); else WolfFishingSession::openHud(); break;
         default:          return;
     }
     if (!was_on)

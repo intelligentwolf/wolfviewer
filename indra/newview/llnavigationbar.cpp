@@ -402,7 +402,7 @@ void LLNavigationBar::setupPanel()
         {
             v->setToolTip(LLTrans::getString("WolfVulkanButtonUnavailable"));
         }
-        v->setToggleState(gSavedSettings.getString("WolfRenderBackend") == "vulkan");
+        v->setToggleState(WolfVkBridge::shownBackend() == "vulkan");   // [round 6 2026-11-11] a second instance: what it runs
         v->setVisible(WolfGrid::isWolfTerritories());
         v->setCommitCallback([](LLUICtrl* ctrl, const LLSD&)
         {
@@ -423,8 +423,8 @@ void LLNavigationBar::setupPanel()
                 {
                     const bool wolf = WolfGrid::isWolfTerritories();
                     if (btn->getVisible() != wolf) btn->setVisible(wolf);
-                    static LLCachedControl<std::string> backend(gSavedSettings, "WolfRenderBackend", "opengl");
-                    const bool on = (std::string(backend) == "vulkan");
+                    // [round 6 2026-11-11] WolfVkBridge::shownBackend: the saved choice, or a second instance's own renderer
+                    const bool on = (WolfVkBridge::shownBackend() == "vulkan");
                     if (btn->getToggleState() != on) btn->setToggleState(on);
                     static int s_tinted = -1;
                     tintWolfNavButton(btn, on, s_tinted);

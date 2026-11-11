@@ -1723,6 +1723,9 @@ Findings V1-V14 and G1-G8 of region-terrain-work/w104-review-2026-11-11/FINDINGS
   instance treats every Vulkan state key as read-only: its fall-back or stop happen in memory, and before any save
   (`gWolfControlBeforeSave`, llxml/llcontrolsavehook.h) it re-reads those keys from the file, so the file keeps what
   the first instance wrote; it never counts, clears, reads the crash marker or takes the first instance's notices.
+  So a crash loop seen only in second instances is not counted (accepted: the first window decides the renderer). The
+  V button and the Vulkan window of a second instance show the renderer it really runs, and a change asks the resident to
+  make it in the first window (WolfVulkanSecondInstance). The BugSplat warning is logged only when Vulkan is requested.
 - Test windows open on the hidden Hyprland workspace special:wolftest (window rules on the test's own X11 class and the
   stop box's zenity title, ~/.cache/vkfix/rig/session2.sh), never over the desktop in use.
 

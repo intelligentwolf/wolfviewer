@@ -94,6 +94,9 @@ namespace WolfVkBridge
     // until the next start (WolfVulkanChosen / WolfVulkanOpenGLChosen). Shared by Wolf World > Vulkan Renderer and the
     // navigation bar's V button. Nothing happens when the choice is the current setting.
     void chooseBackend(const std::string& choice);
+    // [round 6 2026-11-11] "vulkan" / "opengl" as the V button and the Vulkan window show it: the saved choice, or in a
+    // second instance (which cannot change it) the renderer that instance is really using
+    std::string shownBackend();
     // Plain-words status for the Vulkan Renderer floater.
     std::string statusLine();
     // The reason the last Vulkan start failed (empty when none).

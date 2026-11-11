@@ -2956,6 +2956,17 @@ Reason: [REASON]
      name="okbutton"
      yestext="OK"/>
   </notification>
+  <!-- [round 6 2026-11-11] a second WolfViewer window cannot change the renderer (wolfvkbridge.cpp chooseBackend) -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanSecondInstance"
+   type="alertmodal">
+    <unique/>
+This is a second WolfViewer window. The renderer (Vulkan or OpenGL) can only be changed in the first WolfViewer window you opened.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
   <!-- [round 3 2026-11-11] two Vulkan sessions in a row ended without shutting down (wolfvkbridge.cpp decideBackend) -->
   <notification
    icon="alertmodal.tga"

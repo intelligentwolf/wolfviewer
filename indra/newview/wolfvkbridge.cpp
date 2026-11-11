@@ -416,7 +416,13 @@ namespace
     {
         LLSD file;
         llifstream in(filename.c_str());
-        if (in.is_open() && LLSDParser::PARSE_FAILURE == LLSDSerialize::fromXML(file, in))
+        if (!in.is_open())
+        {
+            // [round 6] absent or unreadable alike: never reset to defaults on a file this instance cannot see
+            LL_WARNS("Vulkan") << "Second instance: " << filename << " could not be opened before a save; its Vulkan keys keep the values loaded at start" << LL_ENDL;
+            return;
+        }
+        if (LLSDParser::PARSE_FAILURE == LLSDSerialize::fromXML(file, in))
         {
             // left as loaded at this instance's start (the first instance's values then), never guessed
             LL_WARNS("Vulkan") << "Second instance: " << filename << " could not be read before a save; its Vulkan keys keep the values loaded at start" << LL_ENDL;
@@ -1161,11 +1167,6 @@ namespace WolfVkBridge
 
 void decideBackend()
 {
-#ifdef LL_BUGSPLAT
-    // [round 5 2026-11-11] BugSplat writes its own crash files, not WolfCrashReport's crash_stack.txt, so a crash in a
-    // Vulkan session leaves no evidence decideBackend can see: only LLError / out-of-memory exec markers count here
-    LL_WARNS("Vulkan") << "BugSplat build: crashes in Vulkan sessions are not counted (no crash stack), only LLError/out-of-memory markers" << LL_ENDL;
-#endif
     // [round 5 2026-11-11] A SECOND instance shares the first one's settings file but not its run. ONE rule: every
     // Vulkan state key is read-only for it for the whole session. Its fall-back or stop happen in memory only, and before
     // ANY save of the settings file (a hook in LLControlGroup::saveToFile, llcontrolsavehook.h) those keys are re-read
@@ -1315,6 +1316,11 @@ void decideBackend()
     }
     sRequested = true;
     sState = State::VULKAN_STARTING;
+#ifdef LL_BUGSPLAT
+    // [round 5/6 2026-11-11] BugSplat writes its own crash files, not WolfCrashReport's crash_stack.txt, so a crash in a
+    // Vulkan session leaves no evidence decideBackend can see: only LLError / out-of-memory exec markers count here
+    LL_WARNS("Vulkan") << "BugSplat build: crashes in Vulkan sessions are not counted (no crash stack), only LLError/out-of-memory markers" << LL_ENDL;
+#endif
     // [VULKAN WAYLAND 2026-11-09] the window this start makes goes through XWayland, not native Wayland (llwindow.h)
     LLWindow::sWolfAvoidNativeWayland = true;
     // Like RenderInitError (llappviewer.cpp:3952): the marker is false until the login screen has been drawn, and
@@ -2352,8 +2358,21 @@ bool vulkanAvailable()
     return !sVulkanDeviceLine.empty();
 }
 
+std::string shownBackend()
+{
+    if (LLAppViewer::instance()->isSecondInstance()) return sState == State::VULKAN_ACTIVE ? "vulkan" : "opengl";
+    return gSavedSettings.getString("WolfRenderBackend") == "vulkan" ? "vulkan" : "opengl";
+}
+
 void chooseBackend(const std::string& choice)
 {
+    // [round 6 2026-11-11] a second instance leaves the renderer choice to the first window (the Vulkan keys are
+    // read-only for it, decideBackend): it says so instead of a "chosen" message that would silently not last
+    if (LLAppViewer::instance()->isSecondInstance())
+    {
+        LLNotificationsUtil::add("WolfVulkanSecondInstance");
+        return;
+    }
     // [V BUTTON 2026-11-08] was WolfFloaterVulkan::onChoice; one path for the floater and the navigation bar's V button
     if (choice == gSavedSettings.getString("WolfRenderBackend"))
     {
@@ -2385,7 +2404,7 @@ std::string statusLine()
         return LLTrans::getString("WolfVulkanStatusStarting");
     case State::OPENGL:
     default:
-        if (gSavedSettings.getString("WolfRenderBackend") == "vulkan")
+        if (shownBackend() == "vulkan")   // [round 6] a second instance shows what it runs
         {
             return LLTrans::getString("WolfVulkanStatusRestart");
         }

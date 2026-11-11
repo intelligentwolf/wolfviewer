@@ -589,6 +589,18 @@ Call CheckWillUninstallV2		# Check if Second Life is already installed
 ;; the installer stops early. Same name in llappviewerwin32.cpp.
 System::Call 'kernel32::CreateMutexW(p 0, i 0, w "WolfViewerInstallerRunning") p .s'
 Pop $INSTALL_MUTEX
+;; <WolfViewer 2026-11-11 W104 FEATFIX B8> The mutex is one name for every install, so a side-by-side install (another folder,
+;; e.g. a test -wN build) was refused while any WolfViewer installer ran, and a hung installer refused the viewer for good.
+;; This marker file says WHICH folder is being written, and since when (its time): the viewer (llappviewerwin32.cpp
+;; wolfInstallerState) waits only when the mutex is held AND its own folder has the marker, and starts anyway, with a
+;; warning, once the marker is old. Removed at the end of this section with the mutex (and on a cancelled install).
+Push $0
+CreateDirectory "$INSTDIR"
+FileOpen $0 "$INSTDIR\WolfViewerInstalling.txt" w
+FileWrite $0 "A WolfViewer installer is writing this folder."
+FileClose $0
+Pop $0
+ClearErrors
 
 # <WolfViewer 2026-10-02> Started by the viewer's updater?
 StrCpy $IS_UPDATE ""
@@ -628,6 +640,7 @@ INSTALL_FILES_CANCEL:
   # Silence warnings from RemoveProgFilesOnInst.
   StrCpy $SKIP_DIALOGS "true"
   Call RemoveProgFilesOnInst
+  Delete "$INSTDIR\WolfViewerInstalling.txt"	# <WolfViewer 2026-11-11 W104 FEATFIX B8/> (see CreateMutexW)
   MessageBox MB_OK $(ErrorSecondLifeInstallSupport)
   Quit
 
@@ -807,6 +820,7 @@ StrCmp $DO_UNINSTALL_V2 "" REMOVE_SLV2_DONE
 REMOVE_SLV2_DONE:
 
 # <WolfViewer 2026-11-10 t763/> the files are in place: a WolfViewer started from now on may run (see CreateMutexW above)
+Delete "$INSTDIR\WolfViewerInstalling.txt"	# <WolfViewer 2026-11-11 W104 FEATFIX B8/> first, so no viewer sees a fresh marker after the mutex
 System::Call 'kernel32::CloseHandle(p $INSTALL_MUTEX)'
 
 SectionEnd
@@ -1315,6 +1329,7 @@ Function un.ProgramFiles
 
 # our InstallMode.txt
 Delete "$INSTDIR\InstallMode.txt"
+Delete "$INSTDIR\WolfViewerInstalling.txt"	# <WolfViewer 2026-11-11 W104 FEATFIX B8/> left by an installer that was stopped
 
 # Optional/obsolete files.  Delete won't fail if they don't exist.
 Delete "$INSTDIR\autorun.bat"

@@ -346,6 +346,44 @@ static bool wolfInstallerIsRunning()
     }
     return GetLastError() == ERROR_ACCESS_DENIED;
 }
+
+// <WolfViewer 2026-11-11 W104 FEATFIX B8> Is it THIS install's folder being written, and for how long? The mutex above has one
+// name for every install, so on its own it also stopped a side-by-side install (another folder: a test -wN build) and, with a
+// hung installer, stopped the viewer for good. Source: installer_template.nsi Section "" - "$INSTDIR\WolfViewerInstalling.txt"
+// is written just after CreateMutexW and deleted just before CloseHandle (and on a cancelled install, and by the uninstaller).
+// The viewer's exe is in $INSTDIR itself (RemoveProgFilesOnInst: Delete "$INSTDIR\$VIEWER_EXE"). The marker's last-write
+// time is when that installer started.
+enum class WolfInstallerState { NONE, RUNNING, STUCK };
+static constexpr ULONGLONG WOLF_INSTALLER_STUCK_SECS = 15 * 60;   // (CHOSEN) an update takes a minute or two
+static WolfInstallerState wolfInstallerState()
+{
+    if (!wolfInstallerIsRunning()) return WolfInstallerState::NONE;   // a marker without the mutex: an installer that died
+    std::vector<wchar_t> exe(32768);
+    const DWORD n = GetModuleFileNameW(NULL, exe.data(), (DWORD)exe.size());
+    if (n == 0 || n >= exe.size()) return WolfInstallerState::RUNNING;   // folder unknown: wait, as before
+    std::wstring dir(exe.data(), n);
+    const size_t slash = dir.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) return WolfInstallerState::RUNNING;
+    dir.resize(slash + 1);
+    WIN32_FILE_ATTRIBUTE_DATA marker;
+    if (!GetFileAttributesExW((dir + L"WolfViewerInstalling.txt").c_str(), GetFileExInfoStandard, &marker))
+    {
+        return WolfInstallerState::NONE;   // an installer for another folder: this install is complete
+    }
+    FILETIME now_ft;
+    GetSystemTimeAsFileTime(&now_ft);
+    ULARGE_INTEGER now, then;
+    now.LowPart = now_ft.dwLowDateTime;
+    now.HighPart = now_ft.dwHighDateTime;
+    then.LowPart = marker.ftLastWriteTime.dwLowDateTime;
+    then.HighPart = marker.ftLastWriteTime.dwHighDateTime;
+    // FILETIME counts 100 ns intervals
+    if (now.QuadPart > then.QuadPart && (now.QuadPart - then.QuadPart) / 10000000ULL >= WOLF_INSTALLER_STUCK_SECS)
+    {
+        return WolfInstallerState::STUCK;
+    }
+    return WolfInstallerState::RUNNING;
+}
 // </WolfViewer>
 
 void ll_nvapi_init(NvDRSSessionHandle hSession)
@@ -589,7 +627,10 @@ int APIENTRY WINMAIN(HINSTANCE hInstance,
     // <WolfViewer 2026-11-10 t763> Started while an install or update is still writing the files (wolfInstallerIsRunning
     // above): say so and stop cleanly, before anything reads app_settings or skins. Plain Win32 text: strings.xml may be
     // one of the files not there yet. The updater's installer starts WolfViewer itself when it has finished.
-    if (wolfInstallerIsRunning())
+    // [W104 FEATFIX 2026-11-11 B8] only when it is this install's folder (wolfInstallerState), and not for good: an installer
+    // that has held it for WOLF_INSTALLER_STUCK_SECS is taken as stuck and the viewer starts, saying so
+    const WolfInstallerState installer = wolfInstallerState();
+    if (installer == WolfInstallerState::RUNNING)
     {
         MessageBoxW(NULL,
                     L"WolfViewer is being updated at the moment.\n\n"
@@ -597,6 +638,14 @@ int APIENTRY WINMAIN(HINSTANCE hInstance,
                     L"If it does not, start WolfViewer again then.",
                     L"WolfViewer", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
         return 0;
+    }
+    if (installer == WolfInstallerState::STUCK)
+    {
+        MessageBoxW(NULL,
+                    L"An update of WolfViewer started more than 15 minutes ago and has not finished - it may be stuck.\n\n"
+                    L"WolfViewer will start now anyway. If something does not work, close WolfViewer, restart your computer "
+                    L"and install WolfViewer again.",
+                    L"WolfViewer", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
     }
     // </WolfViewer>
 

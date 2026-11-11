@@ -558,20 +558,52 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
     // at best, WolfVkScene::init). Names compared: GL_RENDERER up to its first " (" or "/" ("NVIDIA GeForce RTX 5090
     // Laptop GPU/PCIe/SSE2", "AMD Radeon 890M Graphics (radeonsi, ...)") and the Vulkan deviceName up to its first " ("
     // ("AMD Radeon 890M Graphics (RADV STRIX1)"), case-insensitive.
+    // [round 4 W2] names normalised on both sides: lower case, a leading "mesa " and "amd " dropped, cut at " (" and,
+    // for GL_RENDERER, "/" too
     auto trimmed = [&lower](const std::string& n, bool slash)
     {
         size_t cut = n.find(" (");
         if (slash) cut = std::min(cut, n.find('/'));
         std::string t = lower(n.substr(0, cut));
+        for (const char* prefix : { "mesa ", "amd " })
+        {
+            if (t.compare(0, strlen(prefix), prefix) == 0) t.erase(0, strlen(prefix));
+        }
         while (!t.empty() && t.back() == ' ') t.pop_back();
         return t;
     };
+    // [round 4 W2] one card offered by two drivers (RADV and amdvlk, say) is one card: devices with the same device UUID or
+    // the same normalised name count once (the first one listed is taken)
+    auto one_card = [&](const std::vector<const WolfVkPhysicalDeviceInfo*>& v)
+    {
+        static const uint8_t zero_uuid[VK_UUID_SIZE] = {};
+        for (const WolfVkPhysicalDeviceInfo* d : v)
+        {
+            // an all-zero UUID (a Vulkan 1.0 device: wolfvkdevice.h mIds) proves nothing
+            const bool same_uuid = memcmp(d->mIds.deviceUUID, zero_uuid, VK_UUID_SIZE) != 0
+                                   && memcmp(d->mIds.deviceUUID, v.front()->mIds.deviceUUID, VK_UUID_SIZE) == 0;
+            if (!same_uuid && trimmed(d->name(), false) != trimmed(v.front()->name(), false)) return false;
+        }
+        return !v.empty();
+    };
+    // [round 4 W1] nothing to tell OpenGL's card by (no GL UUID, no known vendor) and one card offered: that one
+    if (!mConfig.mHaveGLDeviceUUID && mConfig.mGLVendorID == 0)
+    {
+        std::vector<const WolfVkPhysicalDeviceInfo*> all;
+        for (const WolfVkPhysicalDeviceInfo& d : candidates) all.push_back(&d);
+        if (one_card(all))
+        {
+            mChosen = *all.front();
+            LL_INFOS("Vulkan") << "Device chosen as the only card offered (OpenGL gave neither UUID nor vendor): " << mChosen.name() << LL_ENDL;
+            return true;
+        }
+    }
     std::vector<const WolfVkPhysicalDeviceInfo*> same_vendor;
     for (const WolfVkPhysicalDeviceInfo& d : candidates)
     {
         if (mConfig.mGLVendorID && d.mProperties.vendorID == mConfig.mGLVendorID) same_vendor.push_back(&d);
     }
-    if (same_vendor.size() == 1)
+    if (one_card(same_vendor))
     {
         mChosen = *same_vendor.front();
         LL_INFOS("Vulkan") << "Device chosen by the OpenGL vendor: " << mChosen.name() << LL_ENDL;
@@ -588,7 +620,7 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
             if (in_pool && trimmed(d.name(), false) == gl_name) named.push_back(&d);
         }
     }
-    if (named.size() == 1 && (mConfig.mGLVendorID == 0 || !same_vendor.empty()))
+    if (one_card(named) && (mConfig.mGLVendorID == 0 || !same_vendor.empty()))
     {
         mChosen = *named.front();
         LL_INFOS("Vulkan") << "Device chosen by OpenGL's renderer name \"" << mConfig.mGLRenderer << "\": " << mChosen.name() << LL_ENDL;

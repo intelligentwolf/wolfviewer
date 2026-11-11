@@ -35,7 +35,8 @@
 #include "vk/wolfvkshader.h"
 #include "llwindow.h"
 #include "llappviewer.h"   // [RUN-TIME STOP 2026-11-09] requestQuit
-#include "llstartup.h"     // [BLACK WORLD 2026-11-10] the world check starts in-world (STATE_STARTED)
+#include "llstartup.h"
+#include "wolfcrashreport.h"   // [round 4] crash evidence for the session marker     // [BLACK WORLD 2026-11-10] the world check starts in-world (STATE_STARTED)
 #include "llagent.h"       // [G6 2026-11-11] no world-check verdicts from samples taken during a teleport
 #include "llversioninfo.h" // [G5 2026-11-11] the viewer version in the failure stamp
 #include "llviewercontrol.h"
@@ -145,8 +146,15 @@ namespace
     LoginCheck sLogin;
     // [round 3] when this Vulkan session reached STATE_STARTED (0 = not yet): SESSION_PROOF_MINUTES in-world with no
     // failure also proves a session (shutdown), for when the world check is off or ends undecided (a dark region)
-    F64 sInWorldSince = 0.0;
+    // [round 4 W3] seconds in-world while frames were actually presented (each present adds the time since the last,
+    // capped, so a suspend or a minimised window does not count)
+    F64 sInWorldPresented = 0.0;
+    F64 sLastPresentAt = 0.0;
+    constexpr F64 PRESENT_GAP_CAP = 0.5;
     constexpr F64 SESSION_PROOF_MINUTES = 10.0;
+    bool sGBufferSharedAtStart = false;   // [round 4 W3] the G-buffer was shared at the start (shareGBuffer "start")
+    bool sSessionProved = false;          // [round 4 B1] sessionProved() was true once; the crash marker is cleared then
+    bool sCrashedTwice = false;           // [round 4 W4] decideBackend chose OpenGL after two crashes
     constexpr uint32_t LOGIN_BLACK_SAMPLES = 8;
     constexpr F64 LOGIN_SAMPLE_SPACING = 0.25;
     constexpr uint32_t LOGIN_LIT_POINTS = 4;   // of 1024: a few lit pixels are a picture, not noise in a black one
@@ -360,8 +368,10 @@ namespace
     //  - [B1 2026-11-11] The count is cleared only by a session that PROVED itself: Vulkan still running at a clean quit,
     //    after its login check passed and either its in-world world check passed or ([round 3]) it ran 10 minutes
     //    in-world (a world check that is off, or ended undecided in a dark region) (shutdown).
-    //  - [round 3] A crash during a Vulkan session (WolfVulkanSessionRunning still on at the next start) counts like any
-    //    other failure, so a crash that comes back every session stops after AUTO_RETRY_LIMIT of them. Not at the login check: a run-time
+    //  - [round 3/4] A CRASH during a Vulkan session before it proved itself (WolfVulkanSessionRun still set at the next
+    //    start, and that run's crash stack or an LLError/out-of-memory exec marker as evidence) counts like any other
+    //    failure, so a crash that comes back every session stops after AUTO_RETRY_LIMIT of them. An OS kill, a logoff
+    //    or a power cut leaves no evidence and is not counted. Not at the login check: a run-time
     //    stop that comes later in every session (a hang a minute in-world, a rebuild that always fails) would otherwise be
     //    cleared at each login and stop again at each start - a resident looped through forced quits for ever. And the
     //    resident's own choice (V button / Wolf World menu) clears it.
@@ -383,6 +393,7 @@ namespace
     }
     void recordAutomaticFailure(bool retryable)
     {
+        if (LLAppViewer::instance()->isSecondInstance()) return;   // [round 4 B2] the first instance's counters
         const std::string stamp = failureStamp(!retryable);
         U32 count = gSavedSettings.getU32("WolfVulkanAutoFailures");
         if (gSavedSettings.getString("WolfVulkanAutoFailStamp") != stamp) count = 0;
@@ -400,6 +411,7 @@ namespace
     }
     void clearAutomaticFailures()
     {
+        if (LLAppViewer::instance()->isSecondInstance()) return;   // [round 4 B2]
         gSavedSettings.setU32("WolfVulkanAutoFailures", 0);
         gSavedSettings.setString("WolfVulkanAutoFailStamp", "");
     }
@@ -581,7 +593,7 @@ namespace
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
         recordAutomaticFailure(retryable);   // [G5 2026-11-11]
-        gSavedSettings.setBOOL("WolfVulkanSessionRunning", false);   // [round 3] counted here, not again as a crash
+        gSavedSettings.setString("WolfVulkanSessionRun", "");   // [round 3] counted here, not again as a crash
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
         // [round 3] the notice says what the next start will do: try Vulkan once more, or not (permanent failure, or the
         // second one in a row)
@@ -611,7 +623,7 @@ namespace
         // tells the resident at the next start (decideBackend, WolfVulkanStoppedLastRun). It is cleared once the box has
         // been seen.
         gSavedSettings.setString("WolfVulkanStoppedReason", reason);
-        gSavedSettings.setBOOL("WolfVulkanSessionRunning", false);   // [round 3] counted here, not again as a crash
+        gSavedSettings.setString("WolfVulkanSessionRun", "");   // [round 3] counted here, not again as a crash
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
         LLStringUtil::format_map_t args;
         args["[REASON]"] = reason;
@@ -1019,6 +1031,19 @@ namespace
 
 namespace
 {
+    // [round 3/4] The session has proved itself: its login check passed, and either its world check passed or it has
+    // presented frames in-world for SESSION_PROOF_MINUTES ([round 4 W3]: counted only while frames were presented; and
+    // not when the world check FAILED or could not give the G-buffer back, nor when a G-buffer shared at the start is
+    // shared no more). Used to clear the failure count at a clean quit and the crash marker at once (B1).
+    bool sessionProved()
+    {
+        if (sLogin.mStage != LoginCheck::PASSED) return false;
+        if (sBlack.mSummary.compare(0, 6, "passed") == 0) return true;
+        const bool world_bad = sBlack.mSummary.compare(0, 6, "FAILED") == 0 || sBlack.mSummary.find("could not be shared") != std::string::npos;
+        const bool gbuffer_lost = sGBufferSharedAtStart && !sGBuffer;
+        return !world_bad && !gbuffer_lost && sInWorldPresented >= SESSION_PROOF_MINUTES * 60.0;
+    }
+
     // [G2 2026-11-11] see LoginCheck
     void loginCheckPassed(const std::string& how)
     {
@@ -1166,15 +1191,37 @@ void decideBackend()
         }
 #endif
     }
-    // [round 3] the last Vulkan session ended without shutdown, fallBack or stopAtRunTime (a crash or a kill) after its
-    // login screen was confirmed: counted like any failure (an unconfirmed start is counted just below by
-    // WolfVulkanStartOK instead). The second in a row (same stamp) sets OpenGL, with its own notice.
-    if (gSavedSettings.getBOOL("WolfVulkanSessionRunning") && !LLAppViewer::instance()->isSecondInstance())
+    // [round 4 B2] A second instance shares the first one's settings file but not its run: it must neither count nor
+    // clear anything, and must not save back the values it loaded (the first instance's marker and counters, which that
+    // instance changes on its own) - those controls are not saved by a second instance at all.
+    if (LLAppViewer::instance()->isSecondInstance())
     {
-        gSavedSettings.setBOOL("WolfVulkanSessionRunning", false);
-        if (gSavedSettings.getBOOL("WolfVulkanStartOK") && gSavedSettings.getString("WolfRenderBackend") == "vulkan")
+        for (const char* key : { "WolfVulkanSessionRun", "WolfVulkanAutoFailures", "WolfVulkanAutoFailStamp" })
         {
-            LL_WARNS("Vulkan") << "The last Vulkan session ended without shutting down (a crash?)" << LL_ENDL;
+            if (LLControlVariable* ctrl = gSavedSettings.getControl(key)) ctrl->setPersist(LLControlVariable::PERSIST_NO);
+        }
+    }
+    // [round 3/4] The last Vulkan session ended without shutdown, fallBack or stopAtRunTime, after its login screen was
+    // confirmed and before it proved itself (the marker is cleared then). Counted only with evidence of a CRASH from
+    // that run [round 4 B1]: the crash handler's stack in that run's dump folder (WolfCrashReport::runLeftCrashStack),
+    // or this start's exec marker saying LLError / out of memory (LAST_EXEC_LLERROR_CRASH / LAST_EXEC_BAD_ALLOC,
+    // llappviewer.cpp processMarkerFiles). An OS kill, a Windows logoff (WM_ENDSESSION), a power cut or a resident ending
+    // a frozen viewer leave neither and are not counted. The second counted crash in a row sets OpenGL.
+    const std::string last_run = gSavedSettings.getString("WolfVulkanSessionRun");
+    if (!last_run.empty() && !LLAppViewer::instance()->isSecondInstance())
+    {
+        gSavedSettings.setString("WolfVulkanSessionRun", "");
+        const bool stack = WolfCrashReport::runLeftCrashStack(last_run);
+        const bool marker = gLastExecEvent == LAST_EXEC_LLERROR_CRASH || gLastExecEvent == LAST_EXEC_BAD_ALLOC;
+        if (!stack && !marker)
+        {
+            LL_INFOS("Vulkan") << "The last Vulkan session (" << last_run << ") ended without shutting down but left no crash evidence "
+                                  "(no crash stack, last exec event " << static_cast<int>(gLastExecEvent) << "): not counted" << LL_ENDL;
+        }
+        else if (gSavedSettings.getBOOL("WolfVulkanStartOK") && gSavedSettings.getString("WolfRenderBackend") == "vulkan")
+        {
+            LL_WARNS("Vulkan") << "The last Vulkan session (" << last_run << ") crashed (" << (stack ? "its crash stack is in its dump folder" : "exec marker")
+                               << ")" << LL_ENDL;
             recordAutomaticFailure(true);
             if (!nextStartRetries())
             {
@@ -1182,6 +1229,7 @@ void decideBackend()
                 sLastError = "WolfViewer closed unexpectedly while drawing with Vulkan, more than once";
                 rememberNotice("WolfVulkanCrashedTwice", sLastError);
                 sState = State::FELL_BACK;
+                sCrashedTwice = true;   // [round 4 W4] its own status line
                 gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
                 return;
             }
@@ -1349,15 +1397,19 @@ void initAfterGL(LLWindow* window)
     sState = State::VULKAN_ACTIVE;
     // [round 3] a crash from here on (the viewer ends without shutdown, fallBack or stopAtRunTime) is counted at the next
     // start (decideBackend): the marker is on disk for the whole Vulkan session
+    // [round 4] the marker names this run's dump folder (WolfCrashReport::thisRunFolder), so the next start can tell a
+    // crash (the crash handler wrote a stack there) from an OS kill, a power cut or a forced logoff (nothing written)
     if (!LLAppViewer::instance()->isSecondInstance())
     {
-        gSavedSettings.setBOOL("WolfVulkanSessionRunning", true);
+        const std::string folder = WolfCrashReport::thisRunFolder();
+        gSavedSettings.setString("WolfVulkanSessionRun", folder.empty() ? std::string("no-dump-folder") : folder);
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
     }
+
     LL_INFOS("Vulkan") << "Vulkan renderer active: " << sVulkanDeviceLine << ", surface " << WolfVkSurface::kind() << LL_ENDL;
     prof::initStamps();   // [AMD PERF 2026-11-08] Vulkan timestamps for the WolfLogFrameRate breakdown (none when the queue has no timestamps)
 
-    shareGBuffer("start");
+    sGBufferSharedAtStart = shareGBuffer("start");   // [round 4 W3]
 }
 
 bool isActive()
@@ -1968,7 +2020,6 @@ bool presentFrame()
         return false;
     }
 
-    if (sInWorldSince == 0.0 && LLStartUp::getStartupState() >= STATE_STARTED) sInWorldSince = t0;   // [round 3]
     // [G2 2026-11-11] the login check asks for a sample of this frame's picture now and then
     if (sLogin.mStage == LoginCheck::RUNNING && t0 - sLogin.mLastRequest >= LOGIN_SAMPLE_SPACING)
     {
@@ -2072,6 +2123,23 @@ bool presentFrame()
     loginCheck(presented, t0);
     if (sState == State::STOPPED) return false;
     if (sState != State::VULKAN_ACTIVE) return true;   // fell back to OpenGL in this session: this frame was still Vulkan's
+    // [round 4 W3] in-world time that counts as proof: only while frames reach the screen
+    if (presented)
+    {
+        if (sLastPresentAt > 0.0 && LLStartUp::getStartupState() >= STATE_STARTED) sInWorldPresented += std::min(t0 - sLastPresentAt, PRESENT_GAP_CAP);
+        sLastPresentAt = t0;
+    }
+    // [round 4 B1] once proved, a later abnormal end (an OS kill, a logoff, a power cut) is no crash of Vulkan's to count
+    if (!sSessionProved && sessionProved())
+    {
+        sSessionProved = true;
+        if (!LLAppViewer::instance()->isSecondInstance())
+        {
+            gSavedSettings.setString("WolfVulkanSessionRun", "");
+            gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+            LL_INFOS("Vulkan") << "Vulkan session proved itself: a later end without shutdown is not counted as a Vulkan crash" << LL_ENDL;
+        }
+    }
 
     const F64 t1 = LLTimer::getTotalSeconds();
     sPresentAccum += (t1 - t0) * 1000.0;
@@ -2170,7 +2238,7 @@ void shutdown()
     if (sState == State::VULKAN_ACTIVE && sRequested && !LLAppViewer::instance()->isSecondInstance())
     {
         // [round 3] the session ended cleanly: no crash to count at the next start
-        gSavedSettings.setBOOL("WolfVulkanSessionRunning", false);
+        gSavedSettings.setString("WolfVulkanSessionRun", "");
         if (!gSavedSettings.getBOOL("WolfVulkanStartOK") && sLogin.mStage == LoginCheck::RUNNING && sLogin.mSamples > 0 && sLogin.mBlackRun == 0)
         {
             // W4 [round 3: only once the check has taken a sample and none was black against a lit OpenGL frame; a quit
@@ -2181,10 +2249,9 @@ void shutdown()
         }
         // B1 [round 3: or SESSION_PROOF_MINUTES in-world, for a world check that is off or ended undecided - a dark region]
         const bool world_passed = sBlack.mSummary.compare(0, 6, "passed") == 0;
-        const bool long_in_world = sInWorldSince > 0.0 && LLTimer::getTotalSeconds() - sInWorldSince >= SESSION_PROOF_MINUTES * 60.0;
-        if (sLogin.mStage == LoginCheck::PASSED && (world_passed || long_in_world) && gSavedSettings.getU32("WolfVulkanAutoFailures") > 0)
+        if (sessionProved() && gSavedSettings.getU32("WolfVulkanAutoFailures") > 0)
         {
-            LL_INFOS("Vulkan") << "Vulkan session proved itself (login check passed, " << (world_passed ? "world check passed" : "10 minutes in-world")
+            LL_INFOS("Vulkan") << "Vulkan session proved itself (login check passed, " << (world_passed ? "world check passed" : "10 minutes in-world, frames presented")
                                << ", clean quit): automatic failure count cleared" << LL_ENDL;
             clearAutomaticFailures();
         }
@@ -2283,6 +2350,7 @@ std::string statusLine()
     {
         LLStringUtil::format_map_t args;
         args["[REASON]"] = sLastError;
+        if (sCrashedTwice) return LLTrans::getString("WolfVulkanStatusCrashedTwice");   // [round 4 W4]
         return LLTrans::getString(nextStartRetries() ? "WolfVulkanStatusFellBack" : "WolfVulkanStatusFellBackFinal", args);
     }
     case State::VULKAN_STARTING:

@@ -90,6 +90,8 @@ WolfViewer will use OpenGL from now on. Please restart WolfViewer to carry on.</
 	<string name="WolfVulkanStatusStarting">The Vulkan renderer is starting.</string>
 	<string name="WolfVulkanStatusFellBack">OpenGL is drawing this window: the Vulkan renderer could not start ([REASON]). WolfViewer will try Vulkan once more at the next start.</string>
 	<!-- [round 3 2026-11-11] a failure no retry can mend, or the second in a row (wolfvkbridge.cpp nextStartRetries) -->
+	<!-- [round 4 2026-11-11] decideBackend chose OpenGL after two crashes in Vulkan sessions -->
+	<string name="WolfVulkanStatusCrashedTwice">OpenGL is drawing this window: WolfViewer closed unexpectedly more than once while using Vulkan. You can choose Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.</string>
 	<string name="WolfVulkanStatusFellBackFinal">OpenGL is drawing this window: the Vulkan renderer could not start ([REASON]). You can choose Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.</string>
 	<string name="AboutSettings">
 Settings mode: [MODE]

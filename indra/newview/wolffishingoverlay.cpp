@@ -47,6 +47,7 @@
 #include "llwindow.h"
 #include "llapp.h"
 #include "llnotificationsutil.h"
+#include "llstartup.h"
 #include "wolfcave.h"
 #include "wolfdrive.h"
 #include "wolfflight.h"
@@ -285,6 +286,7 @@ void WolfFishingSession::viewOpened(EView v)
     mViews |= (U32)v;
     if (was) { changed(); return; }
     // a new session: everything as a fresh window had it (wolffloaterfishing.cpp onOpen before 11-11)
+    mSessionId = gAgentSessionID;
     mRod = ROD_NONE;
     mFish = FISH_IDLE;
     mLog.clear();
@@ -325,8 +327,8 @@ void WolfFishingSession::viewClosed(EView v)
 
 void WolfFishingSession::say(const std::string& text)
 {
-    if (text.compare(0, 11, "WFISH|hello") == 0) mHelloSent = true;
     // a negative channel goes as a ScriptDialogReply (fsnearbychathub.cpp sendChatFromViewerFinal; wolffloaterlifts.cpp say)
+    if (text.compare(0, 11, "WFISH|hello") == 0) mHelloSent = true;   // "bye" when the session ends (review 11-11 W2)
     FSNearbyChat::sendChatFromViewerFinal(text, text, CHAT_TYPE_NORMAL, false, VCH);
 }
 
@@ -815,6 +817,9 @@ void WolfFishingSession::waitFor(const std::string& vehicle)
     // the session goes on (the rod stays, its lines are heard); only the HUD waits, and appears when the panel goes
     if (mHudPending) return;
     mHudPending = true;
+    // [review 11-11 item 1] a Challenge game cannot go on with the HUD away: it ends as if Reel in were let go, and nothing
+    // is sent, so the fish is not lost and still waits; Reel in is free again
+    endChallenge();
     const std::string tip = "Fishing will appear along the bottom of the screen when you have finished with the " + vehicle + ".";
     setStatus(tip, false);
     LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", tip));
@@ -822,12 +827,44 @@ void WolfFishingSession::waitFor(const std::string& vehicle)
 
 void WolfFishingSession::pendingTick()
 {
-    if (!mHudPending || LLApp::isExiting() || !WolfGrid::isOnWolfTerritories()) return;
+    if (LLApp::isExiting()) return;
+    // [review 11-11 item 3] Fishing belongs to the login that opened it (Greedy's rule, wolfviewer-featfix pendingTick):
+    // logged out, logged in again or on another grid, it is forgotten - nothing appears later unasked
+    if (active() && (gAgentSessionID != mSessionId || LLStartUp::getStartupState() < STATE_STARTED))
+    {
+        forget();
+        return;
+    }
+    if (!mHudPending) return;
+    tick();   // [review 11-11 item 2] a rod that never answers still times out (and says so) while the HUD waits
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        viewClosed(VIEW_HUD);   // off Wolf Territories: the wait is forgotten (Greedy's rule)
+        return;
+    }
     if (vehiclePanelUp().empty())
     {
         mHudPending = false;   // the vehicle's panel has gone: Fishing appears
         changed();
     }
+}
+
+void WolfFishingSession::forget()
+{
+    // a new login: everything of the old one goes, quietly (the old rod cannot be spoken to)
+    LLFloaterReg::hideInstance("wolf_fishing");
+    mViews = 0;
+    mHudPending = false;
+    ++mRodGen;
+    mRodCoroRunning = false;
+    mRod = ROD_NONE;
+    mFish = FISH_IDLE;
+    mPlaying = false;
+    mHelloSent = false;
+    mLog.clear();
+    mPile.clear();
+    mPileCount = 0;
+    changed();
 }
 
 void WolfFishingSession::closeAll()
@@ -841,7 +878,7 @@ void WolfFishingSession::gameHudClaims()
 {
     // the game HUD shown by hand (its tile, Game Mode switched on) takes the bottom from Fishing: the HUD closes, as Greedy's
     // does for it (wolffloatergreedy.cpp); the Board window, if open, keeps the session
-    if (!instanceExists() || !instance().hudWanted()) return;
+    if (!instanceExists() || !instance().hudOn()) return;   // waiting for a vehicle's panel: it keeps waiting
     instance().viewClosed(VIEW_HUD);
     LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE",
         std::string("Fishing made way for the game HUD. Wolf World > Fishing brings it back.")));
@@ -1386,7 +1423,7 @@ void WolfFishingHud::draw()
                 const LLColor4 col = m.mError ? AMBER : (m.mCatch ? GOLD : SNOW);
                 const F32 used = drawLines(cx, top, mLayout[i], px, maxw, alpha(col, a));
                 if (m.mError) rectF(textL, top - used + S(2.f), textL + S(5.f), top - S(2.f), AMBER);
-                mMsgRects.push_back({ textL, top - used, textR, top, m.mText });
+                mMsgRects.push_back({ textL, top - used, textR, top, i });
                 top -= used + S(6.f);
                 ++shown;
             }
@@ -1739,11 +1776,12 @@ bool WolfFishingHud::handleToolTip(S32 x, S32 y, MASK mask)
     }
     // [REVIEW 11-11 W1] a message line: its whole text
     const F32 px = (F32)x / mHitScale, py = (F32)y / mHitScale;
+    const std::vector<WolfFishingSession::Msg>& log = WolfFishingSession::instance().messages();
     for (const MsgRect& r : mMsgRects)
     {
-        if (px >= r.mL && px <= r.mR && py >= r.mB && py <= r.mT)
+        if (px >= r.mL && px <= r.mR && py >= r.mB && py <= r.mT && r.mIndex < log.size())
         {
-            LLToolTipMgr::instance().show(r.mText);
+            LLToolTipMgr::instance().show(log[r.mIndex].mText);
             return true;
         }
     }

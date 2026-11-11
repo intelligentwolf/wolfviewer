@@ -1397,13 +1397,20 @@ bool WolfGame::bottomTaken()
     // active() / deckHidden() - the deck is on screen while active and not hidden.
     const WolfFlight& wf = WolfFlight::instance();
     return (wf.active() && !wf.deckHidden()) || WolfDrive::instance().dashboardOn()
-        || WolfHelm::instance().hudShowing()   // <WolfViewer 2026-10-28/> the Captain's Helm (wolfhelm.h)
-        || (WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn());   // [FISHING HUD 2026-11-11/]
+        || WolfHelm::instance().hudShowing();   // <WolfViewer 2026-10-28/> the Captain's Helm (wolfhelm.h)
+}
+
+// [FISHING HUD 2026-11-11] the bottom in use by a vehicle (bottomTaken) or by the Fishing HUD: the game HUD steps aside and
+// its objective / talk panels go to the top right so they do not sit over Fishing. The Adventure story camera still only
+// stops for a vehicle (bottomTaken), so fishing does not change how a story plays.
+bool WolfGame::bottomBusy()
+{
+    return bottomTaken() || (WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn());
 }
 
 bool WolfGame::hudShowing() const
 {
-    return hudWanted() && !mHudHidden && !bottomTaken();
+    return hudWanted() && !mHudHidden && !bottomBusy();   // [FISHING HUD 2026-11-11/] (was bottomTaken)
 }
 
 void WolfGame::toggleHud()

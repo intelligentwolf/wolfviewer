@@ -373,6 +373,8 @@ public:
     bool hudWanted() const;
     /** The flight / sailing deck shows, or the car dashboard does: the bottom is theirs. */
     static bool bottomTaken();
+    /** [FISHING HUD 2026-11-11] bottomTaken() or the Fishing HUD showing: the game HUD steps aside, its panels go top right. */
+    static bool bottomBusy();
     /** The HUD is on screen now: wanted, not hidden by the player, the bottom free. */
     bool hudShowing() const;
     bool hudHidden() const { return mHudHidden; }

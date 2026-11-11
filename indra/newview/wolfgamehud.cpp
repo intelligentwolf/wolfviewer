@@ -1288,7 +1288,7 @@ void WolfGameHUD::drawAdventure(const LLRect& r, S32 top_pad, S32 right_pad)
     {
         drawn = WolfAdventureUI::drawObjective(mHudRight, mHudTop + 6.f, false, obj);
     }
-    else if (WolfGame::bottomTaken())
+    else if (WolfGame::bottomBusy())   // [FISHING HUD 2026-11-11/] (was bottomTaken: the Fishing HUD too)
     {
         drawn = WolfAdventureUI::drawObjective((F32)(r.mRight - right_pad - MARGIN), mNoticesBottom - 2.f, true, obj);
     }
@@ -1304,7 +1304,7 @@ void WolfGameHUD::drawAdventure(const LLRect& r, S32 top_pad, S32 right_pad)
     // on the same line as the objective (above the HUD, or above the toolbar), left of it; or, when
     // the bottom belongs to the flight deck or the car, top right under the objective line.
     S32 sx = 0, sy = 0;
-    if (WolfGame::bottomTaken())
+    if (WolfGame::bottomBusy())   // [FISHING HUD 2026-11-11/] (was bottomTaken: the Fishing HUD too)
     {
         const S32 x = r.mRight - right_pad - MARGIN;
         const S32 y = drawn ? obj.mBottom - 8 : (S32)(mNoticesBottom - 2.f);

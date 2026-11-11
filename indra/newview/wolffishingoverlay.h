@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "llsd.h"
+#include "lluuid.h"
 #include "llsingleton.h"
 #include "lluictrl.h"
 #include "wolfhudscale.h"
@@ -166,6 +167,7 @@ private:
     void setStatus(const std::string& text, bool error, bool transient = false, bool isCatch = false);
     void addToPile(bool junk, const std::string& name);
     void setBusy();
+    void forget();
     void needRod();
     void rodFailed(const std::string& why);
     void endChallenge();
@@ -182,7 +184,8 @@ private:
     S32 mLogShift = 0;
     U32 mLogVersion = 0;
     bool mHelloSent = false;
-    bool mHudPending = false;      // switched on, waiting for a vehicle's panel to go (review 11-11 B1)       // a "hello" went to the rod this session: "bye" when it ends (review 11-11 W2)
+    bool mHudPending = false;      // switched on, waiting for a vehicle's panel to go (review 11-11 B1)
+    LLUUID mSessionId;             // the login (gAgentSessionID) this fishing session belongs to       // a "hello" went to the rod this session: "bye" when it ends (review 11-11 W2)
     std::vector<PileItem> mPile;   // the last PILE_SHOWN things caught this session
     S32 mPileCount = 0;            // everything caught this session (the heap's count)
     bool mLostShown = false;       // a lost fish was just said: the rod's "Your line is out of the water." is not repeated
@@ -268,7 +271,7 @@ private:
     U32 mLayoutVersion = 0;
     F32 mLayoutWidth = 0.f;
     size_t mLayoutCount = 0;
-    struct MsgRect { F32 mL, mB, mR, mT; std::string mText; };
+    struct MsgRect { F32 mL, mB, mR, mT; size_t mIndex; };   // the message's place in the log (its tooltip)
     std::vector<MsgRect> mMsgRects;   // picture units, this frame: a hovered line's tooltip is its whole text
 
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);

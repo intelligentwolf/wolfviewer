@@ -52,7 +52,7 @@ class LLTextBox;
 namespace WolfLifts
 {
     /** A "WolfLift1|..." line from an object to this agent (llRegionSayTo): the Lifts window's, never chat. */
-    bool onObjectChat(const LLUUID& source, U8 chat_type, const std::string& text);
+    bool onObjectChat(const LLUUID& source, const LLUUID& owner, U8 chat_type, const std::string& text);
 }
 
 class WolfFloaterLifts : public LLFloater, public WolfRouteHost
@@ -108,8 +108,13 @@ private:
     void say(const std::string& text);    // to the box (channel VCH)
     /** Find (or get, then rez) the resident's kit box; runs until it answers hello or fails. */
     void needBox();
-    static void boxCoro(LLHandle<LLFloater> h);
+    static void boxCoro(LLHandle<LLFloater> h, U32 gen);
     void boxFailed(const std::string& why);
+    /** [W104 FEATFIX 2026-11-11 A5] The kit's coroutine (if one runs) stops at its next wake-up; the window forgets the box. */
+    void stopBox();
+    /** [W104 FEATFIX 2026-11-11 A1] The window stops waiting for a build (the kit carries on, or has stopped, by itself). */
+    void endBuilding(const std::string& why, bool error);
+    void setTextIfChanged(LLTextBox* box, const std::string& text);
 
     LLTextBox* mHint = nullptr;
     LLRadioGroup* mKind = nullptr;
@@ -132,6 +137,11 @@ private:
     std::string mBox8;
     LLUUID mWaitFor;                      // the box this window rezzed (its "hi" is the one taken), or null: any of ours
     bool mBoxCoroRunning = false;
+    U32 mBoxGen = 0;                      // [A5] bumped on close / region change: an older coroutine's wake-up finds it changed
+    F64 mBoxRetryAt = 0.0;                // [A5] after a failure the kit is not asked for again before this
+    F64 mBoxBackoff = 0.0;                // [A5] the wait after the last failure (doubles, BOX_RETRY_MAX_S at most)
+    bool mBoxAlerted = false;             // [A5] one alert per run of failures; the status line says the rest
+    bool mBusyKitSeen = false;            // [A1] a kit of ours answered hello "busy" (still building): none is rezzed beside it
 
     // the plan the box answered
     bool mPlanDirty = false;
@@ -144,6 +154,8 @@ private:
     // building
     bool mBuilding = false;
     F64 mBuildNewsAt = 0.0;
+    bool mQuietSaid = false;              // [A1] "nothing for a minute" said once a quiet spell (no news resets mBuildNewsAt now)
+    std::string mOpenNote;                // [A1] said on the next open: what happened while the window was closed
 
     // the camera before the window turned it (wolffloatertunnels.cpp giveCameraBack)
     bool mCamSaved = false, mCamWasOnAvatar = true;

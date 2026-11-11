@@ -880,6 +880,14 @@ namespace WolfTerraform
             mProgress = (F32)sent / (F32)llmax((size_t)1, blocks.size());
             mStatus = llformat("%s: the region has set %d of %d block%s", verb.c_str(), sent, (S32)blocks.size(), blocks.size() == 1 ? "" : "s");
         }
+        // [W104 FEATFIX 2026-11-11 B6] an Undo / Redo the region refused everywhere changed nothing: the history stays where it was
+        // (the step can still be undone / redone, and is said not done) rather than move on as if it had gone through
+        if (kind != KIND_APPLY && changed == 0 && (refused > 0 || no_room > 0))
+        {
+            const std::string verb_done = kind == KIND_UNDO ? "Undo of " : "Redo of ";
+            finish(false, verb_done + label + " was not done: nothing could be changed. The region says: " + reason);
+            return;
+        }
         // the history moves on once the job went through
         auto it = mHistory.find(region);
         if (it != mHistory.end())
@@ -905,8 +913,10 @@ namespace WolfTerraform
         }
         if (refused > 0 || no_room > 0)
         {
-            // Apply's Words(): the parcels and their owners it would not change
-            finish(false, llformat("%s, but %d m² did not change. The region says: %s", what.c_str(), refused + no_room, reason.c_str()));
+            // Apply's Words(): the parcels and their owners it would not change. [W104 FEATFIX 2026-11-11 B6] the step counts as
+            // done for what changed, and the words say how much did and did not
+            finish(false, llformat("%s for %d m², but %d m² did not change. The region says: %s", what.c_str(), changed,
+                                   refused + no_room, reason.c_str()));
             if (kind == KIND_APPLY) markStopped();
             return;
         }

@@ -1635,6 +1635,27 @@ static void wolf_post_inventory_thumbnail(const char* id_key, const LLUUID& id, 
     LLCoreHttpUtil::HttpCoroutineAdapter::callbackHttpPost(url, body);
 }
 
+// [WOLF THUMBNAILS 2026-11-11, ticket 793] The two UDP branches below copy the object and apply "updates" with fromLLSD,
+// which first clears the picture and the favourite mark and then reads them from the map (LLInventoryItem::fromLLSD and
+// LLInventoryCategory::fromLLSD, llinventory.cpp: "mThumbnailUUID.setNull(); mFavorite = false;"). A rename, a new
+// description or a favourite mark therefore wiped the picture in the viewer (and setting a picture wiped the favourite
+// mark), while the grid still held it; the cache then kept "no picture" at the current folder version. With AIS the
+// server answers with the whole object, so only these branches need it. A field the map does name is left as fromLLSD
+// read it (an undefined "thumbnail" or "favorite" is how the callers clear one, llfloaterchangeitemthumbnail.cpp
+// setThumbnailId and llinventoryfunctions.cpp favorite_send).
+static void wolf_keep_unnamed_fields(LLInventoryObject* changed, const LLInventoryObject* current, const LLSD& updates)
+{
+    if (!updates.has("thumbnail") && !updates.has("thumbnail_id"))
+    {
+        // the stored id, not LLViewerInventoryItem::getThumbnailUUID (a texture's own asset, a link's target's picture)
+        changed->setThumbnailUUID(current->LLInventoryObject::getThumbnailUUID());
+    }
+    if (!updates.has("favorite"))
+    {
+        changed->setFavorite(current->LLInventoryObject::getIsFavorite());
+    }
+}
+
 void update_inventory_item(
     const LLUUID& item_id,
     const LLSD& updates,
@@ -1657,6 +1678,7 @@ void update_inventory_item(
             LLPointer<LLViewerInventoryItem> new_item(new LLViewerInventoryItem);
             new_item->copyViewerItem(obj);
             new_item->fromLLSD(updates,false);
+            wolf_keep_unnamed_fields(new_item.get(), obj.get(), updates); // [WOLF THUMBNAILS 2026-11-11, ticket 793]
             wolf_post_inventory_thumbnail("item_id", item_id, updates);   // [WOLF THUMBNAILS 2026-11-07]
 
             LLMessageSystem* msg = gMessageSystem;
@@ -1711,6 +1733,7 @@ void update_inventory_category(
         {
             LLPointer<LLViewerInventoryCategory> new_cat = new LLViewerInventoryCategory(obj);
             new_cat->fromLLSD(updates);
+            wolf_keep_unnamed_fields(new_cat.get(), obj.get(), updates); // [WOLF THUMBNAILS 2026-11-11, ticket 793]
             wolf_post_inventory_thumbnail("category_id", cat_id, updates);   // [WOLF THUMBNAILS 2026-11-07]
             LLMessageSystem* msg = gMessageSystem;
             msg->newMessageFast(_PREHASH_UpdateInventoryFolder);

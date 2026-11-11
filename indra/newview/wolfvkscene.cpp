@@ -1274,7 +1274,7 @@ bool WolfVkScene::frameCheckPossible(const WolfVkSwapchain& swapchain) const
     const VkFormat f = swapchain.format();
     const bool known = f == VK_FORMAT_B8G8R8A8_UNORM || f == VK_FORMAT_R8G8B8A8_UNORM || f == VK_FORMAT_B8G8R8A8_SRGB
                        || f == VK_FORMAT_R8G8B8A8_SRGB || f == VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-    return mCompositeCheckPass != VK_NULL_HANDLE && (swapchain.usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) && known
+    return !mFrameCheckNoBuffers && mCompositeCheckPass != VK_NULL_HANDLE && (swapchain.usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) && known
            && swapchain.extent().width >= CHECK_TILES * CHECK_TILE && swapchain.extent().height >= CHECK_TILES * CHECK_TILE;
 }
 
@@ -1716,8 +1716,9 @@ bool WolfVkScene::recordFrame(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, u
                 std::unique_ptr<WolfVkBuffer> b(new WolfVkBuffer());
                 if (!b->create(*mDevice, static_cast<VkDeviceSize>(CHECK_TILES * CHECK_TILES * CHECK_TILE * CHECK_TILE * 4), VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, error))
                 {
-                    LL_WARNS("WolfVulkanCheck") << "login check: no read-back buffer (" << error << ")" << LL_ENDL;
+                    LL_WARNS("WolfVulkanCheck") << "login check: no read-back buffer (" << error << "); the check judges presented composites instead" << LL_ENDL;
                     mFrameCheckHost.clear();
+                    mFrameCheckNoBuffers = true;   // not retried every request (frameCheckPossible is false from now)
                     break;
                 }
                 mFrameCheckHost.push_back(std::move(b));

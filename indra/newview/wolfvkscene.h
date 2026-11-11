@@ -211,6 +211,7 @@ private:
     uint32_t mFrameCheckGlNow[2] = { 0, 0 };  // this frame's GL sample (max, lit)
     std::vector<uint32_t> mFrameCheckGl;      // per slot: max, lit
     bool mFrameCheckWanted = false;
+    bool mFrameCheckNoBuffers = false;        // the read-back buffers could not be made: no samples this session
     uint32_t mFrameCheckSeq = 0;              // samples issued
     uint32_t mFrameCheckRecorded = 0;         // the sample the last recorded frame took
     std::vector<std::unique_ptr<WolfVkBuffer>> mFrameCheckHost;   // one host buffer per frame slot

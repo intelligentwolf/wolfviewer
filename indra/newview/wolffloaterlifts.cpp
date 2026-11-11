@@ -271,6 +271,7 @@ void WolfFloaterLifts::onClose(bool app_quitting)
         mOpenNote = "The window was closed while your lift was being built. The lift kit carries on by itself and tidies itself "
                     "away when it has finished - look for the lift in the world.";
     }
+    if (mBoxCoroRunning) LL_INFOS("WolfLifts") << "window closed while getting the kit ready: that stops" << LL_ENDL;
     stopBox();
     mPlan.clear();
     mPlanOk = false;
@@ -757,6 +758,7 @@ void WolfFloaterLifts::boxCoro(LLHandle<LLFloater> h, U32 gen)
         if (o && !o->isDead() && o->isRoot()) before.insert(o->getID());
     }
     f->setStatus("Putting your lift kit down beside you (it tidies itself away after building)...", false);
+    LL_INFOS("WolfLifts") << "putting the lift kit down at " << at << LL_ENDL;   // [W104 FEATFIX 2026-11-11/] one line a kit
     rezAt(kit, at);
     for (S32 t = 0; t < 40; ++t)
     {

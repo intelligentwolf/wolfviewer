@@ -434,6 +434,8 @@ void WolfFloaterGreedy::send(const std::string& op, const std::string& extra)
     }
     mBusy = true;
     if (op != "poll") noteActivity();   // [A6/] a press: the quick pace again
+    // [A6/] DEBUG only (logcontrol tag WolfGreedy): every request, to count the polls of an idle window
+    LL_DEBUGS("WolfGreedy") << "request " << op << " game " << mGame << " quiet " << (S32)(LLFrameTimer::getElapsedSeconds() - mLastActivity) << " s" << LL_ENDL;
     const std::string body = "op=" + op + "&g=" + llformat("%d", mGame) + extra;
     LLHandle<LLFloater> handle = getHandle();
     LLCoros::instance().launch("WolfGreedy", [handle, op, body]() { sendCoro(handle, op, body); });

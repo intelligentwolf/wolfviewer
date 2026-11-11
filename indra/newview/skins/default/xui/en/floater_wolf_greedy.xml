@@ -7,7 +7,7 @@
      Three views, chosen with the View buttons at the top and remembered (WolfGreedyMode):
        FULL  - the whole game: whose turn, the players and their scores, this turn, the dice, ROLL / BANK, the game buttons
        TABLE - controls only, for when a Greedy table in-world is the big display: whose turn, your score, ROLL / BANK
-       STRIP - a small bar at the bottom of the screen, to keep playing while walking, flying or sailing
+       HUD   - [W104 FEATFIX 2026-11-11] the old STRIP bar is the Greedy HUD now (wolfgreedyhud.cpp; Paul: "a HUD not a floater")
      Sitting at a Greedy table OFFERS the table view (the offer bar), never forces it. The guide (HOW TO PLAY) shows in the
      full view. Messages and errors stay in the message line until the next action (never a countdown, never a flash). -->
 <floater
@@ -35,7 +35,7 @@
         <text follows="left|top" height="20" layout="topleft" left="232" name="f_view_label" top="20" width="64" font="SansSerifBold" halign="right" text_color="0.89 0.73 0.35 1">View:</text>
         <button follows="left|top" height="28" layout="topleft" left="300" name="f_mode_full" top="16" width="68" label="Full" is_toggle="true" tool_tip="The whole game in this window" />
         <button follows="left|top" height="28" layout="topleft" left="372" name="f_mode_table" top="16" width="68" label="Table" is_toggle="true" tool_tip="Just your controls, for when a Greedy table in-world shows the game" />
-        <button follows="left|top" height="28" layout="topleft" left="444" name="f_mode_strip" top="16" width="68" label="Strip" is_toggle="true" tool_tip="A small bar at the bottom of the screen, to play while you move around" />
+        <button follows="left|top" height="28" layout="topleft" left="444" name="f_mode_strip" top="16" width="68" label="HUD" is_toggle="true" tool_tip="Play on the Greedy HUD along the bottom of the screen, while you walk, fly or sail (this window closes)" />
 
         <panel follows="left|top" height="30" layout="topleft" left="8" name="f_offer" top="56" width="504" visible="false" background_visible="true" bg_alpha_color="0.42 0.5 0.56 1" bg_opaque_color="0.42 0.5 0.56 1">
             <text follows="left|top" height="20" layout="topleft" left="6" name="f_offer_text" top="6" width="270" wrap="false">You are at a Greedy table.</text>
@@ -146,7 +146,7 @@
     <panel follows="left|top" height="230" layout="topleft" left="0" name="table_panel" top="20" width="380" visible="false" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood">
         <button follows="left|top" height="24" layout="topleft" left="8" name="t_mode_full" top="4" width="116" label="Full" is_toggle="true" />
         <button follows="left|top" height="24" layout="topleft" left="132" name="t_mode_table" top="4" width="116" label="Table" is_toggle="true" />
-        <button follows="left|top" height="24" layout="topleft" left="256" name="t_mode_strip" top="4" width="116" label="Strip" is_toggle="true" />
+        <button follows="left|top" height="24" layout="topleft" left="256" name="t_mode_strip" top="4" width="116" label="HUD" is_toggle="true" tool_tip="Play on the Greedy HUD along the bottom of the screen (this window closes)" />
         <text follows="left|top" font="SansSerifLarge" height="26" layout="topleft" left="10" name="t_status" top="36" width="360" text_color="Yellow">Greedy</text>
         <text follows="left|top" font="SansSerifLarge" height="24" layout="topleft" left="10" name="t_score" top="64" width="360">Your score: 0</text>
         <button follows="left|top" font="SansSerifLarge" height="48" layout="topleft" left="10" name="t_roll" image_color="0.13 0.55 0.29 1" label_color="White" top="96" width="174" label="Roll" />
@@ -156,18 +156,4 @@
         <text_editor follows="left|top" height="36" layout="topleft" left="10" name="t_message" top="184" width="360" read_only="true" word_wrap="true" visible="false" />
     </panel>
 
-    <!-- STRIP: one row along the bottom of the screen -->
-    <panel follows="left|top" height="70" layout="topleft" left="0" name="strip_panel" top="20" width="820" visible="false" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood">
-        <text follows="left|top" font="SansSerifLarge" height="24" layout="topleft" left="8" name="s_status" top="6" width="250" text_color="Yellow">Greedy</text>
-        <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="8" name="s_score" top="34" width="250">Your score: 0</text>
-        <icon follows="left|top" height="36" layout="topleft" left="262" name="s_die0" top="10" width="36" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="36" layout="topleft" left="300" name="s_die1" top="10" width="36" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="36" layout="topleft" left="338" name="s_die2" top="10" width="36" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="36" layout="topleft" left="376" name="s_die3" top="10" width="36" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="36" layout="topleft" left="414" name="s_die4" top="10" width="36" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="36" layout="topleft" left="452" name="s_die5" top="10" width="36" image_name="WolfGreedy_Die0" />
-        <button follows="left|top" font="SansSerifLarge" height="40" layout="topleft" left="496" name="s_roll" image_color="0.13 0.55 0.29 1" label_color="White" top="8" width="110" label="Roll" />
-        <button follows="left|top" font="SansSerifLarge" height="40" layout="topleft" left="612" name="s_bank" image_color="0.77 0.55 0.09 1" label_color="White" top="8" width="110" label="Bank" />
-        <button follows="left|top" height="40" layout="topleft" left="728" name="s_mode_full" top="8" width="84" label="Bigger" tool_tip="Show the whole game" />
-    </panel>
 </floater>

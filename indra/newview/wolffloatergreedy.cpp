@@ -213,157 +213,99 @@ namespace
     }
 }
 
-// ------------------------------------------------------------------------------------------------------------- window
-
-WolfFloaterGreedy::WolfFloaterGreedy(const LLSD& key) : LLFloater(key)
+namespace
 {
+    void playSound(const std::string& kind)
+{
+    const char* id = kind == "roll" ? SND_ROLL : kind == "bust" ? SND_BUST : kind == "bank" ? SND_BANK
+                   : kind == "lucky" ? SND_LUCKY : kind == "win" ? SND_WIN : nullptr;
+    if (!id || !gAudiop) return;
+    gAudiop->triggerSound(LLUUID(id), gAgentID, 0.8f, LLAudioEngine::AUDIO_TYPE_UI);
+}
 }
 
-bool WolfFloaterGreedy::postBuild()
-{
-    for (const char* p : { "f_", "t_" })
-    {
-        const std::string pre(p);
-        getChild<LLButton>(pre + "mode_full")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("full", true); });
-        getChild<LLButton>(pre + "mode_table")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("table", true); });
-        getChild<LLButton>(pre + "mode_strip")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("strip", true); });
-    }
-    getChild<LLButton>("s_mode_full")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode(mModeBeforeStrip, true); });
-    for (const char* p : { "f_", "t_", "s_" })
-    {
-        const std::string pre(p);
-        getChild<LLButton>(pre + "roll")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRoll(); });
-        getChild<LLButton>(pre + "bank")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onBank(); });
-    }
-    for (const char* n : { "f_leave", "t_leave" })
-        getChild<LLButton>(n)->setCommitCallback([this](LLUICtrl*, const LLSD&) { if (mGame) send("leave"); });
-    for (const char* n : { "f_help", "t_help" })
-        getChild<LLButton>(n)->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("full", false); showGuide(0); });
-    getChild<LLButton>("f_pass")->setCommitCallback([this](LLUICtrl*, const LLSD&) { if (mGame) send("pass"); });
-    getChild<LLButton>("f_new")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onNew(false); });
-    getChild<LLButton>("f_practice")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onNew(true); });
-    getChild<LLButton>("f_join")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onJoin(); });
-    getChild<LLButton>("f_refresh")->setCommitCallback([this](LLUICtrl*, const LLSD&) { send("list"); });
-    getChild<LLButton>("f_guide_back")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(llmax(0, mGuidePage - 1)); });
-    // [W104 FEATFIX 2026-11-11] on the last card Next reads "Start playing" and closes the guide (showGuide)
-    getChild<LLButton>("f_guide_next")->setCommitCallback([this](LLUICtrl*, const LLSD&)
-    {
-        showGuide(mGuidePage >= GUIDE_PAGES - 1 ? -1 : mGuidePage + 1);
-    });
-    getChild<LLButton>("f_guide_done")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(-1); });
-    getChild<LLButton>("f_guide_practice")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(-1); onNew(true); });
-    getChild<LLButton>("f_offer_yes")->setCommitCallback([this](LLUICtrl*, const LLSD&)
-    {
-        getChild<LLUICtrl>("f_offer")->setVisible(false);
-        setMode("table", true);
-    });
-    getChild<LLButton>("f_offer_no")->setCommitCallback([this](LLUICtrl*, const LLSD&)
-    {
-        mOfferDismissed = true;
-        getChild<LLUICtrl>("f_offer")->setVisible(false);
-        // back to the view they had chosen (the offer is shown in Full so it can be read)
-        if (!mModeBeforeOffer.empty() && mModeBeforeOffer != mMode) setMode(mModeBeforeOffer, false);
-        mModeBeforeOffer.clear();
-    });
-    LLComboBox* target = getChild<LLComboBox>("f_target");
-    target->add("10,000", LLSD(10000));
-    target->add("5,000", LLSD(5000));
-    target->add("2,000", LLSD(2000));
-    target->selectFirstItem();
-    // [W104 FEATFIX 2026-11-11] the tumble's frames and the dice faces, loaded now so the first roll does not flicker
-    for (S32 i = 0; i < ROLL_FRAMES; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Roll%d", i)));
-    for (S32 i = 0; i <= 6; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Die%d", i)));
-    std::string mode = gSavedSettings.getString("WolfGreedyMode");
-    if (mode != "table" && mode != "strip") mode = "full";
-    setMode(mode, false);
-    showNoGame();
-    return true;
-}
+// ----------------------------------------------------------------------------------------------------------- the session
 
-void WolfFloaterGreedy::onOpen(const LLSD& key)
+// [W104 FEATFIX 2026-11-11] wolffloatergreedy.h WolfGreedyGame: what the window did alone before - the requests, the polling,
+// the game - now shared by the HUD and the window.
+void WolfGreedyGame::viewOpened(EView v)
 {
-    LLFloater::onOpen(key);
-    if (!WolfGrid::isWolfTerritories())
-    {
-        setMessage("Greedy is for Wolf Territories logins. Log in to Wolf Territories to play.", EStatus::ERR);
-        return;
-    }
-    if (key.isMap() && key.has("table"))
-    {
-        onTable(key["table"].asInteger(), key["label"].asString());
-        return;
-    }
+    const bool was = mViews != 0;
+    mViews |= (U32)v;
     noteActivity();   // [A6] opened (again): the quick pace, and a poll at once
     mNextPoll = 0.0;
-    if (!mGame)
+    if (!WolfGrid::isWolfTerritories())
+    {
+        setMessage("Greedy is for Wolf Territories logins. Log in to Wolf Territories to play.", true);
+        return;
+    }
+    if (!was && !mGame)
     {
         send("mine");
         send("list");
     }
-    if (!gSavedSettings.getBOOL("WolfGreedyGuideSeen"))
+    changed();
+}
+
+void WolfGreedyGame::viewClosed(EView v)
+{
+    mViews &= ~(U32)v;
+    changed();
+}
+
+// static
+void WolfGreedyGame::openHud()
+{
+    WolfGreedyGame& g = instance();
+    if (g.hudOn()) return;
+    g.viewOpened(VIEW_HUD);
+    // the first time: the guide's cards (as the window did, WolfGreedyGuideSeen)
+    if (WolfGrid::isWolfTerritories() && !gSavedSettings.getBOOL("WolfGreedyGuideSeen"))
     {
         gSavedSettings.setBOOL("WolfGreedyGuideSeen", true);
-        setMode("full", false);
-        showGuide(0);
+        WolfFloaterGreedy::showGuideWindow();
     }
 }
 
-void WolfFloaterGreedy::setMode(const std::string& mode, bool remember)
+// static
+void WolfGreedyGame::closeHud()
 {
-    if (mode == "strip" && mMode != "strip") mModeBeforeStrip = mMode == "table" ? "table" : "full";
-    mMode = mode;
-    if (remember) gSavedSettings.setString("WolfGreedyMode", mode);
-    LLView* full = getChild<LLView>("full_panel");
-    LLView* table = getChild<LLView>("table_panel");
-    LLView* strip = getChild<LLView>("strip_panel");
-    full->setVisible(mode == "full");
-    table->setVisible(mode == "table");
-    strip->setVisible(mode == "strip");
-    LLView* shown = mode == "table" ? table : mode == "strip" ? strip : full;
-    // the panels follow left|top only (floater_wolf_greedy.xml), so reshaping the floater keeps each one under the
-    // title bar and leaves its children alone; the floater takes the shown panel's size plus the title bar
-    const S32 header = getRect().getHeight() - full->getRect().mTop;
-    const LLRect old = getRect();
-    const S32 w = shown->getRect().getWidth(), h = shown->getRect().getHeight() + header;
-    reshape(w, h, false);
-    if (mode == "strip" && gFloaterView)
-    {
-        // along the bottom of the screen, above the toolbars (getSnapRect leaves them out), centred
-        const LLRect snap = gFloaterView->getSnapRect();
-        const S32 left = snap.mLeft + (snap.getWidth() - w) / 2;
-        setOrigin(left, snap.mBottom + 6);
-    }
-    else
-    {
-        setOrigin(old.mLeft, old.mTop - h);   // the top-left corner stays where it was
-    }
-    if (gFloaterView) gFloaterView->adjustToFitScreen(this, false);
-    for (const char* p : { "f_", "t_" })
-    {
-        const std::string pre(p);
-        getChild<LLButton>(pre + "mode_full")->setToggleState(mode == "full");
-        getChild<LLButton>(pre + "mode_table")->setToggleState(mode == "table");
-        getChild<LLButton>(pre + "mode_strip")->setToggleState(mode == "strip");
-    }
-    getChild<LLButton>("s_mode_full")->setLabel(mModeBeforeStrip == "table" ? std::string("Table") : std::string("Bigger"));
+    if (instanceExists()) instance().viewClosed(VIEW_HUD);
 }
 
-void WolfFloaterGreedy::draw()
+// static
+void WolfGreedyGame::toggleHud()
 {
-    // the view buttons are toggles: a click flips the one pressed after our callback ran (LLButton), so the three are
-    // put right here every frame (the 14:23Z screenshots showed "Full" lit in the Table view)
-    for (const char* p : { "f_", "t_" })
+    if (instanceExists() && instance().hudOn()) closeHud();
+    else openHud();
+}
+
+void WolfGreedyGame::noteActivity()
+{
+    mLastActivity = LLFrameTimer::getElapsedSeconds();
+}
+
+void WolfGreedyGame::setMessage(const std::string& text, bool error)
+{
+    mMessage = text;
+    mMessageError = error;
+    if (!text.empty())
     {
-        const std::string pre(p);
-        getChild<LLButton>(pre + "mode_full")->setToggleState(mMode == "full");
-        getChild<LLButton>(pre + "mode_table")->setToggleState(mMode == "table");
-        getChild<LLButton>(pre + "mode_strip")->setToggleState(mMode == "strip");
+        Msg m;
+        m.mText = text;
+        m.mError = error;
+        mLog.insert(mLog.begin(), m);
+        if (mLog.size() > 6) mLog.resize(6);   // (the HUD shows the newest few)
     }
-    animate();   // [W104 FEATFIX 2026-11-11/] the tumble and the banner
-    LLFloater::draw();
-    // [W104 FEATFIX 2026-11-11 A6] draw() runs only while the window shows (a closed window is hidden, not drawn); minimised,
-    // nothing is polled, and opened out again it polls at once
-    if (isMinimized())
+    changed();
+}
+
+void WolfGreedyGame::tick(bool minimised)
+{
+    moments();
+    // [W104 FEATFIX 2026-11-11 A6] polled only while a view shows; the window minimised (and no HUD): nothing, and opened out
+    // again it polls at once
+    if (minimised && !hudOn())
     {
         mWasMinimised = true;
         return;
@@ -385,16 +327,59 @@ void WolfFloaterGreedy::draw()
     send("poll", "&v=" + llformat("%d", mVersion));
 }
 
-void WolfFloaterGreedy::noteActivity()
+void WolfGreedyGame::roll()
 {
-    mLastActivity = LLFrameTimer::getElapsedSeconds();
+    const std::string b = mState["game"]["buttons"].asString();
+    if (!mGame) { setMessage("Start a new game, or join one, first.", true); return; }
+    if (b.find('S') != std::string::npos || b.find('A') != std::string::npos) send("start");
+    else if (b.find('R') != std::string::npos) send("roll");
+    else setMessage("It is not your turn yet.", false);
 }
 
-void WolfFloaterGreedy::onTable(S32 game, const std::string& label)
+void WolfGreedyGame::bank()
+{
+    const std::string b = mState["game"]["buttons"].asString();
+    if (b.find('B') != std::string::npos) send("bank");
+    else if (b.find('R') != std::string::npos) setMessage("Roll first - there is nothing to bank yet.", false);
+    else if (mGame) setMessage("It is not your turn yet.", false);
+}
+
+void WolfGreedyGame::newGame(bool practice, S32 target)
+{
+    if (mGame && mState["game"]["in_game"].asBoolean() && mState["game"]["state"].asString() != "finished")
+    {
+        send("leave");   // one game at a time; the queue keeps the order
+    }
+    std::string region = gAgent.getRegion() ? gAgent.getRegion()->getName() : std::string();
+    send("new", llformat("&target=%d", practice ? 2000 : target) + (practice ? "&practice=1" : "") + "&region=" + LLURI::escape(region));
+}
+
+void WolfGreedyGame::join(S32 id)
+{
+    if (id <= 0) { setMessage("Choose a game from the list first (Refresh looks again).", false); return; }
+    if (mGame && mGame != id && mState["game"]["in_game"].asBoolean()) send("leave");
+    mVersion = -1;
+    send("join", llformat("&g=%d", id));   // the answer's game.id becomes mGame (onReply)
+}
+
+void WolfGreedyGame::leave()
+{
+    if (mGame) send("leave");
+}
+
+void WolfGreedyGame::pass()
+{
+    if (mGame) send("pass");
+}
+
+void WolfGreedyGame::refreshList()
+{
+    send("list");
+}
+
+void WolfGreedyGame::onTable(S32 game)
 {
     if (game <= 0) return;
-    mTableGame = game;
-    mTableLabel = label;
     noteActivity();   // [A6/]
     if (mGame != game)
     {
@@ -403,61 +388,9 @@ void WolfFloaterGreedy::onTable(S32 game, const std::string& label)
         mVersion = -1;
         send("join", llformat("&g=%d", game));
     }
-    if (mMode != "table" && !mOfferDismissed)
-    {
-        getChild<LLTextBox>("f_offer_text")->setText("You are at " + (label.empty() ? std::string("a Greedy table") : label) + ".");
-        getChild<LLUICtrl>("f_offer")->setVisible(true);
-        mModeBeforeOffer = mMode;
-        if (mMode == "strip") setMode("full", false);
-    }
 }
 
-void WolfFloaterGreedy::onLeftTable()
-{
-    mTableGame = 0;
-    mOfferDismissed = false;
-    getChild<LLUICtrl>("f_offer")->setVisible(false);
-    if (mMode == "table") setMessage("You have left the table. The Full view shows the whole game.", EStatus::INFO);
-}
-
-void WolfFloaterGreedy::onRoll()
-{
-    const std::string b = mState["game"]["buttons"].asString();
-    if (!mGame) { setMessage("Start a new game, or join one, first.", EStatus::ERR); return; }
-    if (b.find('S') != std::string::npos || b.find('A') != std::string::npos) send("start");
-    else if (b.find('R') != std::string::npos) send("roll");
-    else setMessage("It is not your turn yet.", EStatus::INFO);
-}
-
-void WolfFloaterGreedy::onBank()
-{
-    const std::string b = mState["game"]["buttons"].asString();
-    if (b.find('B') != std::string::npos) send("bank");
-    else if (b.find('R') != std::string::npos) setMessage("Roll first - there is nothing to bank yet.", EStatus::INFO);
-    else if (mGame) setMessage("It is not your turn yet.", EStatus::INFO);
-}
-
-void WolfFloaterGreedy::onNew(bool practice)
-{
-    if (mGame && mState["game"]["in_game"].asBoolean() && mState["game"]["state"].asString() != "finished")
-    {
-        send("leave");   // one game at a time; the queue keeps the order
-    }
-    const S32 target = practice ? 2000 : getChild<LLComboBox>("f_target")->getValue().asInteger();
-    std::string region = gAgent.getRegion() ? gAgent.getRegion()->getName() : std::string();
-    send("new", llformat("&target=%d", target) + (practice ? "&practice=1" : "") + "&region=" + LLURI::escape(region));
-}
-
-void WolfFloaterGreedy::onJoin()
-{
-    const S32 id = getChild<LLComboBox>("f_games")->getValue().asInteger();
-    if (id <= 0) { setMessage("Choose a game from the list first (Refresh looks again).", EStatus::INFO); return; }
-    if (mGame && mGame != id && mState["game"]["in_game"].asBoolean()) send("leave");
-    mVersion = -1;
-    send("join", llformat("&g=%d", id));   // the answer's game.id becomes mGame (onReply)
-}
-
-void WolfFloaterGreedy::send(const std::string& op, const std::string& extra)
+void WolfGreedyGame::send(const std::string& op, const std::string& extra)
 {
     if (mBusy)
     {
@@ -466,15 +399,15 @@ void WolfFloaterGreedy::send(const std::string& op, const std::string& extra)
     }
     mBusy = true;
     if (op != "poll") noteActivity();   // [A6/] a press: the quick pace again
-    // [A6/] DEBUG only (logcontrol tag WolfGreedy): every request, to count the polls of an idle window
+    // [A6/] DEBUG only (logcontrol tag WolfGreedy): every request, to count the polls of an idle view
     LL_DEBUGS("WolfGreedy") << "request " << op << " game " << mGame << " quiet " << (S32)(LLFrameTimer::getElapsedSeconds() - mLastActivity) << " s" << LL_ENDL;
     const std::string body = "op=" + op + "&g=" + llformat("%d", mGame) + extra;
-    LLHandle<LLFloater> handle = getHandle();
-    LLCoros::instance().launch("WolfGreedy", [handle, op, body]() { sendCoro(handle, op, body); });
+    changed();
+    LLCoros::instance().launch("WolfGreedy", [op, body]() { sendCoro(op, body); });
 }
 
 // static
-void WolfFloaterGreedy::sendCoro(LLHandle<LLFloater> handle, std::string op, std::string body)
+void WolfGreedyGame::sendCoro(std::string op, std::string body)
 {
     LLCore::HttpStatus status;
     // [W104 FEATFIX 2026-11-11 A3] a read is asked again (LLCore's retries, then the second host); a change goes once, and to
@@ -500,18 +433,18 @@ void WolfFloaterGreedy::sendCoro(LLHandle<LLFloater> handle, std::string op, std
             error = "The Greedy server did not answer (" + status.toString() + "). Please try again in a moment.";
         if (op != "poll") LL_WARNS("WolfGreedy") << op << ": " << status.toString() << " " << error << LL_ENDL;
     }
-    WolfFloaterGreedy* self = static_cast<WolfFloaterGreedy*>(handle.get());
-    if (!self) return;
-    self->onReply(op, reply, error, uncertain);
+    if (!instanceExists() || LLApp::isExiting()) return;   // (the session is a singleton: it outlives every request but the last)
+    instance().onReply(op, reply, error, uncertain);
 }
 
-void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const std::string& error, bool uncertain)
+void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std::string& error, bool uncertain)
 {
     mBusy = false;
+    changed();
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!error.empty())
     {
-        if (op != "poll") setMessage(error, EStatus::ERR);
+        if (op != "poll") setMessage(error, true);
         if (uncertain)
         {
             // [W104 FEATFIX 2026-11-11 A3] what the server has now, at once: the game if there is one (a full answer, not
@@ -531,47 +464,26 @@ void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const 
     else if (op == "list")
     {
         mGames = reply["games"];
-        LLComboBox* games = getChild<LLComboBox>("f_games");
-        games->removeall();
-        if (!mGames.isArray() || mGames.size() == 0)
-        {
-            games->add("Nobody is playing just now", LLSD(0));
-        }
-        else
-        {
-            games->add("Choose a game to join...", LLSD(0));
-            for (const LLSD& g : llsd::inArray(mGames))
-            {
-                std::string where = g["region"].asString();
-                games->add(g["label"].asString() + (where.empty() ? std::string() : " at " + where) +
-                           llformat(" - %d in", g["players"].asInteger()) +
-                           (g["state"].asString() == "lobby" ? std::string(", waiting") : std::string(", playing")),
-                           LLSD(g["id"].asInteger()));
-            }
-        }
-        games->selectFirstItem();
     }
     else if (reply["left"].asBoolean())
     {
         mGame = 0;
         mVersion = -1;
         mState = LLSD();
-        showNoGame();
-        setMessage("You have left the game.", EStatus::INFO);
+        setMessage("You have left the game.", false);
     }
     else if (reply["gone"].asBoolean())
     {
         mGame = 0;
         mVersion = -1;
         mState = LLSD();
-        showNoGame();
-        setMessage("That game has ended.", EStatus::INFO);
+        setMessage("That game has ended.", false);
         send("list");
         return;
     }
     else if (reply["none"].asBoolean())
     {
-        showNoGame();
+        mState = LLSD();
     }
     else if (!reply["same"].asBoolean() && reply.has("game"))
     {
@@ -602,13 +514,25 @@ void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const 
         }
         mVersion = v;
         mState = reply;
-        show(reply);
-        if (rolled) startRoll(banner, banner_color);
-        else if (!banner.empty()) showBanner(banner, banner_color);
-        if (op != "poll") setMessage(std::string(), EStatus::INFO);
+        if (op != "poll") { mMessage.clear(); mMessageError = false; }   // a press that went through: its old words go
+        mBanner.clear();
+        mBannerStart = -1.0;
+        if (rolled && !reduce_motion())
+        {
+            mRollStart = now;
+            mPendingBanner = banner;
+            mPendingBannerColor = banner_color;
+        }
+        else if (!banner.empty())
+        {
+            mRollStart = -1.0;
+            mBanner = banner;
+            mBannerColor = banner_color;
+            mBannerStart = now;
+        }
     }
-    const std::string st = mState["game"]["state"].asString();
     // [W104 FEATFIX 2026-11-11 A6] the pace slows while nothing happens (see POLL_SLOWING)
+    const std::string st = mState["game"]["state"].asString();
     const bool going = st == "playing" || st == "final";
     const F64 quiet = now - mLastActivity;
     const F64 base = going ? POLL_PLAYING_S : POLL_WAITING_S;
@@ -623,13 +547,281 @@ void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const 
     }
 }
 
-void WolfFloaterGreedy::playSound(const std::string& kind)
+S32 WolfGreedyGame::rollFrame(S32 die) const
 {
-    const char* id = kind == "roll" ? SND_ROLL : kind == "bust" ? SND_BUST : kind == "bank" ? SND_BANK
-                   : kind == "lucky" ? SND_LUCKY : kind == "win" ? SND_WIN : nullptr;
-    if (!id || !gAudiop) return;
-    gAudiop->triggerSound(LLUUID(id), gAgentID, 0.8f, LLAudioEngine::AUDIO_TYPE_UI);
+    if (mRollStart < 0.0) return 0;
+    const F64 t = LLFrameTimer::getElapsedSeconds() - mRollStart;
+    const S32 frame = (S32)(llclamp(t / ROLL_SECS, 0.0, 0.999) * (F64)ROLL_FRAMES);
+    return (frame + die * 5) % ROLL_FRAMES;   // each die a few frames apart, so they do not turn together
 }
+
+void WolfGreedyGame::landNow()
+{
+    if (mRollStart < 0.0) return;
+    mRollStart = -1.0;
+    if (!mPendingBanner.empty())
+    {
+        mBanner = mPendingBanner;
+        mBannerColor = mPendingBannerColor;
+        mBannerStart = LLFrameTimer::getElapsedSeconds();
+    }
+    mPendingBanner.clear();
+    changed();
+}
+
+F32 WolfGreedyGame::bannerAge() const
+{
+    return mBannerStart < 0.0 ? 0.f : (F32)(LLFrameTimer::getElapsedSeconds() - mBannerStart);
+}
+
+void WolfGreedyGame::moments()
+{
+    if (mRollStart >= 0.0 && LLFrameTimer::getElapsedSeconds() - mRollStart >= ROLL_SECS) landNow();
+    if (mBannerStart >= 0.0 && LLFrameTimer::getElapsedSeconds() - mBannerStart >= BANNER_SECS)
+    {
+        mBanner.clear();
+        mBannerStart = -1.0;
+        changed();
+    }
+}
+
+// ------------------------------------------------------------------------------------------------------------- window
+
+WolfFloaterGreedy::WolfFloaterGreedy(const LLSD& key) : LLFloater(key)
+{
+}
+
+WolfFloaterGreedy::~WolfFloaterGreedy() = default;
+
+bool WolfFloaterGreedy::postBuild()
+{
+    for (const char* p : { "f_", "t_" })
+    {
+        const std::string pre(p);
+        getChild<LLButton>(pre + "mode_full")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("full", true); });
+        getChild<LLButton>(pre + "mode_table")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("table", true); });
+        // [W104 FEATFIX 2026-11-11] the old Strip view is the Greedy HUD now (Paul: "a HUD not a floater")
+        getChild<LLButton>(pre + "mode_strip")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+        {
+            WolfGreedyGame::openHud();
+            closeFloater();
+        });
+        getChild<LLButton>(pre + "roll")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRoll(); });
+        getChild<LLButton>(pre + "bank")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfGreedyGame::instance().bank(); });
+        getChild<LLButton>(pre + "leave")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfGreedyGame::instance().leave(); });
+        getChild<LLButton>(pre + "help")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setMode("full", false); showGuide(0); });
+    }
+    getChild<LLButton>("f_pass")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfGreedyGame::instance().pass(); });
+    getChild<LLButton>("f_new")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onNew(false); });
+    getChild<LLButton>("f_practice")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onNew(true); });
+    getChild<LLButton>("f_join")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onJoin(); });
+    getChild<LLButton>("f_refresh")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfGreedyGame::instance().refreshList(); });
+    getChild<LLButton>("f_guide_back")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(llmax(0, mGuidePage - 1)); });
+    // [W104 FEATFIX 2026-11-11] on the last card Next reads "Start playing" and closes the guide (showGuide)
+    getChild<LLButton>("f_guide_next")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        showGuide(mGuidePage >= GUIDE_PAGES - 1 ? -1 : mGuidePage + 1);
+    });
+    getChild<LLButton>("f_guide_done")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(-1); });
+    getChild<LLButton>("f_guide_practice")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(-1); onNew(true); });
+    getChild<LLButton>("f_offer_yes")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        getChild<LLUICtrl>("f_offer")->setVisible(false);
+        setMode("table", true);
+    });
+    getChild<LLButton>("f_offer_no")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        mOfferDismissed = true;
+        getChild<LLUICtrl>("f_offer")->setVisible(false);
+        // back to the view they had chosen (the offer is shown in Full so it can be read)
+        if (!mModeBeforeOffer.empty() && mModeBeforeOffer != mMode) setMode(mModeBeforeOffer, false);
+        mModeBeforeOffer.clear();
+    });
+    LLComboBox* target = getChild<LLComboBox>("f_target");
+    target->add("10,000", LLSD(10000));
+    target->add("5,000", LLSD(5000));
+    target->add("2,000", LLSD(2000));
+    target->selectFirstItem();
+    // [W104 FEATFIX 2026-11-11] the tumble's frames and the dice faces, loaded now so the first roll does not flicker
+    for (S32 i = 0; i < ROLL_FRAMES; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Roll%d", i)));
+    for (S32 i = 0; i <= 6; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Die%d", i)));
+    std::string mode = gSavedSettings.getString("WolfGreedyMode");
+    if (mode != "table") mode = "full";   // ("strip", the old bar, is the HUD now)
+    setMode(mode, false);
+    showNoGame();
+    return true;
+}
+
+void WolfFloaterGreedy::onOpen(const LLSD& key)
+{
+    LLFloater::onOpen(key);
+    WolfGreedyGame::instance().viewOpened(WolfGreedyGame::VIEW_WINDOW);
+    mSeen = 0;   // drawn afresh
+    if (key.isMap() && key.has("table"))
+    {
+        onTable(key["table"].asInteger(), key["label"].asString());
+    }
+}
+
+void WolfFloaterGreedy::onClose(bool app_quitting)
+{
+    if (!app_quitting && WolfGreedyGame::instanceExists()) WolfGreedyGame::instance().viewClosed(WolfGreedyGame::VIEW_WINDOW);
+    LLFloater::onClose(app_quitting);
+}
+
+// static
+void WolfFloaterGreedy::showGuideWindow()
+{
+    if (WolfFloaterGreedy* f = LLFloaterReg::showTypedInstance<WolfFloaterGreedy>("wolf_greedy"))
+    {
+        f->setMode("full", false);
+        f->showGuide(0);
+    }
+}
+
+// static
+void WolfFloaterGreedy::showLobbyWindow()
+{
+    if (WolfFloaterGreedy* f = LLFloaterReg::showTypedInstance<WolfFloaterGreedy>("wolf_greedy"))
+    {
+        f->setMode("full", false);
+        if (f->mGuidePage >= 0) f->showGuide(-1);
+        WolfGreedyGame::instance().refreshList();
+    }
+}
+
+void WolfFloaterGreedy::setMode(const std::string& mode, bool remember)
+{
+    mMode = mode;
+    if (remember) gSavedSettings.setString("WolfGreedyMode", mode);
+    LLView* full = getChild<LLView>("full_panel");
+    LLView* table = getChild<LLView>("table_panel");
+    full->setVisible(mode == "full");
+    table->setVisible(mode == "table");
+    LLView* shown = mode == "table" ? table : full;
+    // the panels follow left|top only (floater_wolf_greedy.xml), so reshaping the floater keeps each one under the
+    // title bar and leaves its children alone; the floater takes the shown panel's size plus the title bar
+    const S32 header = getRect().getHeight() - full->getRect().mTop;
+    const LLRect old = getRect();
+    const S32 w = shown->getRect().getWidth(), h = shown->getRect().getHeight() + header;
+    reshape(w, h, false);
+    setOrigin(old.mLeft, old.mTop - h);   // the top-left corner stays where it was
+    if (gFloaterView) gFloaterView->adjustToFitScreen(this, false);
+    for (const char* p : { "f_", "t_" })
+    {
+        const std::string pre(p);
+        getChild<LLButton>(pre + "mode_full")->setToggleState(mode == "full");
+        getChild<LLButton>(pre + "mode_table")->setToggleState(mode == "table");
+        getChild<LLButton>(pre + "mode_strip")->setToggleState(false);
+    }
+}
+
+void WolfFloaterGreedy::draw()
+{
+    // the view buttons are toggles: a click flips the one pressed after our callback ran (LLButton), so the three are
+    // put right here every frame (the 14:23Z screenshots showed "Full" lit in the Table view)
+    for (const char* p : { "f_", "t_" })
+    {
+        const std::string pre(p);
+        getChild<LLButton>(pre + "mode_full")->setToggleState(mMode == "full");
+        getChild<LLButton>(pre + "mode_table")->setToggleState(mMode == "table");
+        getChild<LLButton>(pre + "mode_strip")->setToggleState(false);
+    }
+    WolfGreedyGame& game = WolfGreedyGame::instance();
+    game.tick(isMinimized());
+    if (game.version() != mSeen)
+    {
+        mSeen = game.version();
+        render();
+    }
+    animate();   // [W104 FEATFIX 2026-11-11/] the tumble and the banner
+    LLFloater::draw();
+}
+
+void WolfFloaterGreedy::render()
+{
+    const WolfGreedyGame& game = WolfGreedyGame::instance();
+    if (game.state().has("game")) show(game.state());
+    else showNoGame();
+    // the games to join
+    LLComboBox* games = getChild<LLComboBox>("f_games");
+    const LLSD sel = games->getValue();
+    games->removeall();
+    const LLSD& list = game.games();
+    if (!list.isArray() || list.size() == 0)
+    {
+        games->add("Nobody is playing just now", LLSD(0));
+    }
+    else
+    {
+        games->add("Choose a game to join...", LLSD(0));
+        for (const LLSD& g : llsd::inArray(list))
+        {
+            std::string where = g["region"].asString();
+            games->add(g["label"].asString() + (where.empty() ? std::string() : " at " + where) +
+                       llformat(" - %d in", g["players"].asInteger()) +
+                       (g["state"].asString() == "lobby" ? std::string(", waiting") : std::string(", playing")),
+                       LLSD(g["id"].asInteger()));
+        }
+    }
+    if (!games->selectByValue(sel)) games->selectFirstItem();
+    showMessage();
+}
+
+void WolfFloaterGreedy::showMessage()
+{
+    // Source: wolffloaterdob.cpp setStatus - light red on the dark floater, and the words say it too; it stays until the
+    // next action (an error is never taken away by a timer)
+    const WolfGreedyGame& game = WolfGreedyGame::instance();
+    for (const char* n : { "f_message", "t_message" })
+    {
+        LLTextEditor* m = getChild<LLTextEditor>(n);
+        const LLUIColor c = game.messageIsError() ? LLUIColor(RED_TEXT) : LLUIColor(LLColor4::white);
+        m->setReadOnlyColor(c);
+        m->setColor(c);
+        m->setText(game.message());
+        m->setVisible(!game.message().empty());
+    }
+}
+
+void WolfFloaterGreedy::onTable(S32 game, const std::string& label)
+{
+    if (game <= 0) return;
+    mTableGame = game;
+    mTableLabel = label;
+    WolfGreedyGame::instance().onTable(game);
+    if (mMode != "table" && !mOfferDismissed)
+    {
+        getChild<LLTextBox>("f_offer_text")->setText("You are at " + (label.empty() ? std::string("a Greedy table") : label) + ".");
+        getChild<LLUICtrl>("f_offer")->setVisible(true);
+        mModeBeforeOffer = mMode;
+    }
+}
+
+void WolfFloaterGreedy::onLeftTable()
+{
+    mTableGame = 0;
+    mOfferDismissed = false;
+    getChild<LLUICtrl>("f_offer")->setVisible(false);
+    if (mMode == "table") WolfGreedyGame::instance().setMessage("You have left the table. The Full view shows the whole game.", false);
+}
+
+void WolfFloaterGreedy::onRoll()
+{
+    WolfGreedyGame::instance().landNow();
+    WolfGreedyGame::instance().roll();
+}
+
+void WolfFloaterGreedy::onNew(bool practice)
+{
+    WolfGreedyGame::instance().newGame(practice, getChild<LLComboBox>("f_target")->getValue().asInteger());
+}
+
+void WolfFloaterGreedy::onJoin()
+{
+    WolfGreedyGame::instance().join(getChild<LLComboBox>("f_games")->getValue().asInteger());
+}
+
 
 void WolfFloaterGreedy::showNoGame()
 {
@@ -637,14 +829,13 @@ void WolfFloaterGreedy::showNoGame()
     getChild<LLScrollListCtrl>("f_board")->deleteAllItems();
     mBoardEmpty = true;
     getChild<LLUICtrl>("f_tips")->setVisible(false);
-    for (const char* n : { "f_status", "t_status", "s_status" }) getChild<LLTextBox>(n)->setText(std::string("Greedy"));
+    for (const char* n : { "f_status", "t_status" }) getChild<LLTextBox>(n)->setText(std::string("Greedy"));
     getChild<LLTextBox>("f_turn_label")->setText(std::string());
     getChild<LLTextBox>("f_turn")->setText(std::string());
     getChild<LLTextBox>("f_dice_left")->setText(std::string());
     getChild<LLTextBox>("f_event")->setText(std::string());
     getChild<LLTextBox>("t_score")->setText(std::string("Not in a game"));
-    getChild<LLTextBox>("s_score")->setText(std::string("Not in a game"));
-    showDice(LLSD(), "000000");
+    if (mGuidePage < 0 && !WolfGreedyGame::instance().rolling()) applyDice(LLSD(), "000000");
     refreshButtons();
 }
 
@@ -652,7 +843,7 @@ void WolfFloaterGreedy::show(const LLSD& state)
 {
     const LLSD& g = state["game"];
     const std::string status = g["status"].asString();
-    for (const char* n : { "f_status", "t_status", "s_status" })
+    for (const char* n : { "f_status", "t_status" })
     {
         LLTextBox* t = getChild<LLTextBox>(n);
         t->setText(status);
@@ -707,18 +898,8 @@ void WolfFloaterGreedy::show(const LLSD& state)
     ev->setColor(g["event_kind"].asString() == "bust" ? RED_TEXT : LLColor4::white);
     const std::string score = "Your score: " + number(myScore) + (top > myScore ? "   Top: " + number(top) : std::string());
     getChild<LLTextBox>("t_score")->setText(score);
-    getChild<LLTextBox>("s_score")->setText(score);
-    showDice(g["dice"], g["kept"].asString());
+    if (mGuidePage < 0 && !WolfGreedyGame::instance().rolling()) applyDice(g["dice"], g["kept"].asString());
     refreshButtons();
-}
-
-// [W104 FEATFIX 2026-11-11] The game's dice: kept here, and drawn unless the guide's example dice or a tumble show instead.
-void WolfFloaterGreedy::showDice(const LLSD& dice, const std::string& kept)
-{
-    mDice = dice;
-    mKept = kept;
-    if (mGuidePage >= 0 || mRollStart >= 0.0) return;   // (the guide shows its own; a tumble ends on these: endRoll)
-    applyDice(dice, kept);
 }
 
 // The 3D dice faces (greedy-art/render_dice.py): a die that scored is gold, a bust red, the others ivory.
@@ -729,7 +910,7 @@ void WolfFloaterGreedy::applyDice(const LLSD& dice, const std::string& kept)
         const S32 face = dice.isArray() && i < (S32)dice.size() ? llclamp(dice[i].asInteger(), 0, 6) : 0;
         const char k = i < (S32)kept.size() ? kept[i] : '0';
         const LLColor4 c = k == '1' ? GOLD_DIE : k == 'x' ? RED_DIE : LLColor4::white;
-        for (const char* p : { "f_die", "s_die" })
+        for (const char* p : { "f_die" })
         {
             LLIconCtrl* icon = getChild<LLIconCtrl>(llformat("%s%d", p, i));
             icon->setValue(LLSD(llformat("WolfGreedy_Die%d", face)));
@@ -738,103 +919,63 @@ void WolfFloaterGreedy::applyDice(const LLSD& dice, const std::string& kept)
     }
 }
 
-void WolfFloaterGreedy::startRoll(const std::string& banner, const LLColor4& banner_color)
-{
-    mPendingBanner = banner;
-    mPendingBannerColor = banner_color;
-    getChild<LLUICtrl>("f_banner")->setVisible(false);
-    mBannerStart = -1.0;
-    if (reduce_motion() || mGuidePage >= 0)
-    {
-        endRoll();
-        return;
-    }
-    mRollStart = LLFrameTimer::getElapsedSeconds();
-}
-
-void WolfFloaterGreedy::endRoll()
-{
-    mRollStart = -1.0;
-    if (mGuidePage < 0) applyDice(mDice, mKept);
-    if (!mPendingBanner.empty()) showBanner(mPendingBanner, mPendingBannerColor);
-    mPendingBanner.clear();
-}
-
-void WolfFloaterGreedy::showBanner(const std::string& text, const LLColor4& color)
-{
-    if (mGuidePage >= 0) return;
-    LLTextBox* b = getChild<LLTextBox>("f_banner");
-    b->setText(text);
-    b->setColor(color);
-    b->setVisible(true);
-    mBannerColor = color;
-    mBannerStart = LLFrameTimer::getElapsedSeconds();
-}
-
+// [W104 FEATFIX 2026-11-11] The session's moment on the window: the dice tumble (the session says which frame), then its banner
+// pulses briefly and goes (wolffloatergreedy.h WolfGreedyGame).
 void WolfFloaterGreedy::animate()
 {
-    const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (mRollStart >= 0.0)
+    const WolfGreedyGame& game = WolfGreedyGame::instance();
+    if (mGuidePage >= 0) return;
+    if (game.rolling())
     {
-        const F64 t = now - mRollStart;
-        if (t >= ROLL_SECS)
+        mWasRolling = true;
+        const LLSD& dice = game.state()["game"]["dice"];
+        for (S32 i = 0; i < 6; ++i)
         {
-            endRoll();
-        }
-        else
-        {
-            // every die with a face tumbles, each a few frames apart so they do not turn together, untinted
-            const S32 frame = (S32)(t / ROLL_SECS * (F64)ROLL_FRAMES);
-            for (S32 i = 0; i < 6; ++i)
-            {
-                const bool has = mDice.isArray() && i < (S32)mDice.size() && mDice[i].asInteger() > 0;
-                if (!has) continue;
-                const std::string img = llformat("WolfGreedy_Roll%d", (frame + i * 5) % ROLL_FRAMES);
-                for (const char* p : { "f_die", "s_die" })
-                {
-                    LLIconCtrl* icon = getChild<LLIconCtrl>(llformat("%s%d", p, i));
-                    icon->setValue(LLSD(img));
-                    icon->setColor(LLColor4::white);
-                }
-            }
+            if (!(dice.isArray() && i < (S32)dice.size() && dice[i].asInteger() > 0)) continue;
+            LLIconCtrl* icon = getChild<LLIconCtrl>(llformat("f_die%d", i));
+            icon->setValue(LLSD(llformat("WolfGreedy_Roll%d", game.rollFrame(i))));
+            icon->setColor(LLColor4::white);
         }
     }
-    if (mBannerStart >= 0.0)
+    else if (mWasRolling)
     {
-        const F64 t = now - mBannerStart;
-        LLTextBox* b = getChild<LLTextBox>("f_banner");
-        if (t >= BANNER_SECS)
-        {
-            b->setVisible(false);
-            mBannerStart = -1.0;
-        }
-        else if (!reduce_motion())
-        {
-            // a brief flash: bright and dim three times in the first BANNER_PULSE_SECS, then steady
-            LLColor4 c = mBannerColor;
-            if (t < BANNER_PULSE_SECS)
-            {
-                const F32 pulse = (F32)(0.5 + 0.5 * cos(t / BANNER_PULSE_SECS * 3.0 * F_TWO_PI));
-                c = lerp(LLColor4::white, mBannerColor, 1.f - pulse);
-            }
-            b->setColor(c);
-        }
+        mWasRolling = false;
+        const LLSD& g = game.state()["game"];
+        applyDice(g["dice"], g["kept"].asString());   // landed: the server's dice
     }
+    LLTextBox* b = getChild<LLTextBox>("f_banner");
+    if (game.banner().empty() || game.rolling())
+    {
+        b->setVisible(false);
+        return;
+    }
+    if (b->getText() != game.banner()) b->setText(game.banner());
+    b->setVisible(true);
+    LLColor4 c = game.bannerColor();
+    const F32 t = game.bannerAge();
+    if (!reduce_motion() && t < (F32)BANNER_PULSE_SECS)
+    {
+        // a brief flash: bright and dim three times in the first BANNER_PULSE_SECS, then steady
+        const F32 pulse = (F32)(0.5 + 0.5 * cos((F64)t / BANNER_PULSE_SECS * 3.0 * F_TWO_PI));
+        c = lerp(LLColor4::white, game.bannerColor(), 1.f - pulse);
+    }
+    b->setColor(c);
 }
 
 bool WolfFloaterGreedy::handleMouseDown(S32 x, S32 y, MASK mask)
 {
-    if (mRollStart >= 0.0) endRoll();   // [W104 FEATFIX 2026-11-11/] a click lands the dice at once
+    WolfGreedyGame::instance().landNow();   // [W104 FEATFIX 2026-11-11/] a click lands the dice at once
     return LLFloater::handleMouseDown(x, y, mask);
 }
 
 void WolfFloaterGreedy::refreshButtons()
 {
-    const LLSD& g = mState["game"];
+    const WolfGreedyGame& game = WolfGreedyGame::instance();
+    const LLSD& g = game.state()["game"];
     const std::string b = g["buttons"].asString();
-    const bool inGame = mGame && g["in_game"].asBoolean();
+    const bool inGame = game.inGame();
     const std::string rollLabel = b.find('S') != std::string::npos ? "Start" : b.find('A') != std::string::npos ? "Play again" : "Roll";
-    for (const char* p : { "f_", "t_", "s_" })
+    for (const char* p : { "f_", "t_" })
     {
         const std::string pre(p);
         LLButton* roll = getChild<LLButton>(pre + "roll");
@@ -862,7 +1003,7 @@ void WolfFloaterGreedy::refreshButtons()
 // offers "Practice game" there instead.
 void WolfFloaterGreedy::showGuide(S32 page)
 {
-    if (mRollStart >= 0.0) endRoll();
+    WolfGreedyGame::instance().landNow();
     mGuidePage = page;
     const bool on = page >= 0;
     const bool last = page == GUIDE_PAGES - 1;
@@ -918,25 +1059,11 @@ void WolfFloaterGreedy::showGuide(S32 page)
     }
     else
     {
-        applyDice(mDice, mKept);
+        const LLSD& g = WolfGreedyGame::instance().state()["game"];
+        applyDice(g["dice"], g["kept"].asString());
+        mSeen = 0;   // the game is drawn afresh
     }
     refreshButtons();
-}
-
-void WolfFloaterGreedy::setMessage(const std::string& text, EStatus kind)
-{
-    // Source: wolffloaterdob.cpp setStatus - light red on the dark floater, and the words say it too; it stays until the
-    // next action (an error is never taken away by a timer)
-    for (const char* n : { "f_message", "t_message" })
-    {
-        LLTextEditor* m = getChild<LLTextEditor>(n);
-        const LLUIColor c = kind == EStatus::ERR ? LLUIColor(RED_TEXT) : LLUIColor(LLColor4::white);
-        m->setReadOnlyColor(c);
-        m->setColor(c);
-        m->setText(text);
-        m->setVisible(!text.empty());
-    }
-    if (kind == EStatus::ERR && mMode == "strip") getChild<LLTextBox>("s_status")->setText(text);
 }
 
 // ---------------------------------------------------------------------------------------------------------- table link

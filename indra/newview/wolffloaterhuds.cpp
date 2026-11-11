@@ -21,6 +21,7 @@
 #include "wolfgrid.h"
 #include "wolfhelm.h"
 #include "wolfskis.h"
+#include "wolffloatergreedy.h"   // [W104 FEATFIX 2026-11-11/] WolfGreedyGame: the Greedy HUD
 
 namespace
 {
@@ -47,13 +48,12 @@ namespace
         true, true, false, true
     };
 
-    // [W104 FEATFIX 2026-11-11] the windows these tiles show and hide (menu_viewer.xml WolfGreedy / WolfRoleplay / WolfCompass /
-    // WolfSpeed: Floater.Show / Floater.Toggle of these names)
+    // [W104 FEATFIX 2026-11-11] the windows these tiles show and hide (menu_viewer.xml WolfRoleplay / WolfCompass / WolfSpeed:
+    // Floater.Toggle of these names); Greedy is a HUD (WolfGreedyGame)
     const char* floaterOf(WolfFloaterHuds::ETile t)
     {
         switch (t)
         {
-            case WolfFloaterHuds::T_GREEDY:   return "wolf_greedy";
             case WolfFloaterHuds::T_ROLEPLAY: return "wolf_roleplay";
             case WolfFloaterHuds::T_COMPASS:  return "wolf_compass";
             case WolfFloaterHuds::T_SPEED:    return "wolf_speed";
@@ -134,7 +134,8 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_SHIP:      return WolfHelm::instance().hudShowing();
         case T_SPEEDBOAT: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPEEDBOAT);
         case T_SUBMARINE: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SUBMARINE);
-        case T_GREEDY:
+        // [W104 FEATFIX 2026-11-11] Greedy is a HUD now (wolfgreedyhud.h), as its menu tick (WolfGreedy.HudOn)
+        case T_GREEDY:    return WolfGreedyGame::instanceExists() && WolfGreedyGame::instance().hudOn();
         case T_ROLEPLAY:
         case T_COMPASS:
         case T_SPEED:     return LLFloaterReg::instanceVisible(floaterOf(t));   // as their menu ticks (Floater.Visible)
@@ -173,7 +174,7 @@ void WolfFloaterHuds::onTile(ETile t)
         case T_SHIP:      WolfHelm::instance().toggleHud(); break;
         case T_SPEEDBOAT: WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SPEEDBOAT); break;
         case T_SUBMARINE: WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SUBMARINE); break;
-        case T_GREEDY:
+        case T_GREEDY:    WolfGreedyGame::toggleHud(); break;   // WolfGreedy.ToggleHud, as the menu
         case T_ROLEPLAY:
         case T_COMPASS:
         case T_SPEED:     LLFloaterReg::toggleInstance(floaterOf(t)); break;   // Floater.Toggle, as the menu

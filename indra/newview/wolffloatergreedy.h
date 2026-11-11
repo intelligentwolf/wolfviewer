@@ -32,89 +32,151 @@ class LLTextEditor;
 // [GREEDY WINDOW 2026-11-10] Ticket 721 (Jimmy Olsen), Paul: "anything we make like that must be built into the viewer NOT a
 // hud", "the UI for Greedy should SCALE with the user's UI settings", "so the greedy is up to the user".
 // Greedy is played on the Wolf dice server (wolfstorm/php/wolfdice.php + wolfdice_window.php; the server rolls, nobody can
-// cheat). This window is the player's controls, signed in as this login (X-Wolf-Agent + X-Wolf-Session, checked there with
-// the grid's presence service), in one of three views the player picks and the viewer remembers (WolfGreedyMode):
-//   full  - the whole game here, anywhere;
-//   table - just the controls, when a Greedy table in-world is the big display;
-//   strip - a small bar at the bottom of the screen, to play while moving around.
+// cheat), signed in as this login (X-Wolf-Agent + X-Wolf-Session, checked there with the grid's presence service).
 // Design and wire format: region-terrain-work/greedy-dice-2026-11-10/README.md s3b (the window's JSON), s3c (the table).
+//
+// [W104 FEATFIX 2026-11-11] Paul: "the greedy thing needs to be a HUD not a floater, so users can play it while wandering
+// around the grid, with the same hiding of the background etc." The game is now one session (WolfGreedyGame below: the
+// requests, the polling, the game's state, the messages, the roll and its moment) with two views of it:
+//   the Greedy HUD (wolfgreedyhud.cpp) - the way to play, along the bottom of the screen in the dashboard family as the
+//     Fishing and Ski HUDs; Wolf World > Greedy and the Wolf HUDs tile switch it on and off;
+//   the Greedy window (this floater) - the guide's cards (HOW TO PLAY on the HUD), the games to join (JOIN), the Full
+//     view, and the Table view for a Greedy table in-world (sitting at one still offers it). Its old Strip view is the HUD.
+class WolfGreedyGame : public LLSingleton<WolfGreedyGame>
+{
+    LLSINGLETON_EMPTY_CTOR(WolfGreedyGame);
+
+public:
+    enum EView { VIEW_HUD = 1, VIEW_WINDOW = 2 };
+    /** A line of the HUD's message area / the window's message line. Newest first. */
+    struct Msg
+    {
+        std::string mText;
+        bool mError = false;
+    };
+
+    void viewOpened(EView v);
+    void viewClosed(EView v);
+    bool hudOn() const { return (mViews & VIEW_HUD) != 0; }
+    /** Wolf World > Greedy, the Wolf HUDs tile: the HUD on or off. */
+    static void toggleHud();
+    static void openHud();
+    static void closeHud();
+
+    /** Every frame from a view that shows (minimised = the window is minimised): the polling. */
+    void tick(bool minimised);
+
+    // the player's presses
+    void roll();
+    void bank();
+    void newGame(bool practice, S32 target);
+    void join(S32 id);
+    void leave();
+    void pass();
+    void refreshList();
+    /** The table the avatar sits at told us its game (WolfGreedy::onObjectChat): it is loaded (the table seated them). */
+    void onTable(S32 game);
+
+    // what the views show
+    S32 game() const { return mGame; }
+    const LLSD& state() const { return mState; }   // the last game answer ("game", "players", "tips"), undefined: none
+    const LLSD& games() const { return mGames; }   // the last "list" answer
+    bool inGame() const { return mGame && mState["game"]["in_game"].asBoolean(); }
+    bool busy() const { return mBusy; }
+    const std::vector<Msg>& messages() const { return mLog; }
+    const std::string& message() const { return mMessage; }   // the line under the window's controls ("" none)
+    bool messageIsError() const { return mMessageError; }
+    /** Goes up on every change: a view redraws when it differs from the one it last showed. */
+    U32 version() const { return mChange; }
+
+    // the roll's moment: the dice tumble about a second, then a banner ("Bust!", "You banked 350!")
+    bool rolling() const { return mRollStart >= 0.0; }
+    S32 rollFrame(S32 die) const;   // the tumble frame this die shows now (rolling only)
+    void landNow();                 // a click lands the dice at once
+    const std::string& banner() const { return mBanner; }   // "" none
+    const LLColor4& bannerColor() const { return mBannerColor; }
+    F32 bannerAge() const;          // seconds since it showed
+    void setMessage(const std::string& text, bool error);
+
+private:
+    void send(const std::string& op, const std::string& extra = std::string());
+    static void sendCoro(std::string op, std::string body);
+    void onReply(const std::string& op, const LLSD& reply, const std::string& error, bool uncertain);
+    void noteActivity();
+    void moments();                 // the roll's tumble ending, the banner going (from tick)
+    void changed() { ++mChange; }
+
+    U32 mViews = 0;
+    S32 mGame = 0;
+    S32 mVersion = -1;
+    LLSD mState;
+    LLSD mGames;
+    bool mBusy = false;
+    std::string mQueued;            // one action pressed while a request was out
+    F64 mNextPoll = 0.0;
+    F64 mLastActivity = 0.0;        // [A6] the last press, game change or return to a view: the poll pace slows after it
+    bool mWasMinimised = false;     // [A6] no polls while the only view is minimised; one at once when it is opened out
+    bool mPollNow = false;          // [A3/A6] the next frame polls whatever the pace (after a press whose answer was lost)
+    std::vector<Msg> mLog;
+    std::string mMessage;
+    bool mMessageError = false;
+    U32 mChange = 1;
+    F64 mRollStart = -1.0;
+    std::string mPendingBanner;
+    LLColor4 mPendingBannerColor;
+    std::string mBanner;
+    LLColor4 mBannerColor;
+    F64 mBannerStart = -1.0;
+};
+
 class WolfFloaterGreedy : public LLFloater
 {
 public:
     WolfFloaterGreedy(const LLSD& key);
+    ~WolfFloaterGreedy() override;
 
     bool postBuild() override;
     void onOpen(const LLSD& key) override;
+    void onClose(bool app_quitting) override;
     void draw() override;
     bool handleMouseDown(S32 x, S32 y, MASK mask) override;   // [W104 FEATFIX 2026-11-11] a click ends the dice tumble
 
-    /** The table the avatar sits at told us its game (WolfGreedy below): join it and offer the table view. */
+    /** The table the avatar sits at told us its game (WolfGreedy below): offer the table view. */
     void onTable(S32 game, const std::string& label);
     /** They stood up from the table. */
     void onLeftTable();
+    /** [W104 FEATFIX 2026-11-11] HOW TO PLAY on the HUD: the window opens on the guide's first card. */
+    static void showGuideWindow();
+    /** [W104 FEATFIX 2026-11-11] JOIN on the HUD: the window opens in the Full view, the games list read again. */
+    static void showLobbyWindow();
 
 private:
-    enum class EStatus { INFO, ERR };
-
     void setMode(const std::string& mode, bool remember);
-    void send(const std::string& op, const std::string& extra = std::string());
-    void onReply(const std::string& op, const LLSD& reply, const std::string& error, bool uncertain);
-    /** [W104 FEATFIX 2026-11-11 A6] The player did something (or came back to the window): polls go at the quick pace again. */
-    void noteActivity();
-    static void sendCoro(LLHandle<LLFloater> handle, std::string op, std::string body);
+    void render();                  // the session's state into the controls (when its version changes)
     void show(const LLSD& state);
     void showNoGame();
-    void showDice(const LLSD& dice, const std::string& kept);
-    void applyDice(const LLSD& dice, const std::string& kept);   // [W104 FEATFIX 2026-11-11] onto the dice pictures
-    void setMessage(const std::string& text, EStatus kind);
+    void showMessage();
+    void applyDice(const LLSD& dice, const std::string& kept);
+    void animate();                 // every frame: the tumble and the banner
     void refreshButtons();
     void onRoll();
-    void onBank();
     void onNew(bool practice);
     void onJoin();
     void showGuide(S32 page);
-    void playSound(const std::string& kind);
-    // [W104 FEATFIX 2026-11-11] Paul: "no fun", "make the dice 3d". The dice tumble when a roll lands (purely a picture: the
-    // server's dice are shown at the end), then the moment's banner ("Bust!", "You banked 350!").
-    void startRoll(const std::string& banner, const LLColor4& banner_color);
-    void endRoll();
-    void showBanner(const std::string& text, const LLColor4& color);
-    void animate();             // every frame from draw()
 
     std::string mMode = "full";
-    std::string mModeBeforeStrip = "full";
-    S32 mGame = 0;
-    S32 mVersion = -1;
-    LLSD mState;              // the last game answer ("game", "players", "tips")
-    LLSD mGames;              // the last "list" answer
-    bool mBusy = false;
-    std::string mQueued;      // one action pressed while a request was out
-    F64 mNextPoll = 0.0;
-    F64 mLastActivity = 0.0;  // [A6] the last press, game change or return to the window: the poll pace slows after it
-    bool mWasMinimised = false;   // [A6] no polls while minimised; one at once when it is opened out again
-    bool mPollNow = false;    // [A3/A6] the next frame polls whatever the pace (after a press whose answer was lost)
-    S32 mGuidePage = -1;      // -1: the guide is not showing
-    S32 mTableGame = 0;       // the game of the table we sit at (0: none)
+    S32 mGuidePage = -1;            // -1: the guide is not showing
+    S32 mTableGame = 0;             // the game of the table we sit at (0: none)
     std::string mTableLabel;
     bool mOfferDismissed = false;
     std::string mModeBeforeOffer;   // the view to go back to if the table offer is declined (the offer shows in Full)
-    // [W104 FEATFIX 2026-11-11] the dice and the moments
-    LLSD mDice;                     // the dice now shown (the server's), and which scored
-    std::string mKept = "000000";
-    F64 mRollStart = -1.0;          // >= 0 while the dice tumble
+    U32 mSeen = 0;                  // the session's version last rendered
     bool mBoardEmpty = true;        // the scoreboard's empty state shows (no game)
     bool mHasTips = false;          // a practice game's tips show under the scoreboard
-    std::string mPendingBanner;     // shown when the tumble lands
-    LLColor4 mPendingBannerColor;
-    F64 mBannerStart = -1.0;        // >= 0 while the banner shows
-    LLColor4 mBannerColor;
+    bool mWasRolling = false;
     std::vector<LLPointer<LLUIImage>> mHeldImages;   // the tumble's frames, kept loaded so the first roll does not flicker
 };
 
-// The table link (README s3c): seated on an object whose root's description starts "greedy-table", this viewer says
-// "greedy hello 1" on HELLO_CHANNEL until the table answers by llRegionSayTo(us, 0, "WolfGreedy1|table|<game>|<label>")
-// ("WolfGreedy1|bye" when we stand). Those lines are taken out of chat here (llviewermessage.cpp), as the skis' are.
-// Nothing is said or read off Wolf Territories, and a table never sends anything to a viewer that did not say hello.
 class WolfGreedy : public LLSingleton<WolfGreedy>
 {
     LLSINGLETON_EMPTY_CTOR(WolfGreedy);

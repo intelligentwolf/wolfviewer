@@ -1146,6 +1146,28 @@
 		<key>Value</key>
 			<integer>1</integer>
 	</map>
+	<key>WolfGreedyHudBackground</key>
+	<map>
+		<key>Comment</key>
+			<string>[W104 FEATFIX 2026-11-11] The Greedy HUD's night-blue background (wolfgreedyhud.cpp BACKGROUND). Off: only its buttons, dice and outlined words over the world.</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>Boolean</string>
+		<key>Value</key>
+			<integer>1</integer>
+	</map>
+	<key>WolfGreedyHudLess</key>
+	<map>
+		<key>Comment</key>
+			<string>[W104 FEATFIX 2026-11-11] The Greedy HUD shows one row only: the dice, ROLL and BANK (wolfgreedyhud.cpp LESS / MORE).</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>Boolean</string>
+		<key>Value</key>
+			<integer>0</integer>
+	</map>
 	<key>WolfAdventureReduceMotion</key>
 	<map>
 		<key>Comment</key>

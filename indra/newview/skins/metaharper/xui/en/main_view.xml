@@ -149,6 +149,17 @@
            notices, markers, the downed overlay and the screen effects. Under the floaters and the
            toolbars, so the UI stays usable over every overlay. Clicks pass through to the world
            except on the stat panel and the notices. -->
+      <!-- [W104 FEATFIX 2026-11-11] wolfgreedyhud.cpp: the Greedy HUD (Paul: "a HUD not a floater"), in the dashboard family as the
+           Fishing and Ski HUDs. Draws nothing and takes no clicks unless it is switched on (Wolf World > Greedy, the Wolf HUDs
+           window); Wolf Territories only. -->
+      <wolf_greedy_hud follows="all"
+                       left="0"
+                       top="0"
+                       height="500"
+                       width="1024"
+                       mouse_opaque="false"
+                       tab_stop="false"
+                       name="wolf_greedy_hud"/>
       <wolf_game_hud follows="all"
                      left="0"
                      top="0"

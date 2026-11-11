@@ -2178,10 +2178,12 @@
                  so a resident looking for the skis still finds them -->
             <!-- [GREEDY WINDOW 2026-11-10] wolffloatergreedy.cpp: Greedy, the dice game (ticket 721); Paul: "built into the
              viewer NOT a hud". Wolf Territories logins only (the dice server checks the session). -->
-            <menu_item_call label="Greedy (Dice Game)..." name="WolfGreedy">
-                <menu_item_call.on_click function="Floater.Show" parameter="wolf_greedy" />
-                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
-            </menu_item_call>
+            <!-- [W104 FEATFIX 2026-11-11] the Greedy HUD on and off (Paul: "a HUD not a floater"); its WINDOW / JOIN / HOW TO PLAY open the window -->
+            <menu_item_check label="Greedy (Dice Game)" name="WolfGreedy">
+                <menu_item_check.on_check function="WolfGreedy.HudOn" />
+                <menu_item_check.on_click function="WolfGreedy.ToggleHud" />
+                <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_check>
             <menu_item_call label="Winter Fun (Skis and Sledges)..." name="WolfSkis">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_skis" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />

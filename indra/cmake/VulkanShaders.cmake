@@ -43,7 +43,11 @@ macro (wolfvk_compile_shaders _target)
       set(WOLFVK_SPV_DIR "${WOLFVK_SHADERS_DIR}/spv")
       file(GLOB_RECURSE WOLFVK_GLSL_INPUTS CONFIGURE_DEPENDS "${WOLFVK_SHADERS_DIR}/*.glsl")
       set(WOLFVK_STAMP "${CMAKE_CURRENT_BINARY_DIR}/wolfvk_shaders.stamp")
+      # --no-fail: GL compile failures are the check_shaders target's to report (ShaderCheck.cmake, which fails the build on
+      # any outside scripts/shader_check_known.txt). [G7 2026-11-11] --vulkan-min-ratio fails THIS step, whatever --no-fail
+      # says, when the SPIR-V store would be mostly missing (scripts/spv_store_check.py MIN_RATIO, the packaging check).
       set(WOLFVK_ARGS --glslang "${GLSLANG_VALIDATOR}" --shaders "${WOLFVK_SHADERS_DIR}" --vulkan-out "${WOLFVK_SPV_DIR}" --no-fail
+          --vulkan-min-ratio 0.6
           --json "${CMAKE_CURRENT_BINARY_DIR}/wolfvk_shaders.json")
       if (WOLF_VULKAN_SHADERS_QUICK)
         list(APPEND WOLFVK_ARGS --quick)

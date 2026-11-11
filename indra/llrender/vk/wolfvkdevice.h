@@ -18,10 +18,11 @@
  *      GL_DEVICE_UUID_EXT (GL_EXT_memory_object, glext.h:7736): the very card OpenGL is drawing with, which the
  *      staged hand-over (GL and Vulkan sharing images) needs. Proven on NVIDIA and radeonsi by the vkglshare probe.
  *      [W3 2026-11-11] When OpenGL gave its UUID and no device has it, c. decides (logged).
- *   c. the device whose vendor matches the OpenGL renderer's vendor (gGLManager.mIsNVIDIA/mIsAMD/mIsIntel); [V7] when the
- *      vendor is known and no device matches, the choice fails likewise
- *   d. the first VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU (vulkan_core.h:2235)
- *   e. the first device
+ *   c. the ONE device whose vendor matches the OpenGL renderer's vendor (gGLManager.mIsNVIDIA/mIsAMD/mIsIntel); [W3 round 3]
+ *      several of that vendor (an AMD iGPU + dGPU): the one whose name is GL_RENDERER's (both trimmed at " (" / "/"),
+ *      else the choice FAILS (retryable) - it does not guess. [V7] No device of that vendor: fails.
+ *   d./e. [W3 round 3] removed: OpenGL's vendor unknown (software GL, an unlisted maker) and no UUID match = the card
+ *      cannot be identified, and the choice fails (retryable) instead of taking the first discrete / first device.
  * Devices without VK_KHR_swapchain, without a graphics queue that can present, or of VK_PHYSICAL_DEVICE_TYPE_CPU
  * (vulkan_core.h:2237, llvmpipe/lavapipe/SwiftShader; [V7]) are skipped.
  *
@@ -93,6 +94,7 @@ public:
         bool mHaveGLDeviceUUID = false;        // glGetUnsignedBytevEXT(GL_DEVICE_UUID_EXT) was available
         uint8_t mGLDeviceUUID[VK_UUID_SIZE] = {};
         uint32_t mGLVendorID = 0;              // PCI vendor of the GL renderer when known: 0x10DE NVIDIA, 0x1002 AMD, 0x8086 Intel
+        std::string mGLRenderer;               // [W3 2026-11-11] GL_RENDERER, only to break a tie between devices of that vendor
         uint32_t mFramesInFlight = 2;          // command pools / fences rotated per frame
         std::string mApplicationName = "WolfViewer";
         uint32_t mApplicationVersion = 0;
@@ -313,8 +315,8 @@ private:
     uint32_t mOneTimeCount = 0;   // [AMD PERF] takeOneTimeStats
     double mOneTimeMs = 0.0;
     bool mHung = false;
-    bool mAbandoned = false;
-    bool mNoCandidates = false;   // [W3 2026-11-11] noCandidates()   // [V4 2026-11-11] the device was dropped undestroyed: the instance stays for the process
+    bool mAbandoned = false;      // [V4 2026-11-11] the device was dropped undestroyed: the instance stays for the process
+    bool mNoCandidates = false;   // [W3 2026-11-11] noCandidates()
     std::string mHungReason;
     VkSemaphore mTimeline = VK_NULL_HANDLE;   // timeline semaphore: value = number of frames completed
     uint64_t mTimelineNext = 0;

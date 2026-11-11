@@ -21,6 +21,7 @@
 #include <future>   // [W2 2026-11-11] queueWaitIdleBounded
 #include <memory>
 #include <thread>
+#include <system_error>
 #include <cstring>
 #include <cctype>
 #include <algorithm>
@@ -551,37 +552,60 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
         // when that fails too is Vulkan not started (V7). Was (V7 first version): fail here, as permanent.
         LL_WARNS("Vulkan") << "No Vulkan device has the OpenGL device UUID (" << candidates.size() << " offered); choosing by the OpenGL vendor" << LL_ENDL;
     }
-    // c. the OpenGL vendor
-    if (mConfig.mGLVendorID)
+    // c. the OpenGL vendor. [W3 2026-11-11 round 3] Only when it names ONE device: with two of the same maker (an AMD iGPU
+    // + dGPU) the one whose name is OpenGL's renderer name breaks the tie; otherwise the choice fails (retryable) rather
+    // than guess - a card that is not OpenGL's cannot share images with it (the hand-over would fall back to read-back
+    // at best, WolfVkScene::init). Names compared: GL_RENDERER up to its first " (" or "/" ("NVIDIA GeForce RTX 5090
+    // Laptop GPU/PCIe/SSE2", "AMD Radeon 890M Graphics (radeonsi, ...)") and the Vulkan deviceName up to its first " ("
+    // ("AMD Radeon 890M Graphics (RADV STRIX1)"), case-insensitive.
+    auto trimmed = [&lower](const std::string& n, bool slash)
+    {
+        size_t cut = n.find(" (");
+        if (slash) cut = std::min(cut, n.find('/'));
+        std::string t = lower(n.substr(0, cut));
+        while (!t.empty() && t.back() == ' ') t.pop_back();
+        return t;
+    };
+    std::vector<const WolfVkPhysicalDeviceInfo*> same_vendor;
+    for (const WolfVkPhysicalDeviceInfo& d : candidates)
+    {
+        if (mConfig.mGLVendorID && d.mProperties.vendorID == mConfig.mGLVendorID) same_vendor.push_back(&d);
+    }
+    if (same_vendor.size() == 1)
+    {
+        mChosen = *same_vendor.front();
+        LL_INFOS("Vulkan") << "Device chosen by the OpenGL vendor: " << mChosen.name() << LL_ENDL;
+        return true;
+    }
+    const std::string gl_name = trimmed(mConfig.mGLRenderer, true);
+    std::vector<const WolfVkPhysicalDeviceInfo*> named;
+    if (!gl_name.empty())
     {
         for (const WolfVkPhysicalDeviceInfo& d : candidates)
         {
-            if (d.mProperties.vendorID == mConfig.mGLVendorID)
-            {
-                mChosen = d;
-                LL_INFOS("Vulkan") << "Device chosen by the OpenGL vendor: " << d.name() << LL_ENDL;
-                return true;
-            }
+            // among OpenGL's vendor's devices, or among all of them when OpenGL's vendor is not known
+            const bool in_pool = same_vendor.empty() || std::find(same_vendor.begin(), same_vendor.end(), &d) != same_vendor.end();
+            if (in_pool && trimmed(d.name(), false) == gl_name) named.push_back(&d);
         }
-        // [V7 2026-11-11] as for b.: OpenGL's maker is known and none of the Vulkan graphics cards is by that maker
-        error = llformat("no Vulkan graphics card is by the maker of the one OpenGL draws with (vendor 0x%04x)", mConfig.mGLVendorID);
-        LL_WARNS("Vulkan") << error << LL_ENDL;
-        return false;
     }
-    // d. first discrete
-    for (const WolfVkPhysicalDeviceInfo& d : candidates)
+    if (named.size() == 1 && (mConfig.mGLVendorID == 0 || !same_vendor.empty()))
     {
-        if (d.mProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-        {
-            mChosen = d;
-            LL_INFOS("Vulkan") << "Device chosen as the first discrete card: " << d.name() << LL_ENDL;
-            return true;
-        }
+        mChosen = *named.front();
+        LL_INFOS("Vulkan") << "Device chosen by OpenGL's renderer name \"" << mConfig.mGLRenderer << "\": " << mChosen.name() << LL_ENDL;
+        return true;
     }
-    // e. first
-    mChosen = candidates.front();
-    LL_INFOS("Vulkan") << "Device chosen as the first available: " << mChosen.name() << LL_ENDL;
-    return true;
+    if (mConfig.mGLVendorID && same_vendor.empty())
+    {
+        // [V7 2026-11-11] OpenGL's maker is known and none of the Vulkan graphics cards is by that maker
+        error = llformat("no Vulkan graphics card is by the maker of the one OpenGL draws with (vendor 0x%04x)", mConfig.mGLVendorID);
+    }
+    else
+    {
+        error = llformat("the Vulkan graphics card OpenGL draws with cannot be told apart (%u candidate(s), OpenGL renderer \"%s\")",
+                         static_cast<unsigned>(same_vendor.empty() ? candidates.size() : same_vendor.size()), mConfig.mGLRenderer.c_str());
+    }
+    LL_WARNS("Vulkan") << error << LL_ENDL;
+    return false;
 }
 
 bool WolfVkDevice::createDevice(VkSurfaceKHR surface, std::string& error)
@@ -1539,7 +1563,16 @@ bool WolfVkDevice::queueWaitIdleBounded(const char* what)
     std::future<VkResult> done = result->get_future();
     const PFN_vkQueueWaitIdle wait_fn = gVk.vkQueueWaitIdle;
     const VkQueue queue = mQueue;
-    std::thread([result, wait_fn, queue]() { result->set_value(wait_fn(queue)); }).detach();
+    try
+    {
+        std::thread([result, wait_fn, queue]() { result->set_value(wait_fn(queue)); }).detach();
+    }
+    catch (const std::system_error& e)
+    {
+        // [W2 round 3] no helper thread: the wait cannot be bounded, so it is not made - as after a timeout
+        declareHung(llformat("%s: no thread for the bounded vkQueueWaitIdle (%s)", what, e.what()));
+        return false;
+    }
     if (done.wait_for(std::chrono::nanoseconds(FRAME_WAIT_LIMIT_NS)) != std::future_status::ready)
     {
         declareHung(llformat("%s: vkQueueWaitIdle has not returned after %llu s", what, static_cast<unsigned long long>(FRAME_WAIT_LIMIT_NS / 1000000000ull)));

@@ -138,6 +138,7 @@ private:
     // [GREEDY COMPUTER PLAYER 2026-11-11] the practice game played here (wolfgreedylocal.h)
     void startLocal();
     void sendLeaveOwed();                    // [W104 review W4] the next server game still to be left, when nothing is out
+    void dropLeaveOwed(S32 game);            // [W104 review] a game joined again is no longer to be left
     void endLocal(const std::string& why);
     void showLocal(const std::string& op);   // the local game's answer, through onReply as a server answer
     void localTick();                        // the computer's moves, paced so they can be watched

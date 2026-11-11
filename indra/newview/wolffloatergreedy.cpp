@@ -478,6 +478,7 @@ void WolfGreedyGame::join(S32 id)
 {
     if (id <= 0) { setMessage("Choose a game from the list first (Refresh looks again).", false); return; }
     if (mGame && mGame != id && mState["game"]["in_game"].asBoolean()) send("leave");
+    dropLeaveOwed(id);
     mVersion = -1;
     send("join", llformat("&g=%d", id));   // the answer's game.id becomes mGame (onReply)
 }
@@ -505,6 +506,7 @@ void WolfGreedyGame::onTable(S32 game)
     {
         // the table has already seated them in this game: this just loads it (wolfdice_window.php wdw_join). The game
         // goes in the request itself ("&g=" last wins in PHP), so a "leave" still out names the old one.
+        dropLeaveOwed(game);
         mVersion = -1;
         send("join", llformat("&g=%d", game));
     }
@@ -752,6 +754,13 @@ void WolfGreedyGame::sendLeaveOwed()
     const std::string body = "op=leave&g=" + llformat("%d", g);
     changed();
     LLCoros::instance().launch("WolfGreedy", [body]() { sendCoro("leave", body); });
+}
+
+void WolfGreedyGame::dropLeaveOwed(S32 game)
+{
+    // [W104 review 2026-11-11] a leave owed since Practice began is not sent for a game they now join again (or sit at
+    // again): the join's answer would send it (onReply) and take them straight back out
+    mLeaveOwed.erase(std::remove(mLeaveOwed.begin(), mLeaveOwed.end(), game), mLeaveOwed.end());
 }
 
 void WolfGreedyGame::endLocal(const std::string& why)

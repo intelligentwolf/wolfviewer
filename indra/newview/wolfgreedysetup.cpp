@@ -229,7 +229,7 @@ void WolfFloaterGreedySetup::onOpen(const LLSD& key)
     setStep(1);
 }
 
-void WolfFloaterGreedySetup::onClose(bool app_quitting)
+void WolfFloaterGreedySetup::onClose(bool /*app_quitting*/)
 {
     // a piece still being fetched stops here; one already sent to the region is still placed, and what became of it is said in
     // nearby chat (putCoro, [W104 review W2])

@@ -124,6 +124,28 @@ public:
     // [THE CAUSE 2026-11-10] the window's default framebuffer alpha bits (0 on Windows: llwindowwin32.cpp WGL_ALPHA_BITS_ARB 0)
     int backAlphaBits() const { return mBackAlphaBits; }
 
+    // [G2 2026-11-11] The login check (WolfVkBridge): a sample of the PRESENTED picture itself. requestFrameCheck() makes the
+    // next recorded frame end its composite in TRANSFER_SRC (a twin of the composite pass, compatible with it), copy 16
+    // tiles of 8x8 pixels spread over the swapchain image to this slot's host buffer, and hand the image to the present
+    // as before. The sample is read when the slot comes round again (beginFrame, after its fence). lastRecordedCheck()
+    // is the number of the sample the last recorded frame took (0 = none); takeFrameCheck() hands out a finished one.
+    struct FrameCheck
+    {
+        uint32_t mSeq = 0;
+        uint32_t mMax = 0;          // largest R/G/B (0..255) over the 1024 sampled pixels
+        uint32_t mLit = 0;          // pixels with any R/G/B > 0
+        bool mComposited = false;   // the composite's draw was recorded in that frame, with the frame layer bound
+        uint32_t mGlMax = 0;        // the same 16 tiles of OpenGL's own frame (its back buffer) in that frame
+        uint32_t mGlLit = 0;
+    };
+    void requestFrameCheck() { mFrameCheckWanted = true; }
+    // false: the swapchain images cannot be copied (no TRANSFER_SRC usage, or a format other than the 4-byte ones)
+    bool frameCheckPossible(const WolfVkSwapchain& swapchain) const;
+    uint32_t lastRecordedCheck() const { return mFrameCheckRecorded; }
+    bool takeFrameCheck(FrameCheck& out);
+    // whether the last recorded frame drew the composite with the GL frame layer bound (the check's fallback criterion)
+    bool lastFrameComposited() const { return mLastComposited; }
+
     // Statistics for the floater and the log (last frame).
     uint32_t drawsLastFrame() const { return mDrawsLastFrame; }
     uint32_t skippedLastFrame() const { return mSkippedLastFrame; }
@@ -180,7 +202,28 @@ private:
     uint32_t mGBufferDraws = 0;
     bool mGBufferComplete = true;
     std::unordered_set<const LLDrawInfo*> mDrawnByVulkan;
-    void drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index);
+    // true when the composite's draw was recorded with the GL frame layer bound ([G2] the login check). check_pass: the
+    // twin pass that ends in TRANSFER_SRC (requestFrameCheck)
+    // pass_ran: the render pass was recorded (the image then ends in the pass's final layout - TRANSFER_SRC for the twin)
+    bool drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index, bool check_pass, bool& pass_ran);
+    void frameCheckRecord(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index);
+    void frameCheckCollect();
+    void frameCheckGLSample(uint32_t& max, uint32_t& lit);   // OpenGL's back buffer, the same tiles (synchronous read)
+    uint32_t mFrameCheckGlNow[2] = { 0, 0 };  // this frame's GL sample (max, lit)
+    std::vector<uint32_t> mFrameCheckGl;      // per slot: max, lit
+    bool mFrameCheckWanted = false;
+    bool mFrameCheckNoBuffers = false;        // the read-back buffers could not be made: no samples this session
+    uint32_t mFrameCheckSeq = 0;              // samples issued
+    uint32_t mFrameCheckRecorded = 0;         // the sample the last recorded frame took
+    std::vector<std::unique_ptr<WolfVkBuffer>> mFrameCheckHost;   // one host buffer per frame slot
+    std::vector<uint32_t> mFrameCheckPending; // sample number in each slot's buffer (0 = none)
+    std::vector<uint8_t> mFrameCheckComposited;
+    VkFormat mFrameCheckFormat = VK_FORMAT_UNDEFINED;
+    std::vector<FrameCheck> mFrameCheckDone;  // finished samples, oldest first
+    bool mLastComposited = false;
+    VkRenderPass mCompositeCheckPass = VK_NULL_HANDLE;
+    static const uint32_t CHECK_TILES = 4;    // 4 x 4 tiles
+    static const uint32_t CHECK_TILE = 8;     // of 8 x 8 pixels
     WolfVkShaderMirror* mirrorFor(LLGLSLShader* shader);
 
     WolfVkDevice* mDevice = nullptr;

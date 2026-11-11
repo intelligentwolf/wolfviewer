@@ -402,16 +402,26 @@ bool WolfVkSharedImage::create(WolfVkDevice& device, const WolfVkImage::Format& 
     sGL.MemoryObjectParameterivEXT(mGlMemory, WOLF_GL_DEDICATED_MEMORY_OBJECT_EXT, &dedicated);
     std::string e = glErrors();
     if (!e.empty()) { error = "glMemoryObjectParameterivEXT: " + e; device.closeExternalHandle(handle); destroy(); return false; }
-    // "A successful import operation transfers ownership of <fd> to the GL implementation" (GL_EXT_memory_object_fd);
-    // likewise the win32 handle (GL_EXT_memory_object_win32, OPAQUE_WIN32 handles)
+    // Linux: "A successful import operation transfers ownership of <fd> to the GL implementation" (EXT_external_objects_fd
+    // rev 7, 6.1), so the fd is closed here only when the import failed.
+    // [G3 2026-11-11] Windows is the opposite: "Importing a Windows handle does not transfer ownership of the handle to the
+    // GL implementation. For handle types defined as NT handles, the application must release the handle using an
+    // appropriate system call when it is no longer needed." (EXT_external_objects_win32 rev 10, 6.1). OPAQUE_WIN32 (not
+    // _KMT) is an NT handle (vkGetMemoryWin32HandleKHR, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT), and GL keeps its
+    // own reference to the payload, so the handle is closed (CloseHandle, closeExternalHandle) straight after the import,
+    // whether it succeeded or not. Before, it was never closed: every shared layer (re)allocation leaked an NT handle
+    // that kept the old allocation alive.
 #if LL_WINDOWS
     sGL.ImportMemoryWin32HandleEXT(mGlMemory, static_cast<GLuint64>(mImage->allocationSize()), WOLF_GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, handle.mWin32);
+    e = glErrors();
+    device.closeExternalHandle(handle);
+    if (!e.empty()) { error = "glImportMemoryWin32HandleEXT: " + e; destroy(); return false; }
 #else
     sGL.ImportMemoryFdEXT(mGlMemory, static_cast<GLuint64>(mImage->allocationSize()), WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, handle.mFd);
-#endif
     e = glErrors();
     if (!e.empty()) { error = "glImportMemoryFdEXT: " + e; device.closeExternalHandle(handle); destroy(); return false; }
-    // GL owns the handle now
+    // GL owns the fd now
+#endif
 
     GLint saved_tex = 0;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &saved_tex);
@@ -661,6 +671,7 @@ bool WolfVkSharedImage::roundTrip(uint32_t gl_sem_signal, uint32_t gl_sem_wait, 
     }
 
     // ---- compare ---------------------------------------------------------------------------------------------------
+    host.invalidateForRead();   // [V14 2026-11-11] non-coherent read-back memory
     const uint8_t* data = host.hostData();
     if (!data) { result = std::string("round trip (") + what + "): the host buffer is not mapped"; return false; }
     bool all_ok = true;
@@ -812,14 +823,24 @@ bool WolfVkShare::createSemaphores(std::string& error)
     sGL.GenSemaphoresEXT(2, sems);
     mGlSemGlDone = sems[0];
     mGlSemVkDone = sems[1];
-    // "glImportSemaphoreFdEXT(semaphore, GL_HANDLE_TYPE_OPAQUE_FD_EXT, fd)": fd ownership passes to GL on success
+    // Linux: fd ownership passes to GL on a successful import (EXT_external_objects_fd rev 7, 4.2.1).
+    // [G3 2026-11-11] Windows: "Importing a Windows handle does not transfer ownership of the handle to the GL
+    // implementation. For handle types defined as NT handles, the application must release the handle" (EXT_external_objects_win32
+    // rev 10, 4.2.1); OPAQUE_WIN32 semaphore handles are NT handles, so both are closed after the imports, success or not.
 #if LL_WINDOWS
     sGL.ImportSemaphoreWin32HandleEXT(mGlSemGlDone, WOLF_GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, h1.mWin32);
     sGL.ImportSemaphoreWin32HandleEXT(mGlSemVkDone, WOLF_GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, h2.mWin32);
+    const std::string e = glErrors();
+    mDevice->closeExternalHandle(h1);
+    mDevice->closeExternalHandle(h2);
+    if (!e.empty())
+    {
+        error = "glImportSemaphoreWin32HandleEXT: " + e;
+        return false;
+    }
 #else
     sGL.ImportSemaphoreFdEXT(mGlSemGlDone, WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, h1.mFd);
     sGL.ImportSemaphoreFdEXT(mGlSemVkDone, WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, h2.mFd);
-#endif
     const std::string e = glErrors();
     if (!e.empty())
     {
@@ -828,6 +849,7 @@ bool WolfVkShare::createSemaphores(std::string& error)
         mDevice->closeExternalHandle(h2);
         return false;
     }
+#endif
     return true;
 }
 

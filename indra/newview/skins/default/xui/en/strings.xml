@@ -75,7 +75,11 @@ Vulkan: [VULKAN_INFO]</string>
 	<!-- [V BUTTON 2026-11-08] the navigation bar's V button, greyed out where no Vulkan device was found (llnavigationbar.cpp) -->
 	<string name="WolfVulkanButtonUnavailable">Vulkan is not available on this computer</string>
 	<string name="WolfVulkanStoppedTitle">WolfViewer</string>
+	<!-- [G5 2026-11-11] the first stop tries Vulkan once more at the next start; the second keeps OpenGL (wolfvkbridge.cpp recordAutomaticFailure) -->
 	<string name="WolfVulkanStoppedRestart">WolfViewer's Vulkan renderer stopped working on your graphics card ([REASON]).
+
+Please restart WolfViewer to carry on. It will try Vulkan once more, and use OpenGL if Vulkan stops again.</string>
+	<string name="WolfVulkanStoppedRestartFinal">WolfViewer's Vulkan renderer stopped working on your graphics card ([REASON]).
 
 WolfViewer will use OpenGL from now on. Please restart WolfViewer to carry on.</string>
 	<string name="WolfVulkanStatusActive">The Vulkan renderer is drawing this window.</string>
@@ -84,7 +88,11 @@ WolfViewer will use OpenGL from now on. Please restart WolfViewer to carry on.</
 	<string name="WolfVulkanStatusNoVulkan">OpenGL is drawing this window. This computer has no Vulkan driver, so the Vulkan renderer cannot be used here.</string>
 	<string name="WolfVulkanStatusRestart">The Vulkan renderer is chosen. It will draw the window from the next start of WolfViewer.</string>
 	<string name="WolfVulkanStatusStarting">The Vulkan renderer is starting.</string>
-	<string name="WolfVulkanStatusFellBack">OpenGL is drawing this window: the Vulkan renderer could not start ([REASON]).</string>
+	<string name="WolfVulkanStatusFellBack">OpenGL is drawing this window: the Vulkan renderer could not start ([REASON]). WolfViewer will try Vulkan once more at the next start.</string>
+	<!-- [VULKAN 2026-11-11] decideBackend chose OpenGL after two crashes in Vulkan sessions -->
+	<string name="WolfVulkanStatusCrashedTwice">OpenGL is drawing this window: WolfViewer closed unexpectedly more than once while using Vulkan. You can choose Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.</string>
+	<!-- [VULKAN 2026-11-11] a failure no retry can mend, or the second in a row (wolfvkbridge.cpp nextStartRetries) -->
+	<string name="WolfVulkanStatusFellBackFinal">OpenGL is drawing this window: the Vulkan renderer could not start ([REASON]). You can choose Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.</string>
 	<string name="AboutSettings">
 Settings mode: [MODE]
 Viewer Skin: [SKIN] ([THEME])

@@ -39,7 +39,7 @@ bool WolfFloaterVulkan::postBuild()
 
 void WolfFloaterVulkan::onOpen(const LLSD& key)
 {
-    mBackend->setValue(gSavedSettings.getString("WolfRenderBackend") == "vulkan" ? "vulkan" : "opengl");
+    mBackend->setValue(WolfVkBridge::shownBackend());   // [round 6 2026-11-11]
     // the Vulkan choice is offered only where a Vulkan device was found; the status line says why otherwise
     const LLSD fields = WolfVkBridge::reportFields();
     mBackend->setIndexEnabled(1, fields["vulkan_available"].asBoolean());
@@ -50,6 +50,7 @@ void WolfFloaterVulkan::onChoice()
 {
     // [V BUTTON 2026-11-08] the choice itself lives in WolfVkBridge::chooseBackend, shared with the navigation bar's V button
     WolfVkBridge::chooseBackend(mBackend->getValue().asString());
+    mBackend->setValue(WolfVkBridge::shownBackend());   // [round 6] a refused choice (second instance) does not stay shown
     refresh();
 }
 

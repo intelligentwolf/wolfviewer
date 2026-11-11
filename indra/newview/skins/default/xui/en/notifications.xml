@@ -2935,9 +2935,45 @@ The age check is done once, on wolf-grid.com. General, Moderate and Adult region
    name="WolfVulkanFellBack"
    type="alertmodal">
     <unique/>
-WolfViewer could not start its Vulkan renderer on this computer, so it is drawing with OpenGL as before. Nothing else has changed. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+WolfViewer could not start its Vulkan renderer on this computer, so it is drawing with OpenGL as before. Nothing else has changed. WolfViewer will try Vulkan once more at the next start, and stays with OpenGL if it fails again.
 
 Reason: [REASON]
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <!-- [round 3 2026-11-11] the same when the next start will NOT try Vulkan: a failure no retry can mend (no usable Vulkan
+       graphics card), or the second one in a row (wolfvkbridge.cpp fallBack, nextStartRetries) -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanFellBackFinal"
+   type="alertmodal">
+    <unique/>
+WolfViewer could not start its Vulkan renderer on this computer, so it is drawing with OpenGL as before, and will keep using OpenGL. Nothing else has changed. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+
+Reason: [REASON]
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <!-- [round 6 2026-11-11] a second WolfViewer window cannot change the renderer (wolfvkbridge.cpp chooseBackend) -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanSecondInstance"
+   type="alertmodal">
+    <unique/>
+This is a second WolfViewer window. The renderer (Vulkan or OpenGL) can only be changed in the first WolfViewer window you opened.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <!-- [round 3 2026-11-11] two Vulkan sessions in a row ended without shutting down (wolfvkbridge.cpp decideBackend) -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanCrashedTwice"
+   type="alertmodal">
+    <unique/>
+WolfViewer closed unexpectedly while drawing with its Vulkan renderer, more than once, so it is using OpenGL now. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
     <usetemplate
      name="okbutton"
      yestext="OK"/>
@@ -2969,7 +3005,7 @@ WolfViewer will draw with OpenGL the next time you start it.
    name="WolfVulkanFellBackLastStart"
    type="alertmodal">
     <unique/>
-The last time WolfViewer started with the Vulkan renderer it did not get as far as the login screen, so this time it is drawing with OpenGL as before. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+The last time WolfViewer started with the Vulkan renderer it did not get as far as showing the login screen, so this time it is drawing with OpenGL as before. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
     <usetemplate
      name="okbutton"
      yestext="OK"/>
@@ -2982,6 +3018,17 @@ The last time WolfViewer started with the Vulkan renderer it did not get as far 
    type="alertmodal">
     <unique/>
 The last time WolfViewer was running, its Vulkan renderer stopped working on your graphics card ([REASON]). WolfViewer is using OpenGL now. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <!-- [G5 2026-11-11] the same, when this start tries Vulkan once more (wolfvkbridge.cpp decideBackend) -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanStoppedLastRunRetry"
+   type="alertmodal">
+    <unique/>
+The last time WolfViewer was running, its Vulkan renderer stopped working on your graphics card ([REASON]). WolfViewer is trying Vulkan once more; if it stops again, WolfViewer will use OpenGL.
     <usetemplate
      name="okbutton"
      yestext="OK"/>

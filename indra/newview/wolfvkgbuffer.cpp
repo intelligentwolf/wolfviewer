@@ -161,13 +161,24 @@ bool WolfVkGBuffer::init(WolfVkDevice& device, bool self_test, std::string& erro
     sGenSemaphoresEXT(2, sems);
     mGlSemGlPassDone = sems[0];
     mGlSemVkPassDone = sems[1];
+    // [G3 2026-11-11] as WolfVkShare::createSemaphores: Linux fds pass to GL on a successful import (EXT_external_objects_fd
+    // rev 7, 4.2.1); Windows NT handles never do ("Importing a Windows handle does not transfer ownership of the handle to
+    // the GL implementation", EXT_external_objects_win32 rev 10, 4.2.1) and are closed after the import, success or not
 #if LL_WINDOWS
     sImportSemaphoreWin32HandleEXT(mGlSemGlPassDone, WOLF_GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, h1.mWin32);
     sImportSemaphoreWin32HandleEXT(mGlSemVkPassDone, WOLF_GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, h2.mWin32);
+    const std::string e = glErrorsHere();
+    device.closeExternalHandle(h1);
+    device.closeExternalHandle(h2);
+    if (!e.empty())
+    {
+        error = "glImportSemaphoreWin32HandleEXT (G-buffer): " + e;
+        destroy();
+        return false;
+    }
 #else
     sImportSemaphoreFdEXT(mGlSemGlPassDone, WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, h1.mFd);
     sImportSemaphoreFdEXT(mGlSemVkPassDone, WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, h2.mFd);
-#endif
     const std::string e = glErrorsHere();
     if (!e.empty())
     {
@@ -177,6 +188,7 @@ bool WolfVkGBuffer::init(WolfVkDevice& device, bool self_test, std::string& erro
         destroy();
         return false;
     }
+#endif
     mAvailable = true;
     LL_INFOS("Vulkan") << "G-buffer sharing ready: RGBA8, RGBA16, RGB10_A2, RGBA16F + D32_SFLOAT exportable; pass semaphores made" << LL_ENDL;
     return true;
@@ -476,6 +488,7 @@ bool WolfVkGBuffer::writeDump(const std::string& dir, std::string& error)
         const std::string path = dir + llformat("/gbuf_%zu_%ux%u_%u.raw", i, images[i]->width(), images[i]->height(), bpt);
         std::ofstream out(path, std::ios::binary);
         if (!out) { error = "cannot write " + path; mDumpBuffers.clear(); return false; }
+        mDumpBuffers[buffer]->invalidateForRead();   // [V14 2026-11-11]
         out.write(reinterpret_cast<const char*>(mDumpBuffers[buffer]->hostData()), static_cast<std::streamsize>(mDumpBuffers[buffer]->size()));
         buffer++;
     }

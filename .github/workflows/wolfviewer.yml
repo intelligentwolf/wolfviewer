@@ -339,12 +339,23 @@ jobs:
           # is what WolfVkScene::init reads (wolfvkscene.cpp), the <key>.spv files are every program variant
           # (wolfvkshader.cpp), manifest.json is the variant step's own record (scripts/shader_check.py --vulkan-out).
           SPV="work/$TOP/app_settings/shaders/spv"
-          for f in wolfvk_composite.vert.spv wolfvk_composite.frag.spv manifest.json; do
+          for f in wolfvk_composite.vert.spv wolfvk_composite.frag.spv manifest.json summary.json; do
             test -s "$SPV/$f" || { echo "::error::$TOP has no app_settings/shaders/spv/$f"; exit 1; }
           done
-          N=$(find "$SPV" -name '*.spv' ! -name 'wolfvk_*' | wc -l)
-          echo "program-variant SPIR-V files in the tarball: $N"
-          [ "$N" -gt 0 ] || { echo "::error::$TOP has no program-variant SPIR-V in app_settings/shaders/spv"; exit 1; }
+          # [G7 2026-11-11] the rules of scripts/spv_store_check.py (this job has no checkout): at least 60% of the linked
+          # programs compiled (summary.json), and every program manifest.json names present as .vert.spv and .frag.spv
+          python3 - "$SPV" <<'PYCHECK' || { echo "::error::$TOP's SPIR-V store is incomplete (see above)"; exit 1; }
+          import json, os, sys
+          d = sys.argv[1]
+          m = json.load(open(os.path.join(d, "manifest.json")))
+          s = json.load(open(os.path.join(d, "summary.json")))
+          need = max(0.6, float(s.get("min_ratio", 0)))
+          ratio = s["compiled"] / s["programs"] if s["programs"] else 0.0
+          keys = {v["spv"] for v in m.values()}
+          missing = [k for k in keys for st in ("vert", "frag") if not os.path.isfile(os.path.join(d, "%s.%s.spv" % (k, st))) or os.path.getsize(os.path.join(d, "%s.%s.spv" % (k, st))) == 0]
+          print("SPIR-V store: %d of %d linked programs (%.0f%%), %d program files, %d missing" % (s["compiled"], s["programs"], ratio * 100, len(keys), len(missing)))
+          sys.exit(0 if ratio >= need and not missing and len(keys) == s["spv_programs"] else 1)
+          PYCHECK
 
           # The AVX2 build must really be the AVX2 build: a different file, with far more
           # 256-bit (ymm) instructions than the standard one.

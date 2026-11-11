@@ -1124,6 +1124,19 @@ namespace
     }
 }
 
+std::string WolfCrashReport::thisRunFolder()
+{
+    return gDirUtilp->dumpDirExists() ? gDirUtilp->getBaseFileName(gDirUtilp->getDumpDir()) : std::string();
+}
+
+bool WolfCrashReport::runLeftCrashStack(const std::string& folder)
+{
+    // the same folder shape and stack file checkDriverCrash and find_crashes look at
+    if (folder.size() != 41 || folder.compare(0, 5, "dump-") != 0 || !LLUUID::validate(folder.substr(5))) return false;
+    const std::string stack = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "") + folder + gDirUtilp->getDirDelimiter() + STACK_FILE;
+    return file_time(stack) != 0;
+}
+
 void WolfCrashReport::checkDriverCrash()
 {
     static bool done = false;

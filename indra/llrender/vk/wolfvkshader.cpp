@@ -48,25 +48,36 @@ bool WolfVkFrameUniforms::init(WolfVkDevice& device, VkDeviceSize bytes_per_fram
             return false;
         }
         mBuffers.push_back(std::move(b));
-        // Source: vulkan_core.h:4185 VkDescriptorPoolSize { type, descriptorCount }; :4190 VkDescriptorPoolCreateInfo { sType, pNext, flags, maxSets, poolSizeCount, pPoolSizes }
-        // Enough for a few thousand draws per frame: two dynamic uniform descriptors and up to eight samplers each.
-        const VkDescriptorPoolSize sizes[2] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 8192 }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 } };
-        VkDescriptorPoolCreateInfo pool{};
-        pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;   // :240
-        pool.maxSets = 8192;
-        pool.poolSizeCount = 2;
-        pool.pPoolSizes = sizes;
-        VkDescriptorPool p = VK_NULL_HANDLE;
-        VkResult res = gVk.vkCreateDescriptorPool(device.device(), &pool, nullptr, &p);
-        if (res != VK_SUCCESS)
+        VkDescriptorPool p = createPool(error);
+        if (p == VK_NULL_HANDLE)
         {
-            error = std::string("vkCreateDescriptorPool: ") + WolfVkLoader::resultString(res);
             destroy();
             return false;
         }
-        mPools.push_back(p);
+        mPools.push_back(std::vector<VkDescriptorPool>(1, p));
     }
     return true;
+}
+
+VkDescriptorPool WolfVkFrameUniforms::createPool(std::string& error)
+{
+    // Source: vulkan_core.h:4185 VkDescriptorPoolSize { type, descriptorCount }; :4190 VkDescriptorPoolCreateInfo { sType, pNext, flags, maxSets, poolSizeCount, pPoolSizes }
+    // Enough for a few thousand draws: two dynamic uniform descriptors and up to eight samplers each. [V6 2026-11-11] a
+    // frame that needs more chains another pool of the same size (allocate)
+    const VkDescriptorPoolSize sizes[2] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 8192 }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 } };
+    VkDescriptorPoolCreateInfo pool{};
+    pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;   // :240
+    pool.maxSets = 8192;
+    pool.poolSizeCount = 2;
+    pool.pPoolSizes = sizes;
+    VkDescriptorPool p = VK_NULL_HANDLE;
+    VkResult res = gVk.vkCreateDescriptorPool(mDevice->device(), &pool, nullptr, &p);
+    if (res != VK_SUCCESS)
+    {
+        error = std::string("vkCreateDescriptorPool: ") + WolfVkLoader::resultString(res);
+        return VK_NULL_HANDLE;
+    }
+    return p;
 }
 
 void WolfVkFrameUniforms::destroy()
@@ -74,7 +85,8 @@ void WolfVkFrameUniforms::destroy()
     // [HANG GUARD 2026-11-08 8.2k] bounded idle (WolfVkDevice::waitIdle) instead of vkDeviceWaitIdle; a hung device keeps its objects
     if (mDevice && mDevice->hasDevice() && mDevice->waitIdle())
     {
-        for (VkDescriptorPool p : mPools) gVk.vkDestroyDescriptorPool(mDevice->device(), p, nullptr);
+        for (const std::vector<VkDescriptorPool>& chain : mPools)
+            for (VkDescriptorPool p : chain) gVk.vkDestroyDescriptorPool(mDevice->device(), p, nullptr);
     }
     mPools.clear();
     mBuffers.clear();
@@ -87,28 +99,36 @@ void WolfVkFrameUniforms::beginFrame(uint32_t frame_index)
     mFrame = frame_index % static_cast<uint32_t>(mBuffers.size());
     mUsed = 0;
     mWarnedFull = false;
+    mWarnedPools = false;
+    mPoolInUse = 0;
     // Source: vulkan_core.h:4626 PFN_vkResetDescriptorPool(device, pool, flags): every set of the previous use of this frame slot goes
-    gVk.vkResetDescriptorPool(mDevice->device(), mPools[mFrame], 0);
+    for (VkDescriptorPool p : mPools[mFrame]) gVk.vkResetDescriptorPool(mDevice->device(), p, 0);
 }
 
 void WolfVkFrameUniforms::resetPools()
 {
     if (!mDevice || !mDevice->hasDevice()) return;
-    for (VkDescriptorPool p : mPools)
+    for (const std::vector<VkDescriptorPool>& chain : mPools)
     {
         // Source: vulkan_core.h:4626 PFN_vkResetDescriptorPool
-        gVk.vkResetDescriptorPool(mDevice->device(), p, 0);
+        for (VkDescriptorPool p : chain) gVk.vkResetDescriptorPool(mDevice->device(), p, 0);
     }
 }
 
-bool WolfVkFrameUniforms::push(const void* data, VkDeviceSize size, VkDeviceSize& offset)
+bool WolfVkFrameUniforms::push(const void* data, VkDeviceSize size, VkDeviceSize& offset, bool essential)
 {
     const VkDeviceSize start = (mUsed + mAlignment - 1) / mAlignment * mAlignment;
-    if (start + size > mBytes)
+    // [V6 2026-11-11] the last ESSENTIAL_RESERVE bytes are kept for the frame's composite (essential), so a frame whose
+    // scene draws filled the ring still shows its picture instead of a black frame
+    const VkDeviceSize limit = essential ? mBytes : (mBytes > ESSENTIAL_RESERVE ? mBytes - ESSENTIAL_RESERVE : 0);
+    if (start + size > limit)
     {
         if (!mWarnedFull)
         {
-            LL_WARNS("Vulkan") << "Frame uniform ring full (" << mBytes << " bytes); later draws this frame are skipped" << LL_ENDL;
+            // once per frame that overflows, at WARN: the G-buffer pass reports itself incomplete and OpenGL draws it
+            // whole (WolfVkScene::gbufferPassComplete), so nothing goes missing from the picture
+            LL_WARNS("Vulkan") << "Frame uniform ring full (" << mBytes << " bytes" << (essential ? "" : ", the composite's reserve kept")
+                               << "); later Vulkan draws this frame are skipped and drawn by OpenGL" << LL_ENDL;
             mWarnedFull = true;
         }
         return false;
@@ -121,20 +141,50 @@ bool WolfVkFrameUniforms::push(const void* data, VkDeviceSize size, VkDeviceSize
 
 VkDescriptorSet WolfVkFrameUniforms::allocate(VkDescriptorSetLayout layout)
 {
-    // Source: vulkan_core.h:4199 VkDescriptorSetAllocateInfo { sType, pNext, descriptorPool, descriptorSetCount, pSetLayouts }
-    VkDescriptorSetAllocateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;   // :241
-    info.descriptorPool = mPools[mFrame];
-    info.descriptorSetCount = 1;
-    info.pSetLayouts = &layout;
-    VkDescriptorSet set = VK_NULL_HANDLE;
-    VkResult res = gVk.vkAllocateDescriptorSets(mDevice->device(), &info, &set);
-    if (res != VK_SUCCESS)
+    // [V6 2026-11-11] Was one pool of 8192 sets per frame slot (about 4096 draws): past that every allocation failed with
+    // VK_ERROR_OUT_OF_POOL_MEMORY, logged once a session, and the frame's composite could find no set at all (a black
+    // frame). Now a full pool chains the next one of the slot (made on first need, kept and reset with the slot), up to
+    // MAX_POOLS_PER_FRAME; only past that cap does an allocation fail, logged at WARN once per frame.
+    // vkAllocateDescriptorSets "VK_ERROR_OUT_OF_POOL_MEMORY" / "VK_ERROR_FRAGMENTED_POOL": the pool cannot hold the set
+    // (vulkan_core.h:161 / :158); any other error is not a full pool and is not retried.
+    std::vector<VkDescriptorPool>& chain = mPools[mFrame];
+    while (true)
     {
-        LL_WARNS_ONCE("Vulkan") << "vkAllocateDescriptorSets: " << WolfVkLoader::resultString(res) << LL_ENDL;
+        // Source: vulkan_core.h:4199 VkDescriptorSetAllocateInfo { sType, pNext, descriptorPool, descriptorSetCount, pSetLayouts }
+        VkDescriptorSetAllocateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;   // :241
+        info.descriptorPool = chain[mPoolInUse];
+        info.descriptorSetCount = 1;
+        info.pSetLayouts = &layout;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        VkResult res = gVk.vkAllocateDescriptorSets(mDevice->device(), &info, &set);
+        if (res == VK_SUCCESS) return set;
+        const bool full = res == VK_ERROR_OUT_OF_POOL_MEMORY || res == VK_ERROR_FRAGMENTED_POOL;
+        if (full && mPoolInUse + 1 < chain.size())
+        {
+            mPoolInUse++;
+            continue;
+        }
+        std::string error;
+        if (full && chain.size() < MAX_POOLS_PER_FRAME)
+        {
+            VkDescriptorPool p = createPool(error);
+            if (p != VK_NULL_HANDLE)
+            {
+                chain.push_back(p);
+                mPoolInUse = static_cast<uint32_t>(chain.size() - 1);
+                LL_INFOS("Vulkan") << "Descriptor pool " << chain.size() << " added to frame slot " << mFrame << " (a busy frame)" << LL_ENDL;
+                continue;
+            }
+        }
+        if (!mWarnedPools)
+        {
+            LL_WARNS("Vulkan") << "vkAllocateDescriptorSets: " << WolfVkLoader::resultString(res) << " with " << chain.size() << " pool(s) in this frame slot"
+                               << (error.empty() ? std::string() : " (" + error + ")") << "; later Vulkan draws this frame are skipped and drawn by OpenGL" << LL_ENDL;
+            mWarnedPools = true;
+        }
         return VK_NULL_HANDLE;
     }
-    return set;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

@@ -56,6 +56,13 @@ namespace WolfCrashReport
     bool writeForException(void* exception_pointers);
 #endif
 
+    /// [VULKAN round 4 2026-11-11] This run's dump folder name ("dump-<uuid>"), empty when there is none.
+    std::string thisRunFolder();
+    /// [VULKAN round 4 2026-11-11] Whether the run whose dump folder is `folder` (thisRunFolder() of that run) left a
+    /// crash stack there - written only by this file's crash handler, so an OS kill, a power cut or a forced logoff
+    /// (no handler ran) leaves none.
+    bool runLeftCrashStack(const std::string& folder);
+
     /// From llstartup.cpp at STATE_STARTED: send any crash left by an earlier run. Only the first call does anything.
     void sendPendingOnce();
 

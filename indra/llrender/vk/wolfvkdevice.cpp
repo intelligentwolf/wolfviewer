@@ -18,6 +18,10 @@
 #include "linden_common.h"
 #include "wolfvkdevice.h"
 #include <chrono>   // [AMD PERF] endOneTimeAndWait timing
+#include <future>   // [W2 2026-11-11] queueWaitIdleBounded
+#include <memory>
+#include <thread>
+#include <system_error>
 #include <cstring>
 #include <cctype>
 #include <algorithm>
@@ -466,12 +470,20 @@ bool WolfVkDevice::queryPhysicalDevices(std::string& error)
 
 bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error)
 {
+    mNoCandidates = false;
     // Candidates: a graphics queue family that can present to the surface, and VK_KHR_swapchain.
     std::vector<WolfVkPhysicalDeviceInfo> candidates;
     for (WolfVkPhysicalDeviceInfo d : mPhysicalDevices)
     {
         if (!d.mHasSwapchain)
         {
+            continue;
+        }
+        // [V7 2026-11-11] never a CPU implementation (llvmpipe/lavapipe, SwiftShader): VK_PHYSICAL_DEVICE_TYPE_CPU
+        // (vulkan_core.h:2237), "the device is typically running on the same processors as the host" (VkPhysicalDeviceType)
+        if (d.mProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
+        {
+            LL_INFOS("Vulkan") << "Device skipped, it runs on the processor (VK_PHYSICAL_DEVICE_TYPE_CPU): " << d.name() << LL_ENDL;
             continue;
         }
         for (uint32_t family = 0; family < d.mQueueFamilies.size(); ++family)
@@ -501,7 +513,8 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
     }
     if (candidates.empty())
     {
-        error = "No Vulkan device can draw to this window (no graphics queue with presentation, or no VK_KHR_swapchain)";
+        error = "No Vulkan graphics card can draw to this window (no graphics queue with presentation, no VK_KHR_swapchain, or only a processor-based device)";
+        mNoCandidates = true;
         return false;
     }
 
@@ -534,34 +547,103 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
                 return true;
             }
         }
+        // [W3 2026-11-11] OpenGL named its card and no Vulkan device has that UUID (a driver that reports UUIDs
+        // differently between the two APIs, or OpenGL on a software renderer): the vendor match below decides, and only
+        // when that fails too is Vulkan not started (V7). Was (V7 first version): fail here, as permanent.
+        LL_WARNS("Vulkan") << "No Vulkan device has the OpenGL device UUID (" << candidates.size() << " offered); choosing by the OpenGL vendor" << LL_ENDL;
     }
-    // c. the OpenGL vendor
-    if (mConfig.mGLVendorID)
+    // c. the OpenGL vendor. [W3 2026-11-11 round 3] Only when it names ONE device: with two of the same maker (an AMD iGPU
+    // + dGPU) the one whose name is OpenGL's renderer name breaks the tie; otherwise the choice fails (retryable) rather
+    // than guess - a card that is not OpenGL's cannot share images with it (the hand-over would fall back to read-back
+    // at best, WolfVkScene::init). Names compared: GL_RENDERER up to its first " (" or "/" ("NVIDIA GeForce RTX 5090
+    // Laptop GPU/PCIe/SSE2", "AMD Radeon 890M Graphics (radeonsi, ...)") and the Vulkan deviceName up to its first " ("
+    // ("AMD Radeon 890M Graphics (RADV STRIX1)"), case-insensitive.
+    // [round 4 W2] names normalised on both sides: lower case, a leading "mesa " and "amd " dropped, cut at " (" and,
+    // for GL_RENDERER, "/" too
+    auto trimmed = [&lower](const std::string& n, bool slash)
     {
-        for (const WolfVkPhysicalDeviceInfo& d : candidates)
+        size_t cut = n.find(" (");
+        if (slash) cut = std::min(cut, n.find('/'));
+        std::string t = lower(n.substr(0, cut));
+        for (const char* prefix : { "mesa ", "amd " })
         {
-            if (d.mProperties.vendorID == mConfig.mGLVendorID)
-            {
-                mChosen = d;
-                LL_INFOS("Vulkan") << "Device chosen by the OpenGL vendor: " << d.name() << LL_ENDL;
-                return true;
-            }
+            if (t.compare(0, strlen(prefix), prefix) == 0) t.erase(0, strlen(prefix));
         }
-    }
-    // d. first discrete
-    for (const WolfVkPhysicalDeviceInfo& d : candidates)
+        while (!t.empty() && t.back() == ' ') t.pop_back();
+        return t;
+    };
+    // [round 4 W2 / round 5 W-B] one card offered by two drivers (RADV and amdvlk, say) is one card: devices with the same
+    // device UUID count once (the first one listed is taken); by name only when a UUID is not known
+    auto one_card = [&](const std::vector<const WolfVkPhysicalDeviceInfo*>& v)
     {
-        if (d.mProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+        static const uint8_t zero_uuid[VK_UUID_SIZE] = {};
+        for (const WolfVkPhysicalDeviceInfo* d : v)
         {
-            mChosen = d;
-            LL_INFOS("Vulkan") << "Device chosen as the first discrete card: " << d.name() << LL_ENDL;
+            // [round 5 W-B] two devices are one card when their device UUIDs are equal; when both UUIDs are known (non-zero)
+            // and differ they are two cards, even with the same name (two identical cards). Only when a UUID is unknown
+            // (all zero: a Vulkan 1.0 device, wolfvkdevice.h mIds) does the same normalised name make them one.
+            const bool d_known = memcmp(d->mIds.deviceUUID, zero_uuid, VK_UUID_SIZE) != 0;
+            const bool f_known = memcmp(v.front()->mIds.deviceUUID, zero_uuid, VK_UUID_SIZE) != 0;
+            if (d_known && f_known)
+            {
+                if (memcmp(d->mIds.deviceUUID, v.front()->mIds.deviceUUID, VK_UUID_SIZE) != 0) return false;
+            }
+            else if (trimmed(d->name(), false) != trimmed(v.front()->name(), false)) return false;
+        }
+        return !v.empty();
+    };
+    // [round 4 W1] nothing to tell OpenGL's card by (no GL UUID, no known vendor) and one card offered: that one
+    if (!mConfig.mHaveGLDeviceUUID && mConfig.mGLVendorID == 0)
+    {
+        std::vector<const WolfVkPhysicalDeviceInfo*> all;
+        for (const WolfVkPhysicalDeviceInfo& d : candidates) all.push_back(&d);
+        if (one_card(all))
+        {
+            mChosen = *all.front();
+            LL_INFOS("Vulkan") << "Device chosen as the only card offered (OpenGL gave neither UUID nor vendor): " << mChosen.name() << LL_ENDL;
             return true;
         }
     }
-    // e. first
-    mChosen = candidates.front();
-    LL_INFOS("Vulkan") << "Device chosen as the first available: " << mChosen.name() << LL_ENDL;
-    return true;
+    std::vector<const WolfVkPhysicalDeviceInfo*> same_vendor;
+    for (const WolfVkPhysicalDeviceInfo& d : candidates)
+    {
+        if (mConfig.mGLVendorID && d.mProperties.vendorID == mConfig.mGLVendorID) same_vendor.push_back(&d);
+    }
+    if (one_card(same_vendor))
+    {
+        mChosen = *same_vendor.front();
+        LL_INFOS("Vulkan") << "Device chosen by the OpenGL vendor: " << mChosen.name() << LL_ENDL;
+        return true;
+    }
+    const std::string gl_name = trimmed(mConfig.mGLRenderer, true);
+    std::vector<const WolfVkPhysicalDeviceInfo*> named;
+    if (!gl_name.empty())
+    {
+        for (const WolfVkPhysicalDeviceInfo& d : candidates)
+        {
+            // among OpenGL's vendor's devices, or among all of them when OpenGL's vendor is not known
+            const bool in_pool = same_vendor.empty() || std::find(same_vendor.begin(), same_vendor.end(), &d) != same_vendor.end();
+            if (in_pool && trimmed(d.name(), false) == gl_name) named.push_back(&d);
+        }
+    }
+    if (one_card(named) && (mConfig.mGLVendorID == 0 || !same_vendor.empty()))
+    {
+        mChosen = *named.front();
+        LL_INFOS("Vulkan") << "Device chosen by OpenGL's renderer name \"" << mConfig.mGLRenderer << "\": " << mChosen.name() << LL_ENDL;
+        return true;
+    }
+    if (mConfig.mGLVendorID && same_vendor.empty())
+    {
+        // [V7 2026-11-11] OpenGL's maker is known and none of the Vulkan graphics cards is by that maker
+        error = llformat("no Vulkan graphics card is by the maker of the one OpenGL draws with (vendor 0x%04x)", mConfig.mGLVendorID);
+    }
+    else
+    {
+        error = llformat("the Vulkan graphics card OpenGL draws with cannot be told apart (%u candidate(s), OpenGL renderer \"%s\")",
+                         static_cast<unsigned>(same_vendor.empty() ? candidates.size() : same_vendor.size()), mConfig.mGLRenderer.c_str());
+    }
+    LL_WARNS("Vulkan") << error << LL_ENDL;
+    return false;
 }
 
 bool WolfVkDevice::createDevice(VkSurfaceKHR surface, std::string& error)
@@ -707,7 +789,9 @@ bool WolfVkDevice::createDevice(VkSurfaceKHR surface, std::string& error)
 
     if (!createFrames(error))
     {
-        destroy();
+        // [V11 2026-11-11] the device only: destroy() would also end the instance, under the window surface the caller
+        // still holds (VUID-vkDestroyInstance-instance-00629) - the caller destroys the surface, then the instance
+        destroyDeviceObjects();
         return false;
     }
 
@@ -895,7 +979,15 @@ WolfVkDevice::Frame& WolfVkDevice::beginFrame()
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    gVk.vkBeginCommandBuffer(f.mCmd, &begin);
+    // [V10 2026-11-11] vkBeginCommandBuffer can fail (VK_ERROR_OUT_OF_HOST_MEMORY / _DEVICE_MEMORY, vkBeginCommandBuffer
+    // refpage); recording into or ending a buffer that did not begin is invalid, so the device is marked unusable the way
+    // a hang marks it (every caller of beginFrame checks hung() and falls back to OpenGL)
+    const VkResult begun = gVk.vkBeginCommandBuffer(f.mCmd, &begin);
+    if (begun != VK_SUCCESS)
+    {
+        declareHung(std::string("vkBeginCommandBuffer (frame): ") + WolfVkLoader::resultString(begun));
+        return f;
+    }
     mRecording = true;
     return f;
 }
@@ -1030,7 +1122,14 @@ VkCommandBuffer WolfVkDevice::beginMidFrame()
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    gVk.vkBeginCommandBuffer(cmd, &begin);
+    // [V10 2026-11-11] a buffer that did not begin is not handed out (the caller then lets OpenGL draw the pass); it stays
+    // in the slot's pool in the initial state, which beginFrame's pool reset allows
+    const VkResult begun = gVk.vkBeginCommandBuffer(cmd, &begin);
+    if (begun != VK_SUCCESS)
+    {
+        LL_WARNS("Vulkan") << "vkBeginCommandBuffer (mid-frame): " << WolfVkLoader::resultString(begun) << LL_ENDL;
+        return VK_NULL_HANDLE;
+    }
     return cmd;
 }
 
@@ -1275,7 +1374,14 @@ bool WolfVkDevice::submitSync(VkCommandBuffer cmd, const ExtraSync& extra, bool 
     {
         VkFenceCreateInfo fi{};
         fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        gVk.vkCreateFence(mDevice, &fi, nullptr, &fence);
+        // [V10 2026-11-11] checked: without the fence the submit could not be waited for (nor the buffer freed after it)
+        const VkResult made = gVk.vkCreateFence(mDevice, &fi, nullptr, &fence);
+        if (made != VK_SUCCESS)
+        {
+            error = std::string("vkCreateFence (sync): ") + WolfVkLoader::resultString(made);
+            if (cmd != VK_NULL_HANDLE) gVk.vkFreeCommandBuffers(mDevice, mOneTimePool, 1, &cmd);
+            return false;
+        }
     }
     VkResult res = gVk.vkQueueSubmit(mQueue, 1, &submit, fence);
     bool ok = res == VK_SUCCESS;
@@ -1351,7 +1457,13 @@ VkCommandBuffer WolfVkDevice::beginOneTime()
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    gVk.vkBeginCommandBuffer(cmd, &begin);
+    const VkResult begun = gVk.vkBeginCommandBuffer(cmd, &begin);   // [V10 2026-11-11] checked
+    if (begun != VK_SUCCESS)
+    {
+        LL_WARNS("Vulkan") << "vkBeginCommandBuffer (one-time): " << WolfVkLoader::resultString(begun) << LL_ENDL;
+        gVk.vkFreeCommandBuffers(mDevice, mOneTimePool, 1, &cmd);
+        return VK_NULL_HANDLE;
+    }
     mOneTimeOpen++;
     return cmd;
 }
@@ -1381,7 +1493,14 @@ bool WolfVkDevice::endOneTimeAndWait(VkCommandBuffer cmd, std::string& error)
     VkFenceCreateInfo fence_info{};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     VkFence fence = VK_NULL_HANDLE;
-    gVk.vkCreateFence(mDevice, &fence_info, nullptr, &fence);
+    // [V10 2026-11-11] checked: a null fence would make the wait below wait on nothing and free a buffer still executing
+    res = gVk.vkCreateFence(mDevice, &fence_info, nullptr, &fence);
+    if (res != VK_SUCCESS)
+    {
+        error = std::string("vkCreateFence (one-time): ") + WolfVkLoader::resultString(res);
+        gVk.vkFreeCommandBuffers(mDevice, mOneTimePool, 1, &cmd);
+        return false;
+    }
 
     VkSubmitInfo submit{};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1473,6 +1592,40 @@ bool WolfVkDevice::waitIdle()
     return waitAllSubmitted("waitIdle");
 }
 
+bool WolfVkDevice::queueWaitIdleBounded(const char* what)
+{
+    if (mDevice == VK_NULL_HANDLE || mQueue == VK_NULL_HANDLE) return true;
+    if (mHung) return false;
+    // the helper owns copies of what it needs (the shared state outlives this call when it times out)
+    auto result = std::make_shared<std::promise<VkResult>>();
+    std::future<VkResult> done = result->get_future();
+    const PFN_vkQueueWaitIdle wait_fn = gVk.vkQueueWaitIdle;
+    const VkQueue queue = mQueue;
+    try
+    {
+        std::thread([result, wait_fn, queue]() { result->set_value(wait_fn(queue)); }).detach();
+    }
+    catch (const std::system_error& e)
+    {
+        // [W2 round 3] no helper thread: the wait cannot be bounded, so it is not made - as after a timeout
+        declareHung(llformat("%s: no thread for the bounded vkQueueWaitIdle (%s)", what, e.what()));
+        return false;
+    }
+    if (done.wait_for(std::chrono::nanoseconds(FRAME_WAIT_LIMIT_NS)) != std::future_status::ready)
+    {
+        declareHung(llformat("%s: vkQueueWaitIdle has not returned after %llu s", what, static_cast<unsigned long long>(FRAME_WAIT_LIMIT_NS / 1000000000ull)));
+        return false;
+    }
+    const VkResult res = done.get();
+    if (lost(res, what)) return false;
+    if (res != VK_SUCCESS)
+    {
+        LL_WARNS("Vulkan") << what << ": vkQueueWaitIdle: " << WolfVkLoader::resultString(res) << LL_ENDL;
+        return false;
+    }
+    return true;
+}
+
 void WolfVkDevice::waitIdleAndFlushDeferred()
 {
     if (mDevice == VK_NULL_HANDLE || mHung)   // a hung device never goes idle; its objects are left to the driver
@@ -1504,6 +1657,34 @@ void WolfVkDevice::waitIdleAndFlushDeferred()
     }
 }
 
+void WolfVkDevice::destroyDeviceObjects()
+{
+    // [V11 2026-11-11] createDevice's failure path: the frames made so far (destroyFrames skips the null handles of a
+    // half-made slot), the allocator and the device; nothing was submitted, so nothing is waited for. The instance stays.
+    if (mDevice != VK_NULL_HANDLE)
+    {
+        destroyFrames();
+        mAllocator.destroy();
+        gVk.vkDestroyDevice(mDevice, nullptr);
+    }
+    mDevice = VK_NULL_HANDLE;
+    mQueue = VK_NULL_HANDLE;
+    mPresentFences = false;
+    mGlDepthRange = false;
+    mCompressionQuery = false;
+}
+
+void WolfVkDevice::abandon(const std::string& why)
+{
+    // [V4 2026-11-11] see the header: a swapchain the owner could not destroy pins the device and the instance
+    LL_WARNS("Vulkan") << "Vulkan device and instance abandoned without destruction: " << why << LL_ENDL;
+    mAbandoned = true;
+    mAllocator.abandon();
+    mDevice = VK_NULL_HANDLE;
+    mQueue = VK_NULL_HANDLE;
+    mFrames.clear();
+}
+
 void WolfVkDevice::destroy()
 {
     mPresentFences = false;
@@ -1513,6 +1694,8 @@ void WolfVkDevice::destroy()
     {
         // nothing can be waited for or safely destroyed: the handles are abandoned to the driver (process exit cleans up)
         LL_WARNS("Vulkan") << "Vulkan device abandoned without destruction (hung): " << mHungReason << LL_ENDL;
+        mAbandoned = true;
+        mAllocator.abandon();
         mDevice = VK_NULL_HANDLE;
         mFrames.clear();
         return;
@@ -1521,8 +1704,17 @@ void WolfVkDevice::destroy()
     {
         // [HANG GUARD 2026-11-08 8.2k] the bounded wait ran out: abandoned exactly as above
         LL_WARNS("Vulkan") << "Vulkan device abandoned without destruction (hung at shutdown): " << mHungReason << LL_ENDL;
+        mAbandoned = true;
+        mAllocator.abandon();
         mDevice = VK_NULL_HANDLE;
         mFrames.clear();
+        return;
+    }
+    if (mAbandoned)
+    {
+        // [V4 2026-11-11] a later call (shutdown after a fall-back): the abandoned device's swapchain and surface are still
+        // alive, so the instance they belong to stays too (VUID-vkDestroyInstance-instance-00629) and the loader stays
+        // loaded under it; the process ends them
         return;
     }
     if (mDevice != VK_NULL_HANDLE)

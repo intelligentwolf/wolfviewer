@@ -1877,6 +1877,9 @@ def main(argv=None):
                     help="exit 0 when the only failures are in programs the viewer carries on without")
     ap.add_argument("--no-prune", action="store_true",
                     help="keep every #define line the viewer injects, used by the file or not (slower; the compile result is the same)")
+    ap.add_argument("--vulkan-min-ratio", type=float, default=0.0,
+                    help="[G7 2026-11-11] with --vulkan-out: exit 1 (even with --no-fail) when fewer than this share of the linked "
+                         "programs get SPIR-V; the share and counts go to DIR/summary.json for the packaging check (scripts/spv_store_check.py)")
     ap.add_argument("--no-fail", action="store_true",
                     help="[VULKAN BACKEND 2026-11-08] exit 0 whatever the GL results (the Vulkan SPIR-V output step runs this way, so a GL failure is reported by the check target, not twice)")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -1981,6 +1984,7 @@ def main(argv=None):
 
     # 4. [VULKAN BACKEND 2026-11-08] the Vulkan transform + SPIR-V output for the viewer's Vulkan renderer
     vk_results = {}
+    vk_too_few = None   # [G7 2026-11-11]
     if args.vulkan_out:
         vk_dir = os.path.abspath(args.vulkan_out)
         vk_work = os.path.join(cache_dir, "vulkan")
@@ -2009,6 +2013,14 @@ def main(argv=None):
         n_ok = sum(1 for ok, _ in vk_results.values() if ok)
         print("shader_check: Vulkan SPIR-V output: %d of %d linked programs transformed and compiled, %d recipe keys in %s/manifest.json (%.1fs)"
               % (n_ok, len(good), len(manifest), vk_dir, time.time() - t0))
+        # [G7 2026-11-11] the counts the packaging check (scripts/spv_store_check.py) holds the shipped store to
+        vk_ratio = n_ok / len(good) if good else 0.0
+        with open(os.path.join(vk_dir, "summary.json"), "w", encoding="utf-8") as fh:
+            json.dump({"programs": len(good), "compiled": n_ok, "spv_programs": len({v["spv"] for v in manifest.values()}),
+                       "recipes": len(manifest), "min_ratio": args.vulkan_min_ratio, "quick": bool(args.quick)}, fh, indent=1, sort_keys=True)
+        if vk_ratio < args.vulkan_min_ratio:
+            vk_too_few = "only %d of %d linked programs got SPIR-V (%.0f%%, --vulkan-min-ratio %.0f%%)" % (n_ok, len(good), vk_ratio * 100, args.vulkan_min_ratio * 100)
+            print("shader_check: ERROR: " + vk_too_few)
         if n_ok < len(good):
             reasons = group_spirv_reasons(out for ok, out in vk_results.values() if not ok)
             print("  top reasons the rest fail:")
@@ -2134,6 +2146,8 @@ def main(argv=None):
         tmp.cleanup()
     print()
     print("shader_check: done in %.1fs" % (time.time() - t0))
+    if vk_too_few:
+        return 1   # [G7 2026-11-11] whatever --no-fail says: a store this incomplete must not be packaged
     if args.no_fail:
         return 0
     if any(f[0] for f in unknown):

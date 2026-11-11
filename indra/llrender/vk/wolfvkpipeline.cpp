@@ -20,6 +20,8 @@
 #include "wolfvkdevice.h"
 #include "wolfvkbuffer.h"
 #include <cstring>
+#include <algorithm>   // [V5] std::find / std::remove
+#include <functional>
 
 // ---------------------------------------------------------------------------------------------------------------
 // WolfVkProgram
@@ -181,6 +183,7 @@ bool WolfVkProgram::create(WolfVkDevice& device, const std::string& name, const 
 
 void WolfVkProgram::destroy()
 {
+    WolfVkPipelineCache::forgetProgram(this);   // [V5 2026-11-11] its pipelines go with it (deferred)
     if (mDevice && mDevice->hasDevice())
     {
         WolfVkDevice* device = mDevice;
@@ -274,8 +277,78 @@ bool WolfVkPipelineCache::KeyEq::operator()(const Key& a, const Key& b) const
     return a.mProgram == b.mProgram && a.mPass == b.mPass && a.mState == b.mState;
 }
 
+namespace
+{
+    // [V5 2026-11-11] every initialised cache, so a render pass or program going away can take its pipelines with it
+    // (forgetRenderPass / forgetProgram). Main thread only, as every Vulkan object here.
+    // never destroyed (a pointer to a heap vector): ~WolfVkProgram of the viewer's global shader objects can run during
+    // static destruction, after a plain static vector would already be gone [B2 2026-11-11]
+    std::vector<WolfVkPipelineCache*>& liveCaches()
+    {
+        static std::vector<WolfVkPipelineCache*>* caches = new std::vector<WolfVkPipelineCache*>();
+        return *caches;
+    }
+}
+
+void WolfVkPipelineCache::forgetRenderPass(VkRenderPass pass)
+{
+    if (pass == VK_NULL_HANDLE) return;
+    for (WolfVkPipelineCache* cache : liveCaches()) cache->forget([pass](const Key& k) { return k.mPass == pass; });
+}
+
+void WolfVkPipelineCache::forgetProgram(const WolfVkProgram* program)
+{
+    if (!program) return;
+    for (WolfVkPipelineCache* cache : liveCaches()) cache->forget([program](const Key& k) { return k.mProgram == program; });
+}
+
+void WolfVkPipelineCache::forget(const std::function<bool(const Key&)>& match)
+{
+    // [V5 2026-11-11] The cache is keyed by the program's address and the render pass handle. Neither lived as long as
+    // the cache: every window resize remade the composite pass and the render targets' passes (and a remade mirror its
+    // program), so the old pipelines leaked, and an address or handle the driver handed out again found a pipeline made
+    // for an object that no longer existed. The entries go when their pass or program goes (called before that object's
+    // own deferred destruction is filed); the pipelines themselves are destroyed deferred (WolfVkDevice::deferDestroy, as
+    // every object here), since a frame in flight may still have them bound. Failed entries are forgotten too, so a new
+    // object at the same address gets its own attempt.
+    std::vector<VkPipeline> gone;
+    for (auto it = mPipelines.begin(); it != mPipelines.end();)
+    {
+        if (match(it->first)) { gone.push_back(it->second); it = mPipelines.erase(it); }
+        else ++it;
+    }
+    for (auto it = mFailed.begin(); it != mFailed.end();)
+    {
+        if (match(it->first)) it = mFailed.erase(it);
+        else ++it;
+    }
+    if (gone.empty() || !mDevice || !mDevice->hasDevice() || mDevice->hung()) return;   // a hung device keeps its objects
+    WolfVkDevice* device = mDevice;
+    device->deferDestroy([device, gone]()
+    {
+        for (VkPipeline p : gone) if (p) gVk.vkDestroyPipeline(device->device(), p, nullptr);
+    });
+}
+
+WolfVkPipelineCache::~WolfVkPipelineCache()
+{
+    // [B2 2026-11-11] Before, only destroy() unregistered: the hung branch of WolfVkScene::destroy skipped it, the scene was
+    // deleted, and a later ~WolfVkProgram (shader reload, quit) walked the freed cache in forgetProgram - a use-after-free.
+    liveCaches().erase(std::remove(liveCaches().begin(), liveCaches().end(), this), liveCaches().end());
+}
+
+void WolfVkPipelineCache::abandon()
+{
+    mPipelines.clear();
+    mFailed.clear();
+    mCache = VK_NULL_HANDLE;
+    mDevice = nullptr;
+    liveCaches().erase(std::remove(liveCaches().begin(), liveCaches().end(), this), liveCaches().end());
+}
+
 void WolfVkPipelineCache::init(WolfVkDevice& device)
 {
+    if (std::find(liveCaches().begin(), liveCaches().end(), this) == liveCaches().end()) liveCaches().push_back(this);
     mDevice = &device;
     // Source: vulkan_core.h:4083 VkPipelineCacheCreateInfo { sType, pNext, flags, initialDataSize, pInitialData }
     VkPipelineCacheCreateInfo info{};
@@ -306,6 +379,7 @@ void WolfVkPipelineCache::destroy()
     mFailed.clear();
     mCache = VK_NULL_HANDLE;
     mDevice = nullptr;
+    liveCaches().erase(std::remove(liveCaches().begin(), liveCaches().end(), this), liveCaches().end());   // [V5]
 }
 
 VkPipeline WolfVkPipelineCache::get(const WolfVkProgram& program, const WolfVkPipelineState& state, VkRenderPass render_pass)

@@ -131,14 +131,19 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 # (scripts/shader_check.py --vulkan-out). Every platform: macOS packages app_settings the same way, under
                 # Contents/Resources (Darwin construct: super().construct() inside prefix "Resources"), and the
                 # mac build makes the same SPIR-V (install-glslang.sh has a macOS archive), so the check costs it nothing.
+                # [G7 2026-11-11] ...and not just one file of it: scripts/spv_store_check.py (the composite pair, manifest.json,
+                # summary.json with at least MIN_RATIO of the linked programs compiled, every program in the manifest present)
                 spv_dir = self.dst_path_of(os.path.join("shaders", "spv"))
-                for spv_name in ("wolfvk_composite.vert.spv", "wolfvk_composite.frag.spv", "manifest.json"):
-                    if not os.path.isfile(os.path.join(spv_dir, spv_name)):
-                        raise ManifestError("the package has no app_settings/shaders/spv/%s: the Vulkan renderer cannot "
-                                            "start without it (was glslang installed? indra/cmake/VulkanShaders.cmake)" % spv_name)
-                if not any(n.endswith(".spv") and not n.startswith("wolfvk_") for n in os.listdir(spv_dir)):
-                    raise ManifestError("the package has no program-variant SPIR-V in app_settings/shaders/spv "
-                                        "(scripts/shader_check.py --vulkan-out wrote none)")
+                sys.path.insert(0, os.path.join(self.args['source'], os.pardir, os.pardir, "scripts"))
+                try:
+                    import spv_store_check
+                finally:
+                    sys.path.pop(0)
+                spv_errors, spv_line = spv_store_check.check(spv_dir)
+                if spv_errors:
+                    raise ManifestError("the package's Vulkan SPIR-V store (app_settings/shaders/spv) must not ship: "
+                                        + "; ".join(spv_errors) + " (was glslang installed? indra/cmake/VulkanShaders.cmake)")
+                print("SPIR-V store: " + spv_line)
                 # include the extracted list of contributors
                 contributions_path = os.path.join(self.args['source'], "..", "..", "doc", "contributions.txt")
                 contributor_names = self.extract_names(contributions_path)

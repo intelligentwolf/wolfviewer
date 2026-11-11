@@ -35,11 +35,18 @@
 #include "vk/wolfvkshader.h"
 #include "llwindow.h"
 #include "llappviewer.h"   // [RUN-TIME STOP 2026-11-09] requestQuit
-#include "llstartup.h"     // [BLACK WORLD 2026-11-10] the world check starts in-world (STATE_STARTED)
+#include "llstartup.h"         // [BLACK WORLD 2026-11-10] the world check starts in-world (STATE_STARTED)
+#include "wolfcrashreport.h"   // [round 4 2026-11-11] crash evidence for the session marker
+#include "llsdserialize.h"     // [round 5 2026-11-11] a second instance re-reads the Vulkan keys from the settings file
+#include "llfile.h"
+#include "llcontrolsavehook.h" // [round 5 2026-11-11] gWolfControlBeforeSave
+#include "llagent.h"       // [G6 2026-11-11] no world-check verdicts from samples taken during a teleport
+#include "llversioninfo.h" // [G5 2026-11-11] the viewer version in the failure stamp
 #include "llviewercontrol.h"
 #include "llnotificationsutil.h"
 #include "lltrans.h"
 #include "lltimer.h"
+#include <algorithm> // [G2 2026-11-11] std::find, std::max
 #include <chrono>   // [AMD PERF] frame step timing
 #include <cstring>  // [VULKAN WAYLAND 2026-11-09] memcmp
 #if LL_WINDOWS
@@ -88,10 +95,20 @@ namespace
     //      is Vulkan to blame -> stop with the stage's reason. Black through both stages = a dark scene (a black sky
     //      box, a cave at night): nothing fires, the normal mode is restored, and the log says so.
     //   The check runs once a second for the first 90 s in-world and ends early after 10 lit probes.
+    // [G6 2026-11-11] A stage's verdict now needs the picture to FOLLOW the switch, both ways (an A/B/A/B test): black with
+    // Vulkan's part on, lit with it off, black again with it on, lit again with it off. Before, any black-to-lit change
+    // while a stage was on (a teleport's arrival, the sky loading in the first 90 s) was taken for Vulkan's fault and
+    // quit a healthy session with OpenGL saved. Light that comes back with Vulkan's part ON is the scene, not Vulkan: the
+    // normal mode is restored and watching goes on. Samples taken during a teleport do not count, and a check still
+    // switching after 180 s ends undecided with the normal mode restored.
     struct BlackCheck
     {
-        enum Stage { OFF, WATCH, STAGE1_SETTLE, STAGE1, STAGE2_SETTLE, STAGE2, DONE };
+        enum Stage { OFF, WATCH, TOGGLE, DONE };
+        // TOGGLE: mPart 1 = Vulkan's pass into the shared G-buffer (and the depth rewrite), 2 = the G-buffer being shared
+        // at all; mPhase 0 = part off (expect light), 1 = part on again (expect black), 2 = part off again (expect light)
         Stage mStage = OFF;
+        int mPart = 0;
+        int mPhase = 0;
         F64 mStarted = 0.0;
         uint32_t mLastGlSeq = 0;     // the last GL sample judged
         uint32_t mProbes = 0;
@@ -104,10 +121,69 @@ namespace
         std::string mSummary;        // the outcome, for the log and the reports
     };
     BlackCheck sBlack;
+
+    // [G2 2026-11-11] The login check. Before, WolfVulkanStartOK was saved as "good" at the first login frame whatever it
+    // showed (a skipped frame, a failed acquire, a composite with no descriptor set, a black child window), so a black
+    // login screen was remembered as a good start. Now the start is good only once a frame was PRESENTED and a sample of
+    // that very picture (WolfVkScene::FrameCheck, 1024 pixels of the swapchain image after the composite) has light in
+    // it. A sample counts against Vulkan only when OpenGL's own frame (the same pixels of its back buffer, same frame)
+    // has light: the login page may take seconds to load, and a frame black in both says nothing (run t1-normal,
+    // 2026-11-11: without this rule a healthy NVIDIA start failed on 8 black samples in its first 2 s). LOGIN_BLACK_SAMPLES
+    // such samples running (about 2 s: one is asked
+    // for every LOGIN_SAMPLE_SPACING s) end the
+    // Vulkan renderer for this session (loginCheckFailed: OpenGL takes over the window at once, with the notice; on a
+    // native Wayland window, where that is not safe, the run-time stop). Without a way to sample the picture (no
+    // TRANSFER_SRC on the swapchain, another format) a presented frame with the composite drawn over the GL frame layer
+    // counts as good. A check that never concludes (no frame presented: a hidden window) leaves the start unconfirmed, so
+    // the next start treats it like one that did not reach the login screen.
+    struct LoginCheck
+    {
+        enum Stage { OFF, RUNNING, PASSED, FAILED };
+        Stage mStage = OFF;
+        F64 mStarted = 0.0;
+        F64 mLastRequest = 0.0;
+        uint32_t mBlackRun = 0;
+        uint32_t mSamples = 0;
+        std::vector<uint32_t> mPresented;   // check samples whose frame was presented (the last few)
+    };
+    LoginCheck sLogin;
+    // [round 3] when this Vulkan session reached STATE_STARTED (0 = not yet): SESSION_PROOF_MINUTES in-world with no
+    // failure also proves a session (shutdown), for when the world check is off or ends undecided (a dark region)
+    // [round 4 W3] seconds in-world while frames were actually presented (each present adds the time since the last,
+    // capped, so a suspend or a minimised window does not count)
+    F64 sInWorldPresented = 0.0;
+    F64 sLastPresentAt = 0.0;
+    constexpr F64 PRESENT_GAP_CAP = 0.5;
+    constexpr F64 SESSION_PROOF_MINUTES = 10.0;
+    bool sGBufferSharedAtStart = false;   // [round 4 W3] the G-buffer was shared at the start (shareGBuffer "start")
+    bool sCrashedTwice = false;           // [round 4 W4] decideBackend chose OpenGL after two crashes
+    constexpr uint32_t LOGIN_BLACK_SAMPLES = 8;
+    constexpr F64 LOGIN_SAMPLE_SPACING = 0.25;
+    constexpr uint32_t LOGIN_LIT_POINTS = 4;   // of 1024: a few lit pixels are a picture, not noise in a black one
+
+    // [V1/G1 2026-11-11] Swapchain rebuilds at run time. "The window has no size" (minimised, WolfVkSwapchain::noSize) is
+    // waited out for as long as it lasts; any other failure (surface lost, vkCreateSwapchainKHR refused, out of memory) is
+    // retried every SWAPCHAIN_RETRY_SPACING s for SWAPCHAIN_RETRY_WINDOW s from the first failure ([W5] time-based, so a
+    // window system that takes a few seconds to settle gets them), each logged at WARN, and then the renderer
+    // stops (stopAtRunTime: its message box, OpenGL at the next start). Before, every failure was taken for a minimised
+    // window: logged at DEBUG only and retried every frame for ever - a frozen or black picture with no way out.
+    uint32_t sSwapchainFailures = 0;
+    F64 sSwapchainRetryAt = 0.0;
+    F64 sSwapchainFirstFailure = 0.0;
+    constexpr F64 SWAPCHAIN_RETRY_WINDOW = 4.0;
+    constexpr F64 SWAPCHAIN_RETRY_SPACING = 0.25;
+    // [V8 2026-11-11] VK_SUBOPTIMAL_KHR (the image was shown, but a rebuilt swapchain would match the surface better).
+    // A rebuild follows it only when the window's size differs from the one the swapchain was built for, or at most once
+    // every SUBOPTIMAL_REBUILD_SPACING s: a surface that stays suboptimal after a rebuild (e.g. it cannot be flipped)
+    // used to rebuild the swapchain - a device idle wait included - every single frame.
+    uint32_t sBuiltWidth = 0, sBuiltHeight = 0;
+    F64 sLastSuboptimalRebuild = -1.0e9;
+    bool sSuboptimalNoted = false;
+    constexpr F64 SUBOPTIMAL_REBUILD_SPACING = 10.0;
     bool sGBufferGLOnly = false;         // [BLACK WORLD] stage 1: Vulkan draws no pass and no depth rewrite runs
     bool sGBufferUnsharePending = false; // [BLACK WORLD] stage 2: the target gives the shared textures back at its next allocate
     bool sGBufferReshareWanted = false;  // [BLACK WORLD] after a dark-scene verdict: share again once the unshare has finished
-    void stopAtRunTime(const std::string& reason);
+    void stopAtRunTime(const std::string& reason, bool retryable = true);
     bool shareGBuffer(const char* why);
     void unshareGBuffer(const std::string& why);
 
@@ -282,6 +358,98 @@ namespace
         GLSpan sGlCaptureSpan;
     }
 
+    // [G5 2026-11-11] The automatic switch to OpenGL, and when Vulkan is tried again. THE RULE:
+    //  - An automatic failure (start-up fall-back, run-time stop, failed login check, a start that never confirmed its
+    //    login screen) sets WolfRenderBackend to "opengl" as before (so the floater and About say what runs), and also
+    //    counts it: WolfVulkanAutoFailures + 1, with WolfVulkanAutoFailStamp = "<viewer version>|<OpenGL driver>".
+    //  - At the next start, a saved "opengl" that the viewer set itself (WolfVulkanAutoFailures > 0) goes back to Vulkan
+    //    while fewer than AUTO_RETRY_LIMIT failures were counted under the current stamp. So one passing failure (a driver
+    //    reset, a suspend, a monitor change) costs one OpenGL session at most; a second one in a row keeps OpenGL.
+    //  - A new viewer version or a different OpenGL driver starts the count again (one more try each time). Failures that
+    //    no retry can change - no Vulkan at all, no usable Vulkan graphics card - wait for a driver change only.
+    //  - [B1 2026-11-11] The count is cleared only by a session that PROVED itself: Vulkan still running at a clean quit,
+    //    after its login check passed and either its in-world world check passed or ([round 3]) it ran 10 minutes
+    //    in-world (a world check that is off, or ended undecided in a dark region) (shutdown).
+    //  - [round 3-5] A CRASH at any time in a Vulkan session (WolfVulkanSessionRun still set at the next start - only a
+    //    clean quit, a fall-back or a stop clears it - and that run's crash stack or an LLError/out-of-memory exec
+    //    marker as evidence) counts like any other
+    //    failure, so a crash that comes back every session stops after AUTO_RETRY_LIMIT of them. An OS kill, a logoff
+    //    or a power cut leaves no evidence and is not counted. Not at the login check: a run-time
+    //    stop that comes later in every session (a hang a minute in-world, a rebuild that always fails) would otherwise be
+    //    cleared at each login and stop again at each start - a resident looped through forced quits for ever. And the
+    //    resident's own choice (V button / Wolf World menu) clears it.
+    //  - [W4 2026-11-11] A clean quit while the login check had taken samples and none was black against a lit OpenGL
+    //    frame (a picture still loading, a hidden window) is not a failure: the start is marked done without clearing.
+    // So a resident is never put through more than AUTO_RETRY_LIMIT failed Vulkan starts per viewer version and driver.
+    // The driver is OpenGL's, recorded by every start once OpenGL is up (WolfVulkanLastGLDriver): decideBackend runs
+    // before the window exists, so it compares against the driver the last start saw.
+    constexpr U32 AUTO_RETRY_LIMIT = 2;
+    std::string failureStamp(bool any_version)
+    {
+        return (any_version ? std::string("*") : LLVersionInfo::instance().getVersion()) + "|" + gSavedSettings.getString("WolfVulkanLastGLDriver");
+    }
+    // the stamp's version part is "*" for a failure only a driver change can mend
+    bool stampMatches(const std::string& saved)
+    {
+        if (saved.compare(0, 2, "*|") == 0) return saved == failureStamp(true);
+        return saved == failureStamp(false);
+    }
+    void recordAutomaticFailure(bool retryable)
+    {
+        if (LLAppViewer::instance()->isSecondInstance()) return;   // [round 4 B2] the first instance's counters
+        const std::string stamp = failureStamp(!retryable);
+        U32 count = gSavedSettings.getU32("WolfVulkanAutoFailures");
+        if (gSavedSettings.getString("WolfVulkanAutoFailStamp") != stamp) count = 0;
+        count = retryable ? count + 1 : AUTO_RETRY_LIMIT;
+        gSavedSettings.setU32("WolfVulkanAutoFailures", count);
+        gSavedSettings.setString("WolfVulkanAutoFailStamp", stamp);
+        LL_INFOS("Vulkan") << "Automatic switch to OpenGL recorded: " << count << " of " << AUTO_RETRY_LIMIT << " for " << stamp
+                           << (count < AUTO_RETRY_LIMIT ? " (Vulkan is tried again at the next start)" : " (Vulkan is tried again after a viewer or driver update)") << LL_ENDL;
+    }
+    // [round 5 2026-11-11] the Vulkan state keys a second instance must leave as the first instance wrote them
+    const char* const VULKAN_STATE_KEYS[] = { "WolfRenderBackend", "WolfVulkanStartOK", "WolfVulkanSessionRun", "WolfVulkanAutoFailures",
+                                             "WolfVulkanAutoFailStamp", "WolfVulkanStoppedReason", "WolfVulkanLastGLDriver",
+                                             "WolfVulkanW101SpvRetryDone" };
+    // Re-reads those keys from the settings file into memory: a key the file holds takes its value, a key it does not
+    // hold (saved non-default only, llappviewer.cpp:2237) its default - so the save that follows writes them unchanged.
+    void restoreVulkanKeysFromFile(const std::string& filename)
+    {
+        LLSD file;
+        llifstream in(filename.c_str());
+        if (!in.is_open())
+        {
+            // [round 6] absent or unreadable alike: never reset to defaults on a file this instance cannot see
+            LL_WARNS("Vulkan") << "Second instance: " << filename << " could not be opened before a save; its Vulkan keys keep the values loaded at start" << LL_ENDL;
+            return;
+        }
+        if (LLSDParser::PARSE_FAILURE == LLSDSerialize::fromXML(file, in))
+        {
+            // left as loaded at this instance's start (the first instance's values then), never guessed
+            LL_WARNS("Vulkan") << "Second instance: " << filename << " could not be read before a save; its Vulkan keys keep the values loaded at start" << LL_ENDL;
+            return;
+        }
+        for (const char* key : VULKAN_STATE_KEYS)
+        {
+            LLControlVariable* ctrl = gSavedSettings.getControl(key);
+            if (!ctrl) continue;
+            if (file.isMap() && file.has(key) && file[key].has("Value")) ctrl->setValue(file[key]["Value"]);
+            else ctrl->resetToDefault(false);
+        }
+    }
+
+    // [round 3] after a recorded failure: will the next start try Vulkan again (decideBackend's rule, same stamp)?
+    bool nextStartRetries()
+    {
+        const U32 count = gSavedSettings.getU32("WolfVulkanAutoFailures");
+        return count > 0 && count < AUTO_RETRY_LIMIT;
+    }
+    void clearAutomaticFailures()
+    {
+        if (LLAppViewer::instance()->isSecondInstance()) return;   // [round 4 B2]
+        gSavedSettings.setU32("WolfVulkanAutoFailures", 0);
+        gSavedSettings.setString("WolfVulkanAutoFailStamp", "");
+    }
+
     void rememberNotice(const char* name, const std::string& reason)
     {
         sPendingNotice = name;
@@ -356,6 +524,37 @@ namespace
         }
     }
 
+    // [V2/V4 2026-11-11] The swapchain, the window surface and the surface's child window (X11/Win32) or Metal layer, in
+    // an order that is valid on every path, healthy or not:
+    //  - healthy device: the swapchain(s), then the surface (VUID-vkDestroySurfaceKHR-surface-01266), then the child window;
+    //  - a swapchain that could not be destroyed (its presents did not finish within the bounded wait): the surface, the
+    //    device and the instance are left alive under it (WolfVkDevice::abandon), never destroyed;
+    //  - a hung device: nothing of Vulkan is touched.
+    // In every case the child window stops covering the viewer's window: destroyed with the surface, or unmapped/hidden
+    // (WolfVkSurface::abandon), which needs no device. Before, a hung device skipped WolfVkSurface::destroy altogether and the
+    // child (it covers the whole GL window) stayed on top of a working OpenGL: a black login/splash screen.
+    bool sWaylandSwapchainLeft = false;   // [W6 2026-11-11] see releaseSurface
+    void releaseSurface()
+    {
+        const bool hung = gWolfVkDevice.hung();
+        const bool swapchains_gone = !hung && sSwapchain.destroy();
+        if (hung) sSwapchain.forget();   // left to the device; never touched again (the static destructor included)
+        if (!hung && !swapchains_gone) gWolfVkDevice.abandon("a swapchain could not be destroyed (its presents did not finish)");
+        if (sSurface != VK_NULL_HANDLE)
+        {
+            if (swapchains_gone && gWolfVkDevice.hasInstance()) WolfVkSurface::destroy(gWolfVkDevice.instance(), sSurface);
+            else
+            {
+                // [W6 2026-11-11] a native Wayland surface is SDL's own wl_surface (no child to hide): a swapchain left on it
+                // stays attached to the very surface OpenGL's EGL presents to, so OpenGL cannot carry on in this window
+                // (fallBack turns this into the run-time stop)
+                if (WolfVkSurface::kind() == "Wayland") sWaylandSwapchainLeft = true;
+                WolfVkSurface::abandon();
+            }
+            sSurface = VK_NULL_HANDLE;
+        }
+    }
+
     // Everything Vulkan made goes, in the order the hand-over needs (both fall-back paths below).
     void logSessionSummary(const char* when)
     {
@@ -366,8 +565,11 @@ namespace
                            << "; world check " << (sBlack.mSummary.empty() ? std::string("not run") : sBlack.mSummary) << LL_ENDL;
     }
 
+    bool sTornDown = false;   // [round 3] tearDown runs once per session (fallBack -> stopAtRunTime would run it twice)
     void tearDown()
     {
+        if (sTornDown) return;
+        sTornDown = true;
         logSessionSummary("teardown");
         sBlack.mStage = BlackCheck::DONE;
         sGBufferGLOnly = false;
@@ -397,27 +599,39 @@ namespace
         prof::sGlFrameRecord.destroy();
         prof::sGlHandOver.destroy();
         prof::sGlCaptureSpan.destroy();
-        if (!gWolfVkDevice.hung()) sSwapchain.destroy();
-        if (sSurface != VK_NULL_HANDLE)
-        {
-            if (!gWolfVkDevice.hung()) WolfVkSurface::destroy(gWolfVkDevice.instance(), sSurface);   // only after its swapchain went
-            sSurface = VK_NULL_HANDLE;
-        }
+        releaseSurface();   // [V2/V4 2026-11-11] the child window never stays over the GL window
         gWolfVkDevice.destroy();
     }
 
     // START-UP fall-back: Vulkan could not start before its first frame. OpenGL draws this very start in the same window
     // (nothing of Vulkan has reached the window yet) and the notice says why.
-    void fallBack(const std::string& reason, const char* notice)
+    // [G2 2026-11-11] also the login check's fall-back: Vulkan has presented by then, and OpenGL takes the window over in
+    // this same session (the child window is gone with the surface, so OpenGL's swaps show again). retryable: [G5].
+    void fallBack(const std::string& reason, const char* notice, bool retryable = true)
     {
         LL_WARNS("Vulkan") << "Falling back to OpenGL: " << reason << LL_ENDL;
         sLastError = reason;
         sState = State::FELL_BACK;
+        sLogin.mStage = sLogin.mStage == LoginCheck::RUNNING ? LoginCheck::FAILED : sLogin.mStage;
         tearDown();
+        if (sWaylandSwapchainLeft)
+        {
+            // [W6 2026-11-11] the swapchain could not be taken off the native Wayland surface (hung device, unfinished
+            // presents): OpenGL presenting to that surface under a live swapchain is not safe, so this start ends the way
+            // a run-time failure does - the message box, OpenGL at the next start, quit (stopAtRunTime counts it)
+            LL_WARNS("Vulkan") << "The Vulkan swapchain is still on the native Wayland window: stopping instead of drawing with OpenGL under it" << LL_ENDL;
+            stopAtRunTime(reason, retryable);   // [round 3] the caller's verdict on retrying, not a forced "retryable"
+            return;
+        }
         // the setting follows what is running, so the floater and About tell the truth; the resident can ask again
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
-        rememberNotice(notice, reason);
+        recordAutomaticFailure(retryable);   // [G5 2026-11-11]
+        gSavedSettings.setString("WolfVulkanSessionRun", "");   // [round 3] counted here, not again as a crash
+        gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+        // [round 3] the notice says what the next start will do: try Vulkan once more, or not (permanent failure, or the
+        // second one in a row)
+        rememberNotice(nextStartRetries() ? notice : "WolfVulkanFellBackFinal", reason);
     }
 
     // [RUN-TIME STOP 2026-11-09] RUN-TIME failure (after Vulkan has drawn the window): Paul, "we force the user to relog if
@@ -427,20 +641,23 @@ namespace
     // and the viewer quits by the normal path after OK. The message box is the operating system's own
     // (OSMessageBox, llwindow.cpp:72 -> SDL_ShowMessageBox / MessageBox / NSAlert), which needs no renderer. From here
     // present() shows nothing more, Vulkan or OpenGL (State::STOPPED), until the viewer has gone.
-    void stopAtRunTime(const std::string& reason)
+    void stopAtRunTime(const std::string& reason, bool retryable)
     {
         if (sState == State::STOPPED) return;
         LL_WARNS("Vulkan") << "Vulkan renderer stopped while running; next start in OpenGL, quitting: " << reason << LL_ENDL;
         sLastError = reason;
         sState = State::STOPPED;
+        if (sLogin.mStage == LoginCheck::RUNNING) sLogin.mStage = LoginCheck::FAILED;
         tearDown();
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+        recordAutomaticFailure(retryable);   // [G5 2026-11-11] saved with the rest just below
         // The reason is saved with the rest BEFORE the box, so a viewer that never comes back from it (killed, or ended
         // from the desktop's "not responding" dialog while the box blocks the main thread: chain42 amd-r49-wlstop) still
         // tells the resident at the next start (decideBackend, WolfVulkanStoppedLastRun). It is cleared once the box has
         // been seen.
         gSavedSettings.setString("WolfVulkanStoppedReason", reason);
+        gSavedSettings.setString("WolfVulkanSessionRun", "");   // [round 3] counted here, not again as a crash
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
         LLStringUtil::format_map_t args;
         args["[REASON]"] = reason;
@@ -448,7 +665,9 @@ namespace
         // fails (llwindowsdl2.cpp; e.g. no zenity on a Wayland desktop, SDL_waylandmessagebox.c), OSMessageBoxWin32 when
         // MessageBoxW fails (its default case). Shown and closed without OK is -1 (SDL) or NSAlertFirstButtonReturn
         // (macOS showAlert), not OSBTN_CANCEL.
-        if (OSMessageBox(LLTrans::getString("WolfVulkanStoppedRestart", args), LLTrans::getString("WolfVulkanStoppedTitle"), OSMB_OK) != OSBTN_CANCEL)
+        // [G5 2026-11-11] what the next start does (decideBackend): Vulkan once more, or OpenGL from now on
+        const bool will_retry = nextStartRetries();
+        if (OSMessageBox(LLTrans::getString(will_retry ? "WolfVulkanStoppedRestart" : "WolfVulkanStoppedRestartFinal", args), LLTrans::getString("WolfVulkanStoppedTitle"), OSMB_OK) != OSBTN_CANCEL)
         {
             gSavedSettings.setString("WolfVulkanStoppedReason", "");
             gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
@@ -471,11 +690,27 @@ namespace
         // [T724 2026-11-10] the X11 child window the surface is on follows the viewer's window first (wolfvksurface.h),
         // so the swapchain's currentExtent is this size; a no-op on every other surface
         WolfVkSurface::resize(w, h);
-        if (sSwapchain.isValid())
+        bool ok = sSwapchain.isValid() ? sSwapchain.recreate(w, h, vsync, error) : sSwapchain.create(gWolfVkDevice, sSurface, w, h, vsync, error);
+        if (ok)
         {
-            return sSwapchain.recreate(w, h, vsync, error);
+            sBuiltWidth = w;   // [V8 2026-11-11] the size this swapchain was built for
+            sBuiltHeight = h;
         }
-        return sSwapchain.create(gWolfVkDevice, sSurface, w, h, vsync, error);
+        return ok;
+    }
+
+    // [V1/G1 2026-11-11] test only (WolfVulkanDebugFailRebuild, off by default): every run-time rebuild fails with a real
+    // (not "no size") error after the real rebuild was made, so the rig can prove the bounded retries and the stop
+    bool createSwapchainAtRunTime(std::string& error)
+    {
+        static LLCachedControl<bool> fail_rebuild(gSavedSettings, "WolfVulkanDebugFailRebuild", false);
+        if (!createSwapchain(error)) return false;
+        if (fail_rebuild)
+        {
+            error = "test: WolfVulkanDebugFailRebuild";
+            return false;
+        }
+        return true;
     }
 
     // Enumerates devices for About and the floater without touching the window: an instance on its own, destroyed
@@ -490,6 +725,7 @@ namespace
         config.mValidation = keep_instance && gSavedSettings.getBOOL("WolfVulkanValidation");
         config.mDeviceOverride = gSavedSettings.getString("WolfVulkanDevice");
         config.mHaveGLDeviceUUID = glDeviceUUID(config.mGLDeviceUUID, config.mGLVendorID);
+        config.mGLRenderer = gGLManager.mGLRenderer;   // [W3 round 3] the tie-break between devices of one vendor
         config.mApplicationName = "WolfViewer";
         std::string error;
         if (!gWolfVkDevice.createInstance(config, error))
@@ -512,6 +748,7 @@ namespace
             else
             {
                 sLastError = pick_error;
+                sVulkanDeviceLine.clear();   // [V7 2026-11-11] no usable card: initAfterGL falls back on this
             }
             if (!keep_instance)
             {
@@ -656,6 +893,12 @@ namespace
         LL_INFOS("WolfVulkanCheck") << "World probe " << p.mGlSeq << ": GL max R/G/B " << p.mGlMax << " (" << p.mGlLit << " of 1024 points lit)"
                                     << (vk_known ? llformat(", Vulkan's view max %u (%u lit)", vk_max, vk_lit) : std::string(p.mVkPossible ? ", no Vulkan sample for this probe" : ""))
                                     << ", stage " << static_cast<int>(sBlack.mStage) << LL_ENDL;
+        // [G6 2026-11-11] a teleport changes the picture by itself (its screen, then the new region): no run counts
+        if (gAgent.getTeleportState() != LLAgent::TELEPORT_NONE)
+        {
+            sBlack.mGlBlackRun = sBlack.mGlLitRun = sBlack.mGoodRun = sBlack.mImportFaultRun = 0;
+            return;
+        }
         // A. the import does not carry the picture (Vulkan's sample is of the whole frame, UI included, so a lit world can
         // only read black in Vulkan when the hand-over lost it - the UI only adds light)
         if (!gl_black && vk_black) sBlack.mImportFaultRun++; else if (vk_known) sBlack.mImportFaultRun = 0;
@@ -674,6 +917,54 @@ namespace
             sScene->setProbeArmed(false);
             if (warn) LL_WARNS("WolfVulkanCheck") << "World check " << summary << LL_ENDL;
             else LL_INFOS("WolfVulkanCheck") << "World check " << summary << LL_ENDL;
+        };
+        // [G6 2026-11-11] the normal mode back: Vulkan's pass on, the G-buffer shared again if it was (once the target has
+        // given the old images back: finishUnshare, this frame or a later one)
+        auto restore = [&]()
+        {
+            sGBufferGLOnly = false;
+            if (sBlack.mGBufferWasShared && (!sGBuffer || sGBufferUnsharePending))
+            {
+                sGBufferReshareWanted = true;
+                finishUnshare();
+            }
+        };
+        // part on/off: part 1 Vulkan's pass (sGBufferGLOnly), part 2 the sharing (with Vulkan's pass kept off throughout)
+        auto set_part = [&](bool on)
+        {
+            if (sBlack.mPart == 1)
+            {
+                sGBufferGLOnly = !on;
+            }
+            else if (on)
+            {
+                sGBufferReshareWanted = true;
+                finishUnshare();
+            }
+            else
+            {
+                unshareGBuffer("world check stage 2");
+            }
+        };
+        auto enter_phase = [&](int part, int phase)
+        {
+            sBlack.mStage = BlackCheck::TOGGLE;
+            sBlack.mPart = part;
+            sBlack.mPhase = phase;
+            sBlack.mGlBlackRun = sBlack.mGlLitRun = 0;
+            sBlack.mSettle = part == 2 ? 3 : 2;   // probes to let pass (the G-buffer is remade at the next frame)
+            set_part(phase == 1);
+            LL_WARNS("WolfVulkanCheck") << "World check stage " << part << (phase == 1 ? ": Vulkan's part back ON" : ": Vulkan's part OFF")
+                                        << (part == 1 ? " (OpenGL draws the simple pass itself, no depth rewrite)" : " (the G-buffer is OpenGL's own textures)")
+                                        << (phase == 0 ? "" : phase == 1 ? ", to see the black follow it" : ", to see the light follow it") << LL_ENDL;
+        };
+        auto back_to_watch = [&](const char* why)
+        {
+            LL_INFOS("WolfVulkanCheck") << "World check: " << why << "; normal mode restored, watching on" << LL_ENDL;
+            restore();
+            sBlack.mStage = BlackCheck::WATCH;
+            sBlack.mPart = sBlack.mPhase = 0;
+            sBlack.mGlBlackRun = sBlack.mGlLitRun = sBlack.mGoodRun = 0;
         };
         switch (sBlack.mStage)
         {
@@ -694,63 +985,178 @@ namespace
                     end_check("ended: OpenGL's own frame black 3 probes running with the G-buffer not shared - a dark scene, not a Vulkan fault", false);
                     return;
                 }
-                LL_WARNS("WolfVulkanCheck") << "OpenGL's frame black 3 probes running: stage 1, OpenGL draws the simple pass itself and no depth rewrite runs" << LL_ENDL;
-                sGBufferGLOnly = true;
-                sBlack.mStage = BlackCheck::STAGE1_SETTLE;
-                sBlack.mSettle = 2;
-                sBlack.mGlBlackRun = sBlack.mGlLitRun = 0;
+                LL_WARNS("WolfVulkanCheck") << "OpenGL's frame black 3 probes running: switching Vulkan's part off and on to see whether the picture follows" << LL_ENDL;
+                enter_phase(1, 0);
             }
             else if (LLTimer::getTotalSeconds() - sBlack.mStarted > 90.0)
             {
                 end_check(llformat("ended after 90 s: %u probes, last GL max %u", sBlack.mProbes, p.mGlMax), false);
             }
             break;
-        case BlackCheck::STAGE1_SETTLE:
-        case BlackCheck::STAGE2_SETTLE:
-            if (sBlack.mSettle > 0) sBlack.mSettle--;
-            if (sBlack.mSettle == 0)
+        case BlackCheck::TOGGLE:
+        {
+            if (LLTimer::getTotalSeconds() - sBlack.mStarted > 180.0)
             {
-                sBlack.mStage = (sBlack.mStage == BlackCheck::STAGE1_SETTLE) ? BlackCheck::STAGE1 : BlackCheck::STAGE2;
-                sBlack.mGlBlackRun = sBlack.mGlLitRun = 0;
-            }
-            break;
-        case BlackCheck::STAGE1:
-            if (gl_black) { sBlack.mGlBlackRun++; sBlack.mGlLitRun = 0; } else { sBlack.mGlLitRun++; sBlack.mGlBlackRun = 0; }
-            if (sBlack.mGlLitRun >= 3)
-            {
-                end_check(llformat("FAILED: the world came back (max %u) once OpenGL drew the simple pass itself: Vulkan's pass into the shared G-buffer (or the depth rewrite) blanked it", p.mGlMax), true);
-                stopAtRunTime("Vulkan drew nothing on this computer: its pass into the G-buffer shared with OpenGL blanked the picture");
+                restore();
+                end_check(llformat("ended undecided after 180 s (stage %d, phase %d); normal mode restored", sBlack.mPart, sBlack.mPhase), false);
                 return;
             }
-            if (sBlack.mGlBlackRun >= 3)
+            if (sBlack.mSettle > 0)
             {
-                LL_WARNS("WolfVulkanCheck") << "Still black with OpenGL drawing every pass: stage 2, the G-buffer goes back to OpenGL's own textures" << LL_ENDL;
-                unshareGBuffer("world check stage 2");
-                sBlack.mStage = BlackCheck::STAGE2_SETTLE;
-                sBlack.mSettle = 3;
-            }
-            break;
-        case BlackCheck::STAGE2:
-            if (gl_black) { sBlack.mGlBlackRun++; sBlack.mGlLitRun = 0; } else { sBlack.mGlLitRun++; sBlack.mGlBlackRun = 0; }
-            if (sBlack.mGlLitRun >= 3)
-            {
-                end_check(llformat("FAILED: the world came back (max %u) once the G-buffer was OpenGL's own: the G-buffer shared with Vulkan came back black", p.mGlMax), true);
-                stopAtRunTime("Vulkan drew nothing on this computer: the G-buffer shared between OpenGL and Vulkan came back black");
+                // part 2 switched back on: wait until the G-buffer really is shared again (finishUnshare -> shareGBuffer)
+                if (sBlack.mPart == 2 && sBlack.mPhase == 1 && (!sGBuffer || sGBufferUnsharePending))
+                {
+                    if (!sGBufferUnsharePending && !sGBufferReshareWanted)
+                    {
+                        restore();
+                        end_check("ended: the G-buffer could not be shared again for the A/B test; normal mode restored", false);
+                    }
+                    return;
+                }
+                sBlack.mSettle--;
                 return;
             }
-            if (sBlack.mGlBlackRun >= 3)
+            if (gl_black) { sBlack.mGlBlackRun++; sBlack.mGlLitRun = 0; } else { sBlack.mGlLitRun++; sBlack.mGlBlackRun = 0; }
+            const bool lit3 = sBlack.mGlLitRun >= 3, black3 = sBlack.mGlBlackRun >= 3;
+            if (!lit3 && !black3) break;
+            if (sBlack.mPhase == 0)
             {
-                // black with and without Vulkan's part: a dark scene. The normal mode comes back (the share again once
-                // the target has given the old images back: finishUnshare, this frame or a later one).
-                sGBufferGLOnly = false;
-                sGBufferReshareWanted = sBlack.mGBufferWasShared;
-                finishUnshare();
-                end_check("ended: OpenGL's frame black with and without the shared G-buffer - a dark scene, not a Vulkan fault; sharing restored", false);
+                if (lit3) enter_phase(sBlack.mPart, 1);             // light with the part off: now the part back on
+                else if (sBlack.mPart == 1) enter_phase(2, 0);      // still black: the sharing itself, off
+                else
+                {
+                    // black with and without Vulkan's part and the sharing: a dark scene
+                    restore();
+                    end_check("ended: OpenGL's frame black with and without Vulkan's part and the shared G-buffer - a dark scene, not a Vulkan fault; sharing restored", false);
+                    return;
+                }
+            }
+            else if (sBlack.mPhase == 1)
+            {
+                if (black3) enter_phase(sBlack.mPart, 2);           // black follows the part: off once more
+                else back_to_watch("the picture stayed lit with Vulkan's part back on - the scene changed (a teleport, the sky loading), not Vulkan");
+            }
+            else
+            {
+                if (lit3)
+                {
+                    // black with the part on twice, lit with it off twice: Vulkan's part blanks the picture
+                    if (sBlack.mPart == 1)
+                    {
+                        end_check(llformat("FAILED: the world was black with Vulkan's pass into the shared G-buffer and lit without it, twice each (max %u)", p.mGlMax), true);
+                        stopAtRunTime("Vulkan drew nothing on this computer: its pass into the G-buffer shared with OpenGL blanked the picture");
+                    }
+                    else
+                    {
+                        end_check(llformat("FAILED: the world was black with the G-buffer shared with Vulkan and lit with OpenGL's own, twice each (max %u)", p.mGlMax), true);
+                        stopAtRunTime("Vulkan drew nothing on this computer: the G-buffer shared between OpenGL and Vulkan came back black");
+                    }
+                    return;
+                }
+                back_to_watch("the picture stayed black with Vulkan's part off the second time - it does not follow the switch");
             }
             break;
+        }
         default:
             break;
         }
+    }
+}
+
+namespace
+{
+    // [round 3/4] The session has proved itself: its login check passed, and either its world check passed or it has
+    // presented frames in-world for SESSION_PROOF_MINUTES ([round 4 W3]: counted only while frames were presented; and
+    // not when the world check FAILED or could not give the G-buffer back, nor when a G-buffer shared at the start is
+    // shared no more). Used to clear the failure count at a clean quit (B1); the crash marker is cleared only by the
+    // clean quit itself ([round 5 W-A]).
+    bool sessionProved()
+    {
+        if (sLogin.mStage != LoginCheck::PASSED) return false;
+        if (sBlack.mSummary.compare(0, 6, "passed") == 0) return true;
+        const bool world_bad = sBlack.mSummary.compare(0, 6, "FAILED") == 0 || sBlack.mSummary.find("could not be shared") != std::string::npos;
+        const bool gbuffer_lost = sGBufferSharedAtStart && !sGBuffer;
+        return !world_bad && !gbuffer_lost && sInWorldPresented >= SESSION_PROOF_MINUTES * 60.0;
+    }
+
+    // [G2 2026-11-11] see LoginCheck
+    void loginCheckPassed(const std::string& how)
+    {
+        sLogin.mStage = LoginCheck::PASSED;
+        LL_INFOS("WolfVulkanCheck") << "Login check passed after " << llformat("%.1f", LLTimer::getTotalSeconds() - sLogin.mStarted) << " s: " << how << LL_ENDL;
+        gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+        // [B1 2026-11-11] the failure count is NOT cleared here (rule at recordAutomaticFailure): only a session that ends
+        // cleanly with Vulkan still running and the world check passed clears it (shutdown)
+        gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+    }
+
+    void loginCheckFailed(const std::string& reason)
+    {
+        LL_WARNS("WolfVulkanCheck") << "Login check FAILED: " << reason << LL_ENDL;
+        sLogin.mStage = LoginCheck::FAILED;
+        // On a native Wayland window the swapchain is on the wl_surface OpenGL's EGL surface also uses, and handing a
+        // window Vulkan has presented to back to OpenGL made it flash there ([RUN-TIME STOP 2026-11-09]): the run-time stop
+        // (message box, OpenGL at the next start, quit). Everywhere else the swapchain is on a window of its own (the X11
+        // or Win32 child, the Metal layer), which the fall-back takes away, and OpenGL carries on in this session.
+        if (WolfVkSurface::kind() == "Wayland")
+        {
+            stopAtRunTime(reason);
+            return;
+        }
+        fallBack(reason, "WolfVulkanFellBack");
+    }
+
+    void loginCheck(bool presented, F64 now)
+    {
+        if (sLogin.mStage != LoginCheck::RUNNING || !sScene || sState != State::VULKAN_ACTIVE) return;
+        if (!sScene->frameCheckPossible(sSwapchain))
+        {
+            // the picture cannot be sampled here: a presented frame whose composite drew the GL frame layer is the proof
+            if (presented && sScene->lastFrameComposited())
+            {
+                loginCheckPassed("a frame was presented with the composite drawn over the OpenGL frame layer (this swapchain's images cannot be read back)");
+            }
+            return;
+        }
+        // test only (WolfVulkanDebugBlackLogin, off by default): every sample counts as black, as a black login screen would
+        static LLCachedControl<bool> black_login(gSavedSettings, "WolfVulkanDebugBlackLogin", false);
+        WolfVkScene::FrameCheck c;
+        while (sLogin.mStage == LoginCheck::RUNNING && sScene->takeFrameCheck(c))
+        {
+            // only a sample whose frame reached the screen counts
+            if (std::find(sLogin.mPresented.begin(), sLogin.mPresented.end(), c.mSeq) == sLogin.mPresented.end()) continue;
+            sLogin.mSamples++;
+            const uint32_t lit = black_login ? 0u : c.mLit;
+            const uint32_t max = black_login ? 0u : c.mMax;
+            LL_DEBUGS("WolfVulkanCheck") << "Login check sample " << c.mSeq << ": Vulkan max " << max << ", " << lit << " of 1024 lit, composite "
+                                         << (c.mComposited ? "drawn" : "not drawn") << "; OpenGL's frame max " << c.mGlMax << ", " << c.mGlLit << " lit" << LL_ENDL;
+            if (c.mComposited && lit >= LOGIN_LIT_POINTS)
+            {
+                loginCheckPassed(llformat("the presented picture has light (sample %u: max %u, %u of 1024 points lit; OpenGL's frame %u lit)", c.mSeq, max, lit, c.mGlLit));
+                return;
+            }
+            // a frame OpenGL drew black as well (the login page still loading, a fade) says nothing about Vulkan: only a
+            // picture OpenGL drew and Vulkan did not show counts against it (the world check's rule A, wolfvkscene.h)
+            if (c.mGlLit < LOGIN_LIT_POINTS)
+            {
+                if (sLogin.mSamples == 1 || sLogin.mSamples % 40 == 0)
+                    LL_INFOS("WolfVulkanCheck") << "Login check: OpenGL's own frame is black too (sample " << c.mSeq << "); waiting for a picture" << LL_ENDL;
+                continue;
+            }
+            sLogin.mBlackRun++;
+            if (sLogin.mBlackRun == 1 || sLogin.mBlackRun == LOGIN_BLACK_SAMPLES / 2)
+            {
+                LL_WARNS("WolfVulkanCheck") << "Login check: OpenGL's frame has light (" << c.mGlLit << " of 1024 points) but the presented picture is black (sample "
+                                            << c.mSeq << ", composite " << (c.mComposited ? "drawn" : "NOT drawn") << ")" << (black_login ? " [test: WolfVulkanDebugBlackLogin]" : "") << LL_ENDL;
+            }
+            if (sLogin.mBlackRun >= LOGIN_BLACK_SAMPLES)
+            {
+                loginCheckFailed(llformat("the login screen Vulkan showed was black while OpenGL had drawn it (%u samples of the picture running%s)", sLogin.mBlackRun,
+                                          black_login ? ", test: WolfVulkanDebugBlackLogin" : ""));
+                return;
+            }
+        }
+        (void)now;
     }
 }
 
@@ -761,14 +1167,30 @@ namespace WolfVkBridge
 
 void decideBackend()
 {
+    // [round 5 2026-11-11] A SECOND instance shares the first one's settings file but not its run. ONE rule: every
+    // Vulkan state key is read-only for it for the whole session. Its fall-back or stop happen in memory only, and before
+    // ANY save of the settings file (a hook in LLControlGroup::saveToFile, llcontrolsavehook.h) those keys are re-read
+    // from the file, so it keeps exactly what the first instance wrote (byte for byte for those keys).
+    if (LLAppViewer::instance()->isSecondInstance())
+    {
+        const std::string client_file = gSavedSettings.getString("ClientSettingsFile");
+        gWolfControlBeforeSave = [client_file](LLControlGroup& group, const std::string& filename)
+        {
+            if (&group != &gSavedSettings || filename != client_file) return;
+            restoreVulkanKeysFromFile(filename);
+        };
+        LL_INFOS("Vulkan") << "Second instance: the Vulkan state keys stay as the first instance wrote them" << LL_ENDL;
+    }
     // [RUN-TIME STOP 2026-11-09] the last run's Vulkan stop when its message box could not be shown (stopAtRunTime)
-    const std::string stopped = gSavedSettings.getString("WolfVulkanStoppedReason");
+    // [G5 2026-11-11] said below, once it is known whether this start tries Vulkan again
+    // (a second instance does not take the first instance's notice: round 5)
+    const std::string stopped = LLAppViewer::instance()->isSecondInstance() ? std::string() : gSavedSettings.getString("WolfVulkanStoppedReason");
     if (!stopped.empty())
     {
         gSavedSettings.setString("WolfVulkanStoppedReason", "");
-        rememberNotice("WolfVulkanStoppedLastRun", stopped);
     }
 #if LL_DARWIN
+    if (!stopped.empty()) rememberNotice("WolfVulkanStoppedLastRun", stopped);
     // [MAC OPENGL 2026-11-10] Paul: "Macs default to OpenGL with no Vulkan box". The bundle carries no MoltenVK
     // (vk/wolfvkloader.cpp), so a Vulkan start on a Mac can only fall back and show WolfVulkanFellBack - W102 did that at
     // every Mac start. The platform default is made here, where the setting is read, the way the per-platform globals
@@ -819,6 +1241,60 @@ void decideBackend()
         }
 #endif
     }
+    // [round 3-5] The last Vulkan session ended without shutdown, fallBack or stopAtRunTime, after its login screen was
+    // confirmed. Counted only with evidence of a CRASH from
+    // that run [round 4 B1]: the crash handler's stack in that run's dump folder (WolfCrashReport::runLeftCrashStack),
+    // or this start's exec marker saying LLError / out of memory (LAST_EXEC_LLERROR_CRASH / LAST_EXEC_BAD_ALLOC,
+    // llappviewer.cpp processMarkerFiles). An OS kill, a Windows logoff (WM_ENDSESSION), a power cut or a resident ending
+    // a frozen viewer leave neither and are not counted. The second counted crash in a row sets OpenGL.
+    const std::string last_run = gSavedSettings.getString("WolfVulkanSessionRun");
+    if (!last_run.empty() && !LLAppViewer::instance()->isSecondInstance())
+    {
+        gSavedSettings.setString("WolfVulkanSessionRun", "");
+        const bool stack = WolfCrashReport::runLeftCrashStack(last_run);
+        const bool marker = gLastExecEvent == LAST_EXEC_LLERROR_CRASH || gLastExecEvent == LAST_EXEC_BAD_ALLOC;
+        if (!stack && !marker)
+        {
+            LL_INFOS("Vulkan") << "The last Vulkan session (" << last_run << ") ended without shutting down but left no crash evidence "
+                                  "(no crash stack, last exec event " << static_cast<int>(gLastExecEvent) << "): not counted" << LL_ENDL;
+        }
+        else if (gSavedSettings.getBOOL("WolfVulkanStartOK") && gSavedSettings.getString("WolfRenderBackend") == "vulkan")
+        {
+            LL_WARNS("Vulkan") << "The last Vulkan session (" << last_run << ") crashed (" << (stack ? "its crash stack is in its dump folder" : "exec marker")
+                               << ")" << LL_ENDL;
+            recordAutomaticFailure(true);
+            if (!nextStartRetries())
+            {
+                gSavedSettings.setString("WolfRenderBackend", "opengl");
+                sLastError = "WolfViewer closed unexpectedly while drawing with Vulkan, more than once";
+                rememberNotice("WolfVulkanCrashedTwice", sLastError);
+                sState = State::FELL_BACK;
+                sCrashedTwice = true;   // [round 4 W4] its own status line
+                gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+                return;
+            }
+        }
+    }
+    // [G5 2026-11-11] the bounded retry (rule at recordAutomaticFailure): an "opengl" the viewer saved itself goes back to
+    // Vulkan while fewer than AUTO_RETRY_LIMIT failures are counted for this viewer version and OpenGL driver
+    const U32 auto_failures = gSavedSettings.getU32("WolfVulkanAutoFailures");
+    bool retrying = false;
+    if (auto_failures > 0 && gSavedSettings.getString("WolfRenderBackend") == "opengl" && !LLAppViewer::instance()->isSecondInstance())
+    {
+        const std::string saved = gSavedSettings.getString("WolfVulkanAutoFailStamp");
+        const bool same = stampMatches(saved);
+        if (!same || auto_failures < AUTO_RETRY_LIMIT)
+        {
+            LL_INFOS("Vulkan") << "Trying Vulkan again: OpenGL was chosen automatically after " << auto_failures << " failure(s) "
+                               << (same ? "with this viewer and driver" : "with another viewer version or driver (" + saved + ")") << LL_ENDL;
+            if (!same) clearAutomaticFailures();
+            gSavedSettings.setString("WolfRenderBackend", "vulkan");
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            retrying = true;
+        }
+    }
+    // the last run's stop, when its message box could not be shown: with what this start does about it
+    if (!stopped.empty()) rememberNotice(retrying ? "WolfVulkanStoppedLastRunRetry" : "WolfVulkanStoppedLastRun", stopped);
     const std::string backend = gSavedSettings.getString("WolfRenderBackend");
     sRequested = false;
     if (backend != "vulkan")
@@ -827,10 +1303,12 @@ void decideBackend()
     }
     if (!gSavedSettings.getBOOL("WolfVulkanStartOK"))
     {
-        // The last Vulkan start never drew the login screen (crash or hang before it): OpenGL this time, and say so.
-        LL_WARNS("Vulkan") << "The previous Vulkan start did not reach the login screen; starting in OpenGL" << LL_ENDL;
+        // The last Vulkan start never confirmed its login screen (crash or hang before it, or [G2] a login screen that
+        // was never shown as a picture): OpenGL this time, and say so. [G5] counted like any automatic failure.
+        LL_WARNS("Vulkan") << "The previous Vulkan start did not reach a confirmed login screen; starting in OpenGL" << LL_ENDL;
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+        recordAutomaticFailure(true);
         sState = State::FELL_BACK;
         sLastError = "the previous start with the Vulkan renderer did not get as far as the login screen";
         rememberNotice("WolfVulkanFellBackLastStart", sLastError);
@@ -838,6 +1316,11 @@ void decideBackend()
     }
     sRequested = true;
     sState = State::VULKAN_STARTING;
+#ifdef LL_BUGSPLAT
+    // [round 5/6 2026-11-11] BugSplat writes its own crash files, not WolfCrashReport's crash_stack.txt, so a crash in a
+    // Vulkan session leaves no evidence decideBackend can see: only LLError / out-of-memory exec markers count here
+    LL_WARNS("Vulkan") << "BugSplat build: crashes in Vulkan sessions are not counted (no crash stack), only LLError/out-of-memory markers" << LL_ENDL;
+#endif
     // [VULKAN WAYLAND 2026-11-09] the window this start makes goes through XWayland, not native Wayland (llwindow.h)
     LLWindow::sWolfAvoidNativeWayland = true;
     // Like RenderInitError (llappviewer.cpp:3952): the marker is false until the login screen has been drawn, and
@@ -854,6 +1337,8 @@ bool vulkanRequested()
 void initAfterGL(LLWindow* window)
 {
     sWindow = window;
+    // [G5 2026-11-11] the OpenGL driver of this start, for the retry rule's stamp (decideBackend runs before OpenGL is up)
+    gSavedSettings.setString("WolfVulkanLastGLDriver", gGLManager.mGLVendor + " / " + gGLManager.mGLRenderer + " / " + gGLManager.mGLVersionString);
     if (!sRequested || sState != State::VULKAN_STARTING)
     {
         probeInfo(false);
@@ -864,7 +1349,16 @@ void initAfterGL(LLWindow* window)
     std::string error;
     if (!gWolfVkDevice.hasInstance())
     {
-        fallBack(sLastError.empty() ? std::string("Vulkan is not available on this computer") : sLastError, "WolfVulkanFellBack");
+        // [G5] no Vulkan at all: only a driver change can mend that
+        fallBack(sLastError.empty() ? std::string("Vulkan is not available on this computer") : sLastError, "WolfVulkanFellBack", false);
+        return;
+    }
+    if (sVulkanDeviceLine.empty())
+    {
+        // [V7/G5 2026-11-11] no Vulkan graphics card to use: said now, before a surface or child window is made. [W3] None
+        // at all (no presenting GPU, only a processor-based device) waits for a driver change; a card by another maker
+        // than OpenGL's is retried by the usual rule
+        fallBack(sLastError.empty() ? std::string("no Vulkan graphics card can be used") : sLastError, "WolfVulkanFellBack", !gWolfVkDevice.noCandidates());
         return;
     }
     // [VULKAN WAYLAND 2026-11-09] A native Wayland window (only when SDL_VIDEODRIVER forced it: a Vulkan start otherwise
@@ -899,7 +1393,7 @@ void initAfterGL(LLWindow* window)
             if (!radv && !any_driver)
             {
                 fallBack("on a native Wayland window this graphics driver cannot show Vulkan and OpenGL in the same window "
-                         "(start WolfViewer without SDL_VIDEODRIVER=wayland to use Vulkan)", "WolfVulkanFellBack");
+                         "(start WolfViewer without SDL_VIDEODRIVER=wayland to use Vulkan)", "WolfVulkanFellBack", false);
                 return;
             }
         }
@@ -935,11 +1429,32 @@ void initAfterGL(LLWindow* window)
         fallBack(error, "WolfVulkanFellBack");
         return;
     }
+    // [V2 2026-11-11] test only (WolfVulkanDebugHangAtStart, off by default, switches itself off): the start-up hang guard
+    // fires here, after the surface, its child window and the swapchain were made - as when a start-up wait (one-time
+    // upload, the shared images' set-up) runs out on a card that stopped. The fall-back must leave OpenGL visible.
+    if (gSavedSettings.getBOOL("WolfVulkanDebugHangAtStart"))
+    {
+        gSavedSettings.setBOOL("WolfVulkanDebugHangAtStart", false);
+        gWolfVkDevice.declareHung("test: WolfVulkanDebugHangAtStart");
+        fallBack("the graphics card did not finish a Vulkan start-up step (" + gWolfVkDevice.hungReason() + ")", "WolfVulkanFellBack");
+        return;
+    }
     sState = State::VULKAN_ACTIVE;
+    // [round 3] a crash from here on (the viewer ends without shutdown, fallBack or stopAtRunTime) is counted at the next
+    // start (decideBackend): the marker is on disk for the whole Vulkan session
+    // [round 4] the marker names this run's dump folder (WolfCrashReport::thisRunFolder), so the next start can tell a
+    // crash (the crash handler wrote a stack there) from an OS kill, a power cut or a forced logoff (nothing written)
+    if (!LLAppViewer::instance()->isSecondInstance())
+    {
+        const std::string folder = WolfCrashReport::thisRunFolder();
+        gSavedSettings.setString("WolfVulkanSessionRun", folder.empty() ? std::string("no-dump-folder") : folder);
+        gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+    }
+
     LL_INFOS("Vulkan") << "Vulkan renderer active: " << sVulkanDeviceLine << ", surface " << WolfVkSurface::kind() << LL_ENDL;
     prof::initStamps();   // [AMD PERF 2026-11-08] Vulkan timestamps for the WolfLogFrameRate breakdown (none when the queue has no timestamps)
 
-    shareGBuffer("start");
+    sGBufferSharedAtStart = shareGBuffer("start");   // [round 4 W3]
 }
 
 bool isActive()
@@ -1406,6 +1921,15 @@ bool presentFrame()
         stopAtRunTime("test: WolfVulkanDebugFallBack");
         return false;
     }
+    // [B2 2026-11-11] test only (WolfVulkanDebugHangNow, Persist 0, switches itself off): the device is declared hung
+    // mid-session - after the shader mirrors exist - so the hung teardown and what outlives it (the mirrors, deleted at
+    // a shader reload or quit) can be exercised; the hung check just below then stops the renderer
+    static LLCachedControl<bool> test_hang(gSavedSettings, "WolfVulkanDebugHangNow", false);
+    if (test_hang)
+    {
+        gSavedSettings.setBOOL("WolfVulkanDebugHangNow", false);
+        gWolfVkDevice.declareHung("test: WolfVulkanDebugHangNow");
+    }
     // [HANG GUARD / HAND-OVER 2026-11-08 8.2k] a device marked hung or a hand-over broken earlier in this frame (GL
     // capture, G-buffer pass, a bounded wait): fall back before anything else is waited on or submitted
     if (gWolfVkDevice.hung())
@@ -1419,20 +1943,23 @@ bool presentFrame()
         return false;
     }
 
+    {
+        // [V1/G1 2026-11-11] test only: WolfVulkanDebugFailRebuild asks for one rebuild when it is switched on
+        static LLCachedControl<bool> fail_rebuild(gSavedSettings, "WolfVulkanDebugFailRebuild", false);
+        static bool fail_rebuild_requested = false;
+        if (fail_rebuild && !fail_rebuild_requested)
+        {
+            fail_rebuild_requested = true;
+            sResizePending = true;
+            LL_WARNS("Vulkan") << "test: WolfVulkanDebugFailRebuild is on: the swapchain is rebuilt now and every rebuild is made to fail" << LL_ENDL;
+        }
+    }
     if (sResizePending)
     {
-        sResizePending = false;
-        if (!createSwapchain(error))
+        // a frame that does not reach the swapchain still ends its slot: a slot opened mid-frame by a G-buffer pass is
+        // closed with a real submit, so every frame still ends its slot (one slot per frame)
+        auto skip_frame = [&]() -> bool
         {
-            if (gWolfVkDevice.hung())
-            {
-                stopAtRunTime("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")");
-                return false;
-            }
-            // a minimised window has no size: skip this frame, try again next time. A slot opened mid-frame by a G-buffer
-            // pass is closed with a real submit, so every frame still ends its slot (one slot per frame).
-            LL_DEBUGS("Vulkan") << "swapchain not rebuilt: " << error << LL_ENDL;
-            sResizePending = true;
             if (sFrameBegun)
             {
                 sFrameBegun = false;
@@ -1444,6 +1971,46 @@ bool presentFrame()
                 }
             }
             return true;
+        };
+        // [V1/G1 2026-11-11] after a real failure the next try waits SWAPCHAIN_RETRY_SPACING s (frames meanwhile skipped)
+        if (sSwapchainFailures > 0 && t0 < sSwapchainRetryAt) return skip_frame();
+        sResizePending = false;
+        if (!createSwapchainAtRunTime(error))
+        {
+            if (gWolfVkDevice.hung())
+            {
+                stopAtRunTime("the graphics card did not finish a Vulkan frame (" + gWolfVkDevice.hungReason() + ")");
+                return false;
+            }
+            sResizePending = true;
+            if (sSwapchain.noSize())
+            {
+                // a minimised window has no size: skip this frame, try again next time, for as long as it lasts
+                LL_DEBUGS("Vulkan") << "swapchain not rebuilt: " << error << LL_ENDL;
+                sSwapchainFailures = 0;
+                return skip_frame();
+            }
+            // [V1/G1 2026-11-11] a real error: a few spaced retries (a surface briefly unavailable while the window system
+            // reconfigures), then the run-time stop with the reason in its message box
+            if (sSwapchainFailures == 0) sSwapchainFirstFailure = t0;
+            sSwapchainFailures++;
+            const F64 failing_for = t0 - sSwapchainFirstFailure;
+            LL_WARNS("Vulkan") << "Swapchain rebuild failed (attempt " << sSwapchainFailures << ", " << llformat("%.2f", failing_for) << " s of "
+                               << SWAPCHAIN_RETRY_WINDOW << " s): " << error << LL_ENDL;
+            if (failing_for >= SWAPCHAIN_RETRY_WINDOW)
+            {
+                const std::string where = WolfVkSurface::describe();
+                if (!where.empty()) LL_WARNS("Vulkan") << "Swapchain refused on: " << where << LL_ENDL;
+                stopAtRunTime("the window's Vulkan picture could not be rebuilt (" + error + ")");
+                return false;
+            }
+            sSwapchainRetryAt = t0 + SWAPCHAIN_RETRY_SPACING;
+            return skip_frame();
+        }
+        if (sSwapchainFailures > 0)
+        {
+            LL_INFOS("Vulkan") << "Swapchain rebuilt after " << sSwapchainFailures << " failed attempt(s)" << LL_ENDL;
+            sSwapchainFailures = 0;
         }
         sScene->onSwapchainChanged(sSwapchain);
         if (gWolfVkDevice.hung() || sScene->handOverBroken())   // the shared layers' resize ran out of time / failed
@@ -1498,6 +2065,13 @@ bool presentFrame()
         return false;
     }
 
+    // [G2 2026-11-11] the login check asks for a sample of this frame's picture now and then
+    if (sLogin.mStage == LoginCheck::RUNNING && t0 - sLogin.mLastRequest >= LOGIN_SAMPLE_SPACING)
+    {
+        sLogin.mLastRequest = t0;
+        sScene->requestFrameCheck();
+    }
+
     // The frame: the GL layers composited and the Vulkan scene pass, into this swapchain image.
     bool recorded = false;
     {
@@ -1519,6 +2093,7 @@ bool presentFrame()
         stopAtRunTime("hand-over: " + sScene->handOverBrokenReason());
         return false;
     }
+    const uint32_t check_seq = sScene->lastRecordedCheck();   // [G2 2026-11-11] the login check's sample of this frame, if any
 
     // [SHARED IMAGES 2026-11-08] wait for GL's gl_done (the layers are written), signal vk_done (they may be rewritten)
     const WolfVkDevice::ExtraSync sync = sScene->frameSync();
@@ -1542,7 +2117,7 @@ bool presentFrame()
     {
         if (present_out_of_date)
         {
-            sResizePending = true;
+            sResizePending = true;   // VK_ERROR_OUT_OF_DATE_KHR: no further present is possible on this swapchain
         }
         else
         {
@@ -1552,7 +2127,31 @@ bool presentFrame()
     }
     else if (present_out_of_date || out_of_date)
     {
-        sResizePending = true;
+        // [V8 2026-11-11] VK_SUBOPTIMAL_KHR from the acquire or the present (the frame was shown): rebuilt only for a new
+        // window size, otherwise at most every SUBOPTIMAL_REBUILD_SPACING s
+        LLCoordWindow size;
+        sWindow->getSize(&size);
+        const bool resized = static_cast<uint32_t>(std::max(1, size.mX)) != sBuiltWidth || static_cast<uint32_t>(std::max(1, size.mY)) != sBuiltHeight;
+        if (resized || t0 - sLastSuboptimalRebuild >= SUBOPTIMAL_REBUILD_SPACING)
+        {
+            if (!resized)
+            {
+                sLastSuboptimalRebuild = t0;
+                if (!sSuboptimalNoted)
+                {
+                    sSuboptimalNoted = true;
+                    LL_INFOS("Vulkan") << "Swapchain suboptimal at an unchanged window size: rebuilt now and then at most every "
+                                       << SUBOPTIMAL_REBUILD_SPACING << " s while it stays so" << LL_ENDL;
+                }
+            }
+            sResizePending = true;
+        }
+    }
+    if (presented && check_seq != 0)
+    {
+        // [G2 2026-11-11] this sample's frame reached the screen
+        sLogin.mPresented.push_back(check_seq);
+        if (sLogin.mPresented.size() > 8) sLogin.mPresented.erase(sLogin.mPresented.begin());
     }
     // [VK RESIZE 2026-11-10] (onResize) the frame is out: GL's drawable is refreshed again before the next frame draws
     if (sGLRefreshAfterPresent)
@@ -1565,6 +2164,16 @@ bool presentFrame()
     // Vulkan stops the renderer (stopAtRunTime), and this frame counts as shown either way
     blackCheck();
     if (sState == State::STOPPED) return false;
+    // [G2 2026-11-11] the login check judges the samples that have come back; a failure ends Vulkan for this session
+    loginCheck(presented, t0);
+    if (sState == State::STOPPED) return false;
+    if (sState != State::VULKAN_ACTIVE) return true;   // fell back to OpenGL in this session: this frame was still Vulkan's
+    // [round 4 W3] in-world time that counts as proof: only while frames reach the screen
+    if (presented)
+    {
+        if (sLastPresentAt > 0.0 && LLStartUp::getStartupState() >= STATE_STARTED) sInWorldPresented += std::min(t0 - sLastPresentAt, PRESENT_GAP_CAP);
+        sLastPresentAt = t0;
+    }
 
     const F64 t1 = LLTimer::getTotalSeconds();
     sPresentAccum += (t1 - t0) * 1000.0;
@@ -1636,11 +2245,15 @@ void onLoginScreenShown()
         return;
     }
     sLoginShown = true;
-    if (sRequested)
+    if (sRequested && sState == State::VULKAN_ACTIVE)
     {
-        // the login screen was drawn: this Vulkan start is a good one
-        gSavedSettings.setBOOL("WolfVulkanStartOK", true);
-        gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+        // [G2 2026-11-11] the login screen was drawn by OpenGL into the frame layer: whether Vulkan SHOWED it is what the
+        // login check finds out (presentFrame -> loginCheck); WolfVulkanStartOK is saved only when it passes
+        sLogin = LoginCheck();
+        sLogin.mStage = LoginCheck::RUNNING;
+        sLogin.mStarted = LLTimer::getTotalSeconds();
+        LL_INFOS("WolfVulkanCheck") << "Login check started: the presented picture is sampled every " << LOGIN_SAMPLE_SPACING << " s ("
+                                    << (sScene && sScene->frameCheckPossible(sSwapchain) ? "16 tiles of the swapchain image" : "cannot be read back: a presented composite counts") << ")" << LL_ENDL;
     }
     if (!sPendingNotice.empty())
     {
@@ -1654,6 +2267,30 @@ void onLoginScreenShown()
 void shutdown()
 {
     if (sState == State::VULKAN_ACTIVE) logSessionSummary("shutdown");   // [BLACK WORLD 2026-11-10]
+    // [B1/W4 2026-11-11] a clean quit with Vulkan still running (stopAtRunTime and fallBack leave VULKAN_ACTIVE first).
+    // shutdownGL runs after LLAppViewer::cleanup saved the settings (llappviewer.cpp:2240/2433), so they are saved here.
+    if (sState == State::VULKAN_ACTIVE && sRequested && !LLAppViewer::instance()->isSecondInstance())
+    {
+        // [round 3] the session ended cleanly: no crash to count at the next start
+        gSavedSettings.setString("WolfVulkanSessionRun", "");
+        if (!gSavedSettings.getBOOL("WolfVulkanStartOK") && sLogin.mStage == LoginCheck::RUNNING && sLogin.mSamples > 0 && sLogin.mBlackRun == 0)
+        {
+            // W4 [round 3: only once the check has taken a sample and none was black against a lit OpenGL frame; a quit
+            // before any sample - a black splash closed at once - stays unconfirmed and is counted at the next start]
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            LL_INFOS("WolfVulkanCheck") << "Clean quit while the login check was still waiting for a picture (" << sLogin.mSamples
+                                        << " sample(s), none black against a lit OpenGL frame): not counted as a failed start" << LL_ENDL;
+        }
+        // B1 [round 3: or SESSION_PROOF_MINUTES in-world, for a world check that is off or ended undecided - a dark region]
+        const bool world_passed = sBlack.mSummary.compare(0, 6, "passed") == 0;
+        if (sessionProved() && gSavedSettings.getU32("WolfVulkanAutoFailures") > 0)
+        {
+            LL_INFOS("Vulkan") << "Vulkan session proved itself (login check passed, " << (world_passed ? "world check passed" : "10 minutes in-world, frames presented")
+                               << ", clean quit): automatic failure count cleared" << LL_ENDL;
+            clearAutomaticFailures();
+        }
+        gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+    }
     LLRenderTarget::sWolfVkProvider = nullptr;
     // [HANG GUARD 2026-11-08 8.2k] as fallBack: from the first step that finds the card hung, the rest is abandoned
     if (sGBuffer && !gWolfVkDevice.hung()) delete sGBuffer;
@@ -1667,12 +2304,7 @@ void shutdown()
     prof::sGlFrameRecord.destroy();
     prof::sGlHandOver.destroy();
     prof::sGlCaptureSpan.destroy();
-    if (!gWolfVkDevice.hung()) sSwapchain.destroy();
-    if (sSurface != VK_NULL_HANDLE && gWolfVkDevice.hasInstance() && !gWolfVkDevice.hung())
-    {
-        WolfVkSurface::destroy(gWolfVkDevice.instance(), sSurface);
-    }
-    sSurface = VK_NULL_HANDLE;
+    releaseSurface();   // [V2/V4 2026-11-11] as tearDown
     gWolfVkDevice.destroy();
     if (sState == State::VULKAN_ACTIVE)
     {
@@ -1726,8 +2358,21 @@ bool vulkanAvailable()
     return !sVulkanDeviceLine.empty();
 }
 
+std::string shownBackend()
+{
+    if (LLAppViewer::instance()->isSecondInstance()) return sState == State::VULKAN_ACTIVE ? "vulkan" : "opengl";
+    return gSavedSettings.getString("WolfRenderBackend") == "vulkan" ? "vulkan" : "opengl";
+}
+
 void chooseBackend(const std::string& choice)
 {
+    // [round 6 2026-11-11] a second instance leaves the renderer choice to the first window (the Vulkan keys are
+    // read-only for it, decideBackend): it says so instead of a "chosen" message that would silently not last
+    if (LLAppViewer::instance()->isSecondInstance())
+    {
+        LLNotificationsUtil::add("WolfVulkanSecondInstance");
+        return;
+    }
     // [V BUTTON 2026-11-08] was WolfFloaterVulkan::onChoice; one path for the floater and the navigation bar's V button
     if (choice == gSavedSettings.getString("WolfRenderBackend"))
     {
@@ -1736,6 +2381,7 @@ void chooseBackend(const std::string& choice)
     gSavedSettings.setString("WolfRenderBackend", choice);
     // asking again after a failed start: the first-run marker must not stop the next try
     gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+    clearAutomaticFailures();   // [G5 2026-11-11] the resident's own choice
     LLNotificationsUtil::add(choice == "vulkan" ? "WolfVulkanChosen" : "WolfVulkanOpenGLChosen");
 }
 
@@ -1751,13 +2397,14 @@ std::string statusLine()
     {
         LLStringUtil::format_map_t args;
         args["[REASON]"] = sLastError;
-        return LLTrans::getString("WolfVulkanStatusFellBack", args);
+        if (sCrashedTwice) return LLTrans::getString("WolfVulkanStatusCrashedTwice");   // [round 4 W4]
+        return LLTrans::getString(nextStartRetries() ? "WolfVulkanStatusFellBack" : "WolfVulkanStatusFellBackFinal", args);
     }
     case State::VULKAN_STARTING:
         return LLTrans::getString("WolfVulkanStatusStarting");
     case State::OPENGL:
     default:
-        if (gSavedSettings.getString("WolfRenderBackend") == "vulkan")
+        if (shownBackend() == "vulkan")   // [round 6] a second instance shows what it runs
         {
             return LLTrans::getString("WolfVulkanStatusRestart");
         }

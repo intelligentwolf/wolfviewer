@@ -71,8 +71,9 @@ public:
     void beginFrame(uint32_t frame_index);
     // Resets every frame's descriptor pool (device idle): before the images the sets name are destroyed.
     void resetPools();
-    // Copies size bytes into the ring; false when the frame's ring is full (the draw is skipped, logged once).
-    bool push(const void* data, VkDeviceSize size, VkDeviceSize& offset);
+    // Copies size bytes into the ring; false when the frame's ring is full (the draw is skipped, logged once a frame).
+    // [V6 2026-11-11] essential: may use the reserve kept at the end of the ring (the frame's composite)
+    bool push(const void* data, VkDeviceSize size, VkDeviceSize& offset, bool essential = false);
     VkBuffer buffer() const { return mBuffers[mFrame] ? mBuffers[mFrame]->buffer() : VK_NULL_HANDLE; }
     VkDescriptorSet allocate(VkDescriptorSetLayout layout);
     VkDeviceSize used() const { return mUsed; }
@@ -81,7 +82,13 @@ public:
 private:
     WolfVkDevice* mDevice = nullptr;
     std::vector<std::unique_ptr<WolfVkBuffer>> mBuffers;   // one host-visible buffer per frame in flight
-    std::vector<VkDescriptorPool> mPools;
+    // [V6 2026-11-11] per frame slot, a chain of descriptor pools: the first made at init, more when a frame needs them
+    std::vector<std::vector<VkDescriptorPool>> mPools;
+    uint32_t mPoolInUse = 0;
+    bool mWarnedPools = false;
+    static constexpr size_t MAX_POOLS_PER_FRAME = 16;            // 16 x 8192 sets: ~65,000 draws in one frame
+    static constexpr VkDeviceSize ESSENTIAL_RESERVE = 64 * 1024; // ring bytes only the composite may use
+    VkDescriptorPool createPool(std::string& error);
     VkDeviceSize mBytes = 0;
     VkDeviceSize mUsed = 0;
     VkDeviceSize mAlignment = 256;   // VkPhysicalDeviceLimits::minUniformBufferOffsetAlignment (vulkan_core.h:3653)

@@ -678,6 +678,12 @@ swapchain is destroyed when the first image presented on its successor has been 
 same case (chromium `third_party/angle/.../SurfaceVk.cpp:1521-1523`, on this machine) - and at shutdown or past the cap
 after `vkQueueWaitIdle`, which takes no timeout: the one CPU wait of the backend that cannot be bounded. The spec text
 behind both rules is not on this machine; ANGLE's source is the reference used.
+[V4/W2 2026-11-11] That wait is now `WolfVkDevice::waitIdle()` (every tracked submit, 8 s) followed by vkQueueWaitIdle on
+a helper thread waited at most 8 s (`queueWaitIdleBounded`; a timeout declares the device hung, since the helper still
+holds the queue). The spec promises no wait that covers a present without maintenance1 (vkQueueWaitIdle covers
+submissions that accept a fence), so the queue-idle wait is kept as the strongest one on offer, now bounded. A swapchain that still cannot be
+destroyed is reported by `WolfVkSwapchain::destroy()` (false); the bridge then hides the child window and abandons the
+surface and device (`WolfVkSurface::abandon`, `WolfVkDevice::abandon`) instead of destroying them under it.
 
 Not yet built or run (the coordinator's OpenGL control session was running): to be confirmed by a build and a session
 with validation (expected: no 01282 / 05149 at recreates; check that no new present-fence VUID appears).
@@ -1657,6 +1663,71 @@ run 42815452819 is to be run the same way (`~/.cache/winvk/wine-session.sh`) as 
 installer (/downloads/wolfviewer/test/WolfViewer-vulkan-test-windows64-AVX2-Setup.exe) for Paul's cloud Windows PC and
 the Windows volunteers - a Windows PC with a real GPU and Vulkan driver (a GPU-less VM never starts Vulkan and proves
 nothing); what each machine says is in the log lines above. The macOS build of the branch is CI run 42816005089.
+
+### 8.2u W104 review fixes (branch w104-vkfix, 2026-11-11)
+
+Findings V1-V14 and G1-G8 of region-terrain-work/w104-review-2026-11-11/FINDINGS.md (G4, V9, G9, G10 not in this round).
+
+- **Child window never left over OpenGL (V2/V4).** `WolfVkBridge::releaseSurface` destroys swapchain, surface and child
+  in that order on a healthy device; when the device is hung or a swapchain cannot be destroyed (its presents did not
+  finish), the surface, device and instance are left alive (`WolfVkDevice::abandon`) and the X11 child is unmapped / the
+  Win32 child hidden / the Metal layer taken off the view (`WolfVkSurface::abandon`, needs no device). The unbounded
+  `vkQueueWaitIdle` of the no-maintenance1 path is now `WolfVkDevice::waitIdle` (the spec defines it as a fence wait on
+  every submit). Test: `WolfVulkanDebugHangAtStart`.
+- **Login check (G2).** `WolfVulkanStartOK` is saved only when a PRESENTED frame's picture has light: from the login
+  screen on, every 0.25 s the composite of one frame ends in TRANSFER_SRC (a compatible twin render pass) and 16 tiles of
+  8x8 pixels of the swapchain image are copied to a host buffer (`WolfVkScene::FrameCheck`), and the same tiles of
+  OpenGL's back buffer are read in that frame: only "OpenGL lit, Vulkan black" counts (the login page can take seconds to
+  load: run t1-normal failed a healthy start without this). 8 such samples running ->
+  `fallBack` in this session with the WolfVulkanFellBack notice (native Wayland: the run-time stop). No TRANSFER_SRC on the
+  swapchain: a presented frame with the composite drawn over the GL frame layer counts. Test: `WolfVulkanDebugBlackLogin`.
+- **Swapchain rebuilds (V1/G1, V3, V8).** "No size" (VkSwapchainCreateInfoKHR: maxImageExtent (0,0) when minimised) waits
+  for ever; any other failure gets 5 tries 0.25 s apart, logged at WARN, then the run-time stop. A failed build after
+  vkCreateSwapchainKHR cleans up only its own objects (no more null `mDevice` in `recreate`). VK_SUBOPTIMAL_KHR rebuilds
+  only for a new window size, or at most every 10 s. Test: `WolfVulkanDebugFailRebuild` (switch on through LEAP).
+- **Bounded retry (G5).** Rule in wolfvkbridge.cpp `recordAutomaticFailure`: an automatic switch to OpenGL is counted per
+  viewer version + OpenGL driver; below 2 the next start tries Vulkan again; a new version or driver starts the count
+  again; failures no retry can mend (no Vulkan, no card that is OpenGL's) wait for a driver change only.
+- **World check A/B (G6).** A verdict needs the picture to follow Vulkan's part off/on/off (lit/black/lit); teleport
+  samples do not count; light that comes back with the part ON returns to watching.
+- **Packaging (G7).** `shader_check.py --vulkan-min-ratio 0.6` fails the SPIR-V step when fewer than 60% of the linked
+  programs compile, and writes spv/summary.json; `scripts/spv_store_check.py` (viewer_manifest.py, and inline in the
+  linux-bundle job) refuses a store below that or with any manifest program file missing.
+- Also: pipeline cache entries die with their render pass / program (V5); descriptor pools chain per frame slot, the ring
+  keeps 64 KB for the composite (V6); CPU devices and devices that are not OpenGL's card are never chosen (V7);
+  vkBeginCommandBuffer / vkCreateFence results checked (V10); createDevice failure leaves the instance (V11); present
+  fences after OUT_OF_DATE kept per the spec's "still considered to be enqueued" (V12, reviewed, unchanged);
+  vkInvalidateMappedMemoryRanges before every read-back (V14); Win32 NT handles closed after the GL import (G3); a
+  partly shared G-buffer deletes its own GL textures (G8).
+- Runs 2026-11-11 (Linux, XWayland, rig ~/.cache/vkfix/rig, Shadow Testwolf): t1b-normal (NVIDIA: login check passed
+  2.7 s, world check passed, 4 compositor resizes), t6-amd (Radeon 890M: passed 0.3 s, world check passed, 4 resizes),
+  t2-hang (child unmapped, OpenGL login with the notice), t3-blacklogin (in-session fall-back with the notice),
+  t5a/t5b (retry once, then OpenGL kept), t4-failrebuild (5 WARN tries, the message box, OpenGL recorded). Windows (G3,
+  Win32 child hide) and macOS (Metal layer detach) are not built or run here.
+- Review round 2 (commit 077de7eb13): B1 the failure count is cleared only by a proving session (login + world checks
+  passed, clean quit with Vulkan running) - runs b1-s1/b1-s2 (a stop after a passed login check, twice: count 1 then 2),
+  b1-s3 (stays OpenGL), b1-prove (a proving session clears it); B2 the pipeline cache unregisters in its destructor and
+  in the hung teardown - runs b2b (NVIDIA) and b2c (AMD): WolfVulkanDebugHangNow in-world, shader reload after the stop
+  box, clean quit (no ASan build: the old use-after-free was found by reading, not reproduced); W1 test switches are
+  Persist 0 (`--set Key 1`); W2 bounded vkQueueWaitIdle helper (no-maintenance1 path, not used on either GPU here);
+  W3 UUID mismatch -> vendor match; W4 a clean quit with no failed sample is not counted; W5 rebuild retries for 4 s
+  (run w5: 17 attempts over 4.15 s, then the stop); W6 a swapchain left on a native Wayland surface turns the start-up
+  fall-back into the run-time stop (not run: no native-Wayland start here).
+- Rounds 3-5 (the crash marker and second instances): `WolfVulkanSessionRun` holds the run's dump folder while a Vulkan
+  session runs and is cleared only by a clean quit, a fall-back or a run-time stop. At the next start it counts as an
+  automatic failure only with crash evidence from that run (WolfCrashReport's `crash_stack.txt` in that folder, or an
+  LLError / out-of-memory exec marker); an OS kill, a Windows logoff, a power cut or ending a frozen viewer leave none.
+  ACCEPTED TRADE-OFF: any crash with evidence counts, also one that has nothing to do with Vulkan (a script, a
+  network bug) - two in a row set OpenGL until a viewer or driver update, or the resident's own choice. A BugSplat build
+  writes no crash_stack.txt and only counts LLError / out-of-memory markers (a warning says so at start). A SECOND
+  instance treats every Vulkan state key as read-only: its fall-back or stop happen in memory, and before any save
+  (`gWolfControlBeforeSave`, llxml/llcontrolsavehook.h) it re-reads those keys from the file, so the file keeps what
+  the first instance wrote; it never counts, clears, reads the crash marker or takes the first instance's notices.
+  So a crash loop seen only in second instances is not counted (accepted: the first window decides the renderer). The
+  V button and the Vulkan window of a second instance show the renderer it really runs, and a change asks the resident to
+  make it in the first window (WolfVulkanSecondInstance). The BugSplat warning is logged only when Vulkan is requested.
+- Test windows open on the hidden Hyprland workspace special:wolftest (window rules on the test's own X11 class and the
+  stop box's zenity title, ~/.cache/vkfix/rig/session2.sh), never over the desktop in use.
 
 ## 8.5 Design for the next pass: `PASS_SIMPLE` into the G-buffer (stage 4 proper)
 

@@ -58,6 +58,9 @@ public:
     VkDeviceSize size() const { return mSize; }
     // The host-visible bytes: the staging buffer's, or the buffer's own when host_only.
     uint8_t* hostData() const { return mHostOnly ? mAllocation.mMapped : mStagingAllocation.mMapped; }
+    // [V14 2026-11-11] Before reading hostData() of a host_only buffer the device wrote (a read-back): makes those writes
+    // visible on a non-coherent memory type (vkInvalidateMappedMemoryRanges); a no-op on coherent memory.
+    void invalidateForRead();
 
     // Copies into the host bytes and marks [offset, offset+size) for upload (no-op range when host_only, the write
     // is the data; flushes non-coherent memory either way).

@@ -746,6 +746,7 @@ bool WolfVkImage::readBack(std::vector<uint8_t>& out, std::string& error)
         return false;
     }
     out.resize(static_cast<size_t>(size));
+    host.invalidateForRead();   // [V14 2026-11-11] non-coherent read-back memory
     memcpy(out.data(), host.hostData(), static_cast<size_t>(size));
     return true;
 }

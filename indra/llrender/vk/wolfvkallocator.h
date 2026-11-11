@@ -89,12 +89,19 @@ public:
                   VkExternalMemoryHandleTypeFlags export_types = 0);
 
     void free(WolfVkAllocation& allocation);
+    // [V2/V4 2026-11-11] the device was abandoned: forget every block without a Vulkan call
+    void abandon();
 
     // Flushes a host write to a non-coherent allocation (no-op when coherent); offset/size relative to the allocation.
     void flush(const WolfVkAllocation& allocation, VkDeviceSize offset, VkDeviceSize size);
+    // [V14 2026-11-11] Makes device writes visible to the host before a read-back (no-op when coherent).
+    void invalidate(const WolfVkAllocation& allocation, VkDeviceSize offset, VkDeviceSize size);
 
     // Finds a memory type: all required bits present, most preferred bits, allowed by type_bits. Returns UINT32_MAX if none.
     uint32_t findMemoryType(uint32_t type_bits, VkMemoryPropertyFlags required, VkMemoryPropertyFlags preferred) const;
+private:
+    VkMappedMemoryRange mappedRange(const WolfVkAllocation& allocation, VkDeviceSize offset, VkDeviceSize size) const;
+public:
 
     // Statistics for the log and the renderer floater.
     VkDeviceSize bytesAllocated() const { return mBytesAllocated; }   // from the driver

@@ -17,10 +17,14 @@
  *   b. the device whose VkPhysicalDeviceIDProperties::deviceUUID (vulkan_core.h:5941) equals the OpenGL context's
  *      GL_DEVICE_UUID_EXT (GL_EXT_memory_object, glext.h:7736): the very card OpenGL is drawing with, which the
  *      staged hand-over (GL and Vulkan sharing images) needs. Proven on NVIDIA and radeonsi by the vkglshare probe.
- *   c. the device whose vendor matches the OpenGL renderer's vendor (gGLManager.mIsNVIDIA/mIsAMD/mIsIntel)
- *   d. the first VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU (vulkan_core.h:2235)
- *   e. the first device
- * Devices without VK_KHR_swapchain or without a graphics queue that can present are skipped.
+ *      [W3 2026-11-11] When OpenGL gave its UUID and no device has it, c. decides (logged).
+ *   c. the ONE device whose vendor matches the OpenGL renderer's vendor (gGLManager.mIsNVIDIA/mIsAMD/mIsIntel); [W3 round 3]
+ *      several of that vendor (an AMD iGPU + dGPU): the one whose name is GL_RENDERER's (both trimmed at " (" / "/"),
+ *      else the choice FAILS (retryable) - it does not guess. [V7] No device of that vendor: fails.
+ *   d./e. [W3 round 3] removed: OpenGL's vendor unknown (software GL, an unlisted maker) and no UUID match = the card
+ *      cannot be identified, and the choice fails (retryable) instead of taking the first discrete / first device.
+ * Devices without VK_KHR_swapchain, without a graphics queue that can present, or of VK_PHYSICAL_DEVICE_TYPE_CPU
+ * (vulkan_core.h:2237, llvmpipe/lavapipe/SwiftShader; [V7]) are skipped.
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer Source Code
@@ -90,6 +94,7 @@ public:
         bool mHaveGLDeviceUUID = false;        // glGetUnsignedBytevEXT(GL_DEVICE_UUID_EXT) was available
         uint8_t mGLDeviceUUID[VK_UUID_SIZE] = {};
         uint32_t mGLVendorID = 0;              // PCI vendor of the GL renderer when known: 0x10DE NVIDIA, 0x1002 AMD, 0x8086 Intel
+        std::string mGLRenderer;               // [W3 2026-11-11] GL_RENDERER, only to break a tie between devices of that vendor
         uint32_t mFramesInFlight = 2;          // command pools / fences rotated per frame
         std::string mApplicationName = "WolfViewer";
         uint32_t mApplicationVersion = 0;
@@ -135,9 +140,16 @@ public:
     // Runs the physical device choice (a.-e. above) without creating a device, so About and the renderer floater
     // can name the card that would be used; chosen()/aboutLine() are valid afterwards.
     bool chooseOnly(VkSurfaceKHR surface, std::string& error) { return choosePhysicalDevice(surface, error); }
+    // [W3 2026-11-11] the last choice failed because no device can be used at all (no GPU with a presenting graphics
+    // queue and VK_KHR_swapchain): a driver change only can mend it; a vendor mismatch may be retried
+    bool noCandidates() const { return mNoCandidates; }
     // surface: the window surface to present to (VK_NULL_HANDLE allowed for an off-screen device, e.g. tests)
     bool createDevice(VkSurfaceKHR surface, std::string& error);
     void destroy();
+    // [V4 2026-11-11] The owner could not destroy a swapchain (its presents did not finish within the bounded wait), so
+    // the device (VUID-vkDestroyDevice-device-05137) and the instance under its surface must not be destroyed either:
+    // both are dropped without destruction, as for a hung device, and later destroy() calls leave the instance alone.
+    void abandon(const std::string& why);
 
     bool hasInstance() const { return mInstance != VK_NULL_HANDLE; }
     bool hasDevice() const { return mDevice != VK_NULL_HANDLE; }
@@ -196,7 +208,9 @@ public:
     static void setCompressionQueryWanted(bool on) { sCompressionQueryWanted = on; }
     bool compressionQuery() const { return mCompressionQuery && mDevice != VK_NULL_HANDLE && gVk.vkGetImageSubresourceLayout2 != nullptr; }
     VkExternalMemoryHandleTypeFlags externalHandleType() const;
-    // One handle: an fd (Linux) or a HANDLE (Windows); the receiver (GL import) takes ownership on success.
+    // One handle: an fd (Linux) or a HANDLE (Windows). [G3 2026-11-11] A successful GL import takes over an fd
+    // (EXT_external_objects_fd 4.2.1/6.1) but never a Windows NT handle (EXT_external_objects_win32 rev 10 4.2.1/6.1: "the
+    // application must release the handle"), which the importer closes with closeExternalHandle after the import.
     struct ExternalHandle { int mFd = -1; void* mWin32 = nullptr; bool valid() const { return mFd >= 0 || mWin32 != nullptr; } };
     // vkGetMemoryFdKHR (vulkan_core.h:10600) / vkGetMemoryWin32HandleKHR (vulkan_win32.h:88) on a dedicated, exportable allocation.
     bool exportMemory(VkDeviceMemory memory, ExternalHandle& out, std::string& error);
@@ -231,6 +245,10 @@ public:
     // [HANG GUARD 2026-11-08 8.2k] Bounded: every batch this device submitted is tracked (timeline value or fence) and
     // waited for at most FRAME_WAIT_LIMIT_NS; false = the device is (now) hung and nothing may be destroyed or waited on.
     bool waitIdle();
+    // [W2 2026-11-11] vkQueueWaitIdle (vulkan_core.h:4549), which takes no timeout, on a helper thread, waited at most
+    // FRAME_WAIT_LIMIT_NS. On a timeout the device is declared hung at once - the helper still holds the queue, which
+    // must be externally synchronised, so nothing may touch it again - and the helper is left to finish or not.
+    bool queueWaitIdleBounded(const char* what);
 
     // [HANG GUARD 2026-11-08] beginFrame waits at most FRAME_WAIT_LIMIT_NS for the slot's previous frame; when the card
     // has not finished by then the device is marked hung: no further waits anywhere (they would never return), the owner
@@ -260,6 +278,7 @@ private:
     bool queryPhysicalDevices(std::string& error);
     bool choosePhysicalDevice(VkSurfaceKHR surface, std::string& error);
     bool createFrames(std::string& error);
+    void destroyDeviceObjects();   // [V11 2026-11-11] createDevice failed: device-level objects only, the instance stays
     void destroyFrames();
     void runDeferred(Frame& frame);
     // [HANG GUARD 2026-11-08 8.2k] every submitted batch finished (timeline value mTimelineNext, submitted frame fences,
@@ -296,6 +315,8 @@ private:
     uint32_t mOneTimeCount = 0;   // [AMD PERF] takeOneTimeStats
     double mOneTimeMs = 0.0;
     bool mHung = false;
+    bool mAbandoned = false;      // [V4 2026-11-11] the device was dropped undestroyed: the instance stays for the process
+    bool mNoCandidates = false;   // [W3 2026-11-11] noCandidates()
     std::string mHungReason;
     VkSemaphore mTimeline = VK_NULL_HANDLE;   // timeline semaphore: value = number of frames completed
     uint64_t mTimelineNext = 0;

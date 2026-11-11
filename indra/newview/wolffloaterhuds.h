@@ -36,7 +36,9 @@ public:
     // from the Wolf World menu). A new tile goes before T_COUNT, with its TILE_IDS / TILE_NAMES / TILE_WOLF_ONLY entries,
     // tileOn and onTile cases and its XML block (floater_wolf_huds.xml: the next free slot of the 3-wide grid).
     enum ETile { T_GAME = 0, T_CAR, T_SKIS, T_PLANE, T_SPACESHIP, T_BOAT, T_SHIP, T_SPEEDBOAT, T_SUBMARINE,
-                 T_GREEDY, T_ROLEPLAY, T_COMPASS, T_SPEED, T_COUNT };
+                 T_GREEDY, T_ROLEPLAY, T_COMPASS, T_SPEED,
+                 T_FISHING,   // [FISHING HUD 2026-11-11] Paul: the HUDs window lists every on-screen HUD ([W104 MERGE 2026-11-11] after featfix's tiles)
+                 T_COUNT };
 
     /** Lit as its old icon was (the HUD shows). */
     static bool tileOn(ETile t);

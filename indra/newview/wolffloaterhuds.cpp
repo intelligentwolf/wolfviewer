@@ -16,6 +16,7 @@
 #include "lltextbox.h"
 #include "lluicolortable.h"
 #include "wolfdrive.h"
+#include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/]
 #include "wolfflight.h"
 #include "wolfgame.h"
 #include "wolfgrid.h"
@@ -29,7 +30,8 @@ namespace
     const char* const TILE_IDS[WolfFloaterHuds::T_COUNT] =
     {
         "game", "car", "skis", "plane", "spaceship", "boat", "ship", "speedboat", "submarine",
-        "greedy", "roleplay", "compass", "speed"   // [W104 FEATFIX 2026-11-11]
+        "greedy", "roleplay", "compass", "speed",   // [W104 FEATFIX 2026-11-11]
+        "fishing"   // [FISHING HUD 2026-11-11/]
     };
 
     // [W104 FEATFIX 2026-11-11 A7] each tile's name as floater_wolf_huds.xml name_<id> shows it, for the status line
@@ -37,7 +39,8 @@ namespace
     {
         "Game Mode", "The Car Dashboard", "Winter Fun", "The Flight Deck", "The Spaceship HUD", "The Sailing Deck",
         "The Captain's Helm", "The Speedboat helm", "The Submarine helm",
-        "Greedy", "The Roleplay console", "Tessa's Compass", "Xenon's WolfSpeed"
+        "Greedy", "The Roleplay console", "Tessa's Compass", "Xenon's WolfSpeed",
+        "Fishing"   // [W104 MERGE 2026-11-11] floater_wolf_huds.xml name_fishing
     };
 
     // [W104 FEATFIX 2026-11-11] Wolf Territories only, as their menu items (menu_viewer.xml on_visible WolfGrid.IsOnWolfTerritories);
@@ -45,7 +48,8 @@ namespace
     const bool TILE_WOLF_ONLY[WolfFloaterHuds::T_COUNT] =
     {
         true, true, true, true, true, true, true, true, true,
-        true, true, false, true
+        true, true, false, true,
+        true   // [W104 MERGE 2026-11-11] Fishing: Wolf Territories only, as its menu item (menu_viewer.xml WolfWorldFishing on_visible WolfGrid.IsOnWolfTerritories)
     };
 
     // [W104 FEATFIX 2026-11-11] the windows these tiles show and hide (menu_viewer.xml WolfRoleplay / WolfCompass / WolfSpeed:
@@ -139,6 +143,8 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_ROLEPLAY:
         case T_COMPASS:
         case T_SPEED:     return LLFloaterReg::instanceVisible(floaterOf(t));   // as their menu ticks (Floater.Visible)
+        // [FISHING HUD 2026-11-11] on while the Fishing HUD shows (wolffishingoverlay.cpp)
+        case T_FISHING:   return WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudWanted();   // (on, or waiting for a vehicle panel)
         default:          return false;
     }
 }
@@ -178,6 +184,8 @@ void WolfFloaterHuds::onTile(ETile t)
         case T_ROLEPLAY:
         case T_COMPASS:
         case T_SPEED:     LLFloaterReg::toggleInstance(floaterOf(t)); break;   // Floater.Toggle, as the menu
+        // [FISHING HUD 2026-11-11] the same as Wolf World > Fishing (on) and the HUD's CLOSE (off: the rod's touch menu)
+        case T_FISHING:   WolfFishingSession::toggleHud(); break;   // on; off; or, while waiting, cancel the wait
         default:          return;
     }
     if (was_on)

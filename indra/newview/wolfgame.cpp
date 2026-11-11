@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfgame.h"
+#include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/] one bottom panel at a time
 
 #include <algorithm>
 #include <cmath>
@@ -1399,9 +1400,17 @@ bool WolfGame::bottomTaken()
         || WolfHelm::instance().hudShowing();   // <WolfViewer 2026-10-28/> the Captain's Helm (wolfhelm.h)
 }
 
+// [FISHING HUD 2026-11-11] the bottom in use by a vehicle (bottomTaken) or by the Fishing HUD: the game HUD steps aside and
+// its objective / talk panels go to the top right so they do not sit over Fishing. The Adventure story camera still only
+// stops for a vehicle (bottomTaken), so fishing does not change how a story plays.
+bool WolfGame::bottomBusy()
+{
+    return bottomTaken() || (WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn());
+}
+
 bool WolfGame::hudShowing() const
 {
-    return hudWanted() && !mHudHidden && !bottomTaken();
+    return hudWanted() && !mHudHidden && !bottomBusy();   // [FISHING HUD 2026-11-11/] (was bottomTaken)
 }
 
 void WolfGame::toggleHud()
@@ -1433,6 +1442,7 @@ void WolfGame::claimBottom()
     if (wf.active() && !wf.deckHidden()) wf.toggleDeck(wf.sailing());
     // <WolfViewer 2026-10-28> the Captain's Helm gives way too (showHud(false): not reopened for this seat)
     if (WolfHelm::instance().hudShowing()) WolfHelm::instance().showHud(false);
+    WolfFishingSession::gameHudClaims();   // [FISHING HUD 2026-11-11/] the game HUD shown by hand: Fishing makes way
     ++mGeneration;
 }
 

@@ -22,6 +22,7 @@
 #include "lluuid.h"
 
 class LLButton;
+class LLCheckBoxCtrl;
 class LLScrollListCtrl;
 class LLTextBox;
 
@@ -50,6 +51,12 @@ namespace WolfFishing
     bool onObjectChat(const LLUUID& source, const LLUUID& owner, U8 chat_type, const std::string& text);
 }
 
+/**
+ * [FISHING HUD 2026-11-11] Since the Fishing HUD (wolffishingoverlay.h) this window is the Board: the HUD's BOARD button
+ * opens it, and it keeps its own Cast / Reel in / Stop / Put the rod away buttons. It no longer holds the fishing itself:
+ * the rod, the line and the week are WolfFishingSession's, shared with the HUD. Closing it while the HUD is open
+ * only closes the board; closing the last of the two says "bye" to the rod, as closing this window always did.
+ */
 class WolfFloaterFishing : public LLFloater
 {
 public:
@@ -58,27 +65,12 @@ public:
     bool postBuild() override;
     void onOpen(const LLSD& key) override;
     void onClose(bool app_quitting) override;
-
-    /** A line from the rod (WolfFishing::onObjectChat). */
-    void onRodLine(const std::string& text);
+    void draw() override;
 
 private:
-    enum ERod { ROD_NONE, ROD_FINDING, ROD_READY };
-    enum EFish { FISH_IDLE, FISH_WAITING, FISH_BITE, FISH_BUSY };
-
-    void say(const std::string& text);            // to the rod (channel VCH)
-    void setStatus(const std::string& text, bool error);
     void updateControls();
-    void needRod();
-    static void rodCoro(LLHandle<LLFloater> h);
-    void rodFailed(const std::string& why);
-    void refreshWeek();
-    static void weekCoro(LLHandle<LLFloater> h);
     void showWeek(const LLSD& week);
-    void onCast();
-    void onReel();
-    void onStop();
-    void onPutAway();
+    void refreshWords();
 
     LLTextBox* mStatus = nullptr;
     LLButton* mCastBtn = nullptr;
@@ -86,16 +78,14 @@ private:
     LLButton* mStopBtn = nullptr;
     LLButton* mAwayBtn = nullptr;
     LLButton* mUpdateBtn = nullptr;
+    LLCheckBoxCtrl* mChallenge = nullptr;
     LLTextBox* mMine = nullptr;
     LLScrollListCtrl* mMyBest = nullptr;
     LLScrollListCtrl* mBoard = nullptr;
     LLTextBox* mBoardNote = nullptr;
     LLTextBox* mLastWeek = nullptr;
-
-    ERod mRod = ROD_NONE;
-    EFish mFish = FISH_IDLE;
-    bool mRodCoroRunning = false;
-    bool mWeekBusy = false;
+    U32 mShownVersion = 0;
+    bool mOpen = false;
 };
 
 #endif // WOLF_FLOATER_FISHING_H

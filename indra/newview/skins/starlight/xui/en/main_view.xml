@@ -157,6 +157,17 @@
                      mouse_opaque="false"
                      tab_stop="false"
                      name="wolf_game_hud"/>
+      <!-- [FISHING HUD 2026-11-11] wolffishingoverlay.cpp: the Fishing HUD (week, what is happening, CAST / REEL IN / STOP / BOARD /
+           CHALLENGE / PANEL / CLOSE), in the dashboard family as the Ski HUD. Draws nothing and takes no clicks unless Fishing is
+           open (Wolf World > Games & Stories > Fishing, or the Wolf HUDs window); Wolf Territories only. -->
+      <wolf_fishing_hud follows="all"
+                        left="0"
+                        top="0"
+                        height="500"
+                        width="1024"
+                        mouse_opaque="false"
+                        tab_stop="false"
+                        name="wolf_fishing_hud"/>
       <debug_view follows="all"
                   left="0"
                   top="0"

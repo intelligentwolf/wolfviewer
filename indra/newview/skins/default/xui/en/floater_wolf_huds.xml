@@ -104,7 +104,14 @@
     <text follows="left|top" layout="topleft" left="112" top="538" width="148" height="20" name="name_speed" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">WolfSpeed</text>
     <text follows="left|top" layout="topleft" left="112" top="560" width="148" height="46" name="desc_speed" font="SansSerif" wrap="true" mouse_opaque="false">Xenon's WolfSpeed: a speed dial to walk, run, go fast or super fast.</text>
     <text follows="left|top" layout="topleft" left="112" top="610" width="148" height="18" name="state_speed" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- [W104 FEATFIX 2026-11-11] rows 4 and 5 (116 apart, as rows 1-3); row 5's middle (left 276, top 528) is kept for the Fishing
-         tile and its right-hand slot (left 540) is free. Status line under row 5, 36 high: two lines fit. -->
+    <!-- [W104 FEATFIX 2026-11-11] rows 4 and 5 (116 apart, as rows 1-3); row 5's middle (left 276, top 528) is the Fishing tile
+         [W104 MERGE 2026-11-11] and its right-hand slot (left 540) is free. Status line under row 5, 36 high: two lines fit. -->
+    <!-- [FISHING HUD 2026-11-11] Fishing: the Fishing HUD (wolffishingoverlay.cpp), as Wolf World > Fishing.
+         [W104 MERGE 2026-11-11] in the slot featfix kept for it: row 5 middle. -->
+    <button follows="left|top" layout="topleft" left="276" top="528" width="256" height="108" name="tile_fishing" is_toggle="true" label="" tab_stop="true" tool_tip="Fishing: Cast and Reel in buttons, your catch and your week across the bottom of the screen." />
+    <icon follows="left|top" layout="topleft" left="286" top="542" width="80" height="80" name="pic_fishing" image_name="WolfHuds_fishing" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="376" top="538" width="148" height="20" name="name_fishing" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Fishing</text>
+    <text follows="left|top" layout="topleft" left="376" top="560" width="148" height="46" name="desc_fishing" font="SansSerif" wrap="true" mouse_opaque="false">Cast, reel in, your catch and your week, across the bottom.</text>
+    <text follows="left|top" layout="topleft" left="376" top="610" width="148" height="18" name="state_fishing" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
     <text follows="left|top" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="644" width="784" wrap="true" />
 </floater>

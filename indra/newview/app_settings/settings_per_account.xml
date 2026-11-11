@@ -44,6 +44,28 @@
       <key>Value</key>
       <real>-1</real>
     </map>
+    <key>WolfFishingHudBackground</key>
+    <map>
+      <key>Comment</key>
+      <string>[FISHING HUD 2026-11-11] Fishing HUD BACKGROUND button (Paul 11-11: "allow users to turn off the background"), per resident: draw the night-blue band behind the HUD. Off, only the buttons, the outlined words and the pictures are drawn over the world, and clicks between them reach the world.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
+    <key>WolfFishingChallenge</key>
+    <map>
+      <key>Comment</key>
+      <string>[FISHING OVERLAY 2026-11-11] Fishing's Challenge mode (Paul 11-11 "yes challenge mode"): reeling in is holding Reel in while the line's tension stays out of the red. Off by default (no timing for anyone who does not choose it); the overlay's bar and the Board window switch it.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
     <key>WolfMapChartArt</key>
     <map>
       <key>Comment</key>

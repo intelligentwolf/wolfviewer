@@ -78,6 +78,8 @@ with the same filename but different name
   <texture name="WolfHuds_roleplay" file_name="icons/wolf_huds_roleplay.png" preload="false" />
   <texture name="WolfHuds_compass" file_name="icons/wolf_huds_compass.png" preload="false" />
   <texture name="WolfHuds_speed" file_name="icons/wolf_huds_speed.png" preload="false" />
+  <texture name="WolfHuds_fishing" file_name="icons/wolf_huds_fishing.png" preload="false" />   <!-- [FISHING HUD 2026-11-11/] -->
+  <texture name="WolfFishing_Logo" file_name="icons/wolf_fishing_logo.png" preload="false" />   <!-- [FISHING HUD 2026-11-11/] the Wolf Fishing logo -->
   <texture name="Arrow_Left" file_name="widgets/Arrow_Left.png" preload="true" />
   <texture name="Arrow_Right" file_name="widgets/Arrow_Right.png" preload="true" />
 

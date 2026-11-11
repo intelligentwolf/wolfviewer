@@ -56,7 +56,8 @@
         image_overlay="TabIcon_Open_Off"
         layout="topleft"
         width="24"
-        name="slide_left_btn" />
+        name="slide_left_btn"
+        tool_tip="Scroll the conversation tabs left" />
       <button
        height="20"
        follows="left|top"
@@ -64,7 +65,8 @@
        left_delta="1"
        image_overlay="TabIcon_Close_Off"
        width="24"
-       name="slide_right_btn" />
+       name="slide_right_btn"
+       tool_tip="Scroll the conversation tabs right" />
     </layout_panel>
     
     <layout_panel
@@ -244,7 +246,7 @@
        image_pressed="PushButton_Press"
        image_pressed_selected="PushButton_Selected_Press"
        image_selected="PushButton_Selected_Press"
-       tool_tip="Add a voice to this chat"
+       tool_tip="Start a voice call"
        name="call_btn"
        top="0"
        width="24">
@@ -271,7 +273,7 @@
        image_pressed="PushButton_Press"
        image_pressed_selected="PushButton_Selected_Press"
        image_selected="PushButton_Selected_Press"
-       tool_tip="End Voice Call"
+       tool_tip="End the voice call"
        name="end_call_btn"
        top="0"
        width="24">
@@ -297,7 +299,7 @@
        image_pressed="PushButton_Press"
        image_pressed_selected="PushButton_Selected_Press"
        image_selected="PushButton_Selected_Press"
-       tool_tip="Voice Properties"
+       tool_tip="Voice call settings"
        image_overlay="VoicePTT_Off"
        name="voice_ctrls_btn"
        top="0"
@@ -324,7 +326,7 @@
        image_pressed="PushButton_Press"
        image_pressed_selected="PushButton_Selected_Press"
        image_selected="PushButton_Selected_Press"
-       tool_tip="Open this conversation's past transcripts."
+       tool_tip="Open this conversation's past transcripts"
        image_overlay="Chat_History"
        name="im_history_btn"
        top="0"
@@ -654,7 +656,7 @@
                image_overlay="Emoji_Picker_Icon"
                right="-11"
                name="emoji_picker_toggle_btn"
-               tool_tip="Show emoji panel"
+               tool_tip="Show the emoji panel"
                width="24"/>
               <button
                follows="right|bottom"
@@ -668,7 +670,7 @@
                image_overlay="Arrow_Down"
                right="-1"
                name="emoji_recent_panel_toggle_btn"
-               tool_tip="Shows/hides recent emojis"
+               tool_tip="Show or hide recently used emojis"
                left_pad="0"
                width="10"/>
             </layout_panel>
@@ -751,7 +753,7 @@
               follows="left|right|top"
               name="send_chat"
               label="Send"
-              tool_tip="Sends the IM" />
+              tool_tip="Send the message" />
             </layout_panel>
           </layout_stack>
         </layout_panel>

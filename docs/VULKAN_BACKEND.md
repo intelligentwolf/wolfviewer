@@ -1675,7 +1675,9 @@ Findings V1-V14 and G1-G8 of region-terrain-work/w104-review-2026-11-11/FINDINGS
   every submit). Test: `WolfVulkanDebugHangAtStart`.
 - **Login check (G2).** `WolfVulkanStartOK` is saved only when a PRESENTED frame's picture has light: from the login
   screen on, every 0.25 s the composite of one frame ends in TRANSFER_SRC (a compatible twin render pass) and 16 tiles of
-  8x8 pixels of the swapchain image are copied to a host buffer (`WolfVkScene::FrameCheck`). 8 black samples running ->
+  8x8 pixels of the swapchain image are copied to a host buffer (`WolfVkScene::FrameCheck`), and the same tiles of
+  OpenGL's back buffer are read in that frame: only "OpenGL lit, Vulkan black" counts (the login page can take seconds to
+  load: run t1-normal failed a healthy start without this). 8 such samples running ->
   `fallBack` in this session with the WolfVulkanFellBack notice (native Wayland: the run-time stop). No TRANSFER_SRC on the
   swapchain: a presented frame with the composite drawn over the GL frame layer counts. Test: `WolfVulkanDebugBlackLogin`.
 - **Swapchain rebuilds (V1/G1, V3, V8).** "No size" (VkSwapchainCreateInfoKHR: maxImageExtent (0,0) when minimised) waits
@@ -1696,6 +1698,11 @@ Findings V1-V14 and G1-G8 of region-terrain-work/w104-review-2026-11-11/FINDINGS
   fences after OUT_OF_DATE kept per the spec's "still considered to be enqueued" (V12, reviewed, unchanged);
   vkInvalidateMappedMemoryRanges before every read-back (V14); Win32 NT handles closed after the GL import (G3); a
   partly shared G-buffer deletes its own GL textures (G8).
+- Runs 2026-11-11 (Linux, XWayland, rig ~/.cache/vkfix/rig, Shadow Testwolf): t1b-normal (NVIDIA: login check passed
+  2.7 s, world check passed, 4 compositor resizes), t6-amd (Radeon 890M: passed 0.3 s, world check passed, 4 resizes),
+  t2-hang (child unmapped, OpenGL login with the notice), t3-blacklogin (in-session fall-back with the notice),
+  t5a/t5b (retry once, then OpenGL kept), t4-failrebuild (5 WARN tries, the message box, OpenGL recorded). Windows (G3,
+  Win32 child hide) and macOS (Metal layer detach) are not built or run here.
 
 ## 8.5 Design for the next pass: `PASS_SIMPLE` into the G-buffer (stage 4 proper)
 

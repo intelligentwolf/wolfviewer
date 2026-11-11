@@ -168,7 +168,7 @@ public:
 
     // [IM TRANSLATOR 2026-11-10] the globe button is pressed while this conversation is translated on its own
     void updateTranslateButton();
-    // [VOICE MESSAGES 2026-11-10] the Voice / Send 0:07 / Cancel buttons follow WolfVoiceMessage's state
+    // [VOICE MESSAGES 2026-11-10] the microphone / Send 0:07 / Cancel buttons follow WolfVoiceMessage's state
     void draw() override;
 
 protected:
@@ -239,15 +239,18 @@ private:
     void snooze(S32 duration = -1);
 
     // [VOICE MESSAGES 2026-11-10] wolfvoicemessage.h
-    void onVoiceMsgButton();
+    void onVoiceMsgButton();                     // the microphone: start recording
+    void onVoiceMsgSend();                       // "Send 0:07": stop and send
     void onVoiceMsgCancel();
     void updateVoiceMsgButtons();
     bool voiceMessagesOffered() const;
     LLButton*       mTranslateBtn = nullptr;     // [IM TRANSLATOR 2026-11-10/]
-    LLButton*       mVoiceMsgBtn = nullptr;
-    LLLayoutPanel*  mVoiceMsgPanel = nullptr;
+    LLButton*       mVoiceSendBtn = nullptr;     // "Send 0:07" / "Sending..." (voice_send_layout_panel)
+    LLLayoutPanel*  mVoiceMsgPanel = nullptr;    // the microphone icon, shown while idle
+    LLLayoutPanel*  mVoiceSendPanel = nullptr;
     LLLayoutPanel*  mVoiceCancelPanel = nullptr;
-    std::string     mVoiceMsgLabel;              // the last label set, so draw() only relabels on a change
+    LLLayoutPanel*  mInputSendPanel = nullptr;   // the IM's Send, hidden while a voice message is recorded or sent
+    std::string     mVoiceMsgLabel;              // the last Send label set, so draw() only relabels on a change
 
     void onAddButtonClicked();
     bool canAddSelectedToChat(const uuid_vec_t& uuids);

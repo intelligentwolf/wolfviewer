@@ -587,16 +587,19 @@ bool FSFloaterIM::voiceMessagesOffered() const
         && WolfVoiceMessage::isAvailable();
 }
 
+// [VOICE MIC ICON 2026-11-11] the microphone starts a recording; the "Send 0:07" button that replaces it sends that recording
 void FSFloaterIM::onVoiceMsgButton()
+{
+    WolfVoiceMessage::instance().startRecording(mSessionID, mOtherParticipantUUID);
+    updateVoiceMsgButtons();
+}
+
+void FSFloaterIM::onVoiceMsgSend()
 {
     WolfVoiceMessage& vm = WolfVoiceMessage::instance();
     if (vm.getState() == WolfVoiceMessage::RECORDING && vm.getSessionID() == mSessionID)
     {
         vm.stopAndSend();
-    }
-    else
-    {
-        vm.startRecording(mSessionID, mOtherParticipantUUID);
     }
     updateVoiceMsgButtons();
 }
@@ -611,18 +614,16 @@ void FSFloaterIM::onVoiceMsgCancel()
     updateVoiceMsgButtons();
 }
 
+// Idle: the microphone icon only. Recording for this conversation: "Send 0:07" + Cancel in its place (and in place of the IM's
+// Send). Sending: "Sending..." (disabled) until the server has stored it.
 void FSFloaterIM::updateVoiceMsgButtons()
 {
-    if (!mVoiceMsgBtn || !mVoiceMsgPanel || !mVoiceCancelPanel)
+    if (!mVoiceSendBtn || !mVoiceMsgPanel || !mVoiceSendPanel || !mVoiceCancelPanel)
     {
         return;
     }
     const bool offered = voiceMessagesOffered();
-    if (mVoiceMsgPanel->getVisible() != offered)
-    {
-        mVoiceMsgPanel->setVisible(offered);
-    }
-    std::string label = "Voice";
+    std::string label;
     bool recording = false, sending = false;
     if (offered && WolfVoiceMessage::instanceExists())
     {
@@ -642,18 +643,36 @@ void FSFloaterIM::updateVoiceMsgButtons()
             }
         }
     }
-    if (label != mVoiceMsgLabel)
+    const bool busy = recording || sending;
+    if (mVoiceMsgPanel->getVisible() != (offered && !busy))
+    {
+        mVoiceMsgPanel->setVisible(offered && !busy);
+    }
+    if (mVoiceSendPanel->getVisible() != busy)
+    {
+        mVoiceSendPanel->setVisible(busy);
+    }
+    if (busy && label != mVoiceMsgLabel)
     {
         mVoiceMsgLabel = label;
-        mVoiceMsgBtn->setLabel(label);
-        mVoiceMsgBtn->setToolTip(recording ? std::string("Recording - press to send it (up to 1 minute), or Cancel")
-                                           : std::string("Record a voice message (up to 1 minute) and send it"));
+        mVoiceSendBtn->setLabel(label);
     }
-    mVoiceMsgBtn->setToggleState(recording);
-    mVoiceMsgBtn->setEnabled(!sending);
+    mVoiceSendBtn->setEnabled(recording);
     if (mVoiceCancelPanel->getVisible() != recording)
     {
         mVoiceCancelPanel->setVisible(recording);
+    }
+    // [VOICE MIC ICON 2026-11-11] the IM's own Send gives way while a voice message is recorded or sent: "Send 0:07" beside
+    // "Send" read as two sends, and at a narrow window width the four buttons pushed Send past the window's edge (live test
+    // mic1). Back afterwards as the Preferences setting has it (the panel's visibility_control, FSShowIMSendButton).
+    if (mInputSendPanel)
+    {
+        static LLCachedControl<bool> show_send(gSavedSettings, "FSShowIMSendButton");
+        const bool want_send = show_send && !busy;
+        if (mInputSendPanel->getVisible() != want_send)
+        {
+            mInputSendPanel->setVisible(want_send);
+        }
     }
 }
 
@@ -1166,20 +1185,35 @@ bool FSFloaterIM::postBuild()
         });
         updateTranslateButton();
     }
-    // [VOICE MESSAGES 2026-11-10] Ticket 631: Voice, then Send 0:07 / Cancel (wolfvoicemessage.cpp). One-to-one IMs on a
-    // Wolf Territories login only; the panels are hidden everywhere else.
-    mVoiceMsgBtn = findChild<LLButton>("voice_msg_btn");
+    // [VOICE MESSAGES 2026-11-10] Ticket 631: the microphone, then Send 0:07 / Cancel (wolfvoicemessage.cpp). One-to-one IMs
+    // on a Wolf Territories login only; the panels are hidden everywhere else. [VOICE MIC ICON 2026-11-11]
+    LLButton* mic = findChild<LLButton>("voice_msg_btn");
+    LLButton* cancel = findChild<LLButton>("voice_cancel_btn");
+    mVoiceSendBtn = findChild<LLButton>("voice_send_btn");
     mVoiceMsgPanel = findChild<LLLayoutPanel>("voice_msg_layout_panel");
+    mVoiceSendPanel = findChild<LLLayoutPanel>("voice_send_layout_panel");
     mVoiceCancelPanel = findChild<LLLayoutPanel>("voice_cancel_layout_panel");
-    if (mVoiceMsgBtn && mVoiceMsgPanel && mVoiceCancelPanel)
+    mInputSendPanel = findChild<LLLayoutPanel>("input_button_layout_panel");
+    if (mic && cancel && mVoiceSendBtn && mVoiceMsgPanel && mVoiceSendPanel && mVoiceCancelPanel)
     {
-        mVoiceMsgBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onVoiceMsgButton(); });
-        if (LLButton* cancel = findChild<LLButton>("voice_cancel_btn"))
-        {
-            cancel->setCommitCallback([this](LLUICtrl*, const LLSD&) { onVoiceMsgCancel(); });
-        }
+        mic->setCommitCallback([this](LLUICtrl*, const LLSD&) { onVoiceMsgButton(); });
+        mVoiceSendBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onVoiceMsgSend(); });
+        cancel->setCommitCallback([this](LLUICtrl*, const LLSD&) { onVoiceMsgCancel(); });
+        mVoiceSendPanel->setVisible(false);
         mVoiceCancelPanel->setVisible(false);
         mVoiceMsgPanel->setVisible(voiceMessagesOffered());
+    }
+    else
+    {
+        // a skin without the voice message panels: none of them may show half-wired
+        mVoiceSendBtn = nullptr;
+        for (LLLayoutPanel* panel : { mVoiceMsgPanel, mVoiceSendPanel, mVoiceCancelPanel })
+        {
+            if (panel)
+            {
+                panel->setVisible(false);
+            }
+        }
     }
     getChild<LLButton>("chat_search_btn")->setCommitCallback(boost::bind(&FSFloaterIM::onChatSearchButtonClicked, this));
 

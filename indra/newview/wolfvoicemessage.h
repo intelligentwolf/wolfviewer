@@ -28,9 +28,9 @@
 // [VOICE MESSAGES 2026-11-10] Ticket 631, Jimmy Olsen: "Add a button for short voice messages? (maybe up to 1min)". Paul
 // approved. Design: firestorm/region-terrain-work/im-translate-voice-2026-11-10/README.md.
 //
-// RECORD: the Voice button in a one-to-one IM window (fsfloaterim.cpp). The microphone is opened through OpenAL exactly as
-// dictation opens it (wolfspeech.cpp openCapture: 16 kHz mono PCM16) only while the button is pressed in, the button then
-// reads "Send 0:07" beside a Cancel button; Send (or 1:00) uploads the WAV (WolfSpeech::wav16k) to php/voicemsg.php
+// RECORD: the microphone icon button in a one-to-one IM window (fsfloaterim.cpp). The microphone is opened through OpenAL
+// exactly as dictation opens it (wolfspeech.cpp openCapture: 16 kHz mono PCM16) only while recording; the icon then gives way
+// to a "Send 0:07" button beside a Cancel button; Send (or 1:00) uploads the WAV (WolfSpeech::wav16k) to php/voicemsg.php
 // action=send with the session pair, and the line the server answers with is sent as the IM.
 // PLAY: an IM line made by the server (vm_im_text, matched exactly by LINE_PATTERN) is shown in a one-to-one conversation
 // as "🎤 Voice message (0:12) ▶ Play", the play link being secondlife:///app/wolfvoicemsg/play/<id> (click only). The clip

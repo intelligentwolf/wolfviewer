@@ -710,12 +710,35 @@
                left_pad="0"
                width="10"/>
             </layout_panel>
-            <!-- [VOICE MESSAGES 2026-11-10] ticket 631: Voice, then "Send 0:07" + Cancel while recording (wolfvoicemessage.cpp).
-                 Shown in one-to-one conversations on Wolf Territories only (fsfloaterim.cpp voiceMessagesOffered). -->
+            <!-- [VOICE MESSAGES 2026-11-10] ticket 631 (wolfvoicemessage.cpp). Shown in one-to-one conversations on Wolf Territories
+                 only (fsfloaterim.cpp voiceMessagesOffered). [VOICE MIC ICON 2026-11-11] Paul: idle = a microphone icon button the
+                 size and style of the translator and emoji buttons (so the text box keeps its space); while recording the icon
+                 gives way to a wide "Send 0:07" button with Cancel beside it (fsfloaterim.cpp updateVoiceMsgButtons). -->
             <layout_panel
               auto_resize="false"
               user_resize="false"
               name="voice_msg_layout_panel"
+              width="30">
+              <button
+               follows="right|bottom"
+               bottom="-1"
+               height="24"
+               width="27"
+               image_hover_unselected="Toolbar_Middle_Over"
+               image_selected="Toolbar_Middle_Selected"
+               image_unselected="Toolbar_Middle_Off"
+               image_overlay="Command_Speak_Icon"
+               label=""
+               left="0"
+               name="voice_msg_btn"
+               tool_tip="Record a voice message (up to 1 minute) and send it"
+              />
+            </layout_panel>
+            <layout_panel
+              auto_resize="false"
+              user_resize="false"
+              name="voice_send_layout_panel"
+              visible="false"
               width="78"
               top="0"
               bottom="-1">
@@ -726,9 +749,9 @@
               bottom="24"
               height="24"
               follows="left|right|bottom"
-              name="voice_msg_btn"
-              label="Voice"
-              tool_tip="Record a voice message (up to 1 minute) and send it" />
+              name="voice_send_btn"
+              label="Send 0:00"
+              tool_tip="Recording - press to send it (up to 1 minute), or Cancel" />
             </layout_panel>
             <layout_panel
               auto_resize="false"

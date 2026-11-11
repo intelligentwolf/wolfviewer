@@ -276,7 +276,7 @@ bool WolfVoiceMessage::startRecording(const LLUUID& session_id, const LLUUID& ot
     }
     if (WolfSpeech::instanceExists() && WolfSpeech::instance().isDictating())
     {
-        report("Dictation is using the microphone. Turn dictation off, then press Voice again.");
+        report("Dictation is using the microphone. Turn dictation off, then press the microphone button again.");
         return false;
     }
     if (!openCapture())
@@ -322,7 +322,7 @@ void WolfVoiceMessage::stopAndSend()
     {
         mPcm.clear();
         setState(IDLE);
-        report("That voice message was too short to send. Press Voice, speak, then press Send.");
+        report("That voice message was too short to send. Press the microphone button, speak, then press Send.");
         return;
     }
     // Nothing reached the microphone (muted, unplugged, wrong input): the loudest sample is below the level dictation

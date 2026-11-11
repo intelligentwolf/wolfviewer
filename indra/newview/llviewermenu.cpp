@@ -13063,7 +13063,9 @@ void initialize_menus()
     commit.add("WolfRadio.AddStation", [](LLUICtrl*, const LLSD&) { WolfRadioStations::openAddStationPage(); });
     commit.add("WolfTerrain.OpenTerrainScreen", [](LLUICtrl*, const LLSD&) { WolfPanelTerrainLayers::openTerrainScreen(); });   // [WOLF TERRAIN SCREEN 2026-11-04/]
     commit.add("WolfAdventure.ShowAdventures", [](LLUICtrl*, const LLSD&) { WolfFloaterRoleplay::showAdventures(); });
-    commit.add("WolfFishing.Show", [](LLUICtrl*, const LLSD&) { WolfFishingSession::openHud(); });   // [FISHING HUD 2026-11-11/] Wolf World > Fishing
+    // [FISHING HUD 2026-11-11] Wolf World > Fishing: on / off (ticked while on, or waiting for a vehicle's panel to go)
+    commit.add("WolfFishing.ToggleHud", [](LLUICtrl*, const LLSD&) { WolfFishingSession::toggleHud(); });
+    enable.add("WolfFishing.HudOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudWanted(); });
     // [BORDER GUARD 2026-10-16] Wolf World > Teleport Across the Border Ahead: the border banner's button (wolfborder.cpp)
     commit.add("WolfBorder.TeleportAcross", [](LLUICtrl*, const LLSD&) { WolfBorder::instance().teleportAcross(); });
     enable.add("WolfBorder.CanTeleportAcross", [](LLUICtrl*, const LLSD&) -> bool

@@ -45,8 +45,15 @@
 #include "llviewercontrol.h"
 #include "llviewerinventory.h"
 #include "llwindow.h"
+#include "llapp.h"
+#include "llnotificationsutil.h"
 #include "wolfcave.h"
+#include "wolfdrive.h"
+#include "wolfflight.h"
+#include "wolfgame.h"
 #include "wolfgrid.h"
+#include "wolfhelm.h"
+#include "wolfskis.h"
 
 static LLDefaultChildRegistry::Register<WolfFishingHud> r_wolf_fishing_hud("wolf_fishing_hud");
 
@@ -297,9 +304,13 @@ void WolfFishingSession::viewClosed(EView v)
 {
     if (!active()) return;
     mViews &= ~(U32)v;
+    if (v == VIEW_HUD) mHudPending = false;
     if (active()) { changed(); return; }
     // the rod goes back to owner chat and its touch menu (fish_rod.lsl "bye"), so a bite is never missed
-    if (mRod == ROD_READY) say("WFISH|bye");
+    // [REVIEW 11-11 W2] whenever a hello went out this session (a rod that answered late would otherwise go on
+    // sending window lines to a viewer that no longer shows them), not only when the rod had answered
+    if (mRod == ROD_READY || mHelloSent) say("WFISH|bye");
+    mHelloSent = false;
     // [REVIEW 11-11 items 2, 3] a rod search still waiting belongs to this opening: it stops at its next step (live())
     ++mRodGen;
     mRodCoroRunning = false;
@@ -314,6 +325,7 @@ void WolfFishingSession::viewClosed(EView v)
 
 void WolfFishingSession::say(const std::string& text)
 {
+    if (text.compare(0, 11, "WFISH|hello") == 0) mHelloSent = true;
     // a negative channel goes as a ScriptDialogReply (fsnearbychathub.cpp sendChatFromViewerFinal; wolffloaterlifts.cpp say)
     FSNearbyChat::sendChatFromViewerFinal(text, text, CHAT_TYPE_NORMAL, false, VCH);
 }
@@ -325,7 +337,8 @@ void WolfFishingSession::setStatus(const std::string& text, bool error, bool tra
     // the message area: newest first; a "just a moment" line gives way to the next; the same line twice is said once
     if (!text.empty())
     {
-        if (!mLog.empty() && mLog.front().mText == text && mLog.front().mError == error)
+        // [REVIEW 11-11 W5] a catch is always its own line (two old boots in a row are two catches)
+        if (!isCatch && !mLog.empty() && mLog.front().mText == text && mLog.front().mError == error)
         {
             mLog.front().mTransient = transient;
         }
@@ -339,6 +352,7 @@ void WolfFishingSession::setStatus(const std::string& text, bool error, bool tra
             m.mCatch = isCatch;
             mLog.insert(mLog.begin(), m);
             ++mLogShift;
+            ++mLogVersion;
             if (mLog.size() > LOG_KEPT) mLog.resize(LOG_KEPT);
         }
     }
@@ -385,7 +399,8 @@ void WolfFishingSession::reel()
 {
     if (!active() || mRod != ROD_READY || (mFish != FISH_WAITING && mFish != FISH_BITE)) return;
     if (mPlaying) return;       // the game is played by holding Reel in (challengeStep)
-    if (challengeOn() && mFish == FISH_BITE)
+    // (while the HUD waits for a vehicle's panel there is nowhere to play: the default reel)
+    if (challengeOn() && mFish == FISH_BITE && !mHudPending)
     {
         // Challenge mode starts at a bite; before a bite there is no fish to play, and Reel in is the default early reel
         mPlaying = true;
@@ -440,9 +455,10 @@ void WolfFishingSession::setChallenge(bool on)
     {
         // switched off mid-game: the default mode's single reel
         endChallenge();
-        setStatus("A fish is biting! Reel it in whenever you are ready.", false);
     }
-    changed();
+    // said in the message area (and so to the screen reader) like everything else
+    setStatus(on ? "Challenge mode is on: at a bite, hold REEL IN and let go before the line goes into the red."
+                 : "Challenge mode is off: one press of REEL IN brings the fish in, and there is no hurry.", false);
 }
 
 void WolfFishingSession::endChallenge()
@@ -756,15 +772,79 @@ void WolfFishingSession::weekCoro()
 void WolfFishingSession::openHud()
 {
     WolfFishingSession& s = instance();
-    if (s.hudOn()) return;
+    if (s.hudWanted()) return;
+    // the game HUD steps aside by itself while Fishing shows (wolfgame.cpp bottomTaken) and comes back when Fishing closes
+    const bool game_hud = WolfGrid::isOnWolfTerritories() && WolfGame::instance().hudShowing();
     s.viewOpened(VIEW_HUD);
+    if (game_hud) s.setStatus("The game HUD steps aside while you fish; it comes back when you close Fishing.", false);
+    // [REVIEW 11-11 B1, Paul: "play while wandering"] a vehicle's panel is never taken away: Fishing waits for it
+    // (Source: wolfviewer-featfix wolffloatergreedy.cpp WolfGreedyGame::openHud, the same rule and words)
+    const std::string vehicle = WolfGrid::isOnWolfTerritories() ? vehiclePanelUp() : std::string();
+    if (!vehicle.empty()) s.waitFor(vehicle);
+}
+
+void WolfFishingSession::toggleHud()
+{
+    WolfFishingSession& s = instance();
+    if (s.mHudPending)
+    {
+        // switched off while waiting: it does not come (wolffloatergreedy.cpp toggleHud)
+        s.viewClosed(VIEW_HUD);
+        LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", std::string("Fishing will not appear after all.")));
+        return;
+    }
+    if (s.hudOn()) closeAll();
+    else openHud();
+}
+
+// static
+std::string WolfFishingSession::vehiclePanelUp()
+{
+    // Source: wolfviewer-featfix wolffloatergreedy.cpp WolfGreedyGame::vehiclePanelUp (wolfgame.cpp WolfGame::bottomTaken: the
+    // deck on screen while active and not hidden, the dashboard, the helm; and the Ski HUD, wolfskis.h hudShowing)
+    const WolfFlight& wf = WolfFlight::instance();
+    if (wf.active() && !wf.deckHidden()) return wf.sailing() ? "sailing deck" : "flight deck";
+    if (WolfDrive::instance().dashboardOn()) return "dashboard";
+    if (WolfHelm::instance().hudShowing()) return "Captain's Helm";
+    if (WolfSkis::instance().hudShowing()) return "Ski HUD";
+    return std::string();
+}
+
+void WolfFishingSession::waitFor(const std::string& vehicle)
+{
+    // the session goes on (the rod stays, its lines are heard); only the HUD waits, and appears when the panel goes
+    if (mHudPending) return;
+    mHudPending = true;
+    const std::string tip = "Fishing will appear along the bottom of the screen when you have finished with the " + vehicle + ".";
+    setStatus(tip, false);
+    LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", tip));
+}
+
+void WolfFishingSession::pendingTick()
+{
+    if (!mHudPending || LLApp::isExiting() || !WolfGrid::isOnWolfTerritories()) return;
+    if (vehiclePanelUp().empty())
+    {
+        mHudPending = false;   // the vehicle's panel has gone: Fishing appears
+        changed();
+    }
 }
 
 void WolfFishingSession::closeAll()
 {
     // the Board first (the session stays open for the HUD), then the HUD: the session ends and says "bye"
     LLFloaterReg::hideInstance("wolf_fishing");
-    if (instanceExists() && instance().hudOn()) instance().viewClosed(VIEW_HUD);
+    if (instanceExists() && instance().hudWanted()) instance().viewClosed(VIEW_HUD);
+}
+
+void WolfFishingSession::gameHudClaims()
+{
+    // the game HUD shown by hand (its tile, Game Mode switched on) takes the bottom from Fishing: the HUD closes, as Greedy's
+    // does for it (wolffloatergreedy.cpp); the Board window, if open, keeps the session
+    if (!instanceExists() || !instance().hudWanted()) return;
+    instance().viewClosed(VIEW_HUD);
+    LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE",
+        std::string("Fishing made way for the game HUD. Wolf World > Fishing brings it back.")));
 }
 
 // ───────────────────────────── the HUD ─────────────────────────────
@@ -969,9 +1049,9 @@ namespace
         text(f, str, x, y, c, LLFontGL::HCENTER, LLFontGL::VCENTER);
     }
 
-    /** A message: its words in lines no wider than `maxw` (at most `max_lines`, the last cut with "..."), centred one under
-     *  another from `top` down. Returns the height it took. */
-    F32 msgT(F32 x, F32 top, const std::string& str, F32 px, F32 maxw, S32 max_lines, const LLColor4& c, bool draw = true)
+    /** A message's words in lines no wider than `maxw` at `px` (at most `max_lines`: the rest goes on the last line, which
+     *  fitT cuts with "..."; the whole text is the line's tooltip). */
+    std::vector<std::string> wrapLines(const std::string& str, F32 px, F32 maxw, S32 max_lines)
     {
         const LLFontGL* f = font(px);
         std::vector<std::string> lines;
@@ -991,14 +1071,21 @@ namespace
         if (!cur.empty()) lines.push_back(cur);
         if ((S32)lines.size() > max_lines)
         {
-            // the rest goes on the last line, cut with "..." by fitT
             std::string last;
             for (size_t i = (size_t)max_lines - 1; i < lines.size(); ++i) last += (last.empty() ? "" : " ") + lines[i];
             lines.resize((size_t)max_lines);
             lines.back() = last;
         }
-        const F32 lh = S(px * 1.45f * TEXT_UP);
-        if (draw) for (size_t i = 0; i < lines.size(); ++i) fitT(x, top - lh * ((F32)i + 0.5f), lines[i], px, px, maxw, c);
+        return lines;
+    }
+
+    F32 lineH(F32 px) { return S(px * 1.45f * TEXT_UP); }
+
+    /** Lines laid out by wrapLines, centred one under another from `top` down. Returns the height they took. */
+    F32 drawLines(F32 x, F32 top, const std::vector<std::string>& lines, F32 px, F32 maxw, const LLColor4& c)
+    {
+        const F32 lh = lineH(px);
+        for (size_t i = 0; i < lines.size(); ++i) fitT(x, top - lh * ((F32)i + 0.5f), lines[i], px, px, maxw, c);
         return lh * (F32)lines.size();
     }
 
@@ -1100,12 +1187,29 @@ void WolfFishingHud::draw()
 {
     mHits.clear();
     mDrawn = false;
+    if (LLApp::isExiting()) return;   // nothing of the vehicles is asked while the viewer quits
+    if (WolfFishingSession::instanceExists())
+    {
+        WolfFishingSession& fs = WolfFishingSession::instance();
+        fs.pendingTick();   // a waiting HUD appears when the vehicle's panel has gone
+        // a vehicle's panel switched on while Fishing shows: Fishing waits for it the same way (the session goes on)
+        if (fs.hudOn() && WolfGrid::isOnWolfTerritories())
+        {
+            const std::string vehicle = WolfFishingSession::vehiclePanelUp();
+            if (!vehicle.empty()) fs.waitFor(vehicle);
+        }
+    }
     if (!WolfFishingSession::instanceExists() || !WolfFishingSession::instance().hudOn())
     {
         if (hasMouseCapture()) gFocusMgr.setMouseCapture(nullptr);
         mPressed = H_NONE;
         mResize.hide();
         mLastFrame = 0.0;
+        // [REVIEW 11-11 W3] the next opening starts at the newest message
+        mScroll = 0;
+        mSeenShift = WolfFishingSession::instanceExists() ? WolfFishingSession::instance().logShift() : 0;
+        mMsgL = mMsgR = mMsgT = mMsgB = 0.f;
+        mMsgRects.clear();
         return;
     }
     WolfFishingSession& s = WolfFishingSession::instance();
@@ -1206,6 +1310,8 @@ void WolfFishingHud::draw()
         LLColor4 swc = sc;
         if (bite && !s.challengePlaying()) swc = lerp(GOLD, SNOW, beat);
         fitT(X((C_L + C_R) * 0.5f), YM(624.f), sw, 13.f, 9.f, S(C_R - C_L - 20.f), swc, true);
+        mMsgL = mMsgR = mMsgT = mMsgB = 0.f;   // no history to scroll while the Challenge bars show (review 11-11)
+        mMsgRects.clear();
         if (s.challengePlaying())
         {
             // the line's tension: green, amber ("careful"), red (the line snaps); the marker is where it is now
@@ -1250,20 +1356,37 @@ void WolfFishingHud::draw()
             const F32 textL = X(C_L + 6.f), textR = X(C_R - 34.f);
             const F32 cx = (textL + textR) * 0.5f, maxw = textR - textL - S(16.f);
             F32 top = YM(656.f);
-            const F32 bottom = YM(886.f);
-            mMsgL = X(C_L); mMsgR = X(C_R); mMsgT = top; mMsgB = bottom;
-            if (log.empty()) msgT(cx, top, "Looking for your fishing rod...", 12.f, maxw, 2, SNOW);
+            const F32 msgBottom = YM(886.f);
+            mMsgL = X(C_L); mMsgR = X(C_R); mMsgT = top; mMsgB = msgBottom;
+            // [REVIEW 11-11 W7] the words are wrapped again only when a message comes, or the size changes - not every frame
+            if (mLayoutVersion != s.logVersion() || mLayoutWidth != maxw || mLayoutCount != log.size())
+            {
+                mLayoutVersion = s.logVersion();
+                mLayoutWidth = maxw;
+                mLayoutCount = log.size();
+                mLayout.clear();
+                for (size_t i = 0; i < log.size(); ++i)
+                {
+                    // [REVIEW 11-11 W1] a problem is wrapped in full (it says what to do); other lines at most two, the whole
+                    // text in the line's tooltip
+                    const F32 px = i == 0 ? 13.f : 12.f;
+                    mLayout.push_back(wrapLines(log[i].mText, px, maxw, log[i].mError ? 8 : 2));
+                }
+            }
+            mMsgRects.clear();
+            if (log.empty()) drawLines(cx, top, wrapLines("Looking for your fishing rod...", 12.f, maxw, 2), 12.f, maxw, SNOW);
             S32 shown = 0;
-            for (size_t i = (size_t)mScroll; i < log.size(); ++i)
+            for (size_t i = (size_t)mScroll; i < log.size() && i < mLayout.size(); ++i)
             {
                 const WolfFishingSession::Msg& m = log[i];
                 const F32 px = i == 0 ? 13.f : 12.f;
-                const F32 need = msgT(cx, top, m.mText, px, maxw, 2, SNOW, false);
-                if (top - need < bottom && shown > 0) break;
+                const F32 need = lineH(px) * (F32)mLayout[i].size();
+                if (top - need < msgBottom && shown > 0) break;
                 const F32 a = i == 0 ? 1.f : 0.86f;   // the newest bright, the rest gently dimmed (they stay readable)
                 const LLColor4 col = m.mError ? AMBER : (m.mCatch ? GOLD : SNOW);
-                const F32 used = msgT(cx, top, m.mText, px, maxw, 2, alpha(col, a));
+                const F32 used = drawLines(cx, top, mLayout[i], px, maxw, alpha(col, a));
                 if (m.mError) rectF(textL, top - used + S(2.f), textL + S(5.f), top - S(2.f), AMBER);
+                mMsgRects.push_back({ textL, top - used, textR, top, m.mText });
                 top -= used + S(6.f);
                 ++shown;
             }
@@ -1274,7 +1397,7 @@ void WolfFishingHud::draw()
             if (mMsgTotal > shown || mScroll > 0)
             {
                 const F32 bl = X(C_R - 26.f), br = X(C_R - 4.f);
-                const F32 upB = YM(682.f), upT = YM(656.f), dnB = YM(886.f), dnT = YM(860.f);
+                const F32 upB = YM(682.f), upT = YM(656.f), dnB = YM(886.f), dnT = YM(860.f);   // the message area's top / bottom
                 Ctx sc{ [this](F32 a, F32 bb, F32 r, F32 tt, EHit id, const std::string& tip) { addHit(a, bb, r, tt, id, tip); }, mPressed };
                 auto arrow = [&](F32 b0, F32 t0, bool up, EHit id, const std::string& tip, bool on)
                 {
@@ -1525,7 +1648,7 @@ bool WolfFishingHud::handleScrollWheel(S32 x, S32 y, S32 clicks)
     // the mouse wheel over the message area scrolls its history (down: older)
     if (!mDrawn) return false;
     const F32 px = (F32)x / mHitScale, py = (F32)y / mHitScale;
-    if (px < mMsgL || px > mMsgR || py > mMsgT || py < mMsgB) return false;
+    if (mMsgR <= mMsgL || px < mMsgL || px > mMsgR || py > mMsgT || py < mMsgB) return false;
     mScroll = llclamp(mScroll + clicks, 0, llmax(0, mMsgTotal - 1));
     return true;
 }
@@ -1612,6 +1735,17 @@ bool WolfFishingHud::handleToolTip(S32 x, S32 y, MASK mask)
     if (const Hit* hit = hitAt(x, y))
     {
         if (!hit->mTip.empty()) LLToolTipMgr::instance().show(hit->mTip);
+        return true;
+    }
+    // [REVIEW 11-11 W1] a message line: its whole text
+    const F32 px = (F32)x / mHitScale, py = (F32)y / mHitScale;
+    for (const MsgRect& r : mMsgRects)
+    {
+        if (px >= r.mL && px <= r.mR && py >= r.mB && py <= r.mT)
+        {
+            LLToolTipMgr::instance().show(r.mText);
+            return true;
+        }
     }
     return true;
 }

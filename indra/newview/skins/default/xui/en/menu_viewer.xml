@@ -2008,10 +2008,11 @@
             <!-- [WOLF FISHING 2026-11-10] Ticket 679 (Jimmy Olsen): cast, reel in, the weekly top 10 (wolffloaterfishing.cpp).
              Wolf Territories only, as the other Wolf games. [FISHING OVERLAY 2026-11-11] shows Fishing on the screen
              (wolffishingoverlay.cpp); its Board button opens the window. -->
-            <menu_item_call label="Fishing..." name="WolfWorldFishing">
-                <menu_item_call.on_click function="WolfFishing.Show" />
-                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
-            </menu_item_call>
+            <menu_item_check label="Fishing" name="WolfWorldFishing">
+                <menu_item_check.on_check function="WolfFishing.HudOn" />
+                <menu_item_check.on_click function="WolfFishing.ToggleHud" />
+                <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_check>
             <!-- [WOLF ADVENTURE P1 2026-10-16] HUD_MESSAGES_V1.md §3.12: the Roleplay window on Journal >
              Adventures here (join one, start a party, leave). [WOLF GRID GATE] gone (not greyed) off Wolf. -->
             <menu_item_call label="Adventures..." name="WolfAdventures">

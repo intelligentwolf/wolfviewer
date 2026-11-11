@@ -92,12 +92,27 @@ public:
     void viewOpened(EView v);
     void viewClosed(EView v);
     bool active() const { return mViews != 0; }
-    /** The Fishing HUD is open (WolfFishingHud draws). */
-    bool hudOn() const { return (mViews & VIEW_HUD) != 0; }
+    /** The Fishing HUD shows (WolfFishingHud draws). */
+    bool hudOn() const { return (mViews & VIEW_HUD) != 0 && !mHudPending; }
+    /** Switched on: showing, or waiting for a vehicle's panel to go (the menu tick and the Wolf HUDs tile show this). */
+    bool hudWanted() const { return (mViews & VIEW_HUD) != 0; }
     /** Wolf World > Games & Stories > Fishing, the Wolf HUDs tile: open the HUD (and the session). */
     static void openHud();
     /** The HUD's CLOSE: the HUD and the Board window close, the rod goes back to its touch menu. */
     static void closeAll();
+    /** Wolf World > Fishing, the Wolf HUDs tile: on; off; or, while waiting, cancel the wait. */
+    static void toggleHud();
+    /** [REVIEW 11-11 B1] Paul: "play while wandering" - a vehicle's panel (dashboard, flight / sailing deck, Captain's Helm,
+     *  Ski HUD) is never taken away: Fishing waits for it and appears by itself when it goes; one switched on while Fishing
+     *  shows sends Fishing back to waiting (the session, the rod and the messages go on). The same rule as Greedy's
+     *  (wolfviewer-featfix wolffloatergreedy.cpp). "" = none showing. */
+    static std::string vehiclePanelUp();
+    void waitFor(const std::string& vehicle);
+    /** Every frame from the HUD control, also while it does not show: a waiting HUD appears when the bottom is free. */
+    void pendingTick();
+    /** The game HUD shown by hand takes the bottom (wolfgame.cpp claimBottom): the Fishing HUD closes. Only the game HUD is
+     *  put away by Fishing, passively (wolfgame.cpp bottomTaken), so it comes back when Fishing closes. */
+    static void gameHudClaims();
 
     void cast();          // also "Get my rod" when there is no rod
     void reel();          // default mode: reel in; Challenge mode at a bite: start the mini-game
@@ -131,6 +146,8 @@ public:
     /** Goes up by one for every message added at the top (and down when a "just a moment" line gives way): the HUD keeps a
      *  scrolled-back view on the same lines as new ones arrive. */
     S32 logShift() const { return mLogShift; }
+    /** Goes up whenever a message is added: the HUD lays the messages out again only then (review 11-11 W7). */
+    U32 logVersion() const { return mLogVersion; }
     const std::vector<PileItem>& pile() const { return mPile; }
     S32 pileCount() const { return mPileCount; }
     const Me& me() const { return mMe; }
@@ -163,6 +180,9 @@ private:
     bool mStatusError = false;
     std::vector<Msg> mLog;         // newest first, at most LOG_KEPT
     S32 mLogShift = 0;
+    U32 mLogVersion = 0;
+    bool mHelloSent = false;
+    bool mHudPending = false;      // switched on, waiting for a vehicle's panel to go (review 11-11 B1)       // a "hello" went to the rod this session: "bye" when it ends (review 11-11 W2)
     std::vector<PileItem> mPile;   // the last PILE_SHOWN things caught this session
     S32 mPileCount = 0;            // everything caught this session (the heap's count)
     bool mLostShown = false;       // a lost fish was just said: the rod's "Your line is out of the water." is not repeated
@@ -243,6 +263,13 @@ private:
     F32 mTrackT = 0.f, mTrackB = 0.f, mThumbT = 0.f, mThumbB = 0.f;
     F32 mDragY = 0.f;
     S32 mDragScroll = 0;
+    // the messages laid out (review 11-11 W7: wrapped again only when the log or the width changes) and where each drew
+    std::vector<std::vector<std::string>> mLayout;
+    U32 mLayoutVersion = 0;
+    F32 mLayoutWidth = 0.f;
+    size_t mLayoutCount = 0;
+    struct MsgRect { F32 mL, mB, mR, mT; std::string mText; };
+    std::vector<MsgRect> mMsgRects;   // picture units, this frame: a hovered line's tooltip is its whole text
 
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;

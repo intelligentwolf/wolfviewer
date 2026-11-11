@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfgame.h"
+#include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/] one bottom panel at a time
 
 #include <algorithm>
 #include <cmath>
@@ -1396,7 +1397,8 @@ bool WolfGame::bottomTaken()
     // active() / deckHidden() - the deck is on screen while active and not hidden.
     const WolfFlight& wf = WolfFlight::instance();
     return (wf.active() && !wf.deckHidden()) || WolfDrive::instance().dashboardOn()
-        || WolfHelm::instance().hudShowing();   // <WolfViewer 2026-10-28/> the Captain's Helm (wolfhelm.h)
+        || WolfHelm::instance().hudShowing()   // <WolfViewer 2026-10-28/> the Captain's Helm (wolfhelm.h)
+        || (WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn());   // [FISHING HUD 2026-11-11/]
 }
 
 bool WolfGame::hudShowing() const
@@ -1433,6 +1435,7 @@ void WolfGame::claimBottom()
     if (wf.active() && !wf.deckHidden()) wf.toggleDeck(wf.sailing());
     // <WolfViewer 2026-10-28> the Captain's Helm gives way too (showHud(false): not reopened for this seat)
     if (WolfHelm::instance().hudShowing()) WolfHelm::instance().showHud(false);
+    WolfFishingSession::gameHudClaims();   // [FISHING HUD 2026-11-11/] the game HUD shown by hand: Fishing makes way
     ++mGeneration;
 }
 

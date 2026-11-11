@@ -105,7 +105,7 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_SPEEDBOAT: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPEEDBOAT);
         case T_SUBMARINE: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SUBMARINE);
         // [FISHING HUD 2026-11-11] on while the Fishing HUD shows (wolffishingoverlay.cpp)
-        case T_FISHING:   return WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn();
+        case T_FISHING:   return WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudWanted();   // (on, or waiting for a vehicle panel)
         default:          return false;
     }
 }
@@ -140,7 +140,7 @@ void WolfFloaterHuds::onTile(ETile t)
         case T_SPEEDBOAT: WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SPEEDBOAT); break;
         case T_SUBMARINE: WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SUBMARINE); break;
         // [FISHING HUD 2026-11-11] the same as Wolf World > Fishing (on) and the HUD's CLOSE (off: the rod's touch menu)
-        case T_FISHING:   if (was_on) WolfFishingSession::closeAll(); else WolfFishingSession::openHud(); break;
+        case T_FISHING:   WolfFishingSession::toggleHud(); break;   // on; off; or, while waiting, cancel the wait
         default:          return;
     }
     if (!was_on)

@@ -1075,6 +1075,7 @@ set(viewer_SOURCE_FILES
     wolffloaterterraform.cpp # [WOLF TERRAFORM 2026-10-23] the Terraform window
     wolffloaterlifts.cpp # [WOLF LIFTS 2026-11-10] Cable Cars and Ski Lifts (ticket 691)
     wolffloaterfishing.cpp # [WOLF FISHING 2026-11-10] Fishing (ticket 679)
+    wolffishingoverlay.cpp # [FISHING OVERLAY 2026-11-11] Fishing on the screen
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
     wolfmapchart.cpp
@@ -2119,6 +2120,7 @@ set(viewer_HEADER_FILES
     wolffloaterterraform.h
     wolffloaterlifts.h
     wolffloaterfishing.h
+    wolffishingoverlay.h
     wolfsurfcurl.h
     wolfmapglobe.h
     wolfmapchart.h

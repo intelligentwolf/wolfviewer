@@ -6,7 +6,10 @@
      what I caught and where I am this week."
      Flow: the window puts the rod in your hand (given first if you have none) -> Cast -> waiting -> "A fish is biting!" (no
      hurry) -> Reel in -> the catch and the score -> Cast again. The big line at the top always says what is happening or
-     what to do; failures show there in the caution colour and stay until the next action. No codes, no countdowns. -->
+     what to do; failures show there in the caution colour and stay until the next action. No codes, no countdowns.
+     [FISHING HUD 2026-11-11] Wolf World > Fishing now shows the Fishing HUD (wolffishingoverlay.cpp, main_view.xml
+     wolf_fishing_hud); this window is its Board (your week, the top 10) and keeps its own buttons. Challenge mode (off by
+     default, remembered per resident) is switched here or with the HUD's CHALLENGE button. -->
 <floater
  can_close="true"
  can_minimize="true"
@@ -19,7 +22,9 @@
  single_instance="true"
  title="Fishing"
  width="500">
-    <text follows="left|top" font="SansSerifLarge" height="66" layout="topleft" left="16" name="fish_status" top="26" width="468" word_wrap="true">Looking for your fishing rod...</text>
+    <!-- [FISHING HUD 2026-11-11] the Wolf Fishing logo (our own art, the HUD's) beside the line that says what is happening -->
+    <icon follows="left|top" height="60" image_name="WolfFishing_Logo" layout="topleft" left="14" mouse_opaque="false" name="fish_logo" top="28" width="60" />
+    <text follows="left|top" font="SansSerifLarge" height="66" layout="topleft" left="84" name="fish_status" top="26" width="400" word_wrap="true">Looking for your fishing rod...</text>
     <button follows="left|top" font="SansSerifLarge" height="40" label="Cast" layout="topleft" left="16" name="fish_cast" top="98" width="150"
      tool_tip="Cast your line into the water in front of you. Face the water first." />
     <button follows="left|top" font="SansSerifLarge" height="40" label="Reel in" layout="topleft" left="176" name="fish_reel" top="98" width="150"
@@ -63,6 +68,8 @@
     </scroll_list>
     <text follows="left|top" height="36" layout="topleft" left="16" name="fish_board_note" top="516" width="468" word_wrap="true" />
     <text follows="left|top" height="20" layout="topleft" left="16" name="fish_last_week" top="552" width="340" word_wrap="true" />
+    <check_box follows="left|top" height="20" label="Challenge mode" layout="topleft" left="16" name="fish_challenge" top="580" width="220"
+     tool_tip="Challenge mode: to reel in, hold Reel in on the fishing bar and let go before the line goes into the red, or the fish gets away. When it is off, one press of Reel in brings the fish in and there is no hurry." />
     <button follows="left|top" height="24" label="Put the rod away" layout="topleft" left="354" name="fish_away" top="578" width="130"
      tool_tip="Take the fishing rod off. Get my rod puts it back." />
 </floater>

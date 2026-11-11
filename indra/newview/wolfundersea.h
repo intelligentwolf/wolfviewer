@@ -142,6 +142,7 @@ private:
     bool blocked(F64 gx, F64 gy, F32 radius, F32 zlo, F32 zhi, bool hulls = true) const;
     /** The plants' test: blocked() without the boats' hulls (they sail on: a garden built round one would keep the hole). */
     bool plantBlocked(F64 gx, F64 gy, F32 radius, F32 zlo, F32 zhi) const { return blocked(gx, gy, radius, zlo, zhi, false); }
+    // ([W104 FEATFIX 2026-11-11 B3] hulls = false also leaves out tagged prims on the move: see DryTrack)
     U64 blockHash(const LLVector3d& corner) const;
 
     // [T733 2026-11-10] the air-filled volumes (WolfDryVolumes: "wolfdry" prims, the Tunnel tool's boxes under the sea,
@@ -152,9 +153,21 @@ private:
         F32 mRadius = 0.f;             // its bounding sphere about mVol.mCentre
         LLVector3d mGlobal;            // mVol.mCentre in world (global) metres
         U64 mKey = 0;                  // its kind, place, turn and size, rounded (dryHash)
+        bool mSettled = true;          // [W104 FEATFIX 2026-11-11 B3] at rest for DRY_SETTLE_S (a tagged prim; the others always)
     };
-    /** Once a frame: this frame's volumes into mDry, and mDrySig (the plants' volumes: all but hulls) for the garden. */
-    void dryUpdate();
+    /** Once a frame while the plants or fish are about: this frame's volumes into mDry, and mDrySig (the plants' volumes: all
+     *  but hulls and [B3] tagged prims on the move) for the garden. */
+    void dryUpdate(F64 now);
+    // [W104 FEATFIX 2026-11-11 B3] each tagged prim's last place key and when it last changed: a prim moving (on a boat, a
+    // submarine, a lift) never rebuilds the gardens it passes; once at rest for DRY_SETTLE_S it does, once
+    struct DryTrack
+    {
+        U64 mKey = 0;
+        F64 mChangedAt = 0.0;
+        U32 mSeen = 0;
+    };
+    std::map<LLUUID, DryTrack> mDryTrack;
+    U32 mDryPass = 0;
     /** Whether the vertical column at agent (x, y), `radius` out, zlo..zhi, reaches into one of mDry. */
     bool dry(const LLVector3& agent_xy, F32 radius, F32 zlo, F32 zhi, bool hulls) const;
     /** Whether an agent point is inside one of mDry. */

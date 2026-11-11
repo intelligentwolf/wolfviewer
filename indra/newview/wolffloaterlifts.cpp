@@ -17,8 +17,11 @@
 
 #include "wolffloaterlifts.h"
 
+#include <algorithm>
 #include <cmath>
+#include <memory>
 #include <set>
+#include <vector>
 
 #include "fscommon.h"
 #include "fsnearbychathub.h"
@@ -36,6 +39,8 @@
 #include "llgl.h"
 #include "llinventoryfunctions.h"
 #include "llinventorymodel.h"
+#include "llinventorymodelbackgroundfetch.h"
+#include "llinventoryobserver.h"
 #include "llnotificationsutil.h"
 #include "llprogressbar.h"
 #include "llradiogroup.h"
@@ -64,6 +69,7 @@ namespace
     const char* GIVE_URL = "https://wolfstorm.app/php/wolflifts.php";
     const char* GIVE_BODY = "{\"action\":\"give\"}";
     constexpr F32 GIVE_TIMEOUT_S = 30.f;
+    constexpr S32 GIVE_WAIT_S = 30;            // after the grid's answer, the kit is looked for this long (the 30 one-second waits before)
     constexpr size_t MAX_POINTS = 12;          // lift_setup.lsl MAX_POINTS: bottom, up to 10 bends, top
     constexpr size_t MAX_LINE = 1023;          // llRegionSayTo's longest line (LSL_Api.cs llRegionSayTo)
     constexpr F32 SAME_CLICK_M = 1.f;          // the second press of a double-click (wolffloaterterraform.cpp SAME_CLICK_M)
@@ -101,18 +107,228 @@ namespace
         }
     };
 
-    LLViewerInventoryItem* findKit()
+    // [LIFTFIND 2026-11-11] The same cause as the Greedy pieces (wolfgreedysetup.cpp [GREEDYFIND 2026-11-11], read it for the
+    // source lines): every item read from the inventory cache at login is "not finished" (llinventorymodel.cpp loadFromFile,
+    // LLViewerInventoryItem() + the non-virtual LLInventoryItem::fromLLSD; lltooldraganddrop.cpp willObjectAcceptInventory), and
+    // a folder whose cached version matches the login skeleton is not fetched again (llinventorymodelbackgroundfetch.cpp
+    // bulkFetch asks only for VERSION_UNKNOWN folders). So a kit given in an earlier session was never seen by findKit (finished
+    // items only), the grid answered {have: true} with no folder id (wolflifts_lib.php wlf_give), the 30 s wait fetched nothing
+    // and the window said "could not see it yet". Now: an unfinished copy is asked for as a drag does (lltooldraganddrop.cpp
+    // beginDrag: LLInventoryModelBackgroundFetch::start(item, false)), the kit's folders are asked for again, the grid is asked
+    // only after the login's inventory fetch is done, and after its answer Objects, the kit's folder and the kit folders are
+    // asked for again while the kit is looked for. Source: wolfgreedysetup.cpp findPieceIn / backgroundFetchIdle / greedyFolders
+    // / refetchFolder / PieceSearch / putCoro step 2, the same steps for the lift kit.
+
+    /** The resident's kit under `folder` (outside the Trash): the first one that is finished. A copy that is not finished yet
+     *  (read from the inventory cache) goes into `unfinished`, when given, so that it can be asked for. */
+    LLViewerInventoryItem* findKitIn(const LLUUID& folder, uuid_vec_t* unfinished)
     {
         LLInventoryModel::cat_array_t cats;
         LLInventoryModel::item_array_t items;
         KitItems match;
-        gInventory.collectDescendentsIf(gInventory.getRootFolderID(), cats, items, LLInventoryModel::EXCLUDE_TRASH, match);
+        gInventory.collectDescendentsIf(folder, cats, items, LLInventoryModel::EXCLUDE_TRASH, match);
+        LLViewerInventoryItem* found = nullptr;
         for (const LLPointer<LLViewerInventoryItem>& p : items)
         {
-            if (p.notNull() && p->isFinished()) return p.get();
+            if (p.isNull()) continue;
+            if (p->isFinished())
+            {
+                if (!found) found = p.get();
+            }
+            else if (unfinished)
+            {
+                unfinished->push_back(p->getUUID());
+            }
         }
-        return nullptr;
+        return found;
     }
+
+    /** The resident's kit anywhere in the inventory (outside the Trash): wolflifts_lib.php wlf_candidates counts a kit in any
+     *  folder but the Trash. */
+    LLViewerInventoryItem* findKit(uuid_vec_t* unfinished = nullptr)
+    {
+        return findKitIn(gInventory.getRootFolderID(), unfinished);
+    }
+
+    /** The login's background inventory fetch has nothing left to do. Source: wolfgreedysetup.cpp backgroundFetchIdle
+     *  (llinventorymodelbackgroundfetch.cpp setAllFoldersFetched, isBulkFetchProcessingComplete, inventoryFetchStarted). */
+    bool backgroundFetchIdle()
+    {
+        const LLInventoryModelBackgroundFetch& f = LLInventoryModelBackgroundFetch::instance();
+        return f.inventoryFetchStarted() && !f.folderFetchActive() && f.isBulkFetchProcessingComplete();
+    }
+
+    /** Objects. Source: wolfgreedysetup.cpp objectsFolder (findUserDefinedCategoryUUIDForType FT_OBJECT). */
+    LLUUID objectsFolder() { return gInventory.findUserDefinedCategoryUUIDForType(LLFolderType::FT_OBJECT); }
+
+    // wolflifts_items.php 'folder' (build_lifts.py FOLDER_NAME): the grid gives the kit into a folder of this name directly
+    // under Objects (wolflifts_lib.php wlf_give -> wolfskis_lib.php wsk_pick_folder / wsk_find_folder, an exact name match;
+    // wlf_items 'old_folders' is empty)
+    const std::string KIT_FOLDER = "Cable Cars and Ski Lifts";
+
+    /** The folders directly under Objects named KIT_FOLDER. Source: wolfgreedysetup.cpp greedyFolders. */
+    std::vector<LLUUID> kitFolders()
+    {
+        std::vector<LLUUID> out;
+        const LLUUID objects = objectsFolder();
+        if (objects.isNull()) return out;
+        LLInventoryModel::cat_array_t* cats = nullptr;
+        LLInventoryModel::item_array_t* items = nullptr;
+        gInventory.getDirectDescendentsOf(objects, cats, items);
+        if (!cats) return out;
+        for (const LLPointer<LLViewerInventoryCategory>& c : *cats)
+        {
+            if (c.notNull() && c->getName() == KIT_FOLDER) out.push_back(c->getUUID());
+        }
+        return out;
+    }
+
+    /** Ask the region for a folder's contents again (once per folder per round: `asked`). False: no folder id yet, or the
+     *  viewer does not know the folder (yet). Source: wolfgreedysetup.cpp refetchFolder. */
+    bool refetchFolder(const LLUUID& id, std::vector<LLUUID>& asked, const char* what)
+    {
+        if (id.isNull()) return false;
+        if (std::find(asked.begin(), asked.end(), id) != asked.end()) return true;
+        LLViewerInventoryCategory* cat = gInventory.getCategory(id);
+        if (!cat)
+        {
+            LL_INFOS("WolfLifts") << "kit search: " << what << " folder " << id << " is not known to this viewer yet" << LL_ENDL;
+            return false;
+        }
+        asked.push_back(id);
+        cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
+        cat->fetch();
+        LL_INFOS("WolfLifts") << "kit search: asked again for the " << what << " folder '" << cat->getName() << "' " << id << LL_ENDL;
+        return true;
+    }
+
+    /** The kit search's scans while it waits. Source: wolffishingoverlay.cpp RodWatch (the same gate, spacing and observer
+     *  lifetime); wolfgreedysetup.cpp PieceSearch, the same class for the lift kit. [W104 review 2026-11-11 W1 W2 S1]
+     *  - the kit folders (small; the grid gives into the first) are scanned every time;
+     *  - copies elsewhere that the last whole scan met unfinished are looked up by id every time (an item made complete by
+     *    its fetch keeps its id and the item count: llinventorymodel.cpp updateItem changes the old item in place);
+     *  - the whole inventory (63,000 items for some residents) is scanned only when it could have changed since the last
+     *    whole scan - the model told its observers of a change (updateItem / addChangedMask -> idleNotifyObservers ->
+     *    changed()), its item count moved, or the login's background fetch finished - and then at most every WHOLE_SCAN_S.
+     *  A finished copy ends the search at once and nothing is asked for. Otherwise the unfinished copies are asked for, at
+     *  most MAX_ASK a round (again() starts the next round), the kit folders' copies first, the rest in turn. */
+    class KitSearch
+    {
+    public:
+        // gInventory.cleanupInventory() deletes every observer still added (llinventorymodel.cpp), so the observer lives on
+        // the heap and shares its state with this search: the search removes and deletes it only while it is alive
+        // (wolffishingoverlay.cpp RodWatch)
+        KitSearch() : mState(std::make_shared<State>()), mObserver(new Observer(mState)) { gInventory.addObserver(mObserver); }
+        ~KitSearch()
+        {
+            if (mState->mAlive)
+            {
+                gInventory.removeObserver(mObserver);
+                delete mObserver;
+            }
+        }
+        KitSearch(const KitSearch&) = delete;
+        KitSearch& operator=(const KitSearch&) = delete;
+
+        /** The kit folders, the asked-for copies, and the whole inventory when it is due. */
+        LLViewerInventoryItem* find() { return look(false); }
+
+        /** The same with the whole inventory scanned now, due or not (the last look before the grid is asked or the search
+         *  gives up). */
+        LLViewerInventoryItem* findWhole() { return look(true); }
+
+        /** The next round asks for unfinished copies again: the ones after those just asked for, round and round. */
+        void again()
+        {
+            mTurn += mAsked.size();
+            mAsked.clear();
+        }
+
+        /** How many unfinished copies have been asked for this round. */
+        size_t askedCount() const { return mAsked.size(); }
+
+    private:
+        struct State
+        {
+            bool mDirty = true;
+            bool mAlive = true;
+        };
+        class Observer : public LLInventoryObserver
+        {
+        public:
+            explicit Observer(const std::shared_ptr<State>& state) : mState(state) {}
+            ~Observer() override { mState->mAlive = false; }
+            void changed(U32) override { mState->mDirty = true; }
+        private:
+            std::shared_ptr<State> mState;
+        };
+
+        /** `item` (met unfinished by a whole scan) is complete now and still what a scan would take: a match, outside the
+         *  Trash. */
+        bool usable(LLViewerInventoryItem* item) const
+        {
+            if (!item || !item->isFinished()) return false;
+            KitItems match;
+            if (!match(nullptr, item)) return false;
+            const LLUUID trash = gInventory.findCategoryUUIDForType(LLFolderType::FT_TRASH);
+            return trash.isNull() || !gInventory.isObjectDescendentOf(item->getUUID(), trash);
+        }
+
+        LLViewerInventoryItem* look(bool whole_now)
+        {
+            // 1. the kit folders; their unfinished copies are the first in line to be asked for
+            uuid_vec_t wanted;
+            for (const LLUUID& f : kitFolders())
+            {
+                if (LLViewerInventoryItem* got = findKitIn(f, &wanted)) return got;
+            }
+            // 2. the copies elsewhere, by id
+            for (const LLUUID& id : mElsewhere)
+            {
+                LLViewerInventoryItem* got = gInventory.getItem(id);
+                if (usable(got)) return got;
+            }
+            // 3. the whole inventory, when something could have changed since the last whole scan
+            const S32 count = gInventory.getItemCount();
+            const bool all = LLInventoryModelBackgroundFetch::instance().isEverythingFetched();
+            const bool changed = !mState->mAlive || mState->mDirty || count != mCount || all != mAll;
+            const F64 t = LLFrameTimer::getTotalSeconds();
+            if (whole_now || (changed && (mWholeAt < 0.0 || t - mWholeAt >= WHOLE_SCAN_S)))
+            {
+                mWholeAt = t;
+                mState->mDirty = false;
+                mCount = count;
+                mAll = all;
+                mElsewhere.clear();
+                if (LLViewerInventoryItem* got = findKit(&mElsewhere)) return got;
+            }
+            // 4. no finished copy: ask for unfinished ones, a few a round
+            for (const LLUUID& id : mElsewhere)
+            {
+                if (std::find(wanted.begin(), wanted.end(), id) == wanted.end()) wanted.push_back(id);
+            }
+            for (size_t n = 0; n < wanted.size() && mAsked.size() < MAX_ASK; ++n)
+            {
+                const LLUUID& id = wanted[(mTurn + n) % wanted.size()];
+                if (std::find(mAsked.begin(), mAsked.end(), id) != mAsked.end()) continue;
+                mAsked.push_back(id);
+                LLInventoryModelBackgroundFetch::instance().start(id, false);
+                LL_INFOS("WolfLifts") << "kit search: asked for the lift kit " << id << " (read from the inventory cache, not complete yet)" << LL_ENDL;
+            }
+            return nullptr;
+        }
+
+        static constexpr F64 WHOLE_SCAN_S = 5.0;   // CHOSEN (wolffishingoverlay.cpp RodWatch WHOLE_SCAN_S)
+        static constexpr size_t MAX_ASK = 4;       // CHOSEN: unfinished copies asked for in one round
+        std::shared_ptr<State> mState;
+        Observer* mObserver;
+        uuid_vec_t mAsked;       // asked for this round
+        uuid_vec_t mElsewhere;   // unfinished copies met by the last whole scan
+        size_t mTurn = 0;        // where the next round's asking starts
+        S32 mCount = -1;
+        bool mAll = false;
+        F64 mWholeAt = -1.0;
+    };
 
     /** Rez `item` with its root at `at` (region metres) in the agent's region. Source: wolffloatertunnels.cpp rezTunnel
      *  (wolfcave.cpp WolfCaves::rezExact; lltooldraganddrop.cpp:1970-2028 dropObject; RayEndIsIntersection = 1 places the
@@ -700,49 +916,115 @@ void WolfFloaterLifts::boxCoro(LLHandle<LLFloater> h, U32 gen)
         f->boxFailed("Your lift kit is still building your last lift. When it has finished, move a point to carry on.");
         return;
     }
-    // 2. the kit in the inventory; when there is none, the grid gives one (php/wolflifts.php) and it is waited for
-    LLViewerInventoryItem* kit = findKit();
+    // 2. the kit in the inventory; when there is none, the grid gives one (php/wolflifts.php) and it is waited for.
+    // [LIFTFIND 2026-11-11] never on a half-loaded inventory and never on copies read from the cache only (see findKitIn): the
+    // login's background fetch finishes (or goes idle) first, the kit folders and any unfinished copy are asked for, and only
+    // then the grid (Source: wolfgreedysetup.cpp putCoro step 2, the same waits)
+    KitSearch search;
+    LLViewerInventoryItem* kit = search.find();
     if (!kit)
     {
-        f->setStatus("You have no lift kit yet - getting one for you (it goes into Objects > Cable Cars and Ski Lifts)...", false);
-        const std::string body(GIVE_BODY);
-        LLSD result = WolfCaves::serviceRequest(GIVE_URL, &body, GIVE_TIMEOUT_S);
-        LLSD reply;
-        std::string transport;
-        const S32 status = WolfCaves::serviceReply(result, reply, transport);
-        f = self();
-        if (!f) return;
-        if (status != 200 || !reply.isMap() || !reply["success"].asBoolean())
+        std::vector<LLUUID> asked;
+        LL_INFOS("WolfLifts") << "kit search: no complete lift kit in the loaded inventory (" << search.askedCount()
+                              << " copies from the inventory cache asked for); background fetch "
+                              << (LLInventoryModelBackgroundFetch::instance().isEverythingFetched() ? "complete"
+                                  : (backgroundFetchIdle() ? "idle" : "still running"))
+                              << ", Objects " << objectsFolder() << ", kit folders " << kitFolders().size() << LL_ENDL;
+        f->setStatus("Looking for your lift kit in your inventory...", false);
+        for (const LLUUID& k : kitFolders()) refetchFolder(k, asked, "kit");
+        // CHOSEN (wolfgreedysetup.cpp putCoro): up to 60 s for the inventory to finish loading (less once the fetch has nothing
+        // left to do), then at least 6 s for the kit folders and the asked-for copies to come back
+        for (S32 i = 0; i < 66 && !kit; ++i)
         {
-            std::string why = reply.isMap() && reply.has("error") ? reply["error"].asString()
-                : (transport.empty() ? llformat("the grid answered HTTP %d", status) : transport);
-            f->mBoxCoroRunning = false;
-            f->boxFailed("The lift kit could not be fetched: " + why);
-            return;
-        }
-        LLUUID folder = reply["folderId"].asUUID();
-        LLUUID item_id = reply["given"].isMap() ? reply["given"]["item"].asUUID() : LLUUID::null;
-        for (S32 i = 0; i < 30 && !kit; ++i)
-        {
-            if (folder.notNull())
+            const bool loaded = LLInventoryModelBackgroundFetch::instance().isEverythingFetched();
+            if ((loaded || backgroundFetchIdle()) && i >= 6)
             {
-                if (LLViewerInventoryCategory* cat = gInventory.getCategory(folder)) cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
-                gInventory.fetchDescendentsOf(folder);
+                LL_INFOS("WolfLifts") << "kit search: background fetch " << (loaded ? "complete" : "idle") << " after " << i << " s" << LL_ENDL;
+                break;
             }
             llcoro::suspendUntilTimeout(1.f);
             if (!self()) return;
-            kit = item_id.notNull() ? gInventory.getItem(item_id) : nullptr;
-            if (kit && !kit->isFinished()) kit = nullptr;
-            if (!kit) kit = findKit();
+            for (const LLUUID& k : kitFolders()) refetchFolder(k, asked, "kit");
+            // [W104 review W3] an asked-for copy whose fetch failed is asked for again every 5 s, as after the give
+            if (i % 5 == 4) search.again();
+            kit = search.find();
         }
+        // one whole scan before the grid is asked; unfinished copies it meets are asked for too [W104 review S1]
+        if (!kit) kit = search.findWhole();
         f = self();
         if (!f) return;
+        LL_INFOS("WolfLifts") << "kit search: " << (kit ? "found " + kit->getUUID().asString() + " after the folders came back"
+                                                      : std::string("still none - asking the grid")) << LL_ENDL;
         if (!kit)
         {
-            f->mBoxCoroRunning = false;
-            f->boxFailed("Your lift kit is in your inventory (Objects > Cable Cars and Ski Lifts), but this viewer could not see it yet. "
-                         "Close the window and open it again.");
-            return;
+            // the waits above can be long: off Wolf Territories meanwhile, no kit is asked for
+            if (!onWolf())
+            {
+                f->mBoxCoroRunning = false;
+                f->boxFailed("Cable Cars and Ski Lifts works on Wolf Territories regions only.");
+                return;
+            }
+            f->setStatus("You have no lift kit yet - getting one for you (it goes into Objects > Cable Cars and Ski Lifts)...", false);
+            const std::string body(GIVE_BODY);
+            LLSD result = WolfCaves::serviceRequest(GIVE_URL, &body, GIVE_TIMEOUT_S);
+            LLSD reply;
+            std::string transport;
+            const S32 status = WolfCaves::serviceReply(result, reply, transport);
+            f = self();
+            if (!f) return;
+            if (status != 200 || !reply.isMap() || !reply["success"].asBoolean())
+            {
+                std::string why = reply.isMap() && reply.has("error") ? reply["error"].asString()
+                    : (transport.empty() ? llformat("the grid answered HTTP %d", status) : transport);
+                f->mBoxCoroRunning = false;
+                f->boxFailed("The lift kit could not be fetched: " + why);
+                return;
+            }
+            // Source: wolflifts_lib.php wlf_give -> {have: true} | {have: false, given: {name, item}, folder, folderId,
+            // folderNew, delivered}
+            const bool have = reply["have"].asBoolean();
+            const LLUUID folder = reply["folderId"].asUUID();
+            const LLUUID item_id = reply["given"].isMap() ? reply["given"]["item"].asUUID() : LLUUID::null;
+            LL_INFOS("WolfLifts") << "kit give: " << (have ? "the grid says you already have one" : "given item " + item_id.asString())
+                                  << " folder " << folder << (reply["folderNew"].asBoolean() ? " (new)" : "") << LL_ENDL;
+            if (have) f->setStatus("You have a lift kit already - finding it in your inventory...", false);
+            // the kit's folder may be new to this viewer (made by the grid just now, or while they were logged in): Objects is
+            // asked for again so that it appears, then the folder itself and the kit folders (once each a round)
+            bool objects_asked = false;
+            for (S32 i = 0; i < GIVE_WAIT_S && !kit; ++i)
+            {
+                if (i % 5 == 4)
+                {
+                    asked.clear();   // the kit's and the kit folders, and unfinished copies, again every 5 s (Objects once)
+                    search.again();
+                }
+                if (!objects_asked && (have || folder.isNull() || !gInventory.getCategory(folder)))
+                {
+                    objects_asked = refetchFolder(objectsFolder(), asked, "Objects");
+                }
+                if (folder.notNull()) refetchFolder(folder, asked, "the kit's");
+                for (const LLUUID& k : kitFolders()) refetchFolder(k, asked, "kit");
+                llcoro::suspendUntilTimeout(1.f);
+                if (!self()) return;
+                kit = item_id.notNull() ? gInventory.getItem(item_id) : nullptr;
+                if (kit && !kit->isFinished()) kit = nullptr;
+                if (!kit) kit = search.find();
+            }
+            f = self();
+            if (!f) return;
+            // one whole scan before giving up; unfinished copies it meets are asked for (there for the next press) [W104 review S1]
+            if (!kit) kit = search.findWhole();
+            LL_INFOS("WolfLifts") << "kit give: " << (kit ? "found " + kit->getUUID().asString()
+                                                          : llformat("not seen after %d s", GIVE_WAIT_S)) << LL_ENDL;
+            if (!kit)
+            {
+                // a kit put down by hand is found by the hello of step 1 (lift_setup.lsl answers its owner)
+                f->mBoxCoroRunning = false;
+                f->boxFailed("Your lift kit is in your inventory (Objects > Cable Cars and Ski Lifts), but this viewer could not see it yet. "
+                             "You can drag it from Objects > Cable Cars and Ski Lifts onto the ground beside you instead, or close the "
+                             "window and open it again.");
+                return;
+            }
         }
     }
     // 3. rez it just in front of the avatar, on the ground; its "hi" is the one taken

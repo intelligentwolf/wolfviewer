@@ -17,9 +17,12 @@
 
 #include "wolfgreedysetup.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <memory>
 #include <set>
+#include <vector>
 
 #include "fscommon.h"
 #include "llagent.h"
@@ -27,9 +30,12 @@
 #include "llcoros.h"
 #include "lleventcoro.h"
 #include "llfloaterreg.h"
+#include "llframetimer.h"
 #include "lliconctrl.h"
 #include "llinventoryfunctions.h"
 #include "llinventorymodel.h"
+#include "llinventorymodelbackgroundfetch.h"
+#include "llinventoryobserver.h"
 #include "llradiogroup.h"
 #include "llsurface.h"
 #include "lltextbox.h"
@@ -124,18 +130,232 @@ namespace
         const LLUUID mAsset;
     };
 
-    LLViewerInventoryItem* findPiece(const Piece& p)
+    // [GREEDYFIND 2026-11-11] Why Put the table here found nothing for Paul although his pieces were in Objects > Greedy:
+    // every item read from the inventory cache at login is "not finished". llinventorymodel.cpp loadFromFile makes each one
+    // with LLViewerInventoryItem() (mIsComplete false, llviewerinventory.cpp) and fills it with LLInventoryItem::fromLLSD,
+    // which is not virtual and leaves it so (lltooldraganddrop.cpp willObjectAcceptInventory: "(isFinished() == false) at
+    // the moment shows that item was loaded from cache"). A folder whose cached version matches the login skeleton keeps
+    // those items (llinventorymodel.cpp loadSkeleton) and the login fetch does not ask for it again (llinventorymodel-
+    // backgroundfetch.cpp bulkFetch: only VERSION_UNKNOWN folders are requested), so pieces given in an earlier session stay
+    // unfinished, the search (finished items only) never saw them, the grid answered "you have it" with no folder id, and
+    // the wait asked for nothing. So now: an unfinished copy is asked for, as a drag does (lltooldraganddrop.cpp beginDrag:
+    // LLInventoryModelBackgroundFetch::start(item, false)); the Greedy folders are asked for again; the grid is not asked
+    // until the login's inventory fetch is done; and after the grid's answer Objects and the Greedy folders are asked for
+    // again while the piece is looked for. Source: wolffishingoverlay.cpp [FISHFIX 2026-11-11] rod search (findRodIn,
+    // backgroundFetchIdle, fishingFolders, refetchFolder, RodWatch, rodCoro), the same steps for the Greedy pieces.
+
+    /** The resident's copy of `p` under `folder` (outside the Trash): the first one that is finished. A copy that is not
+     *  finished yet (read from the inventory cache) goes into `unfinished`, when given, so that it can be asked for. */
+    LLViewerInventoryItem* findPieceIn(const LLUUID& folder, const Piece& p, uuid_vec_t* unfinished)
     {
         LLInventoryModel::cat_array_t cats;
         LLInventoryModel::item_array_t items;
         PieceItems match(p);
-        gInventory.collectDescendentsIf(gInventory.getRootFolderID(), cats, items, LLInventoryModel::EXCLUDE_TRASH, match);
+        gInventory.collectDescendentsIf(folder, cats, items, LLInventoryModel::EXCLUDE_TRASH, match);
+        LLViewerInventoryItem* found = nullptr;
         for (const LLPointer<LLViewerInventoryItem>& it : items)
         {
-            if (it.notNull() && it->isFinished()) return it.get();
+            if (it.isNull()) continue;
+            if (it->isFinished())
+            {
+                if (!found) found = it.get();
+            }
+            else if (unfinished)
+            {
+                unfinished->push_back(it->getUUID());
+            }
         }
-        return nullptr;
+        return found;
     }
+
+    /** The resident's copy anywhere in the inventory (outside the Trash). */
+    LLViewerInventoryItem* findPiece(const Piece& p, uuid_vec_t* unfinished = nullptr)
+    {
+        return findPieceIn(gInventory.getRootFolderID(), p, unfinished);
+    }
+
+    /** The login's background inventory fetch has nothing left to do. Source: wolffishingoverlay.cpp backgroundFetchIdle
+     *  (llinventorymodelbackgroundfetch.cpp setAllFoldersFetched, isBulkFetchProcessingComplete, inventoryFetchStarted). */
+    bool backgroundFetchIdle()
+    {
+        const LLInventoryModelBackgroundFetch& f = LLInventoryModelBackgroundFetch::instance();
+        return f.inventoryFetchStarted() && !f.folderFetchActive() && f.isBulkFetchProcessingComplete();
+    }
+
+    /** Objects. Source: wolffishingoverlay.cpp objectsFolder (findUserDefinedCategoryUUIDForType FT_OBJECT). */
+    LLUUID objectsFolder() { return gInventory.findUserDefinedCategoryUUIDForType(LLFolderType::FT_OBJECT); }
+
+    /** The folders directly under Objects named "Greedy": the grid gives a piece into the first one (wolfdice_items.php
+     *  'folder' => 'Greedy', build_wolfdice.py FOLDER_NAME; wolfdice_give_lib.php wdg_give -> wolfskis_lib.php
+     *  wsk_pick_folder / wsk_find_folder, a folder of that name directly under Objects). Source: wolffishingoverlay.cpp
+     *  fishingFolders. */
+    std::vector<LLUUID> greedyFolders()
+    {
+        std::vector<LLUUID> out;
+        const LLUUID objects = objectsFolder();
+        if (objects.isNull()) return out;
+        LLInventoryModel::cat_array_t* cats = nullptr;
+        LLInventoryModel::item_array_t* items = nullptr;
+        gInventory.getDirectDescendentsOf(objects, cats, items);
+        if (!cats) return out;
+        for (const LLPointer<LLViewerInventoryCategory>& c : *cats)
+        {
+            if (c.notNull() && LLStringUtil::compareInsensitive(c->getName(), "Greedy") == 0) out.push_back(c->getUUID());
+        }
+        return out;
+    }
+
+    /** Ask the region for a folder's contents again (once per folder per round: `asked`). False: no folder id yet, or the
+     *  viewer does not know the folder (yet). Source: wolffishingoverlay.cpp refetchFolder. */
+    bool refetchFolder(const LLUUID& id, std::vector<LLUUID>& asked, const char* what)
+    {
+        if (id.isNull()) return false;
+        if (std::find(asked.begin(), asked.end(), id) != asked.end()) return true;
+        LLViewerInventoryCategory* cat = gInventory.getCategory(id);
+        if (!cat)
+        {
+            LL_INFOS("WolfGreedy") << "piece search: " << what << " folder " << id << " is not known to this viewer yet" << LL_ENDL;
+            return false;
+        }
+        asked.push_back(id);
+        cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
+        cat->fetch();
+        LL_INFOS("WolfGreedy") << "piece search: asked again for the " << what << " folder '" << cat->getName() << "' " << id << LL_ENDL;
+        return true;
+    }
+
+    /** The piece search's scans while it waits. Source: wolffishingoverlay.cpp RodWatch (the same gate, spacing and observer
+     *  lifetime). [W104 review 2026-11-11 W1 W2 S1]
+     *  - the Greedy folders (small; the grid gives into the first) are scanned every time;
+     *  - copies elsewhere that the last whole scan met unfinished are looked up by id every time (an item made complete by
+     *    its fetch keeps its id and the item count: llinventorymodel.cpp updateItem changes the old item in place);
+     *  - the whole inventory (63,000 items for some residents) is scanned only when it could have changed since the last
+     *    whole scan - the model told its observers of a change (updateItem / addChangedMask -> idleNotifyObservers ->
+     *    changed()), its item count moved, or the login's background fetch finished - and then at most every WHOLE_SCAN_S.
+     *  A finished copy ends the search at once and nothing is asked for. Otherwise the unfinished copies are asked for, at
+     *  most MAX_ASK a round (again() starts the next round), the Greedy folders' copies first, the rest in turn. */
+    class PieceSearch
+    {
+    public:
+        // gInventory.cleanupInventory() deletes every observer still added (llinventorymodel.cpp), so the observer lives on
+        // the heap and shares its state with this search: the search removes and deletes it only while it is alive
+        // (wolffishingoverlay.cpp RodWatch)
+        explicit PieceSearch(const Piece& p) : mPiece(p), mState(std::make_shared<State>()), mObserver(new Observer(mState))
+        {
+            gInventory.addObserver(mObserver);
+        }
+        ~PieceSearch()
+        {
+            if (mState->mAlive)
+            {
+                gInventory.removeObserver(mObserver);
+                delete mObserver;
+            }
+        }
+        PieceSearch(const PieceSearch&) = delete;
+        PieceSearch& operator=(const PieceSearch&) = delete;
+
+        /** The Greedy folders, the asked-for copies, and the whole inventory when it is due. */
+        LLViewerInventoryItem* find() { return look(false); }
+
+        /** The same with the whole inventory scanned now, due or not (the last look before the grid is asked or the search
+         *  gives up). */
+        LLViewerInventoryItem* findWhole() { return look(true); }
+
+        /** The next round asks for unfinished copies again: the ones after those just asked for, round and round. */
+        void again()
+        {
+            mTurn += mAsked.size();
+            mAsked.clear();
+        }
+
+        /** How many unfinished copies have been asked for this round. */
+        size_t askedCount() const { return mAsked.size(); }
+
+    private:
+        struct State
+        {
+            bool mDirty = true;
+            bool mAlive = true;
+        };
+        class Observer : public LLInventoryObserver
+        {
+        public:
+            explicit Observer(const std::shared_ptr<State>& state) : mState(state) {}
+            ~Observer() override { mState->mAlive = false; }
+            void changed(U32) override { mState->mDirty = true; }
+        private:
+            std::shared_ptr<State> mState;
+        };
+
+        /** `item` (met unfinished by a whole scan) is complete now and still what a scan would take: a match, outside the
+         *  Trash. */
+        bool usable(LLViewerInventoryItem* item) const
+        {
+            if (!item || !item->isFinished()) return false;
+            PieceItems match(mPiece);
+            if (!match(nullptr, item)) return false;
+            const LLUUID trash = gInventory.findCategoryUUIDForType(LLFolderType::FT_TRASH);
+            return trash.isNull() || !gInventory.isObjectDescendentOf(item->getUUID(), trash);
+        }
+
+        LLViewerInventoryItem* look(bool whole_now)
+        {
+            // 1. the Greedy folders; their unfinished copies are the first in line to be asked for
+            uuid_vec_t wanted;
+            for (const LLUUID& f : greedyFolders())
+            {
+                if (LLViewerInventoryItem* got = findPieceIn(f, mPiece, &wanted)) return got;
+            }
+            // 2. the copies elsewhere, by id
+            for (const LLUUID& id : mElsewhere)
+            {
+                LLViewerInventoryItem* got = gInventory.getItem(id);
+                if (usable(got)) return got;
+            }
+            // 3. the whole inventory, when something could have changed since the last whole scan
+            const S32 count = gInventory.getItemCount();
+            const bool all = LLInventoryModelBackgroundFetch::instance().isEverythingFetched();
+            const bool changed = !mState->mAlive || mState->mDirty || count != mCount || all != mAll;
+            const F64 t = LLFrameTimer::getTotalSeconds();
+            if (whole_now || (changed && (mWholeAt < 0.0 || t - mWholeAt >= WHOLE_SCAN_S)))
+            {
+                mWholeAt = t;
+                mState->mDirty = false;
+                mCount = count;
+                mAll = all;
+                mElsewhere.clear();
+                if (LLViewerInventoryItem* got = findPiece(mPiece, &mElsewhere)) return got;
+            }
+            // 4. no finished copy: ask for unfinished ones, a few a round
+            for (const LLUUID& id : mElsewhere)
+            {
+                if (std::find(wanted.begin(), wanted.end(), id) == wanted.end()) wanted.push_back(id);
+            }
+            for (size_t n = 0; n < wanted.size() && mAsked.size() < MAX_ASK; ++n)
+            {
+                const LLUUID& id = wanted[(mTurn + n) % wanted.size()];
+                if (std::find(mAsked.begin(), mAsked.end(), id) != mAsked.end()) continue;
+                mAsked.push_back(id);
+                LLInventoryModelBackgroundFetch::instance().start(id, false);
+                LL_INFOS("WolfGreedy") << "piece search: asked for " << mPiece.name << " " << id << " (read from the inventory cache, "
+                                       << "not complete yet)" << LL_ENDL;
+            }
+            return nullptr;
+        }
+
+        static constexpr F64 WHOLE_SCAN_S = 5.0;   // CHOSEN (wolffishingoverlay.cpp RodWatch WHOLE_SCAN_S)
+        static constexpr size_t MAX_ASK = 4;       // CHOSEN: unfinished copies asked for in one round
+        const Piece& mPiece;
+        std::shared_ptr<State> mState;
+        Observer* mObserver;
+        uuid_vec_t mAsked;       // asked for this round
+        uuid_vec_t mElsewhere;   // unfinished copies met by the last whole scan
+        size_t mTurn = 0;        // where the next round's asking starts
+        S32 mCount = -1;
+        bool mAll = false;
+        F64 mWholeAt = -1.0;
+    };
 
     /** Rez `item` with its root over `at` (region metres), the bottom of its box on at.z. Source: wolffloaterlifts.cpp rezAt
      *  (wolffloatertunnels.cpp rezTunnel; lltooldraganddrop.cpp:1970-2028 dropObject). RayEndIsIntersection = 1 places it at
@@ -389,47 +609,109 @@ void WolfFloaterGreedySetup::putCoro(LLHandle<LLFloater> h, U32 gen, S32 index)
     // [W104 review W1] the region they pressed in: a move to another while the piece is fetched is said, not rezzed over there
     const LLUUID region = rgn->getRegionID();
 
-    // 2. their copy, or the grid gives one (wolffloaterlifts.cpp boxCoro step 2)
-    LLViewerInventoryItem* item = findPiece(p);
+    // 2. their copy, or the grid gives one (wolffloaterlifts.cpp boxCoro step 2). [GREEDYFIND 2026-11-11] never on a
+    // half-loaded inventory and never on copies read from the cache only (see findPieceIn): the login's background fetch
+    // finishes (or goes idle) first, the Greedy folders and any unfinished copy are asked for, and only then the grid
+    // (Source: wolffishingoverlay.cpp rodCoro step 2, the same waits)
+    PieceSearch search(p);
+    LLViewerInventoryItem* item = search.find();
     if (!item)
     {
-        f->setMessage("Getting your " + name + " from the grid (it goes into your inventory: Objects > Greedy)...", false);
-        const std::string body = std::string("{\"action\":\"give\",\"piece\":\"") + p.key + "\"}";
-        LLSD result = WolfCaves::serviceRequest(GIVE_URL, &body, GIVE_TIMEOUT_S);
-        LLSD reply;
-        std::string transport;
-        const S32 status = WolfCaves::serviceReply(result, reply, transport);
-        if (!(f = self())) return;
-        if (status != 200 || !reply.isMap() || !reply["success"].asBoolean())
+        std::vector<LLUUID> asked;
+        LL_INFOS("WolfGreedy") << "piece search: no complete " << name << " in the loaded inventory (" << search.askedCount()
+                               << " copies from the inventory cache asked for); background fetch "
+                               << (LLInventoryModelBackgroundFetch::instance().isEverythingFetched() ? "complete"
+                                   : (backgroundFetchIdle() ? "idle" : "still running"))
+                               << ", Objects " << objectsFolder() << ", Greedy folders " << greedyFolders().size() << LL_ENDL;
+        f->setMessage("Looking through your inventory for your " + name + "...", false);
+        for (const LLUUID& g : greedyFolders()) refetchFolder(g, asked, "Greedy");
+        // CHOSEN (wolffishingoverlay.cpp rodCoro): up to 60 s for the inventory to finish loading (less once the fetch has
+        // nothing left to do), then at least 6 s for the Greedy folders and the asked-for copies to come back
+        for (S32 i = 0; i < 66 && !item; ++i)
         {
-            // a 404: the give is not on this web host (not installed yet, or being updated) - said in words, not "Not Found"
-            const std::string err = reply.isMap() && reply.has("error") ? reply["error"].asString()
-                : status == 404 ? std::string("the grid does not hand out Greedy tables just now. Please try again later, or ask Wolf Territories support.")
-                : (transport.empty() ? llformat("the grid answered HTTP %d", status) : transport);
-            fail("Your " + name + " could not be fetched: " + err);
-            return;
-        }
-        const LLUUID folder = reply["folderId"].asUUID();
-        const LLUUID item_id = reply["given"].isMap() ? reply["given"]["item"].asUUID() : LLUUID::null;
-        for (S32 i = 0; i < GIVE_WAIT_S && !item; ++i)
-        {
-            if (folder.notNull())
+            const bool loaded = LLInventoryModelBackgroundFetch::instance().isEverythingFetched();
+            if ((loaded || backgroundFetchIdle()) && i >= 6)
             {
-                if (LLViewerInventoryCategory* cat = gInventory.getCategory(folder)) cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
-                gInventory.fetchDescendentsOf(folder);
+                LL_INFOS("WolfGreedy") << "piece search: background fetch " << (loaded ? "complete" : "idle") << " after " << i << " s" << LL_ENDL;
+                break;
             }
             llcoro::suspendUntilTimeout(1.f);
             if (!self()) return;
-            item = item_id.notNull() ? gInventory.getItem(item_id) : nullptr;
-            if (item && !item->isFinished()) item = nullptr;
-            if (!item) item = findPiece(p);
+            for (const LLUUID& g : greedyFolders()) refetchFolder(g, asked, "Greedy");
+            // [W104 review W3] an asked-for copy whose fetch failed is asked for again every 5 s, as after the give
+            if (i % 5 == 4) search.again();
+            item = search.find();
         }
+        // one whole scan before the grid is asked; unfinished copies it meets are asked for too [W104 review S1]
+        if (!item) item = search.findWhole();
         if (!(f = self())) return;
+        LL_INFOS("WolfGreedy") << "piece search: " << (item ? "found " + item->getUUID().asString() + " after the folders came back"
+                                                          : std::string("still none - asking the grid")) << LL_ENDL;
         if (!item)
         {
-            fail("Your " + name + " is in your inventory (Objects > Greedy), but this viewer could not see it yet. Wait a moment, "
-                 "then press the button again.");
-            return;
+            // the waits above can be long: off Wolf Territories meanwhile, no piece is asked for
+            if (!WolfGrid::isOnWolfTerritories())
+            {
+                fail("Greedy tables are put down here on Wolf Territories only.");
+                return;
+            }
+            f->setMessage("Getting your " + name + " from the grid (it goes into your inventory: Objects > Greedy)...", false);
+            const std::string body = std::string("{\"action\":\"give\",\"piece\":\"") + p.key + "\"}";
+            LLSD result = WolfCaves::serviceRequest(GIVE_URL, &body, GIVE_TIMEOUT_S);
+            LLSD reply;
+            std::string transport;
+            const S32 status = WolfCaves::serviceReply(result, reply, transport);
+            if (!(f = self())) return;
+            if (status != 200 || !reply.isMap() || !reply["success"].asBoolean())
+            {
+                // a 404: the give is not on this web host (not installed yet, or being updated) - said in words, not "Not Found"
+                const std::string err = reply.isMap() && reply.has("error") ? reply["error"].asString()
+                    : status == 404 ? std::string("the grid does not hand out Greedy tables just now. Please try again later, or ask Wolf Territories support.")
+                    : (transport.empty() ? llformat("the grid answered HTTP %d", status) : transport);
+                fail("Your " + name + " could not be fetched: " + err);
+                return;
+            }
+            // Source: wolfdice_give_lib.php wdg_give -> {have: true} | {have: false, given: {key, name, item}, folder, folderId,
+            // folderNew, delivered}
+            const bool have = reply["have"].asBoolean();
+            const LLUUID folder = reply["folderId"].asUUID();
+            const LLUUID item_id = reply["given"].isMap() ? reply["given"]["item"].asUUID() : LLUUID::null;
+            LL_INFOS("WolfGreedy") << "piece give: " << (have ? "the grid says you already have one" : "given item " + item_id.asString())
+                                   << " folder " << folder << (reply["folderNew"].asBoolean() ? " (new)" : "") << LL_ENDL;
+            if (have) f->setMessage("You have your " + name + " already - finding it in your inventory...", false);
+            // the piece's folder may be new to this viewer (made by the grid just now, or while they were logged in):
+            // Objects is asked for again so that it appears, then the folder itself and the Greedy folders (once each a round)
+            bool objects_asked = false;
+            for (S32 i = 0; i < GIVE_WAIT_S && !item; ++i)
+            {
+                if (i % 5 == 4)
+                {
+                    asked.clear();   // the piece's and the Greedy folders, and unfinished copies, again every 5 s (Objects once)
+                    search.again();
+                }
+                if (!objects_asked && (have || folder.isNull() || !gInventory.getCategory(folder)))
+                {
+                    objects_asked = refetchFolder(objectsFolder(), asked, "Objects");
+                }
+                if (folder.notNull()) refetchFolder(folder, asked, "the piece's");
+                for (const LLUUID& g : greedyFolders()) refetchFolder(g, asked, "Greedy");
+                llcoro::suspendUntilTimeout(1.f);
+                if (!self()) return;
+                item = item_id.notNull() ? gInventory.getItem(item_id) : nullptr;
+                if (item && !item->isFinished()) item = nullptr;
+                if (!item) item = search.find();
+            }
+            if (!(f = self())) return;
+            // one whole scan before giving up; unfinished copies it meets are asked for (there for the next press) [W104 review S1]
+            if (!item) item = search.findWhole();
+            LL_INFOS("WolfGreedy") << "piece give: " << (item ? "found " + item->getUUID().asString()
+                                                            : llformat("not seen after %d s", GIVE_WAIT_S)) << LL_ENDL;
+            if (!item)
+            {
+                fail("Your " + name + " is in your inventory (Objects > Greedy), but this viewer could not see it yet. You can "
+                     "drag it from Objects > Greedy onto the ground instead, or wait a moment and press the button again.");
+                return;
+            }
         }
         // [W104 review W1] the same region, and the spot from where they are now
         rgn = gAgent.getRegion();

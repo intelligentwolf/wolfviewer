@@ -17,6 +17,9 @@
 #define WOLF_FLOATERGREEDY_H
 
 #include "llfloater.h"
+#include "lluiimage.h"
+#include "v4color.h"
+#include <vector>
 #include "llsingleton.h"
 #include "lluuid.h"
 
@@ -43,6 +46,7 @@ public:
     bool postBuild() override;
     void onOpen(const LLSD& key) override;
     void draw() override;
+    bool handleMouseDown(S32 x, S32 y, MASK mask) override;   // [W104 FEATFIX 2026-11-11] a click ends the dice tumble
 
     /** The table the avatar sits at told us its game (WolfGreedy below): join it and offer the table view. */
     void onTable(S32 game, const std::string& label);
@@ -61,6 +65,7 @@ private:
     void show(const LLSD& state);
     void showNoGame();
     void showDice(const LLSD& dice, const std::string& kept);
+    void applyDice(const LLSD& dice, const std::string& kept);   // [W104 FEATFIX 2026-11-11] onto the dice pictures
     void setMessage(const std::string& text, EStatus kind);
     void refreshButtons();
     void onRoll();
@@ -69,6 +74,12 @@ private:
     void onJoin();
     void showGuide(S32 page);
     void playSound(const std::string& kind);
+    // [W104 FEATFIX 2026-11-11] Paul: "no fun", "make the dice 3d". The dice tumble when a roll lands (purely a picture: the
+    // server's dice are shown at the end), then the moment's banner ("Bust!", "You banked 350!").
+    void startRoll(const std::string& banner, const LLColor4& banner_color);
+    void endRoll();
+    void showBanner(const std::string& text, const LLColor4& color);
+    void animate();             // every frame from draw()
 
     std::string mMode = "full";
     std::string mModeBeforeStrip = "full";
@@ -87,6 +98,17 @@ private:
     std::string mTableLabel;
     bool mOfferDismissed = false;
     std::string mModeBeforeOffer;   // the view to go back to if the table offer is declined (the offer shows in Full)
+    // [W104 FEATFIX 2026-11-11] the dice and the moments
+    LLSD mDice;                     // the dice now shown (the server's), and which scored
+    std::string mKept = "000000";
+    F64 mRollStart = -1.0;          // >= 0 while the dice tumble
+    bool mBoardEmpty = true;        // the scoreboard's empty state shows (no game)
+    bool mHasTips = false;          // a practice game's tips show under the scoreboard
+    std::string mPendingBanner;     // shown when the tumble lands
+    LLColor4 mPendingBannerColor;
+    F64 mBannerStart = -1.0;        // >= 0 while the banner shows
+    LLColor4 mBannerColor;
+    std::vector<LLPointer<LLUIImage>> mHeldImages;   // the tumble's frames, kept loaded so the first roll does not flicker
 };
 
 // The table link (README s3c): seated on an object whose root's description starts "greedy-table", this viewer says

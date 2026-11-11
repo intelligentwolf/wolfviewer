@@ -33,6 +33,7 @@
 #include "llframetimer.h"
 #include "llhttpconstants.h"
 #include "lliconctrl.h"
+#include "llscrolllistctrl.h"
 #include "llsdjson.h"
 #include "llstyle.h"
 #include "lltextbox.h"
@@ -43,6 +44,7 @@
 #include "llviewerobjectlist.h"
 #include "llviewerregion.h"
 #include "llvoavatarself.h"
+#include "llui.h"
 #include "wolfgrid.h"
 #include "wolfobjectprops.h"
 
@@ -80,27 +82,34 @@ namespace
     const char* SND_WIN = "45be77bb-2278-45a5-95a9-c0109229fe77";
 
     // The guide: the same nine pages as the table's (lsl/wolfdice_tutorial.lsl PAGES), each with its example dice.
-    struct GuidePage { const char* text; const char* dice; const char* kept; };
+    // [W104 FEATFIX 2026-11-11] Paul: "it says page 1 of 9, it looks ugly", "no fun". Each page is now a card: a title, the
+    // words, and on the two scoring pages one row of dice pictures for each combination (the same scores, in the same words);
+    // the page number is the dots under the card (their tool tip says "Page 2 of 9"). The words are the old pages' words.
+    struct GuideRow { const char* dice; const char* label; };
+    struct GuidePage { const char* title; const char* body; const char* dice; const char* kept; GuideRow rows[6]; };
     const GuidePage GUIDE[] = {
-        { "HOW TO PLAY  1 of 9\n\nWelcome! This takes 2 minutes.\n\nGreedy is a game of luck and good sense for 1 to 8 players.\n\n"
-          "Roll six dice and collect points. The first to 10,000 wins.", "000000", "000000" },
-        { "ROLLING THE DICE  2 of 9\n\nPress ROLL and the six dice are rolled for you - by the Greedy server, so nobody can cheat.\n\n"
-          "Dice that score turn GOLD and are put aside for you.\n\nHere a 1 and a 5 scored: 100 + 50 = 150 points.", "153326", "110000" },
-        { "WHAT SCORES  3 of 9\n\nA single 1: 100\nA single 5: 50\nThree 1s: 1,000\nThree 2s: 200, three 3s: 300, and so on\n\n"
-          "Each extra matching die doubles it: four 4s = 800.\nHere: 800 + 100 = 900.", "444412", "111110" },
-        { "SPECIAL ROLLS  4 of 9\n\nIn one roll:\n1 2 3 4 5 or 2 3 4 5 6: 1,000\n1 2 3 4 5 6: 1,500\nThree pairs: 1,500\n"
-          "Four alike and a pair: 2,000 (four 1s and a pair: 2,500)\nTwo threes alike: 2,000\nSix 1s: 8,000", "123456", "111111" },
-        { "ROLL AGAIN OR BANK?  5 of 9\n\nAfter a roll that scores, you choose: ROLL the dice that are left to add more points, "
-          "or BANK to keep this turn's points. Then it is the next player's turn.\n\nFewer dice left means more risk.", "152263", "110000" },
-        { "GOING BUST  6 of 9\n\nNo 1s, no 5s and nothing special means BUST: the points from that turn are lost, and the "
-          "next player goes.\n\nA star * shows each bust. On your third bust your score goes back to 0 - take care!", "234623", "xxxxxx" },
-        { "LUCKY SIX  7 of 9\n\nWhen every die has scored, you may roll all six again and keep adding to your turn.\n\n"
-          "Or BANK, if you would rather be safe. It is up to you.\n\nHere: two threes alike, 2,000.", "111555", "111111" },
-        { "WINNING  8 of 9\n\nThe first to bank 10,000 (or that game's target) starts the LAST TURNS: everyone else has one more "
-          "turn to beat them. The highest score wins.\n\nThere is no clock. Take all the time you need.", "000000", "000000" },
-        { "READY?  9 of 9\n\nLet's play!\n\nNew game starts a game others can join from their Greedy window or a Greedy table. "
+        { "How to play", "Welcome! This takes 2 minutes.\n\nGreedy is a game of luck and good sense for 1 to 8 players.\n\n"
+          "Roll six dice and collect points. The first to 10,000 wins.", "000000", "000000", {} },
+        { "Rolling the dice", "Press ROLL and the six dice are rolled for you - by the Greedy server, so nobody can cheat.\n\n"
+          "Dice that score turn GOLD and are put aside for you.\n\nHere a 1 and a 5 scored: 100 + 50 = 150 points.", "153326", "110000", {} },
+        { "What scores", "Here: 800 + 100 = 900.", "444412", "111110",
+          { { "1", "A single 1: 100" }, { "5", "A single 5: 50" }, { "111", "Three 1s: 1,000" },
+            { "222", "Three 2s: 200, three 3s: 300, and so on" }, { "4444", "Each extra matching die doubles it: four 4s = 800" } } },
+        { "Special rolls", "In one roll.", "123456", "111111",
+          { { "12345", "1 2 3 4 5 or 2 3 4 5 6: 1,000" }, { "123456", "1 2 3 4 5 6: 1,500" }, { "224466", "Three pairs: 1,500" },
+            { "666622", "Four alike and a pair: 2,000 (four 1s and a pair: 2,500)" }, { "333444", "Two threes alike: 2,000" },
+            { "111111", "Six 1s: 8,000" } } },
+        { "Roll again or bank?", "After a roll that scores, you choose: ROLL the dice that are left to add more points, "
+          "or BANK to keep this turn's points. Then it is the next player's turn.\n\nFewer dice left means more risk.", "152263", "110000", {} },
+        { "Going bust", "No 1s, no 5s and nothing special means BUST: the points from that turn are lost, and the "
+          "next player goes.\n\nA star * shows each bust. On your third bust your score goes back to 0 - take care!", "234623", "xxxxxx", {} },
+        { "Lucky six", "When every die has scored, you may roll all six again and keep adding to your turn.\n\n"
+          "Or BANK, if you would rather be safe. It is up to you.\n\nHere: two threes alike, 2,000.", "111555", "111111", {} },
+        { "Winning", "The first to bank 10,000 (or that game's target) starts the LAST TURNS: everyone else has one more "
+          "turn to beat them. The highest score wins.\n\nThere is no clock. Take all the time you need.", "000000", "000000", {} },
+        { "Ready?", "Let's play!\n\nNew game starts a game others can join from their Greedy window or a Greedy table. "
           "Join plays in a game going now.\n\nPRACTICE is a game on your own with tips. Nothing is saved and it is not ranked.\n\n"
-          "HOW TO PLAY shows this again.", "000000", "000000" },
+          "HOW TO PLAY shows this again.", "000000", "000000", {} },
     };
     const S32 GUIDE_PAGES = S32(sizeof(GUIDE) / sizeof(GUIDE[0]));
 
@@ -187,6 +196,21 @@ namespace
     const LLColor4 RED_TEXT(1.f, 0.6f, 0.6f, 1.f);
     const LLColor4 GOLD_DIE(1.f, 0.8f, 0.3f, 1.f);
     const LLColor4 RED_DIE(1.f, 0.42f, 0.4f, 1.f);
+    // [W104 FEATFIX 2026-11-11] the game's moments (CHOSEN): the dice tumble about a second (12 rendered frames,
+    // greedy-art/render_dice.py), then the banner ("Bust!", "You banked 350!") pulses for its first 0.6 s and goes after
+    // 2.5 s - nothing to react to, and the event line under the dice keeps the words. A click on the window ends the
+    // tumble; Reduce motion (WolfAdventureReduceMotion, the viewer's own) shows the result and a still banner at once.
+    const S32 ROLL_FRAMES = 12;
+    const F64 ROLL_SECS = 0.96;
+    const F64 BANNER_PULSE_SECS = 0.6;
+    const F64 BANNER_SECS = 2.5;
+    const LLColor4 BOARD_ME(0.55f, 1.f, 0.62f, 1.f);
+
+    bool reduce_motion()
+    {
+        static LLCachedControl<bool> reduce(gSavedPerAccountSettings, "WolfAdventureReduceMotion", false);
+        return reduce;
+    }
 }
 
 // ------------------------------------------------------------------------------------------------------------- window
@@ -221,7 +245,11 @@ bool WolfFloaterGreedy::postBuild()
     getChild<LLButton>("f_join")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onJoin(); });
     getChild<LLButton>("f_refresh")->setCommitCallback([this](LLUICtrl*, const LLSD&) { send("list"); });
     getChild<LLButton>("f_guide_back")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(llmax(0, mGuidePage - 1)); });
-    getChild<LLButton>("f_guide_next")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(llmin(GUIDE_PAGES - 1, mGuidePage + 1)); });
+    // [W104 FEATFIX 2026-11-11] on the last card Next reads "Start playing" and closes the guide (showGuide)
+    getChild<LLButton>("f_guide_next")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        showGuide(mGuidePage >= GUIDE_PAGES - 1 ? -1 : mGuidePage + 1);
+    });
     getChild<LLButton>("f_guide_done")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(-1); });
     getChild<LLButton>("f_guide_practice")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(-1); onNew(true); });
     getChild<LLButton>("f_offer_yes")->setCommitCallback([this](LLUICtrl*, const LLSD&)
@@ -242,6 +270,9 @@ bool WolfFloaterGreedy::postBuild()
     target->add("5,000", LLSD(5000));
     target->add("2,000", LLSD(2000));
     target->selectFirstItem();
+    // [W104 FEATFIX 2026-11-11] the tumble's frames and the dice faces, loaded now so the first roll does not flicker
+    for (S32 i = 0; i < ROLL_FRAMES; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Roll%d", i)));
+    for (S32 i = 0; i <= 6; ++i) mHeldImages.push_back(LLUI::getUIImage(llformat("WolfGreedy_Die%d", i)));
     std::string mode = gSavedSettings.getString("WolfGreedyMode");
     if (mode != "table" && mode != "strip") mode = "full";
     setMode(mode, false);
@@ -328,6 +359,7 @@ void WolfFloaterGreedy::draw()
         getChild<LLButton>(pre + "mode_table")->setToggleState(mMode == "table");
         getChild<LLButton>(pre + "mode_strip")->setToggleState(mMode == "strip");
     }
+    animate();   // [W104 FEATFIX 2026-11-11/] the tumble and the banner
     LLFloater::draw();
     // [W104 FEATFIX 2026-11-11 A6] draw() runs only while the window shows (a closed window is hidden, not drawn); minimised,
     // nothing is polled, and opened out again it polls at once
@@ -549,9 +581,30 @@ void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const 
         mGame = g["id"].asInteger();
         if (!first && v != mVersion) playSound(g["event_kind"].asString());
         if (first || v != mVersion) noteActivity();   // [A6/] something happened: the quick pace again
+        // [W104 FEATFIX 2026-11-11] the moment: a roll tumbles the dice, then "Bust!" / "You banked 350!" / "Lucky six!"
+        std::string banner;
+        LLColor4 banner_color = YELLOW;
+        bool rolled = false;
+        if (!first && v != mVersion)
+        {
+            const std::string kind = g["event_kind"].asString();
+            const LLSD& before = mState["game"];
+            rolled = kind == "roll" || kind == "bust" || kind == "lucky";
+            if (kind == "bust") { banner = "Bust!"; banner_color = RED_TEXT; }
+            else if (kind == "lucky") banner = "Lucky six!";
+            else if (kind == "win") banner = "We have a winner!";
+            else if (kind == "bank")
+            {
+                const S32 pts = before["turn_points"].asInteger();
+                banner = before["my_turn"].asBoolean() && pts > 0 ? "You banked " + number(pts) + "!" : std::string("Banked!");
+                banner_color = GREEN;
+            }
+        }
         mVersion = v;
         mState = reply;
         show(reply);
+        if (rolled) startRoll(banner, banner_color);
+        else if (!banner.empty()) showBanner(banner, banner_color);
         if (op != "poll") setMessage(std::string(), EStatus::INFO);
     }
     const std::string st = mState["game"]["state"].asString();
@@ -580,12 +633,14 @@ void WolfFloaterGreedy::playSound(const std::string& kind)
 
 void WolfFloaterGreedy::showNoGame()
 {
-    LLTextEditor* players = getChild<LLTextEditor>("f_players");
-    players->clear();
-    players->appendText("Start a new game below - others can join it from their Greedy window or a Greedy table - "
-                        "or join a game being played now.\n\nNew here? Press How to play.", false);
+    // [W104 FEATFIX 2026-11-11] the scoreboard's empty state says what to do (f_board_empty)
+    getChild<LLScrollListCtrl>("f_board")->deleteAllItems();
+    mBoardEmpty = true;
+    getChild<LLUICtrl>("f_tips")->setVisible(false);
     for (const char* n : { "f_status", "t_status", "s_status" }) getChild<LLTextBox>(n)->setText(std::string("Greedy"));
+    getChild<LLTextBox>("f_turn_label")->setText(std::string());
     getChild<LLTextBox>("f_turn")->setText(std::string());
+    getChild<LLTextBox>("f_dice_left")->setText(std::string());
     getChild<LLTextBox>("f_event")->setText(std::string());
     getChild<LLTextBox>("t_score")->setText(std::string("Not in a game"));
     getChild<LLTextBox>("s_score")->setText(std::string("Not in a game"));
@@ -603,36 +658,50 @@ void WolfFloaterGreedy::show(const LLSD& state)
         t->setText(status);
         t->setColor(g["my_turn"].asBoolean() ? YELLOW : LLColor4::white);
     }
-    LLTextEditor* players = getChild<LLTextEditor>("f_players");
-    players->clear();
+    // [W104 FEATFIX 2026-11-11] the scoreboard: one row a player - whose turn (an arrow, and the row in yellow), you (green),
+    // the winner (a star), busts as stars, the score right-aligned in big figures; words as well as colour
+    LLScrollListCtrl* board = getChild<LLScrollListCtrl>("f_board");
+    board->deleteAllItems();
+    mBoardEmpty = false;
     S32 myScore = 0, top = 0;
-    bool first = true;
+    const LLFontGL* big = LLFontGL::getFontSansSerifBig();   // SansSerif "Large" (llfontgl.cpp), as the XUI font="SansSerifLarge"
     for (const LLSD& p : llsd::inArray(state["players"]))
     {
-        LLStyle::Params style;
-        style.color = p["away"].asBoolean() ? GREY : p["current"].asBoolean() ? YELLOW
-                    : (p["me"].asBoolean() || p["winner"].asBoolean()) ? GREEN : LLColor4::white;
+        const bool away = p["away"].asBoolean(), current = p["current"].asBoolean(), me = p["me"].asBoolean(), winner = p["winner"].asBoolean();
+        const LLColor4 c = away ? GREY : current ? YELLOW : (me || winner) ? BOARD_ME : LLColor4::white;
         std::string stars;
-        for (S32 i = 0; i < p["busts"].asInteger() && i < 3; ++i) stars += "*";
-        std::string line = std::string(p["current"].asBoolean() ? "> " : "   ") + p["name"].asString() + "   " +
-                           number(p["score"].asInteger()) + (p["away"].asBoolean() ? "   (away)" : stars.empty() ? "" : "   " + stars) +
-                           (p["me"].asBoolean() ? "   (you)" : "") + (p["winner"].asBoolean() ? "   WINNER" : "");
-        players->appendText(line, !first, style);
-        first = false;
-        if (p["me"].asBoolean()) myScore = p["score"].asInteger();
+        for (S32 i = 0; i < p["busts"].asInteger() && i < 3; ++i) stars += "\xE2\x9C\xB1 ";   // U+2731
+        LLScrollListItem::Params row;
+        auto cell = [&](const char* col, const std::string& text, LLFontGL::HAlign align)
+        {
+            LLScrollListCell::Params c_p;
+            c_p.column(col).value(text).font(big).font_color(c).font_halign(align);
+            row.columns.add(c_p);
+        };
+        cell("mark", winner ? "\xE2\x98\x85" : current ? "\xE2\x96\xB6" : "", LLFontGL::HCENTER);   // U+2605 star, U+25B6 arrow
+        cell("name", p["name"].asString() + (me ? "  (you)" : "") + (away ? "  (away)" : "") + (winner ? "  WINNER" : ""), LLFontGL::LEFT);
+        cell("busts", stars, LLFontGL::LEFT);
+        cell("score", number(p["score"].asInteger()), LLFontGL::RIGHT);
+        board->addRow(row);
+        if (me) myScore = p["score"].asInteger();
         top = llmax(top, p["score"].asInteger());
     }
+    LLTextEditor* tips = getChild<LLTextEditor>("f_tips");
+    tips->clear();
     if (state.has("tips"))
     {
         LLStyle::Params tip;
         tip.color = LLColor4(0.45f, 0.9f, 1.f, 1.f);
-        for (const LLSD& t : llsd::inArray(state["tips"])) players->appendText(t.asString(), true, tip);
+        bool first = true;
+        for (const LLSD& t : llsd::inArray(state["tips"])) { tips->appendText(t.asString(), !first, tip); first = false; }
     }
+    mHasTips = state.has("tips") && state["tips"].size() > 0;
     const std::string st = g["state"].asString();
     const bool going = st == "playing" || st == "final";
-    getChild<LLTextBox>("f_turn")->setText(going ? "This turn: " + number(g["turn_points"].asInteger()) +
-                                                   llformat("      Dice to roll: %d", g["dice_left"].asInteger())
-                                                 : llformat("First to %s", number(g["target"].asInteger()).c_str()));
+    // [W104 FEATFIX 2026-11-11] this turn's points, big and gold
+    getChild<LLTextBox>("f_turn_label")->setText(going ? std::string("THIS TURN") : std::string("FIRST TO"));
+    getChild<LLTextBox>("f_turn")->setText(going ? number(g["turn_points"].asInteger()) : number(g["target"].asInteger()));
+    getChild<LLTextBox>("f_dice_left")->setText(going ? llformat("Dice to roll: %d", g["dice_left"].asInteger()) : std::string());
     LLTextBox* ev = getChild<LLTextBox>("f_event");
     ev->setText(g["event"].asString());
     ev->setColor(g["event_kind"].asString() == "bust" ? RED_TEXT : LLColor4::white);
@@ -643,7 +712,17 @@ void WolfFloaterGreedy::show(const LLSD& state)
     refreshButtons();
 }
 
+// [W104 FEATFIX 2026-11-11] The game's dice: kept here, and drawn unless the guide's example dice or a tumble show instead.
 void WolfFloaterGreedy::showDice(const LLSD& dice, const std::string& kept)
+{
+    mDice = dice;
+    mKept = kept;
+    if (mGuidePage >= 0 || mRollStart >= 0.0) return;   // (the guide shows its own; a tumble ends on these: endRoll)
+    applyDice(dice, kept);
+}
+
+// The 3D dice faces (greedy-art/render_dice.py): a die that scored is gold, a bust red, the others ivory.
+void WolfFloaterGreedy::applyDice(const LLSD& dice, const std::string& kept)
 {
     for (S32 i = 0; i < 6; ++i)
     {
@@ -657,6 +736,96 @@ void WolfFloaterGreedy::showDice(const LLSD& dice, const std::string& kept)
             icon->setColor(c);
         }
     }
+}
+
+void WolfFloaterGreedy::startRoll(const std::string& banner, const LLColor4& banner_color)
+{
+    mPendingBanner = banner;
+    mPendingBannerColor = banner_color;
+    getChild<LLUICtrl>("f_banner")->setVisible(false);
+    mBannerStart = -1.0;
+    if (reduce_motion() || mGuidePage >= 0)
+    {
+        endRoll();
+        return;
+    }
+    mRollStart = LLFrameTimer::getElapsedSeconds();
+}
+
+void WolfFloaterGreedy::endRoll()
+{
+    mRollStart = -1.0;
+    if (mGuidePage < 0) applyDice(mDice, mKept);
+    if (!mPendingBanner.empty()) showBanner(mPendingBanner, mPendingBannerColor);
+    mPendingBanner.clear();
+}
+
+void WolfFloaterGreedy::showBanner(const std::string& text, const LLColor4& color)
+{
+    if (mGuidePage >= 0) return;
+    LLTextBox* b = getChild<LLTextBox>("f_banner");
+    b->setText(text);
+    b->setColor(color);
+    b->setVisible(true);
+    mBannerColor = color;
+    mBannerStart = LLFrameTimer::getElapsedSeconds();
+}
+
+void WolfFloaterGreedy::animate()
+{
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (mRollStart >= 0.0)
+    {
+        const F64 t = now - mRollStart;
+        if (t >= ROLL_SECS)
+        {
+            endRoll();
+        }
+        else
+        {
+            // every die with a face tumbles, each a few frames apart so they do not turn together, untinted
+            const S32 frame = (S32)(t / ROLL_SECS * (F64)ROLL_FRAMES);
+            for (S32 i = 0; i < 6; ++i)
+            {
+                const bool has = mDice.isArray() && i < (S32)mDice.size() && mDice[i].asInteger() > 0;
+                if (!has) continue;
+                const std::string img = llformat("WolfGreedy_Roll%d", (frame + i * 5) % ROLL_FRAMES);
+                for (const char* p : { "f_die", "s_die" })
+                {
+                    LLIconCtrl* icon = getChild<LLIconCtrl>(llformat("%s%d", p, i));
+                    icon->setValue(LLSD(img));
+                    icon->setColor(LLColor4::white);
+                }
+            }
+        }
+    }
+    if (mBannerStart >= 0.0)
+    {
+        const F64 t = now - mBannerStart;
+        LLTextBox* b = getChild<LLTextBox>("f_banner");
+        if (t >= BANNER_SECS)
+        {
+            b->setVisible(false);
+            mBannerStart = -1.0;
+        }
+        else if (!reduce_motion())
+        {
+            // a brief flash: bright and dim three times in the first BANNER_PULSE_SECS, then steady
+            LLColor4 c = mBannerColor;
+            if (t < BANNER_PULSE_SECS)
+            {
+                const F32 pulse = (F32)(0.5 + 0.5 * cos(t / BANNER_PULSE_SECS * 3.0 * F_TWO_PI));
+                c = lerp(LLColor4::white, mBannerColor, 1.f - pulse);
+            }
+            b->setColor(c);
+        }
+    }
+}
+
+bool WolfFloaterGreedy::handleMouseDown(S32 x, S32 y, MASK mask)
+{
+    if (mRollStart >= 0.0) endRoll();   // [W104 FEATFIX 2026-11-11/] a click lands the dice at once
+    return LLFloater::handleMouseDown(x, y, mask);
 }
 
 void WolfFloaterGreedy::refreshButtons()
@@ -679,31 +848,77 @@ void WolfFloaterGreedy::refreshButtons()
     for (const char* n : { "f_leave", "f_pass" }) getChild<LLUICtrl>(n)->setVisible(!guide && inGame);
     getChild<LLUICtrl>("t_leave")->setEnabled(inGame);
     getChild<LLUICtrl>("f_help")->setVisible(!guide);
-    for (const char* n : { "f_players", "f_turn", "f_event", "f_roll", "f_bank", "f_status" }) getChild<LLUICtrl>(n)->setVisible(!guide);
+    for (const char* n : { "f_board", "f_turn_label", "f_turn", "f_dice_left", "f_event", "f_roll", "f_bank", "f_status" })
+        getChild<LLUICtrl>(n)->setVisible(!guide);
+    getChild<LLUICtrl>("f_board_empty")->setVisible(!guide && mBoardEmpty);
+    getChild<LLUICtrl>("f_tips")->setVisible(!guide && mHasTips);
+    if (guide) getChild<LLUICtrl>("f_banner")->setVisible(false);
 }
 
+// [W104 FEATFIX 2026-11-11] Paul: "it says page 1 of 9, it looks ugly", "no fun". The guide is a card: the logo, a title,
+// the words (or, on the scoring cards, a row of dice pictures for every combination), the example dice on the baize, and
+// under the card Back (off on the first card), the page dots (gold = this card; the tool tip says "Page 2 of 9") and
+// Next (green; "Start playing" on the last card). "I've got it, let's play" leaves the guide from any card; the last card
+// offers "Practice game" there instead.
 void WolfFloaterGreedy::showGuide(S32 page)
 {
+    if (mRollStart >= 0.0) endRoll();
     mGuidePage = page;
     const bool on = page >= 0;
-    for (const char* n : { "f_guide", "f_guide_back", "f_guide_next", "f_guide_done" }) getChild<LLUICtrl>(n)->setVisible(on);
-    getChild<LLUICtrl>("f_guide_practice")->setVisible(on && page == GUIDE_PAGES - 1);
-    getChild<LLUICtrl>("f_guide_next")->setVisible(on && page < GUIDE_PAGES - 1);
-    getChild<LLUICtrl>("f_guide_back")->setEnabled(page > 0);
+    const bool last = page == GUIDE_PAGES - 1;
+    const GuidePage* gp = on ? &GUIDE[page] : nullptr;
+    S32 rows = 0;
+    if (gp) while (rows < 6 && gp->rows[rows].dice) ++rows;
+    for (const char* n : { "f_guide_card", "f_guide_logo", "f_guide_title", "f_guide_back", "f_guide_dots", "f_guide_next" })
+        getChild<LLUICtrl>(n)->setVisible(on);
+    getChild<LLUICtrl>("f_guide_done")->setVisible(on && !last);
+    getChild<LLUICtrl>("f_guide_practice")->setVisible(on && last);
+    getChild<LLUICtrl>("f_guide")->setVisible(on && rows == 0);
+    getChild<LLUICtrl>("f_guide_note")->setVisible(on && rows > 0);
+    for (S32 r = 0; r < 6; ++r)
+    {
+        const char* dice = r < rows ? gp->rows[r].dice : "";
+        const S32 n = (S32)strlen(dice);
+        for (S32 i = 0; i < 6; ++i)
+        {
+            LLIconCtrl* d = getChild<LLIconCtrl>(llformat("f_combo%d_d%d", r, i));
+            d->setVisible(i < n);
+            if (i < n)
+            {
+                d->setValue(LLSD(llformat("WolfGreedy_Die%c", dice[i])));
+                d->setColor(GOLD_DIE);   // every die in a scoring combination scores
+            }
+        }
+        LLTextBox* t = getChild<LLTextBox>(llformat("f_combo%d_t", r));
+        t->setVisible(r < rows);
+        t->setText(r < rows ? std::string(gp->rows[r].label) : std::string());
+    }
+    // the dice on the baize: the card's example, or (out of the guide) the game's
+    const bool example = gp && strcmp(gp->dice, "000000") != 0;
+    getChild<LLUICtrl>("f_felt")->setVisible(!on || example);
+    for (S32 i = 0; i < 6; ++i) getChild<LLUICtrl>(llformat("f_die%d", i))->setVisible(!on || example);
     if (on)
     {
-        getChild<LLTextEditor>("f_guide")->setText(std::string(GUIDE[page].text));
+        getChild<LLTextBox>("f_guide_title")->setText(std::string(gp->title));
+        getChild<LLTextEditor>(rows ? "f_guide_note" : "f_guide")->setText(std::string(gp->body));
+        std::string dots;
+        for (S32 i = 0; i < GUIDE_PAGES; ++i) dots += i == page ? "\xE2\x97\x8F " : "\xE2\x97\x8B ";   // U+25CF / U+25CB
+        LLTextBox* d = getChild<LLTextBox>("f_guide_dots");
+        d->setText(dots);
+        d->setToolTip(llformat("Page %d of %d", page + 1, GUIDE_PAGES));
+        LLButton* back = getChild<LLButton>("f_guide_back");
+        back->setEnabled(page > 0);
+        back->setToolTip(page > 0 ? llformat("Back to page %d of %d", page, GUIDE_PAGES) : std::string("This is the first page"));
+        LLButton* next = getChild<LLButton>("f_guide_next");
+        next->setLabel(last ? std::string("Start playing") : std::string("Next"));
+        next->setToolTip(last ? std::string("Close the guide and play") : llformat("Page %d of %d", page + 2, GUIDE_PAGES));
         LLSD dice = LLSD::emptyArray();
-        for (S32 i = 0; i < 6; ++i) dice.append(GUIDE[page].dice[i] - '0');
-        showDice(dice, GUIDE[page].kept);
-    }
-    else if (mState.has("game"))
-    {
-        showDice(mState["game"]["dice"], mState["game"]["kept"].asString());
+        for (S32 i = 0; i < 6; ++i) dice.append(gp->dice[i] - '0');
+        applyDice(dice, gp->kept);
     }
     else
     {
-        showDice(LLSD(), "000000");
+        applyDice(mDice, mKept);
     }
     refreshButtons();
 }

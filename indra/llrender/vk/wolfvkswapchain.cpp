@@ -503,6 +503,23 @@ bool WolfVkSwapchain::destroy()
     return all_gone;
 }
 
+void WolfVkSwapchain::forget()
+{
+    if (mSwapchain != VK_NULL_HANDLE || !mRetired.empty())
+        LL_WARNS("Vulkan") << "Swapchain left to the hung device with " << mRetired.size() << " retired swapchain(s)" << LL_ENDL;
+    mFreeFences.clear();
+    mPendingPresentFences.clear();
+    mRetired.clear();
+    mFirstPresentDone = false;
+    mSwapchain = VK_NULL_HANDLE;
+    mViews.clear();
+    mImages.clear();
+    mRenderDone.clear();
+    mDevice = nullptr;
+    mSurface = VK_NULL_HANDLE;
+    mNoSize = false;
+}
+
 bool WolfVkSwapchain::acquire(VkSemaphore signal, uint32_t& image_index, bool& out_of_date, bool& timed_out, std::string& error)
 {
     out_of_date = false;

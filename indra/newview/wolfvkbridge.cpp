@@ -470,6 +470,7 @@ namespace
     {
         const bool hung = gWolfVkDevice.hung();
         const bool swapchains_gone = !hung && sSwapchain.destroy();
+        if (hung) sSwapchain.forget();   // left to the device; never touched again (the static destructor included)
         if (!hung && !swapchains_gone) gWolfVkDevice.abandon("a swapchain could not be destroyed (its presents did not finish)");
         if (sSurface != VK_NULL_HANDLE)
         {

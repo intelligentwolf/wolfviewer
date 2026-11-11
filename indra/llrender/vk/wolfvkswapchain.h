@@ -73,6 +73,9 @@ public:
     // [V4 2026-11-11] true when no swapchain (current or retired) is left alive; false when one had to be left to the
     // device (hung, or its presents did not finish within the bounded wait) - the surface must then not be destroyed
     bool destroy();
+    // [V2 2026-11-11] the device is hung: every handle is dropped without a Vulkan call (they stay with the abandoned
+    // device), so nothing later - the static destructor at exit included - touches the device again
+    void forget();
     // [V1 2026-11-11] the last create/recreate failed only because the window has no size (minimised): wait, not an error
     bool noSize() const { return mNoSize; }
 

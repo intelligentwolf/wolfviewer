@@ -2986,6 +2986,17 @@ The last time WolfViewer was running, its Vulkan renderer stopped working on you
      name="okbutton"
      yestext="OK"/>
   </notification>
+  <!-- [G5 2026-11-11] the same, when this start tries Vulkan once more (wolfvkbridge.cpp decideBackend) -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfVulkanStoppedLastRunRetry"
+   type="alertmodal">
+    <unique/>
+The last time WolfViewer was running, its Vulkan renderer stopped working on your graphics card ([REASON]). WolfViewer is trying Vulkan once more; if it stops again, WolfViewer will use OpenGL.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
   <notification
    icon="alertmodal.tga"
    name="WolfAdultContentOwnerVerify"

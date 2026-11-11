@@ -574,7 +574,9 @@ namespace
         // fails (llwindowsdl2.cpp; e.g. no zenity on a Wayland desktop, SDL_waylandmessagebox.c), OSMessageBoxWin32 when
         // MessageBoxW fails (its default case). Shown and closed without OK is -1 (SDL) or NSAlertFirstButtonReturn
         // (macOS showAlert), not OSBTN_CANCEL.
-        if (OSMessageBox(LLTrans::getString("WolfVulkanStoppedRestart", args), LLTrans::getString("WolfVulkanStoppedTitle"), OSMB_OK) != OSBTN_CANCEL)
+        // [G5 2026-11-11] what the next start does (decideBackend): Vulkan once more, or OpenGL from now on
+        const bool will_retry = gSavedSettings.getU32("WolfVulkanAutoFailures") < AUTO_RETRY_LIMIT;
+        if (OSMessageBox(LLTrans::getString(will_retry ? "WolfVulkanStoppedRestart" : "WolfVulkanStoppedRestartFinal", args), LLTrans::getString("WolfVulkanStoppedTitle"), OSMB_OK) != OSBTN_CANCEL)
         {
             gSavedSettings.setString("WolfVulkanStoppedReason", "");
             gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
@@ -1059,13 +1061,14 @@ namespace WolfVkBridge
 void decideBackend()
 {
     // [RUN-TIME STOP 2026-11-09] the last run's Vulkan stop when its message box could not be shown (stopAtRunTime)
+    // [G5 2026-11-11] said below, once it is known whether this start tries Vulkan again
     const std::string stopped = gSavedSettings.getString("WolfVulkanStoppedReason");
     if (!stopped.empty())
     {
         gSavedSettings.setString("WolfVulkanStoppedReason", "");
-        rememberNotice("WolfVulkanStoppedLastRun", stopped);
     }
 #if LL_DARWIN
+    if (!stopped.empty()) rememberNotice("WolfVulkanStoppedLastRun", stopped);
     // [MAC OPENGL 2026-11-10] Paul: "Macs default to OpenGL with no Vulkan box". The bundle carries no MoltenVK
     // (vk/wolfvkloader.cpp), so a Vulkan start on a Mac can only fall back and show WolfVulkanFellBack - W102 did that at
     // every Mac start. The platform default is made here, where the setting is read, the way the per-platform globals
@@ -1119,6 +1122,7 @@ void decideBackend()
     // [G5 2026-11-11] the bounded retry (rule at recordAutomaticFailure): an "opengl" the viewer saved itself goes back to
     // Vulkan while fewer than AUTO_RETRY_LIMIT failures are counted for this viewer version and OpenGL driver
     const U32 auto_failures = gSavedSettings.getU32("WolfVulkanAutoFailures");
+    bool retrying = false;
     if (auto_failures > 0 && gSavedSettings.getString("WolfRenderBackend") == "opengl" && !LLAppViewer::instance()->isSecondInstance())
     {
         const std::string saved = gSavedSettings.getString("WolfVulkanAutoFailStamp");
@@ -1130,8 +1134,11 @@ void decideBackend()
             if (!same) clearAutomaticFailures();
             gSavedSettings.setString("WolfRenderBackend", "vulkan");
             gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            retrying = true;
         }
     }
+    // the last run's stop, when its message box could not be shown: with what this start does about it
+    if (!stopped.empty()) rememberNotice(retrying ? "WolfVulkanStoppedLastRunRetry" : "WolfVulkanStoppedLastRun", stopped);
     const std::string backend = gSavedSettings.getString("WolfRenderBackend");
     sRequested = false;
     if (backend != "vulkan")

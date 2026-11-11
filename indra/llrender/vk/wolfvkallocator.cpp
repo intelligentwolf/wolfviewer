@@ -377,6 +377,16 @@ bool WolfVkAllocator::allocate(const VkMemoryRequirements& requirements, VkMemor
     return true;
 }
 
+void WolfVkAllocator::abandon()
+{
+    // [V2/V4 2026-11-11] the device was abandoned (hung, or a swapchain could not be destroyed): its memory stays with it.
+    // Before, the static destructor at exit called vkUnmapMemory/vkFreeMemory on the abandoned (possibly hung) device
+    // (run t2-hang: "Allocator block 1 destroyed with 4 live allocations" after "Goodbye!").
+    std::lock_guard<std::mutex> lock(mMutex);
+    mBlocks.clear();
+    mDevice = VK_NULL_HANDLE;
+}
+
 void WolfVkAllocator::free(WolfVkAllocation& allocation)
 {
     if (!allocation.isValid())
@@ -384,6 +394,11 @@ void WolfVkAllocator::free(WolfVkAllocation& allocation)
         return;
     }
     std::lock_guard<std::mutex> lock(mMutex);
+    if (mDevice == VK_NULL_HANDLE)
+    {
+        allocation = WolfVkAllocation();   // [V2/V4] abandoned or destroyed: nothing of this allocator's is freed any more
+        return;
+    }
     if (allocation.mDedicated)
     {
         if (allocation.mMapped)

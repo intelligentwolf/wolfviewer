@@ -1580,6 +1580,7 @@ void WolfVkDevice::abandon(const std::string& why)
     // [V4 2026-11-11] see the header: a swapchain the owner could not destroy pins the device and the instance
     LL_WARNS("Vulkan") << "Vulkan device and instance abandoned without destruction: " << why << LL_ENDL;
     mAbandoned = true;
+    mAllocator.abandon();
     mDevice = VK_NULL_HANDLE;
     mQueue = VK_NULL_HANDLE;
     mFrames.clear();
@@ -1595,6 +1596,7 @@ void WolfVkDevice::destroy()
         // nothing can be waited for or safely destroyed: the handles are abandoned to the driver (process exit cleans up)
         LL_WARNS("Vulkan") << "Vulkan device abandoned without destruction (hung): " << mHungReason << LL_ENDL;
         mAbandoned = true;
+        mAllocator.abandon();
         mDevice = VK_NULL_HANDLE;
         mFrames.clear();
         return;
@@ -1604,6 +1606,7 @@ void WolfVkDevice::destroy()
         // [HANG GUARD 2026-11-08 8.2k] the bounded wait ran out: abandoned exactly as above
         LL_WARNS("Vulkan") << "Vulkan device abandoned without destruction (hung at shutdown): " << mHungReason << LL_ENDL;
         mAbandoned = true;
+        mAllocator.abandon();
         mDevice = VK_NULL_HANDLE;
         mFrames.clear();
         return;

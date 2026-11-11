@@ -89,6 +89,8 @@ public:
                   VkExternalMemoryHandleTypeFlags export_types = 0);
 
     void free(WolfVkAllocation& allocation);
+    // [V2/V4 2026-11-11] the device was abandoned: forget every block without a Vulkan call
+    void abandon();
 
     // Flushes a host write to a non-coherent allocation (no-op when coherent); offset/size relative to the allocation.
     void flush(const WolfVkAllocation& allocation, VkDeviceSize offset, VkDeviceSize size);

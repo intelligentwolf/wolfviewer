@@ -35,8 +35,11 @@
 #include "vk/wolfvkshader.h"
 #include "llwindow.h"
 #include "llappviewer.h"   // [RUN-TIME STOP 2026-11-09] requestQuit
-#include "llstartup.h"
-#include "wolfcrashreport.h"   // [round 4] crash evidence for the session marker     // [BLACK WORLD 2026-11-10] the world check starts in-world (STATE_STARTED)
+#include "llstartup.h"         // [BLACK WORLD 2026-11-10] the world check starts in-world (STATE_STARTED)
+#include "wolfcrashreport.h"   // [round 4 2026-11-11] crash evidence for the session marker
+#include "llsdserialize.h"     // [round 5 2026-11-11] a second instance re-reads the Vulkan keys from the settings file
+#include "llfile.h"
+#include "llcontrolsavehook.h" // [round 5 2026-11-11] gWolfControlBeforeSave
 #include "llagent.h"       // [G6 2026-11-11] no world-check verdicts from samples taken during a teleport
 #include "llversioninfo.h" // [G5 2026-11-11] the viewer version in the failure stamp
 #include "llviewercontrol.h"
@@ -153,7 +156,6 @@ namespace
     constexpr F64 PRESENT_GAP_CAP = 0.5;
     constexpr F64 SESSION_PROOF_MINUTES = 10.0;
     bool sGBufferSharedAtStart = false;   // [round 4 W3] the G-buffer was shared at the start (shareGBuffer "start")
-    bool sSessionProved = false;          // [round 4 B1] sessionProved() was true once; the crash marker is cleared then
     bool sCrashedTwice = false;           // [round 4 W4] decideBackend chose OpenGL after two crashes
     constexpr uint32_t LOGIN_BLACK_SAMPLES = 8;
     constexpr F64 LOGIN_SAMPLE_SPACING = 0.25;
@@ -368,8 +370,9 @@ namespace
     //  - [B1 2026-11-11] The count is cleared only by a session that PROVED itself: Vulkan still running at a clean quit,
     //    after its login check passed and either its in-world world check passed or ([round 3]) it ran 10 minutes
     //    in-world (a world check that is off, or ended undecided in a dark region) (shutdown).
-    //  - [round 3/4] A CRASH during a Vulkan session before it proved itself (WolfVulkanSessionRun still set at the next
-    //    start, and that run's crash stack or an LLError/out-of-memory exec marker as evidence) counts like any other
+    //  - [round 3-5] A CRASH at any time in a Vulkan session (WolfVulkanSessionRun still set at the next start - only a
+    //    clean quit, a fall-back or a stop clears it - and that run's crash stack or an LLError/out-of-memory exec
+    //    marker as evidence) counts like any other
     //    failure, so a crash that comes back every session stops after AUTO_RETRY_LIMIT of them. An OS kill, a logoff
     //    or a power cut leaves no evidence and is not counted. Not at the login check: a run-time
     //    stop that comes later in every session (a hang a minute in-world, a rebuild that always fails) would otherwise be
@@ -403,6 +406,31 @@ namespace
         LL_INFOS("Vulkan") << "Automatic switch to OpenGL recorded: " << count << " of " << AUTO_RETRY_LIMIT << " for " << stamp
                            << (count < AUTO_RETRY_LIMIT ? " (Vulkan is tried again at the next start)" : " (Vulkan is tried again after a viewer or driver update)") << LL_ENDL;
     }
+    // [round 5 2026-11-11] the Vulkan state keys a second instance must leave as the first instance wrote them
+    const char* const VULKAN_STATE_KEYS[] = { "WolfRenderBackend", "WolfVulkanStartOK", "WolfVulkanSessionRun", "WolfVulkanAutoFailures",
+                                             "WolfVulkanAutoFailStamp", "WolfVulkanStoppedReason", "WolfVulkanLastGLDriver",
+                                             "WolfVulkanW101SpvRetryDone" };
+    // Re-reads those keys from the settings file into memory: a key the file holds takes its value, a key it does not
+    // hold (saved non-default only, llappviewer.cpp:2237) its default - so the save that follows writes them unchanged.
+    void restoreVulkanKeysFromFile(const std::string& filename)
+    {
+        LLSD file;
+        llifstream in(filename.c_str());
+        if (in.is_open() && LLSDParser::PARSE_FAILURE == LLSDSerialize::fromXML(file, in))
+        {
+            // left as loaded at this instance's start (the first instance's values then), never guessed
+            LL_WARNS("Vulkan") << "Second instance: " << filename << " could not be read before a save; its Vulkan keys keep the values loaded at start" << LL_ENDL;
+            return;
+        }
+        for (const char* key : VULKAN_STATE_KEYS)
+        {
+            LLControlVariable* ctrl = gSavedSettings.getControl(key);
+            if (!ctrl) continue;
+            if (file.isMap() && file.has(key) && file[key].has("Value")) ctrl->setValue(file[key]["Value"]);
+            else ctrl->resetToDefault(false);
+        }
+    }
+
     // [round 3] after a recorded failure: will the next start try Vulkan again (decideBackend's rule, same stamp)?
     bool nextStartRetries()
     {
@@ -1034,7 +1062,8 @@ namespace
     // [round 3/4] The session has proved itself: its login check passed, and either its world check passed or it has
     // presented frames in-world for SESSION_PROOF_MINUTES ([round 4 W3]: counted only while frames were presented; and
     // not when the world check FAILED or could not give the G-buffer back, nor when a G-buffer shared at the start is
-    // shared no more). Used to clear the failure count at a clean quit and the crash marker at once (B1).
+    // shared no more). Used to clear the failure count at a clean quit (B1); the crash marker is cleared only by the
+    // clean quit itself ([round 5 W-A]).
     bool sessionProved()
     {
         if (sLogin.mStage != LoginCheck::PASSED) return false;
@@ -1132,9 +1161,29 @@ namespace WolfVkBridge
 
 void decideBackend()
 {
+#ifdef LL_BUGSPLAT
+    // [round 5 2026-11-11] BugSplat writes its own crash files, not WolfCrashReport's crash_stack.txt, so a crash in a
+    // Vulkan session leaves no evidence decideBackend can see: only LLError / out-of-memory exec markers count here
+    LL_WARNS("Vulkan") << "BugSplat build: crashes in Vulkan sessions are not counted (no crash stack), only LLError/out-of-memory markers" << LL_ENDL;
+#endif
+    // [round 5 2026-11-11] A SECOND instance shares the first one's settings file but not its run. ONE rule: every
+    // Vulkan state key is read-only for it for the whole session. Its fall-back or stop happen in memory only, and before
+    // ANY save of the settings file (a hook in LLControlGroup::saveToFile, llcontrolsavehook.h) those keys are re-read
+    // from the file, so it keeps exactly what the first instance wrote (byte for byte for those keys).
+    if (LLAppViewer::instance()->isSecondInstance())
+    {
+        const std::string client_file = gSavedSettings.getString("ClientSettingsFile");
+        gWolfControlBeforeSave = [client_file](LLControlGroup& group, const std::string& filename)
+        {
+            if (&group != &gSavedSettings || filename != client_file) return;
+            restoreVulkanKeysFromFile(filename);
+        };
+        LL_INFOS("Vulkan") << "Second instance: the Vulkan state keys stay as the first instance wrote them" << LL_ENDL;
+    }
     // [RUN-TIME STOP 2026-11-09] the last run's Vulkan stop when its message box could not be shown (stopAtRunTime)
     // [G5 2026-11-11] said below, once it is known whether this start tries Vulkan again
-    const std::string stopped = gSavedSettings.getString("WolfVulkanStoppedReason");
+    // (a second instance does not take the first instance's notice: round 5)
+    const std::string stopped = LLAppViewer::instance()->isSecondInstance() ? std::string() : gSavedSettings.getString("WolfVulkanStoppedReason");
     if (!stopped.empty())
     {
         gSavedSettings.setString("WolfVulkanStoppedReason", "");
@@ -1191,18 +1240,8 @@ void decideBackend()
         }
 #endif
     }
-    // [round 4 B2] A second instance shares the first one's settings file but not its run: it must neither count nor
-    // clear anything, and must not save back the values it loaded (the first instance's marker and counters, which that
-    // instance changes on its own) - those controls are not saved by a second instance at all.
-    if (LLAppViewer::instance()->isSecondInstance())
-    {
-        for (const char* key : { "WolfVulkanSessionRun", "WolfVulkanAutoFailures", "WolfVulkanAutoFailStamp" })
-        {
-            if (LLControlVariable* ctrl = gSavedSettings.getControl(key)) ctrl->setPersist(LLControlVariable::PERSIST_NO);
-        }
-    }
-    // [round 3/4] The last Vulkan session ended without shutdown, fallBack or stopAtRunTime, after its login screen was
-    // confirmed and before it proved itself (the marker is cleared then). Counted only with evidence of a CRASH from
+    // [round 3-5] The last Vulkan session ended without shutdown, fallBack or stopAtRunTime, after its login screen was
+    // confirmed. Counted only with evidence of a CRASH from
     // that run [round 4 B1]: the crash handler's stack in that run's dump folder (WolfCrashReport::runLeftCrashStack),
     // or this start's exec marker saying LLError / out of memory (LAST_EXEC_LLERROR_CRASH / LAST_EXEC_BAD_ALLOC,
     // llappviewer.cpp processMarkerFiles). An OS kill, a Windows logoff (WM_ENDSESSION), a power cut or a resident ending
@@ -2128,17 +2167,6 @@ bool presentFrame()
     {
         if (sLastPresentAt > 0.0 && LLStartUp::getStartupState() >= STATE_STARTED) sInWorldPresented += std::min(t0 - sLastPresentAt, PRESENT_GAP_CAP);
         sLastPresentAt = t0;
-    }
-    // [round 4 B1] once proved, a later abnormal end (an OS kill, a logoff, a power cut) is no crash of Vulkan's to count
-    if (!sSessionProved && sessionProved())
-    {
-        sSessionProved = true;
-        if (!LLAppViewer::instance()->isSecondInstance())
-        {
-            gSavedSettings.setString("WolfVulkanSessionRun", "");
-            gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
-            LL_INFOS("Vulkan") << "Vulkan session proved itself: a later end without shutdown is not counted as a Vulkan crash" << LL_ENDL;
-        }
     }
 
     const F64 t1 = LLTimer::getTotalSeconds();

@@ -20537,7 +20537,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanSessionRun</key>
 		<map>
 			<key>Comment</key>
-			<string>[round 4 2026-11-11] Set (to this run's dump folder name) and saved while a Vulkan session runs, until it proves itself; cleared by a clean quit, a fall-back, a run-time stop or the proof. Still set at the next start AND that run left a crash stack (or an LLError / out-of-memory exec marker): counted as an automatic failure (WolfVulkanAutoFailures). Not saved by a second instance. Set by the viewer.</string>
+			<string>[round 4 2026-11-11] Set (to this run's dump folder name) and saved while a Vulkan session runs; cleared by a clean quit, a fall-back or a run-time stop. Still set at the next start AND that run left a crash stack (or an LLError / out-of-memory exec marker): counted as an automatic failure (WolfVulkanAutoFailures). A second instance leaves it (and every Vulkan state key) as the first instance wrote it. Set by the viewer.</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>

@@ -1713,6 +1713,16 @@ Findings V1-V14 and G1-G8 of region-terrain-work/w104-review-2026-11-11/FINDINGS
   W3 UUID mismatch -> vendor match; W4 a clean quit with no failed sample is not counted; W5 rebuild retries for 4 s
   (run w5: 17 attempts over 4.15 s, then the stop); W6 a swapchain left on a native Wayland surface turns the start-up
   fall-back into the run-time stop (not run: no native-Wayland start here).
+- Rounds 3-5 (the crash marker and second instances): `WolfVulkanSessionRun` holds the run's dump folder while a Vulkan
+  session runs and is cleared only by a clean quit, a fall-back or a run-time stop. At the next start it counts as an
+  automatic failure only with crash evidence from that run (WolfCrashReport's `crash_stack.txt` in that folder, or an
+  LLError / out-of-memory exec marker); an OS kill, a Windows logoff, a power cut or ending a frozen viewer leave none.
+  ACCEPTED TRADE-OFF: any crash with evidence counts, also one that has nothing to do with Vulkan (a script, a
+  network bug) - two in a row set OpenGL until a viewer or driver update, or the resident's own choice. A BugSplat build
+  writes no crash_stack.txt and only counts LLError / out-of-memory markers (a warning says so at start). A SECOND
+  instance treats every Vulkan state key as read-only: its fall-back or stop happen in memory, and before any save
+  (`gWolfControlBeforeSave`, llxml/llcontrolsavehook.h) it re-reads those keys from the file, so the file keeps what
+  the first instance wrote; it never counts, clears, reads the crash marker or takes the first instance's notices.
 - Test windows open on the hidden Hyprland workspace special:wolftest (window rules on the test's own X11 class and the
   stop box's zenity title, ~/.cache/vkfix/rig/session2.sh), never over the desktop in use.
 

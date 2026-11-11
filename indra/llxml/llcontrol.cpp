@@ -31,6 +31,7 @@
 #include <algorithm>
 
 #include "llcontrol.h"
+#include "llcontrolsavehook.h"   // [WolfViewer 2026-11-11]
 
 #include "llstl.h"
 
@@ -1055,8 +1056,11 @@ U32 LLControlGroup::loadFromFileLegacy(const std::string& filename, bool require
     return validitems;
 }
 
+std::function<void(LLControlGroup&, const std::string&)> gWolfControlBeforeSave;   // [WolfViewer 2026-11-11]
+
 U32 LLControlGroup::saveToFile(const std::string& filename, bool nondefault_only)
 {
+    if (gWolfControlBeforeSave) gWolfControlBeforeSave(*this, filename);   // [WolfViewer 2026-11-11] llcontrolsavehook.h
     LLSD settings;
     int num_saved = 0;
     for (ctrl_name_table_t::iterator iter = mNameTable.begin();

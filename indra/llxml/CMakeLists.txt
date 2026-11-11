@@ -16,6 +16,7 @@ set(llxml_HEADER_FILES
     CMakeLists.txt
 
     llcontrol.h
+    llcontrolsavehook.h
     llxmlnode.h
     llxmlparser.h
     llxmltree.h

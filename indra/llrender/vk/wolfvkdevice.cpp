@@ -572,17 +572,23 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
         while (!t.empty() && t.back() == ' ') t.pop_back();
         return t;
     };
-    // [round 4 W2] one card offered by two drivers (RADV and amdvlk, say) is one card: devices with the same device UUID or
-    // the same normalised name count once (the first one listed is taken)
+    // [round 4 W2 / round 5 W-B] one card offered by two drivers (RADV and amdvlk, say) is one card: devices with the same
+    // device UUID count once (the first one listed is taken); by name only when a UUID is not known
     auto one_card = [&](const std::vector<const WolfVkPhysicalDeviceInfo*>& v)
     {
         static const uint8_t zero_uuid[VK_UUID_SIZE] = {};
         for (const WolfVkPhysicalDeviceInfo* d : v)
         {
-            // an all-zero UUID (a Vulkan 1.0 device: wolfvkdevice.h mIds) proves nothing
-            const bool same_uuid = memcmp(d->mIds.deviceUUID, zero_uuid, VK_UUID_SIZE) != 0
-                                   && memcmp(d->mIds.deviceUUID, v.front()->mIds.deviceUUID, VK_UUID_SIZE) == 0;
-            if (!same_uuid && trimmed(d->name(), false) != trimmed(v.front()->name(), false)) return false;
+            // [round 5 W-B] two devices are one card when their device UUIDs are equal; when both UUIDs are known (non-zero)
+            // and differ they are two cards, even with the same name (two identical cards). Only when a UUID is unknown
+            // (all zero: a Vulkan 1.0 device, wolfvkdevice.h mIds) does the same normalised name make them one.
+            const bool d_known = memcmp(d->mIds.deviceUUID, zero_uuid, VK_UUID_SIZE) != 0;
+            const bool f_known = memcmp(v.front()->mIds.deviceUUID, zero_uuid, VK_UUID_SIZE) != 0;
+            if (d_known && f_known)
+            {
+                if (memcmp(d->mIds.deviceUUID, v.front()->mIds.deviceUUID, VK_UUID_SIZE) != 0) return false;
+            }
+            else if (trimmed(d->name(), false) != trimmed(v.front()->name(), false)) return false;
         }
         return !v.empty();
     };

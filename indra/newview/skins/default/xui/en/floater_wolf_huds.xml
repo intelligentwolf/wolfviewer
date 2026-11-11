@@ -90,7 +90,7 @@
     <button follows="left|top" layout="topleft" left="276" top="412" width="256" height="108" name="tile_roleplay" is_toggle="true" label="" tab_stop="true" tool_tip="Roleplay: The game console: your hero, stats, bag, pets and the game&apos;s pages." />
     <icon follows="left|top" layout="topleft" left="286" top="426" width="80" height="80" name="pic_roleplay" image_name="WolfHuds_roleplay" mouse_opaque="false" />
     <text follows="left|top" layout="topleft" left="376" top="422" width="148" height="20" name="name_roleplay" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Roleplay</text>
-    <text follows="left|top" layout="topleft" left="376" top="444" width="148" height="46" name="desc_roleplay" font="SansSerif" wrap="true" mouse_opaque="false">The game console: your hero, stats, bag, pets and the game's pages.</text>
+    <text follows="left|top" layout="topleft" left="376" top="444" width="148" height="46" name="desc_roleplay" font="SansSerif" wrap="true" mouse_opaque="false">The game console: your hero, stats, bag and pets.</text>
     <text follows="left|top" layout="topleft" left="376" top="494" width="148" height="18" name="state_roleplay" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
     <!-- Tessa's Compass [W104 FEATFIX 2026-11-11] -->
     <button follows="left|top" layout="topleft" left="540" top="412" width="256" height="108" name="tile_compass" is_toggle="true" label="" tab_stop="true" tool_tip="Tessa&apos;s Compass: A mariner&apos;s compass: North, where you look and where you go." />

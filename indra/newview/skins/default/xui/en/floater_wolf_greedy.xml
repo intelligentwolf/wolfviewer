@@ -58,6 +58,8 @@
         <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="14" name="f_turn_label" top="308" width="200" text_color="0.89 0.73 0.35 1">THIS TURN</text>
         <text follows="left|top" font="SansSerifHuge" font.style="BOLD" height="38" layout="topleft" left="12" name="f_turn" top="324" width="260" text_color="1 0.84 0.3 1"> </text>
         <text follows="left|top" font="SansSerifLarge" height="24" layout="topleft" left="280" name="f_dice_left" top="334" width="228" halign="right" text_color="0.95 0.92 0.85 1"> </text>
+        <!-- the guide's card lies under the dice, so a card's example dice show on it (drawn in this order) -->
+        <icon follows="left|top" height="404" layout="topleft" left="8" name="f_guide_card" top="56" width="504" image_name="WolfGreedy_Plate" color="0.12 0.1 0.08 0.96" visible="false" />
         <!-- the dice on baize -->
         <icon follows="left|top" height="80" layout="topleft" left="12" name="f_felt" top="366" width="496" image_name="WolfGreedy_Plate" color="0.16 0.52 0.3 1" />
         <icon follows="left|top" height="64" layout="topleft" left="38" name="f_die0" top="374" width="64" image_name="WolfGreedy_Die0" />
@@ -85,52 +87,51 @@
         <button follows="left|top" height="30" layout="topleft" left="12" name="f_help" top="599" width="150" label="How to play" />
 
         <!-- the guide: nine illustrated cards over the game (wolffloatergreedy.cpp GUIDE) -->
-        <icon follows="left|top" height="404" layout="topleft" left="8" name="f_guide_card" top="56" width="504" image_name="WolfGreedy_Plate" color="0.12 0.1 0.08 0.96" visible="false" />
         <icon follows="left|top" height="40" layout="topleft" left="20" name="f_guide_logo" top="64" width="40" image_name="WolfGreedy_Logo" visible="false" />
         <text follows="left|top" font="SansSerifHuge" font.style="BOLD" height="36" layout="topleft" left="68" name="f_guide_title" top="66" width="430" text_color="1 0.84 0.3 1" visible="false"> </text>
         <text_editor follows="left|top" font="SansSerifLarge" height="246" layout="topleft" left="20" name="f_guide" top="112" width="480" read_only="true" word_wrap="true" enabled="false" visible="false" show_context_menu="false" border_visible="false" bg_readonly_color="0 0 0 0" />
-        <icon follows="left|top" height="24" layout="topleft" left="20" name="f_combo0_d0" top="118" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="45" name="f_combo0_d1" top="118" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="70" name="f_combo0_d2" top="118" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="95" name="f_combo0_d3" top="118" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="120" name="f_combo0_d4" top="118" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="145" name="f_combo0_d5" top="118" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="174" name="f_combo0_t" top="112" width="330" wrap="true" visible="false"> </text>
-        <icon follows="left|top" height="24" layout="topleft" left="20" name="f_combo1_d0" top="154" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="45" name="f_combo1_d1" top="154" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="70" name="f_combo1_d2" top="154" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="95" name="f_combo1_d3" top="154" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="120" name="f_combo1_d4" top="154" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="145" name="f_combo1_d5" top="154" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="174" name="f_combo1_t" top="148" width="330" wrap="true" visible="false"> </text>
-        <icon follows="left|top" height="24" layout="topleft" left="20" name="f_combo2_d0" top="190" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="45" name="f_combo2_d1" top="190" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="70" name="f_combo2_d2" top="190" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="95" name="f_combo2_d3" top="190" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="120" name="f_combo2_d4" top="190" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="145" name="f_combo2_d5" top="190" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="174" name="f_combo2_t" top="184" width="330" wrap="true" visible="false"> </text>
-        <icon follows="left|top" height="24" layout="topleft" left="20" name="f_combo3_d0" top="226" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="45" name="f_combo3_d1" top="226" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="70" name="f_combo3_d2" top="226" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="95" name="f_combo3_d3" top="226" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="120" name="f_combo3_d4" top="226" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="145" name="f_combo3_d5" top="226" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="174" name="f_combo3_t" top="220" width="330" wrap="true" visible="false"> </text>
-        <icon follows="left|top" height="24" layout="topleft" left="20" name="f_combo4_d0" top="262" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="45" name="f_combo4_d1" top="262" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="70" name="f_combo4_d2" top="262" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="95" name="f_combo4_d3" top="262" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="120" name="f_combo4_d4" top="262" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="145" name="f_combo4_d5" top="262" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="174" name="f_combo4_t" top="256" width="330" wrap="true" visible="false"> </text>
-        <icon follows="left|top" height="24" layout="topleft" left="20" name="f_combo5_d0" top="298" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="45" name="f_combo5_d1" top="298" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="70" name="f_combo5_d2" top="298" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="95" name="f_combo5_d3" top="298" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="120" name="f_combo5_d4" top="298" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <icon follows="left|top" height="24" layout="topleft" left="145" name="f_combo5_d5" top="298" width="24" image_name="WolfGreedy_Die0" visible="false" />
-        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="174" name="f_combo5_t" top="292" width="330" wrap="true" visible="false"> </text>
+        <icon follows="left|top" height="32" layout="topleft" left="20" name="f_combo0_d0" top="114" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="53" name="f_combo0_d1" top="114" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="86" name="f_combo0_d2" top="114" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="119" name="f_combo0_d3" top="114" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="152" name="f_combo0_d4" top="114" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="185" name="f_combo0_d5" top="114" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="222" name="f_combo0_t" top="112" width="284" wrap="true" visible="false"> </text>
+        <icon follows="left|top" height="32" layout="topleft" left="20" name="f_combo1_d0" top="150" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="53" name="f_combo1_d1" top="150" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="86" name="f_combo1_d2" top="150" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="119" name="f_combo1_d3" top="150" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="152" name="f_combo1_d4" top="150" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="185" name="f_combo1_d5" top="150" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="222" name="f_combo1_t" top="148" width="284" wrap="true" visible="false"> </text>
+        <icon follows="left|top" height="32" layout="topleft" left="20" name="f_combo2_d0" top="186" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="53" name="f_combo2_d1" top="186" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="86" name="f_combo2_d2" top="186" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="119" name="f_combo2_d3" top="186" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="152" name="f_combo2_d4" top="186" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="185" name="f_combo2_d5" top="186" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="222" name="f_combo2_t" top="184" width="284" wrap="true" visible="false"> </text>
+        <icon follows="left|top" height="32" layout="topleft" left="20" name="f_combo3_d0" top="222" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="53" name="f_combo3_d1" top="222" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="86" name="f_combo3_d2" top="222" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="119" name="f_combo3_d3" top="222" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="152" name="f_combo3_d4" top="222" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="185" name="f_combo3_d5" top="222" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="222" name="f_combo3_t" top="220" width="284" wrap="true" visible="false"> </text>
+        <icon follows="left|top" height="32" layout="topleft" left="20" name="f_combo4_d0" top="258" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="53" name="f_combo4_d1" top="258" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="86" name="f_combo4_d2" top="258" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="119" name="f_combo4_d3" top="258" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="152" name="f_combo4_d4" top="258" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="185" name="f_combo4_d5" top="258" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="222" name="f_combo4_t" top="256" width="284" wrap="true" visible="false"> </text>
+        <icon follows="left|top" height="32" layout="topleft" left="20" name="f_combo5_d0" top="294" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="53" name="f_combo5_d1" top="294" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="86" name="f_combo5_d2" top="294" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="119" name="f_combo5_d3" top="294" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="152" name="f_combo5_d4" top="294" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <icon follows="left|top" height="32" layout="topleft" left="185" name="f_combo5_d5" top="294" width="32" image_name="WolfGreedy_Die0" visible="false" />
+        <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="222" name="f_combo5_t" top="292" width="284" wrap="true" visible="false"> </text>
         <text_editor follows="left|top" font="SansSerifLarge" height="40" layout="topleft" left="20" name="f_guide_note" top="330" width="480" read_only="true" word_wrap="true" enabled="false" visible="false" show_context_menu="false" border_visible="false" bg_readonly_color="0 0 0 0" />
         <button follows="left|top" font="SansSerifLarge" height="44" layout="topleft" left="12" name="f_guide_back" top="474" width="120" label="Back" visible="false" />
         <text follows="left|top" font="SansSerifLarge" height="28" layout="topleft" left="140" name="f_guide_dots" top="484" width="240" halign="center" text_color="1 0.84 0.3 1" visible="false"> </text>

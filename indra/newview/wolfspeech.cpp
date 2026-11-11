@@ -45,6 +45,7 @@
 #include "llsdjson.h"
 #include "llviewercontrol.h"
 #include "wolfgrid.h"
+#include "wolfvoicemessage.h"   // [W104 FEATFIX 2026-11-11 A7] one microphone user at a time; the voice-message line read aloud
 
 // Source: wolfstorm/js/ui/speech_to_text.js, js/ui/text_to_speech.js.
 
@@ -214,6 +215,13 @@ void WolfSpeech::toggleDictation()
     if (!canCapture())
     {
         report("This build of the viewer cannot capture audio (no OpenAL), so dictation is unavailable.");
+        return;
+    }
+    // [W104 FEATFIX 2026-11-11 A7] a voice message being recorded has the microphone (wolfvoicemessage.cpp startRecording
+    // refuses the other way round the same way): both reading one capture device would split the sound between them
+    if (WolfVoiceMessage::instanceExists() && WolfVoiceMessage::instance().getState() == WolfVoiceMessage::RECORDING)
+    {
+        report("A voice message is being recorded and is using the microphone. Send it or cancel it, then turn dictation on.");
         return;
     }
     if (!openCapture())
@@ -617,6 +625,13 @@ void WolfSpeech::onInstantMessage(const LLUUID& session_id, const std::string& f
     else
     {
         if (!read_ims) return;
+        // [W104 FEATFIX 2026-11-11 A7] the server's voice-message line (WolfVoiceMessage::isVoiceMessageLine: the exact
+        // vm_im_text) is a web link and instructions, not words to hear: it is said plainly
+        if (WolfVoiceMessage::isVoiceMessageLine(text))
+        {
+            enqueue("Voice message from " + from + ".");
+            return;
+        }
         enqueue("Message from " + from + ". " + text);
     }
 }

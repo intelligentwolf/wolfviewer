@@ -3081,7 +3081,9 @@ bool LLInventoryModel::loadSkeleton(
                     // throw away the version we have so we can fetch the
                     // correct contents the next time the viewer opens the folder.
                     tcat->setVersion(NO_VERSION);
-                    if (wolf_parent_listed_thumbnails && cat->getThumbnailUUID().notNull())
+                    // the resident's own folders only (never the library's), and never a null parent (the root)
+                    if (wolf_parent_listed_thumbnails && owner_id == gAgent.getID() && cat->getThumbnailUUID().notNull()
+                        && tcat->getParentUUID().notNull())
                     {
                         wolf_list_again.insert(tcat->getParentUUID()); // [WOLF THUMBNAILS 2026-11-11, ticket 793]
                     }

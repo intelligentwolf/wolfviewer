@@ -329,6 +329,25 @@ bool create_app_mutex()
     return result;
 }
 
+// <WolfViewer 2026-11-10 t763> Is the WolfViewer installer replacing the program files right now?
+// Source: installer_template.nsi Section "" - CreateMutexW "WolfViewerInstallerRunning" before RemoveProgFilesOnInst
+// deletes app_settings and skins, CloseHandle at the end of the section (before .onInstSuccess starts the viewer).
+// A viewer started in between found half a folder and stopped in LLAppViewer::initStrings ("The file 'strings.xml' is
+// not found") or initConfiguration ("settings_files.xml not found"): tickets 565, 604 and 763, each just after an update.
+// The installer runs elevated, so its mutex may refuse an unelevated open: ERROR_ACCESS_DENIED also means it exists
+// (OpenMutexW: ERROR_FILE_NOT_FOUND when no such object exists).
+static bool wolfInstallerIsRunning()
+{
+    HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, L"WolfViewerInstallerRunning");
+    if (h)
+    {
+        CloseHandle(h);
+        return true;
+    }
+    return GetLastError() == ERROR_ACCESS_DENIED;
+}
+// </WolfViewer>
+
 void ll_nvapi_init(NvDRSSessionHandle hSession)
 {
     // (2) load all the system settings into the session
@@ -566,6 +585,20 @@ int APIENTRY WINMAIN(HINSTANCE hInstance,
     }
 #endif
 #endif
+
+    // <WolfViewer 2026-11-10 t763> Started while an install or update is still writing the files (wolfInstallerIsRunning
+    // above): say so and stop cleanly, before anything reads app_settings or skins. Plain Win32 text: strings.xml may be
+    // one of the files not there yet. The updater's installer starts WolfViewer itself when it has finished.
+    if (wolfInstallerIsRunning())
+    {
+        MessageBoxW(NULL,
+                    L"WolfViewer is being updated at the moment.\n\n"
+                    L"Please wait a minute or two: it will open by itself when the update has finished. "
+                    L"If it does not, start WolfViewer again then.",
+                    L"WolfViewer", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+        return 0;
+    }
+    // </WolfViewer>
 
     // *FIX: global
     gIconResource = MAKEINTRESOURCE(IDI_LL_ICON);

@@ -162,6 +162,7 @@ Var NO_STARTMENU        # <FS:Ansariel> Optional start menu entry
 Var FRIENDLY_APP_NAME   # <FS:Ansariel> FIRE-30446: Set FriendlyAppName for protocols
 Var IS_UPDATE           # <WolfViewer 2026-10-02> "/UPDATE": started by the viewer's updater (wolfupdate.cpp)
 Var HAD_OLD_DESKTOP     # <WolfViewer 2026-10-02> a per-release (-wN) install being removed had a desktop shortcut
+Var INSTALL_MUTEX       # <WolfViewer 2026-11-10 t763> handle of the "files are being replaced" mutex (Section below)
 
 # Function definitions should go before file includes, because calls to
 # DLLs like LangDLL trigger an implicit file include, so if that call is at
@@ -578,6 +579,16 @@ StrCpy $INSTSHORTCUT "${SHORTCUT}"
 Call CheckIfAdministrator		# Make sure the user can install/uninstall
 Call CloseSecondLife			# Make sure Second Life not currently running
 Call CheckWillUninstallV2		# Check if Second Life is already installed
+;; <WolfViewer 2026-11-10 t763> While this installer removes and rewrites the program files, a WolfViewer started
+;; from a shortcut finds half a folder (RemoveProgFilesOnInst deletes app_settings and skins first) and stops at once:
+;; "The file 'strings.xml' is not found" (llappviewer.cpp initStrings) or "settings_files.xml not found"
+;; (initConfiguration) - Lacey Nutmeg's three crash reports (tickets 565, 604, 763), each a few minutes after an update
+;; whose silent install (/S, wolfupdate.cpp) shows nothing on screen. This named mutex says "being installed";
+;; the viewer looks for it before anything else (llappviewerwin32.cpp wolfInstallerIsRunning) and tells the resident to
+;; wait. Released at the end of this section, before .onInstSuccess starts the new viewer; Windows also releases it if
+;; the installer stops early. Same name in llappviewerwin32.cpp.
+System::Call 'kernel32::CreateMutexW(p 0, i 0, w "WolfViewerInstallerRunning") p .s'
+Pop $INSTALL_MUTEX
 
 # <WolfViewer 2026-10-02> Started by the viewer's updater?
 StrCpy $IS_UPDATE ""
@@ -794,6 +805,9 @@ StrCmp $DO_UNINSTALL_V2 "" REMOVE_SLV2_DONE
   RMDir "$PROGRAMFILES\SecondLifeViewer2"	# Will remove only if empty.
 
 REMOVE_SLV2_DONE:
+
+# <WolfViewer 2026-11-10 t763/> the files are in place: a WolfViewer started from now on may run (see CreateMutexW above)
+System::Call 'kernel32::CloseHandle(p $INSTALL_MUTEX)'
 
 SectionEnd
 

@@ -196,7 +196,9 @@ public:
     static void setCompressionQueryWanted(bool on) { sCompressionQueryWanted = on; }
     bool compressionQuery() const { return mCompressionQuery && mDevice != VK_NULL_HANDLE && gVk.vkGetImageSubresourceLayout2 != nullptr; }
     VkExternalMemoryHandleTypeFlags externalHandleType() const;
-    // One handle: an fd (Linux) or a HANDLE (Windows); the receiver (GL import) takes ownership on success.
+    // One handle: an fd (Linux) or a HANDLE (Windows). [G3 2026-11-11] A successful GL import takes over an fd
+    // (EXT_external_objects_fd 4.2.1/6.1) but never a Windows NT handle (EXT_external_objects_win32 rev 10 4.2.1/6.1: "the
+    // application must release the handle"), which the importer closes with closeExternalHandle after the import.
     struct ExternalHandle { int mFd = -1; void* mWin32 = nullptr; bool valid() const { return mFd >= 0 || mWin32 != nullptr; } };
     // vkGetMemoryFdKHR (vulkan_core.h:10600) / vkGetMemoryWin32HandleKHR (vulkan_win32.h:88) on a dedicated, exportable allocation.
     bool exportMemory(VkDeviceMemory memory, ExternalHandle& out, std::string& error);

@@ -669,7 +669,9 @@
               auto_resize="false"
               user_resize="false"
               name="voice_msg_layout_panel"
-              width="78">
+              width="78"
+              top="0"
+              bottom="-1">
               <button
               layout="topleft"
               left="1"
@@ -686,7 +688,9 @@
               user_resize="false"
               name="voice_cancel_layout_panel"
               visible="false"
-              width="64">
+              width="64"
+              top="0"
+              bottom="-1">
               <button
               layout="topleft"
               left="1"

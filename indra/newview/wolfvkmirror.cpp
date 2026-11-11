@@ -246,6 +246,46 @@ namespace
         }
     }
 
+    // [T766 2026-11-10] GL's texture swizzle, carried into the Vulkan copy's view.
+    // Source: llimagegl.cpp:1340-1360 setManualImage() - on the core profile a 1-channel image (GL_LUMINANCE) is stored as
+    // GL_R8 with GL_TEXTURE_SWIZZLE_RGBA (R,R,R,ONE), GL_ALPHA as GL_R8 with (ZERO,ZERO,ZERO,R), GL_LUMINANCE_ALPHA as GL_RG8
+    // with (R,R,R,G). GL_TEXTURE_INTERNAL_FORMAT then reads back as plain GL_R8 / GL_RG8, and formatFor() gives those an
+    // identity view (wolfvkimage.cpp:106-112), so a white greyscale texture sampled as (1,0,0,1): the grid's "Blank Texture"
+    // 5748decc-f629-461c-9a36-a35a221fe21f is a 1-component 512x512 J2C (Csiz 1 in its SIZ marker), and a box set to Blank
+    // showed red in the Vulkan-drawn deferred diffuse pass (ticket 766, W103 on Windows).
+    // The swizzle is a texture parameter (OpenGL 4.6 core spec 8.10 "Texture Parameters", TEXTURE_SWIZZLE_RGBA, read back
+    // with glGetTexParameteriv): each output component names a component of the texture's own RGBA (RED/GREEN/BLUE/ALPHA)
+    // or a constant (ZERO/ONE). In the Vulkan copy the texture's own RGBA is what format.mSwizzle already makes of the stored
+    // channels, so GL's swizzle is composed on top of it.
+    void applyGLSwizzle(WolfVkImage::Format& format)
+    {
+        GLint gl[4] = { GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA };   // GL's default swizzle
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, gl);
+        if (gl[0] == GL_RED && gl[1] == GL_GREEN && gl[2] == GL_BLUE && gl[3] == GL_ALPHA) return;
+        // the texture's own component i in the copy: format.mSwizzle's entry, IDENTITY meaning channel i itself
+        // (Vulkan spec VkComponentMapping)
+        const VkComponentSwizzle base[4] = {
+            format.mSwizzle.r == VK_COMPONENT_SWIZZLE_IDENTITY ? VK_COMPONENT_SWIZZLE_R : format.mSwizzle.r,
+            format.mSwizzle.g == VK_COMPONENT_SWIZZLE_IDENTITY ? VK_COMPONENT_SWIZZLE_G : format.mSwizzle.g,
+            format.mSwizzle.b == VK_COMPONENT_SWIZZLE_IDENTITY ? VK_COMPONENT_SWIZZLE_B : format.mSwizzle.b,
+            format.mSwizzle.a == VK_COMPONENT_SWIZZLE_IDENTITY ? VK_COMPONENT_SWIZZLE_A : format.mSwizzle.a };
+        VkComponentSwizzle out[4];
+        for (int c = 0; c < 4; ++c)
+        {
+            switch (gl[c])
+            {
+            case GL_RED:   out[c] = base[0]; break;
+            case GL_GREEN: out[c] = base[1]; break;
+            case GL_BLUE:  out[c] = base[2]; break;
+            case GL_ALPHA: out[c] = base[3]; break;
+            case GL_ZERO:  out[c] = VK_COMPONENT_SWIZZLE_ZERO; break;
+            case GL_ONE:   out[c] = VK_COMPONENT_SWIZZLE_ONE; break;
+            default:       out[c] = base[c]; break;   // GL accepts no other value; keep the component as it was
+            }
+        }
+        format.mSwizzle = { out[0], out[1], out[2], out[3] };
+    }
+
     bool mirrorTexture(LLImageGL* image, TextureEntry& entry)
     {
         const LLGLuint name = image->getTexName();
@@ -305,6 +345,8 @@ namespace
             glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(saved_binding));
             return false;
         }
+        // [T766 2026-11-10] sample what GL samples: a greyscale (GL_R8 + swizzle) texture as grey, not red
+        if (!format.mDepth) applyGLSwizzle(format);
         // count the levels of GL's mipmap chain that follow level 0. "width > 0" alone is not enough: when the texture
         // purge (llviewertexture.cpp:618 TextureDiscardBackgroundedTime) re-specifies level 0 smaller, GL keeps the older,
         // larger levels above it (run nv-hang1 19:09:09Z: level 0 8x8, level 4 still 16 wide). Counting those made a

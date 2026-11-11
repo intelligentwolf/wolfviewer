@@ -347,7 +347,9 @@ void WolfFloaterGreedySetup::putCoro(LLHandle<LLFloater> h, U32 gen, S32 index)
         if (!(f = self())) return;
         if (status != 200 || !reply.isMap() || !reply["success"].asBoolean())
         {
+            // a 404: the give is not on this web host (not installed yet, or being updated) - said in words, not "Not Found"
             const std::string why = reply.isMap() && reply.has("error") ? reply["error"].asString()
+                : status == 404 ? std::string("the grid does not hand out Greedy tables just now. Please try again later, or ask Wolf Territories support.")
                 : (transport.empty() ? llformat("the grid answered HTTP %d", status) : transport);
             fail("Your " + name + " could not be fetched: " + why);
             return;

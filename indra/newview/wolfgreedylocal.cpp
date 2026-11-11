@@ -305,14 +305,14 @@ std::string WolfGreedyLocal::tip() const
              + " this turn and is thinking...";
     }
     std::string last;
-    if (mState == "final") last = "Last turn! You need more than " + number(leaderOther(0)) + " to win. ";
+    if (mState == "final") last = "Last turn! Beat " + number(leaderOther(0)) + " to win. ";
     if (!mRolled) return before + last + "Your turn: press ROLL to roll all six dice.";
     if (mEventKind == "lucky")
-        return last + "Lucky six! All six dice scored (" + mWhat + "), so you may roll all six again - or BANK to keep "
-             + number(mTurnPoints) + ".";
-    std::string t = last + "These dice score: " + mWhat + " (" + number(mLastPoints) + "). They turn gold and are kept for you. "
-                  + "ROLL the " + llformat("%d", mDiceLeft) + " dice left for more, or BANK to keep " + number(mTurnPoints) + ".";
-    if (mDiceLeft <= 2) t += " With so few dice a bust is likely - BANK is safer.";
+        return last + "Lucky six! All six scored (" + mWhat + "). ROLL all six again, or BANK " + number(mTurnPoints) + ".";
+    // short enough for the HUD's two lines
+    std::string t = last + "These dice score: " + mWhat + " (" + number(mLastPoints) + "), kept in gold. ROLL the "
+                  + llformat("%d", mDiceLeft) + " left, or BANK " + number(mTurnPoints) + ".";
+    if (mDiceLeft <= 2) t += " Few dice left: BANK is safer.";
     return t;
 }
 

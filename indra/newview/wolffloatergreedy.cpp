@@ -1203,6 +1203,7 @@ void WolfFloaterGreedy::refreshButtons()
     for (const char* n : { "f_target_label", "f_target", "f_new", "f_practice", "f_games", "f_join", "f_refresh" })
         getChild<LLUICtrl>(n)->setVisible(!guide && !inGame);
     for (const char* n : { "f_leave", "f_pass" }) getChild<LLUICtrl>(n)->setVisible(!guide && inGame);
+    if (game.localGame()) getChild<LLUICtrl>("f_pass")->setVisible(false);   // [GREEDY COMPUTER PLAYER/] Bramble never needs passing
     for (const char* n : { "f_pass", "f_new", "f_practice", "f_join" }) getChild<LLUICtrl>(n)->setEnabled(!game.changeInFlight());
     getChild<LLUICtrl>("f_help")->setVisible(!guide);
     getChild<LLUICtrl>("f_setup")->setVisible(!guide);   // [GREEDY TABLE HERE 2026-11-11/]

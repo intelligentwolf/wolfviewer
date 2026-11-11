@@ -399,6 +399,16 @@ namespace
         if (st == "finished") { col = GOLD; return "GAME OVER"; }
         if (st == "lobby") return "WAITING TO START - PRESS START WHEN EVERYONE IS IN";
         if (g["my_turn"].asBoolean()) { col = GOLD; return g["rolled"].asBoolean() ? "YOUR TURN: ROLL AGAIN OR BANK" : "YOUR TURN: ROLL"; }
+        // [GREEDY COMPUTER PLAYER 2026-11-11] whose turn it is, by name (Bramble's in practice; any player's in a real game)
+        for (const LLSD& p : llsd::inArray(s.state()["players"]))
+        {
+            if (!p["current"].asBoolean()) continue;
+            std::string who = p["name"].asString();
+            const size_t paren = who.find(" (");
+            if (paren != std::string::npos) who.erase(paren);
+            LLStringUtil::toUpper(who);
+            if (!who.empty()) return who + (who.back() == 'S' ? "' TURN - WATCH THE DICE" : "'S TURN - WATCH THE DICE");
+        }
         return "WAITING FOR THE OTHER PLAYERS";
     }
 }
@@ -722,6 +732,8 @@ void WolfGreedyHud::draw()
             if (inGame)
             {
                 button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "LEAVE", H_LEAVE, "Leave this game", 12.f, BTN_HI, BTN_LO, changes_ok);
+                // [GREEDY COMPUTER PLAYER 2026-11-11/] practice: Bramble never needs passing
+                if (!s.localGame())
                 button(c, X(R_L + 182.f), YM(780.f), X(R_L + 358.f), YM(716.f), "PASS THEIR TURN", H_PASS,
                        "When the player whose turn it is has been away for a few minutes", 11.f, BTN_HI, BTN_LO, changes_ok && going && !gm["my_turn"].asBoolean());
                 button(c, X(R_L + 364.f), YM(780.f), X(1588.f), YM(716.f), "WINDOW", H_WINDOW,

@@ -17,6 +17,7 @@
 
 #include "wolfgame.h"
 #include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/] one bottom panel at a time
+#include "wolffloatergreedy.h"   // [W104 MERGE 2026-11-11/] the Greedy HUD too
 
 #include <algorithm>
 #include <cmath>
@@ -1403,9 +1404,12 @@ bool WolfGame::bottomTaken()
 // [FISHING HUD 2026-11-11] the bottom in use by a vehicle (bottomTaken) or by the Fishing HUD: the game HUD steps aside and
 // its objective / talk panels go to the top right so they do not sit over Fishing. The Adventure story camera still only
 // stops for a vehicle (bottomTaken), so fishing does not change how a story plays.
+// [W104 MERGE 2026-11-11] the Greedy HUD the same way (one rule for both: the game HUD steps aside while either shows and comes
+// back when it closes; shown by hand, the game HUD closes them, claimBottom)
 bool WolfGame::bottomBusy()
 {
-    return bottomTaken() || (WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn());
+    return bottomTaken() || (WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn())
+        || (WolfGreedyGame::instanceExists() && WolfGreedyGame::instance().hudOn());
 }
 
 bool WolfGame::hudShowing() const
@@ -1443,6 +1447,7 @@ void WolfGame::claimBottom()
     // <WolfViewer 2026-10-28> the Captain's Helm gives way too (showHud(false): not reopened for this seat)
     if (WolfHelm::instance().hudShowing()) WolfHelm::instance().showHud(false);
     WolfFishingSession::gameHudClaims();   // [FISHING HUD 2026-11-11/] the game HUD shown by hand: Fishing makes way
+    WolfGreedyGame::gameHudClaims();       // [W104 MERGE 2026-11-11/] and Greedy
     ++mGeneration;
 }
 

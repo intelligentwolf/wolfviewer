@@ -106,13 +106,15 @@ public:
     /** [REVIEW 11-11 B1] Paul: "play while wandering" - a vehicle's panel (dashboard, flight / sailing deck, Captain's Helm,
      *  Ski HUD) is never taken away: Fishing waits for it and appears by itself when it goes; one switched on while Fishing
      *  shows sends Fishing back to waiting (the session, the rod and the messages go on). The same rule as Greedy's
-     *  (wolfviewer-featfix wolffloatergreedy.cpp). "" = none showing. */
+     *  (wolfviewer-featfix wolffloatergreedy.cpp). "" = none showing; else its name with its article ("the dashboard").
+     *  [W104 MERGE 2026-11-11] the Greedy HUD counts too: Greedy and Fishing are one at a time, the one switched on last waits. */
     static std::string vehiclePanelUp();
     void waitFor(const std::string& vehicle);
     /** Every frame from the HUD control, also while it does not show: a waiting HUD appears when the bottom is free. */
     void pendingTick();
-    /** The game HUD shown by hand takes the bottom (wolfgame.cpp claimBottom): the Fishing HUD closes. Only the game HUD is
-     *  put away by Fishing, passively (wolfgame.cpp bottomTaken), so it comes back when Fishing closes. */
+    /** The game HUD shown by hand takes the bottom (wolfgame.cpp claimBottom): the Fishing HUD closes ([W104 MERGE 2026-11-11]
+     *  and a waiting one stops waiting). Only the game HUD is put away by Fishing, passively (wolfgame.cpp bottomBusy), so it
+     *  comes back when Fishing closes. */
     static void gameHudClaims();
 
     void cast();          // also "Get my rod" when there is no rod

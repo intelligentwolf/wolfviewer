@@ -391,32 +391,26 @@ void WolfGreedyHud::draw()
     if (WolfGreedyGame::instanceExists()) WolfGreedyGame::instance().pendingTick();   // [review 2 W4] a waiting HUD appears
     if (!WolfGreedyGame::instanceExists() || !WolfGreedyGame::instance().hudOn() || !WolfGrid::isOnWolfTerritories())
     {
-        mOtherWasUp = WolfGreedyGame::instanceExists() && !WolfGreedyGame::bottomTakenBy().empty();
+        mOtherWasUp = WolfGreedyGame::instanceExists() && !WolfGreedyGame::vehiclePanelUp().empty();
         if (hasMouseCapture()) gFocusMgr.setMouseCapture(nullptr);
         mPressed = H_NONE;
         mResize.hide();
         return;
     }
     WolfGreedyGame& s = WolfGreedyGame::instance();
-    // [W104 FEATFIX review 2026-11-11] one bottom panel at a time (wolffloatergreedy.h bottomTakenBy): another switched on after
-    // this one puts this one away - the game goes on, and Wolf World > Greedy brings the HUD back
-    const std::string other = WolfGreedyGame::bottomTakenBy();
-    const bool other_up = !other.empty();
+    // [W104 FEATFIX review 2026-11-11] one bottom panel at a time (wolffloatergreedy.h vehiclePanelUp): a vehicle's panel
+    // switched on after this one sends Greedy back to waiting - the game goes on, and Greedy comes back by itself when that
+    // panel goes (playing while wandering). [W104 MERGE 2026-11-11] The game HUD is no longer handled here: it steps aside
+    // by itself while Greedy shows (wolfgame.cpp bottomBusy), and shown by hand it closes Greedy (WolfGreedyGame::gameHudClaims).
+    // Fishing never comes up while Greedy shows (it waits for Greedy, wolffishingoverlay.cpp vehiclePanelUp).
+    const bool other_up = !WolfGreedyGame::vehiclePanelUp().empty();
     const bool newly = other_up && !mOtherWasUp;
     mOtherWasUp = other_up;
     if (newly)
     {
         WolfGreedyGame::closeHud();
         mResize.hide();
-        if (other != "game HUD")
-        {
-            // [review 2 W4] a vehicle's panel: Greedy waits for it and comes back by itself (playing while wandering)
-            WolfGreedyGame::openHud();   // (waits: vehiclePanelUp is not empty, and says so)
-        }
-        else
-        {
-            s.setMessage("The Greedy HUD made way for the game HUD. Your game goes on: Wolf World > Greedy brings the HUD back.", false);
-        }
+        WolfGreedyGame::openHud();   // (waits: vehiclePanelUp is not empty, and says so)
         return;
     }
     s.tick(false);

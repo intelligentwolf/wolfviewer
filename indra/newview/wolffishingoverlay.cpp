@@ -51,6 +51,7 @@
 #include "wolfcave.h"
 #include "wolfdrive.h"
 #include "wolfflight.h"
+#include "wolffloatergreedy.h"   // [W104 MERGE 2026-11-11/] Greedy and Fishing one at a time
 #include "wolfgame.h"
 #include "wolfgrid.h"
 #include "wolfhelm.h"
@@ -805,10 +806,13 @@ std::string WolfFishingSession::vehiclePanelUp()
     // Source: wolfviewer-featfix wolffloatergreedy.cpp WolfGreedyGame::vehiclePanelUp (wolfgame.cpp WolfGame::bottomTaken: the
     // deck on screen while active and not hidden, the dashboard, the helm; and the Ski HUD, wolfskis.h hudShowing)
     const WolfFlight& wf = WolfFlight::instance();
-    if (wf.active() && !wf.deckHidden()) return wf.sailing() ? "sailing deck" : "flight deck";
-    if (WolfDrive::instance().dashboardOn()) return "dashboard";
-    if (WolfHelm::instance().hudShowing()) return "Captain's Helm";
-    if (WolfSkis::instance().hudShowing()) return "Ski HUD";
+    if (wf.active() && !wf.deckHidden()) return wf.sailing() ? "the sailing deck" : "the flight deck";
+    if (WolfDrive::instance().dashboardOn()) return "the dashboard";
+    if (WolfHelm::instance().hudShowing()) return "the Captain's Helm";
+    if (WolfSkis::instance().hudShowing()) return "the Ski HUD";
+    // [W104 MERGE 2026-11-11] the Greedy HUD showing (wolffloatergreedy.h hudOn: not while it waits itself). Greedy and Fishing
+    // are one at a time: the one switched on last waits for the other (wolffloatergreedy.h vehiclePanelUp, the same rule)
+    if (WolfGreedyGame::instanceExists() && WolfGreedyGame::instance().hudOn()) return "Greedy";
     return std::string();
 }
 
@@ -820,7 +824,7 @@ void WolfFishingSession::waitFor(const std::string& vehicle)
     // [review 11-11 item 1] a Challenge game cannot go on with the HUD away: it ends as if Reel in were let go, and nothing
     // is sent, so the fish is not lost and still waits; Reel in is free again
     endChallenge();
-    const std::string tip = "Fishing will appear along the bottom of the screen when you have finished with the " + vehicle + ".";
+    const std::string tip = "Fishing will appear along the bottom of the screen when you have finished with " + vehicle + ".";
     setStatus(tip, false);
     LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", tip));
 }
@@ -878,8 +882,11 @@ void WolfFishingSession::gameHudClaims()
 {
     // the game HUD shown by hand (its tile, Game Mode switched on) takes the bottom from Fishing: the HUD closes, as Greedy's
     // does for it (wolffloatergreedy.cpp); the Board window, if open, keeps the session
-    if (!instanceExists() || !instance().hudOn()) return;   // waiting for a vehicle's panel: it keeps waiting
-    instance().viewClosed(VIEW_HUD);
+    // [W104 MERGE 2026-11-11] a WAITING Fishing HUD stops waiting as well (was: it kept waiting): claimBottom has just closed
+    // the vehicle's panel it waited for, so it would otherwise appear next frame and push the game HUD the resident asked for
+    // straight back off the bottom. Greedy's the same (wolffloatergreedy.cpp gameHudClaims).
+    if (!instanceExists() || !instance().hudWanted()) return;
+    instance().viewClosed(VIEW_HUD);   // (also forgets the wait: mHudPending)
     LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE",
         std::string("Fishing made way for the game HUD. Wolf World > Fishing brings it back.")));
 }

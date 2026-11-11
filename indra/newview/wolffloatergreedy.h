@@ -59,11 +59,10 @@ public:
     void viewClosed(EView v);
     bool hudOn() const { return (mViews & VIEW_HUD) != 0; }
     /** [W104 FEATFIX review 2 2026-11-11] switched on, or waiting to come back once the resident has finished with a vehicle's
-     *  panel (see claimBottom): the menu tick and the Wolf HUDs tile show this */
+     *  panel or Fishing (see vehiclePanelUp): the menu tick and the Wolf HUDs tile show this */
     bool hudWanted() const { return hudOn() || mHudPending; }
     /** Every frame from the HUD control (wolfgreedyhud.cpp), also while it is off: a waiting HUD appears when the bottom is free. */
     void pendingTick();
-    void restoreGameHud();          // [review 3 F1]
     /** [review 2] the textures let go before the texture system shuts down (LLAppViewer::cleanup) */
     void releaseImages() { mHeldImages.clear(); }
     /** Wolf World > Greedy, the Wolf HUDs tile: the HUD on or off. */
@@ -71,19 +70,19 @@ public:
     static void openHud();
     static void closeHud();
     /** [W104 FEATFIX review 2026-11-11] ONE BOTTOM PANEL AT A TIME (the rule of wolfgame.cpp / wolfhelm.cpp / wolfskis.cpp
-     *  claimBottom): the name of another panel across the bottom of the screen showing now ("" none) - the car / spaceship /
-     *  speedboat / submarine dashboard, the flight or sailing deck, the Captain's Helm, the Ski HUD, the game HUD. The Greedy
-     *  HUD switched on puts those away (claimBottom, and says so in its message area); one of them switched on later puts the
-     *  Greedy HUD away (WolfGreedyHud::draw). At the fishing-overlay merge: add the Fishing HUD to both (bottomTakenBy and
-     *  claimBottom here), and have the Fishing HUD close this one as it claims the bottom.
+     *  claimBottom).
      *  [W104 FEATFIX review 2 2026-11-11] Paul: "play while wandering". A VEHICLE's panel (dashboard, deck, helm, skis) is never
      *  pulled away from someone driving, flying, sailing or skiing: the Greedy HUD waits ("Greedy will appear when you have
      *  finished with the dashboard") and appears by itself when that panel goes; one of those switched on while Greedy shows
-     *  sends Greedy back to waiting the same way. Only the game HUD (not a vehicle) is put away by Greedy, and it is brought
-     *  back when the Greedy HUD closes (if Game Mode is still on). */
-    static std::string bottomTakenBy();
-    static std::string vehiclePanelUp();   // the vehicle panel showing ("" none)
-    static void claimBottom();
+     *  sends Greedy back to waiting the same way (WolfGreedyHud::draw).
+     *  [W104 MERGE 2026-11-11] with the Fishing HUD: Greedy and Fishing are one at a time, each treating the other as it treats
+     *  a vehicle's panel (here and wolffishingoverlay.cpp WolfFishingSession::vehiclePanelUp), so the one switched on last waits
+     *  and appears when the other closes; neither ever sends the showing one away, so they cannot send each other to waiting
+     *  in turn. The game HUD steps aside by itself while Greedy shows, as it does for Fishing (wolfgame.cpp bottomBusy), and
+     *  comes back when Greedy closes; the game HUD shown by hand takes the bottom and Greedy closes (gameHudClaims). */
+    static std::string vehiclePanelUp();   // what Greedy waits for, with its article ("the dashboard", "Fishing"; "" none)
+    /** The game HUD shown by hand (wolfgame.cpp claimBottom): the Greedy HUD closes, and a waiting one stops waiting. */
+    static void gameHudClaims();
 
     /** Every frame from a view that shows (minimised = the window is minimised): the polling. */
     void tick(bool minimised);
@@ -141,7 +140,6 @@ private:
     std::string mInFlight;          // [review] the request out now ("" none), and its arguments (W5: a join of another game is not a repeat)
     std::string mInFlightExtra;
     bool mHudPending = false;       // [review 2] waiting for a vehicle's panel to go
-    bool mHidGameHud = false;       // [review 2] the Greedy HUD put the game HUD away: it comes back when Greedy closes
     LLUUID mPendingSession;         // [review 3 F2] the login a wait belongs to
     std::vector<LLPointer<LLUIImage>> mHeldImages;   // [review] the dice faces and tumble frames, loaded while a view is open
     F64 mNextPoll = 0.0;

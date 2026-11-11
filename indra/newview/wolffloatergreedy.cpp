@@ -48,7 +48,8 @@
 #include "llviewerregion.h"
 #include "llvoavatarself.h"
 #include "llui.h"
-#include "wolfdrive.h"   // [W104 FEATFIX review/] one bottom panel at a time (bottomTakenBy / claimBottom)
+#include "wolfdrive.h"   // [W104 FEATFIX review/] one bottom panel at a time (vehiclePanelUp)
+#include "wolffishingoverlay.h"   // [W104 MERGE 2026-11-11/] Greedy and Fishing one at a time
 #include "wolfflight.h"
 #include "wolfgame.h"
 #include "wolfgrid.h"
@@ -269,7 +270,6 @@ void WolfGreedyGame::viewClosed(EView v)
 {
     mViews &= ~(U32)v;
     if (mViews == 0) mHeldImages.clear();   // [review 2 W1] reloaded when a view opens again (viewOpened)
-    if (v == VIEW_HUD) restoreGameHud();
     changed();
 }
 
@@ -287,12 +287,16 @@ void WolfGreedyGame::openHud()
         g.mPendingSession = gAgentSessionID;
         g.changed();
         LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE",
-            "Greedy will appear along the bottom of the screen when you have finished with the " + vehicle + "."));
+            "Greedy will appear along the bottom of the screen when you have finished with " + vehicle + "."));
         return;
     }
     g.mHudPending = false;
-    if (WolfGrid::isOnWolfTerritories()) claimBottom();   // [W104 FEATFIX review 2026-11-11/] one bottom panel at a time
+    // [W104 MERGE 2026-11-11] the game HUD steps aside by itself while Greedy shows (wolfgame.cpp bottomBusy) and comes back
+    // when Greedy closes - the Fishing HUD's rule and words (wolffishingoverlay.cpp WolfFishingSession::openHud); it was put
+    // away here by hand before the merge
+    const bool game_hud = WolfGrid::isOnWolfTerritories() && WolfGame::instance().hudShowing();
     g.viewOpened(VIEW_HUD);
+    if (game_hud) g.setMessage("The game HUD steps aside while you play Greedy; it comes back when you close Greedy.", false);
     // the first time: the guide's cards (as the window did, WolfGreedyGuideSeen)
     if (WolfGrid::isWolfTerritories() && !gSavedSettings.getBOOL("WolfGreedyGuideSeen"))
     {
@@ -307,39 +311,31 @@ std::string WolfGreedyGame::vehiclePanelUp()
     // Source: wolfgame.cpp WolfGame::bottomTaken (the deck on screen while active and not hidden; the dashboard; the helm),
     // and the Ski HUD (wolfskis.h hudShowing)
     const WolfFlight& wf = WolfFlight::instance();
-    if (wf.active() && !wf.deckHidden()) return wf.sailing() ? "sailing deck" : "flight deck";
-    if (WolfDrive::instance().dashboardOn()) return "dashboard";
-    if (WolfHelm::instance().hudShowing()) return "Captain's Helm";
-    if (WolfSkis::instance().hudShowing()) return "Ski HUD";
+    if (wf.active() && !wf.deckHidden()) return wf.sailing() ? "the sailing deck" : "the flight deck";
+    if (WolfDrive::instance().dashboardOn()) return "the dashboard";
+    if (WolfHelm::instance().hudShowing()) return "the Captain's Helm";
+    if (WolfSkis::instance().hudShowing()) return "the Ski HUD";
+    // [W104 MERGE 2026-11-11] the Fishing HUD showing (wolffishingoverlay.h hudOn: not while it waits itself)
+    if (WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudOn()) return "Fishing";
     return std::string();
 }
 
 // static
-std::string WolfGreedyGame::bottomTakenBy()
+void WolfGreedyGame::gameHudClaims()
 {
-    // Source: wolfgame.cpp WolfGame::bottomTaken (the deck on screen while active and not hidden; the dashboard; the helm),
-    // and the Ski HUD and the game HUD, which give way to each other the same way (wolfskis.cpp, wolfgame.cpp claimBottom)
-    const WolfFlight& wf = WolfFlight::instance();
-    if (wf.active() && !wf.deckHidden()) return wf.sailing() ? "sailing deck" : "flight deck";
-    if (WolfDrive::instance().dashboardOn()) return "dashboard";
-    if (WolfHelm::instance().hudShowing()) return "Captain's Helm";
-    if (WolfSkis::instance().hudShowing()) return "Ski HUD";
-    if (WolfGame::instance().hudShowing()) return "game HUD";
-    return std::string();
-}
-
-// static
-void WolfGreedyGame::claimBottom()
-{
-    // [review 2 W4] only the game HUD is put away (the game keeps running with its HUD hidden, WolfGame::toggleHud); a vehicle's
-    // panel never is (openHud waits for it instead), so nobody driving has their controls pulled away
-    if (WolfGame::instance().hudShowing())
-    {
-        WolfGame::instance().toggleHud();
-        instance().mHidGameHud = true;
-        instance().setMessage("The game HUD was put away so Greedy can sit along the bottom of the screen; it comes back when "
-                              "you close Greedy.", false);
-    }
+    // [W104 MERGE 2026-11-11] Source: wolffishingoverlay.cpp WolfFishingSession::gameHudClaims - the game HUD shown by hand
+    // (its tile, Game Mode switched on) takes the bottom: a showing Greedy HUD closes; the game goes on and the window, if
+    // open, still shows it
+    // A WAITING Greedy stops waiting as well: claimBottom has just closed the vehicle's panel it waited for, so it would
+    // otherwise appear next frame and push the game HUD the resident asked for straight back off the bottom
+    if (!instanceExists() || !instance().hudWanted()) return;
+    WolfGreedyGame& g = instance();
+    g.mHudPending = false;
+    if (g.hudOn()) g.viewClosed(VIEW_HUD);
+    else g.changed();
+    const std::string text = "The Greedy HUD made way for the game HUD. Your game goes on: Wolf World > Greedy brings the HUD back.";
+    g.setMessage(text, false);
+    LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", text));
 }
 
 // static
@@ -356,7 +352,6 @@ void WolfGreedyGame::toggleHud()
         // [review 2] switched off while waiting: it does not come
         instance().mHudPending = false;
         instance().changed();
-        instance().restoreGameHud();   // [review 3 F1] this is Greedy's real close
         LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", std::string("Greedy will not appear after all.")));
         return;
     }
@@ -376,16 +371,6 @@ void WolfGreedyGame::pendingTick()
         return;
     }
     if (vehiclePanelUp().empty()) openHud();   // the vehicle's panel has gone: Greedy appears
-}
-
-// [review 3 F1] the game HUD Greedy put away comes back when Greedy finally closes (not while it only waits for a vehicle's
-// panel: then the flag stays, and the restore happens at the real close), if Game Mode is still on and its HUD still hidden
-void WolfGreedyGame::restoreGameHud()
-{
-    if (!mHidGameHud || !vehiclePanelUp().empty()) return;
-    mHidGameHud = false;
-    WolfGame& wg = WolfGame::instance();
-    if (WolfGrid::isOnWolfTerritories() && wg.gameModeShownOn() && !wg.hudShowing()) wg.toggleHud();
 }
 
 void WolfGreedyGame::noteActivity()

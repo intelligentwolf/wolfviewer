@@ -79,7 +79,7 @@ private:
     F32 mHitScale = 1.f;
     bool mDrawn = false;
     S32 mPressed = H_NONE;
-    bool mOtherWasUp = false;           // [review] another bottom panel was showing last frame (WolfGreedyGame::bottomTakenBy)
+    bool mOtherWasUp = false;           // [review] another bottom panel was showing last frame (WolfGreedyGame::vehiclePanelUp)
 
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;

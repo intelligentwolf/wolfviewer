@@ -564,6 +564,9 @@
             Unread Messages: [NUM]
           </text>
         </layout_panel>
+        <!-- [IM INPUT ROWS 2026-11-11] Paul: the text box on its own full-width row, the buttons on a row beneath it (the box was
+             squeezed to a sliver beside them). chat_layout_panel holds only the editor, so fsfloaterim.cpp reshapeChatLayoutPanel
+             (editor height + the 6 px pad measured at postBuild) still grows it with multi-line text. -->
         <layout_panel
           tab_group="3"
           top_delta="0"
@@ -571,6 +574,28 @@
           bottom="-1"
           auto_resize="false"
           name="chat_layout_panel">
+          <chat_editor
+          layout="topleft"
+          expand_lines_count="5"
+          follows="left|right|bottom"
+          font="SansSerifSmall"
+          height="20"
+          is_expandable="true"
+          text_tentative_color="TextFgTentativeColor"
+          name="chat_editor"
+          max_length="3070"
+          spellcheck="true"
+          top="3"
+          left="4"
+          right="-2"
+          wrap="true" />
+        </layout_panel>
+        <layout_panel
+          tab_group="4"
+          height="26"
+          auto_resize="false"
+          user_resize="false"
+          name="input_buttons_row_panel">
           <layout_stack
             animate="false"
             follows="all"
@@ -580,29 +605,13 @@
             bottom="-2"
             left="0"
             right="-1">
+            <!-- the free space left of the buttons, so they sit at the right as before -->
             <layout_panel
-              name="input_editor_layout_panel"
+              name="input_spacer_layout_panel"
               auto_resize="true"
               user_resize="false"
               top="0"
-              bottom="-1">
-              <chat_editor
-              layout="topleft"
-              expand_lines_count="5"
-              follows="left|right|bottom"
-              font="SansSerifSmall"
-              height="20"
-              is_expandable="true"
-              text_tentative_color="TextFgTentativeColor"
-              name="chat_editor"
-              max_length="3070"
-              spellcheck="true"
-              top="1"
-              bottom="-1"
-              left="4"
-              right="-2"
-              wrap="true" />
-            </layout_panel>
+              bottom="-1" />
             <!-- [IM TRANSLATOR 2026-11-10] ticket 631: this conversation's translator (wolffloaterimtranslate.cpp) -->
             <layout_panel
               auto_resize="false"

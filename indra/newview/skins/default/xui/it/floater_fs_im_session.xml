@@ -60,7 +60,7 @@
 						Messaggi non letti: [NUM]
 					</text>
 				</layout_panel>
-				<layout_panel name="chat_layout_panel">
+				<layout_panel name="input_buttons_row_panel">
 					<layout_stack name="input_panels">
 						<layout_panel name="emoji_button_layout_panel">
 							<button name="emoji_picker_toggle_btn" tool_tip="Mostra pannello emoji" />

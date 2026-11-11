@@ -73,6 +73,11 @@ with the same filename but different name
   <texture name="WolfHuds_ship" file_name="icons/wolf_huds_ship.png" preload="false" />
   <texture name="WolfHuds_speedboat" file_name="icons/wolf_huds_speedboat.png" preload="false" />
   <texture name="WolfHuds_submarine" file_name="icons/wolf_huds_submarine.png" preload="false" />
+  <!-- [W104 FEATFIX 2026-11-11] the Wolf HUDs window's new tiles (region-terrain-work/w104-review-2026-11-11/featfix/make_hud_art_extra.py) -->
+  <texture name="WolfHuds_greedy" file_name="icons/wolf_huds_greedy.png" preload="false" />
+  <texture name="WolfHuds_roleplay" file_name="icons/wolf_huds_roleplay.png" preload="false" />
+  <texture name="WolfHuds_compass" file_name="icons/wolf_huds_compass.png" preload="false" />
+  <texture name="WolfHuds_speed" file_name="icons/wolf_huds_speed.png" preload="false" />
   <texture name="Arrow_Left" file_name="widgets/Arrow_Left.png" preload="true" />
   <texture name="Arrow_Right" file_name="widgets/Arrow_Right.png" preload="true" />
 

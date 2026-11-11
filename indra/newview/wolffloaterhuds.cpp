@@ -27,8 +27,39 @@ namespace
     // Source: floater_wolf_huds.xml tile_<id> / state_<id>; the order is ETile's.
     const char* const TILE_IDS[WolfFloaterHuds::T_COUNT] =
     {
-        "game", "car", "skis", "plane", "spaceship", "boat", "ship", "speedboat", "submarine"
+        "game", "car", "skis", "plane", "spaceship", "boat", "ship", "speedboat", "submarine",
+        "greedy", "roleplay", "compass", "speed"   // [W104 FEATFIX 2026-11-11]
     };
+
+    // [W104 FEATFIX 2026-11-11 A7] each tile's name as floater_wolf_huds.xml name_<id> shows it, for the status line
+    const char* const TILE_NAMES[WolfFloaterHuds::T_COUNT] =
+    {
+        "Game Mode", "The Car Dashboard", "Winter Fun", "The Flight Deck", "The Spaceship HUD", "The Sailing Deck",
+        "The Captain's Helm", "The Speedboat helm", "The Submarine helm",
+        "Greedy", "The Roleplay console", "Tessa's Compass", "Xenon's WolfSpeed"
+    };
+
+    // [W104 FEATFIX 2026-11-11] Wolf Territories only, as their menu items (menu_viewer.xml on_visible WolfGrid.IsOnWolfTerritories);
+    // Tessa's Compass works on every grid (its menu item has no gate, floater_wolf_compass.xml "Every grid")
+    const bool TILE_WOLF_ONLY[WolfFloaterHuds::T_COUNT] =
+    {
+        true, true, true, true, true, true, true, true, true,
+        true, true, false, true
+    };
+
+    // [W104 FEATFIX 2026-11-11] the windows these tiles show and hide (menu_viewer.xml WolfGreedy / WolfRoleplay / WolfCompass /
+    // WolfSpeed: Floater.Show / Floater.Toggle of these names)
+    const char* floaterOf(WolfFloaterHuds::ETile t)
+    {
+        switch (t)
+        {
+            case WolfFloaterHuds::T_GREEDY:   return "wolf_greedy";
+            case WolfFloaterHuds::T_ROLEPLAY: return "wolf_roleplay";
+            case WolfFloaterHuds::T_COMPASS:  return "wolf_compass";
+            case WolfFloaterHuds::T_SPEED:    return "wolf_speed";
+            default:                          return nullptr;
+        }
+    }
 
     // Source: lltoolbarview.cpp postBuild before 2026-11-10 (the Game icon's `run` lambda): the same command as
     // World > Game Mode, so its refusals and the forced-region lock behave the same wherever it is pressed.
@@ -63,6 +94,7 @@ bool WolfFloaterHuds::postBuild()
 void WolfFloaterHuds::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);
+    mNote.clear();   // [A7/]
     refreshTiles();
     // Keyboard: Tab moves between the tiles, Enter or Space presses one (LLButton::handleKeyHere). No tile is given focus
     // on open: in the WolfViewer skins a focused button is drawn green, which would read as "this one is on".
@@ -102,6 +134,10 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_SHIP:      return WolfHelm::instance().hudShowing();
         case T_SPEEDBOAT: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPEEDBOAT);
         case T_SUBMARINE: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SUBMARINE);
+        case T_GREEDY:
+        case T_ROLEPLAY:
+        case T_COMPASS:
+        case T_SPEED:     return LLFloaterReg::instanceVisible(floaterOf(t));   // as their menu ticks (Floater.Visible)
         default:          return false;
     }
 }
@@ -109,13 +145,15 @@ bool WolfFloaterHuds::tileOn(ETile t)
 // Source: lltoolbarview.cpp postBuild before 2026-11-10 - each icon's commit callback, unchanged.
 void WolfFloaterHuds::onTile(ETile t)
 {
-    if (!WolfGrid::isOnWolfTerritories())
+    if (!WolfGrid::isOnWolfTerritories() && TILE_WOLF_ONLY[t])
     {
         return;   // the tiles are disabled off Wolf (refreshTiles); a press that slips through does nothing, as the icons
     }
     // Switching a HUD ON closes this window so the HUD can be seen (it sits over the bottom of the screen); switching
     // one OFF leaves it open for the next choice.
+    mNote.clear();
     const bool was_on = tileOn(t);
+    const bool skis_window_was_open = LLFloaterReg::instanceVisible("wolf_skis");
     switch (t)
     {
         case T_GAME:
@@ -135,12 +173,37 @@ void WolfFloaterHuds::onTile(ETile t)
         case T_SHIP:      WolfHelm::instance().toggleHud(); break;
         case T_SPEEDBOAT: WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SPEEDBOAT); break;
         case T_SUBMARINE: WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SUBMARINE); break;
+        case T_GREEDY:
+        case T_ROLEPLAY:
+        case T_COMPASS:
+        case T_SPEED:     LLFloaterReg::toggleInstance(floaterOf(t)); break;   // Floater.Toggle, as the menu
         default:          return;
     }
-    if (!was_on)
+    if (was_on)
+    {
+        return;
+    }
+    // [W104 FEATFIX 2026-11-11 A7] Did it come on? Only then is this window closed. A HUD can refuse (a gate, Game Mode
+    // locked by the region, a window that closes itself): the window then stays open with the tile still OFF and says so,
+    // instead of the press seeming lost. Started but not on yet counts as on: Game Mode connecting, the Winter Fun window
+    // (its tile is lit by riding, the window is where they choose; pressing it with that window open closed it).
+    bool came_on = tileOn(t);
+    if (t == T_GAME)
+    {
+        const WolfGame& g = WolfGame::instance();
+        came_on = came_on || g.gameModeShownOn() || g.gameModeConnecting();
+    }
+    else if (t == T_SKIS)
+    {
+        came_on = came_on || skis_window_was_open || LLFloaterReg::instanceVisible("wolf_skis");
+    }
+    if (came_on)
     {
         closeFloater();
+        return;
     }
+    mNote = std::string(TILE_NAMES[t]) + " did not come on. If a message popped up, it says why; otherwise try again in a moment.";
+    refreshTiles();
 }
 
 void WolfFloaterHuds::refreshTiles()
@@ -150,8 +213,9 @@ void WolfFloaterHuds::refreshTiles()
     {
         if (!mTiles[i] || !mStates[i]) continue;
         const ETile t = static_cast<ETile>(i);
-        const bool on = wolf && tileOn(t);
-        mTiles[i]->setEnabled(wolf);
+        const bool usable = wolf || !TILE_WOLF_ONLY[i];   // [W104 FEATFIX 2026-11-11/] Tessa's Compass works on every grid
+        const bool on = usable && tileOn(t);
+        mTiles[i]->setEnabled(usable);
         mTiles[i]->setToggleState(on);
         // The word as well as the light (never colour alone): ON / OFF, and what the old tooltips said beside it.
         std::string state = on ? "ON" : "OFF";
@@ -184,7 +248,12 @@ void WolfFloaterHuds::refreshTiles()
     }
     if (mStatus)
     {
-        const std::string msg = wolf ? std::string() : std::string("Wolf HUDs work on Wolf Territories regions only.");
-        if (mStatus->getText() != msg) mStatus->setText(msg);
+        // [W104 FEATFIX 2026-11-11 A7] after a press that did not switch a HUD on: why the window stayed open
+        const std::string msg = wolf ? mNote : std::string("Wolf HUDs work on Wolf Territories regions only (Tessa's Compass works everywhere).");
+        if (mStatus->getText() != msg)
+        {
+            mStatus->setText(msg);
+            mStatus->setColor(LLUIColorTable::instance().getColor(msg.empty() ? "LabelTextColor" : "AlertCautionTextColor"));
+        }
     }
 }

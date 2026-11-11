@@ -152,6 +152,7 @@ private:
     LLTextBox* mSurfaceNote = nullptr;
     U32 mSeenSkyChange = 0;
     LLViewerRegion* mSeenSkyRegion = nullptr;
+    LLUUID mSeenSkyRegionId;                    // [W104 FEATFIX 2026-11-11 B4/] a pointer can be reused by the next region
     WolfDigProgress* mDig = nullptr;
 };
 

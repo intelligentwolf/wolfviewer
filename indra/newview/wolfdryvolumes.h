@@ -118,6 +118,7 @@ public:
         LLVector3 mAxis[3];
         F32 mHalf[3] = { 0.f, 0.f, 0.f };
         std::shared_ptr<const HullProfile> mHull;   // KIND_HULL only
+        LLUUID mId;                                 // [W104 FEATFIX 2026-11-11 B3] the tagged prim (null: a hull or a tunnel box)
         bool contains(const LLVector3& agent_pos) const;
         F32 boundingRadius() const;
     };

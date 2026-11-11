@@ -591,12 +591,16 @@ namespace
     constexpr S32 DRY_MAX_LEVELS = 32;
     constexpr F32 RIM_C[8] = { 1.f, 0.70710678f, 0.f, -0.70710678f, -1.f, -0.70710678f, 0.f, 0.70710678f };
     constexpr F32 RIM_S[8] = { 0.f, 0.70710678f, 1.f, 0.70710678f, 0.f, -0.70710678f, -1.f, -0.70710678f };
+    // [W104 FEATFIX 2026-11-11 B3] (CHOSEN) a tagged prim whose place key has not changed for this long is at rest
+    constexpr F64 DRY_SETTLE_S = 2.0;
 }
 
-void WolfUnderSea::dryUpdate()
+void WolfUnderSea::dryUpdate(F64 now)
 {
     mDry.clear();
     U64 sig = 0;
+    ++mDryPass;
+    if (mDryPass == 0) ++mDryPass;   // 0 marks a new DryTrack
     for (const WolfDryVolumes::Volume& v : WolfDryVolumes::instance().volumes())
     {
         if (v.mKind == WolfDryVolumes::KIND_NONE) continue;
@@ -615,9 +619,27 @@ void WolfUnderSea::dryUpdate()
             k = hash2((S64)floorf(v.mAxis[a].mV[VZ] * 64.f), (S64)floorf(v.mHalf[a] * 4.f), k);
         }
         d.mKey = k;
+        // [W104 FEATFIX 2026-11-11 B3] a tagged prim on the move (its key, rounded to 0.25 m, changed in the last DRY_SETTLE_S)
+        // is left out of the plants' tests and the signature, as a hull is: a "wolfdry" tube on a submarine no longer
+        // rebuilds every garden it passes 4 times a metre; at rest it counts again (one rebuild where it stopped)
+        if (v.mId.notNull() && v.mKind != WolfDryVolumes::KIND_HULL)
+        {
+            DryTrack& t = mDryTrack[v.mId];
+            if (t.mSeen == 0) { t.mKey = k; t.mChangedAt = now - DRY_SETTLE_S; }   // first seen: at rest
+            else if (t.mKey != k) { t.mKey = k; t.mChangedAt = now; }
+            t.mSeen = mDryPass;
+            d.mSettled = now - t.mChangedAt >= DRY_SETTLE_S;
+        }
         mDry.push_back(d);
-        // the plants' volumes only: a boat's hull sails on (plantBlocked), so its rocking never rebuilds a garden
-        if (v.mKind != WolfDryVolumes::KIND_HULL) sig ^= k;
+        // the plants' volumes only: a boat's hull sails on (plantBlocked), so its rocking never rebuilds a garden.
+        // [W104 FEATFIX 2026-11-11 B3] summed after a hash of each key, not XORed: two volumes with the same key (two prims
+        // moved together, a copy on top of the other) no longer cancel out
+        if (v.mKind != WolfDryVolumes::KIND_HULL && d.mSettled) sig += mix64(k);
+    }
+    for (auto it = mDryTrack.begin(); it != mDryTrack.end();)   // the prims not in this frame's list are forgotten
+    {
+        if (it->second.mSeen != mDryPass) it = mDryTrack.erase(it);
+        else ++it;
     }
     mDrySig = sig;
 }
@@ -627,7 +649,7 @@ bool WolfUnderSea::dry(const LLVector3& at, F32 radius, F32 zlo, F32 zhi, bool h
     for (const DryVolume& d : mDry)
     {
         const WolfDryVolumes::Volume& v = d.mVol;
-        if (!hulls && v.mKind == WolfDryVolumes::KIND_HULL) continue;
+        if (!hulls && (v.mKind == WolfDryVolumes::KIND_HULL || !d.mSettled)) continue;   // [B3/] a prim on the move too
         // its bounding sphere first (every kind lies inside it: wolfdryvolumes.cpp boundingRadius, the unit box's corner)
         const F32 dx = at.mV[VX] - v.mCentre.mV[VX], dy = at.mV[VY] - v.mCentre.mV[VY];
         const F32 reach = d.mRadius + radius;
@@ -663,13 +685,13 @@ U64 WolfUnderSea::dryHash(const LLVector3d& corner) const
     U64 h = 0;
     for (const DryVolume& d : mDry)
     {
-        if (d.mVol.mKind == WolfDryVolumes::KIND_HULL) continue;
+        if (d.mVol.mKind == WolfDryVolumes::KIND_HULL || !d.mSettled) continue;   // [B3/] as dryUpdate's signature
         // its bounding sphere over the chunk's square (the nearest point of the square to its centre)
         const F64 nx = llclamp(d.mGlobal.mdV[VX], corner.mdV[VX], corner.mdV[VX] + (F64)CHUNK_M);
         const F64 ny = llclamp(d.mGlobal.mdV[VY], corner.mdV[VY], corner.mdV[VY] + (F64)CHUNK_M);
         const F64 ex = d.mGlobal.mdV[VX] - nx, ey = d.mGlobal.mdV[VY] - ny;
         if (ex * ex + ey * ey > (F64)d.mRadius * (F64)d.mRadius) continue;
-        h ^= d.mKey;
+        h += mix64(d.mKey);   // [B3/] summed, as dryUpdate's signature (XOR cancelled pairs)
     }
     return h;
 }
@@ -2601,7 +2623,10 @@ void WolfUnderSea::idle()
         scanObjects(cam);
         atlasReady();
     }
-    dryUpdate();   // [T733/] before the garden and the fish read them
+    // [T733/] before the garden and the fish read them. [W104 FEATFIX 2026-11-11 B3] only while plants or fish are about: high
+    // above the sea nothing reads them (buildChunk runs only with the plants on, swim / direct only with fish), and the last
+    // list and signature wait unchanged until the camera comes back down
+    if (mPlantsActive || mFishActive || !mFish.empty()) dryUpdate(now);
     garden(cam, now, mPlantsActive);
     if (!mFishActive && height > FISH_ABOVE_M + CAMERA_ONWARDS_M && !mFish.empty())
     {

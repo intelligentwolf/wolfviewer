@@ -30,6 +30,7 @@
 #include "lltextbox.h"
 #include "lluicolortable.h"
 #include "llviewerregion.h"
+#include "llworld.h"   // [W104 FEATFIX review/] the region the change went to
 #include "wolfgrid.h"
 #include "wolfterrainlevels.h"
 
@@ -77,6 +78,14 @@ bool WolfFloaterSkyLevels::postBuild()
     getChild<LLButton>("remove_here_btn")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRemoveHere(); });
     getChild<LLButton>("undo_btn")->setCommitCallback([this](LLUICtrl*, const LLSD&)
     {
+        // [W104 FEATFIX review 2026-11-11] only the window's own changes (wolfterrainlevels.h windowMayUndo): the region's
+        // "undo" takes back whatever this login changed last, and the brush / Terraform window undo by sending heights back
+        std::string why;
+        if (WolfTerrainLevels* s = sky(); s && s->getRegion() && !WolfTerrainLevels::windowMayUndo(s->getRegion()->getHandle(), why))
+        {
+            say(why, true);
+            return;
+        }
         LLSD body = LLSD::emptyMap();
         body["op"] = "undo";
         act(body, "Undone.");
@@ -249,8 +258,18 @@ void WolfFloaterSkyLevels::act(const LLSD& body, const std::string& done_text)
     mBusy = true;
     say("Working...", false);
     LLHandle<LLFloater> h = getHandle();
-    s->post(body, [h, done_text](const LLSD& answer)
+    const U64 region = s->getRegion() ? s->getRegion()->getHandle() : 0;
+    const std::string op = body["op"].asString();
+    s->post(body, [h, done_text, region, op](const LLSD& answer)
     {
+        // [W104 FEATFIX review 2026-11-11] which change the region now remembers as this login's last (wolfterrainlevels.h):
+        // create / delete / set always make a step; apply / remove only when they changed something; undo takes one back
+        if (answer["success"].asBoolean())
+        {
+            if (op == "undo") WolfTerrainLevels::noteWindowUndo(region);
+            else if (op == "create" || op == "delete" || op == "set" || answer["changed"].asInteger() > 0)
+                WolfTerrainLevels::noteChange(region, WolfTerrainLevels::EDITOR_WINDOW);
+        }
         WolfFloaterSkyLevels* self = static_cast<WolfFloaterSkyLevels*>(h.get());
         if (!self)
         {

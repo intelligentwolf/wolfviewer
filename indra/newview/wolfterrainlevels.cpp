@@ -1099,3 +1099,71 @@ void WolfTerrainLevels::renderDeferred()
     }
     shader.unbind();
 }
+
+// [W104 FEATFIX review 2026-11-11] wolfterrainlevels.h noteChange / windowMayUndo / noteWindowUndo. [review 2] per region handle,
+// for the session.
+namespace
+{
+    struct SkyUndoTrack
+    {
+        S32 mWindowSteps = 0;                   // the window's changes on top of this login's history in that region
+        bool mOther = false;                    // the brush or the Terraform window changed sky land there since
+        WolfTerrainLevels::EEditor mLastOther = WolfTerrainLevels::EDITOR_BRUSH;
+    };
+    std::map<U64, SkyUndoTrack>& sky_undo_tracks()
+    {
+        static std::map<U64, SkyUndoTrack> tracks;
+        // [review 3 F4] "since you logged in": a new login (another session id) starts with nothing known
+        static LLUUID session;
+        if (session != gAgentSessionID)
+        {
+            tracks.clear();
+            session = gAgentSessionID;
+        }
+        return tracks;
+    }
+}
+
+// static
+void WolfTerrainLevels::noteChange(U64 region, EEditor by)
+{
+    if (!region) return;
+    SkyUndoTrack& t = sky_undo_tracks()[region];
+    if (by == EDITOR_WINDOW)
+    {
+        ++t.mWindowSteps;
+        return;
+    }
+    t.mWindowSteps = 0;   // the window's earlier changes are under this one now: the region's undo would take this first
+    t.mOther = true;
+    t.mLastOther = by;
+}
+
+// static
+bool WolfTerrainLevels::windowMayUndo(U64 region, std::string& why)
+{
+    auto it = sky_undo_tracks().find(region);
+    if (it != sky_undo_tracks().end() && it->second.mWindowSteps > 0) return true;
+    if (it != sky_undo_tracks().end() && it->second.mOther)
+    {
+        why = it->second.mLastOther == EDITOR_BRUSH
+            ? "Your last change to the sky land here was made with the land brush. Undo it with Edit > Undo while the land tool "
+              "is chosen (Build > Land); this window's Undo only takes back changes made in this window."
+            : "Your last change to the sky land here was made with the Terraform window. Undo it with that window's Undo; this "
+              "window's Undo only takes back changes made in this window.";
+    }
+    else
+    {
+        // fail safe: nothing known here this session (since you logged in), so it cannot be told what the region would undo
+        why = "This window's Undo takes back only changes made in this window since you logged in, and there are none here. "
+              "(The region keeps your last 20 sky land changes for 24 hours, but it cannot tell this window which tool made them.)";
+    }
+    return false;
+}
+
+// static
+void WolfTerrainLevels::noteWindowUndo(U64 region)
+{
+    auto it = sky_undo_tracks().find(region);
+    if (it != sky_undo_tracks().end() && it->second.mWindowSteps > 0) --it->second.mWindowSteps;
+}

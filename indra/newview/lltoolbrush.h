@@ -34,6 +34,7 @@
 #include <functional>      // [SKY LAND TOOLS 2026-11-10]
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>          // [W104 FEATFIX 2026-11-11/]
 
 class LLSurface;
 class LLVector3d;
@@ -100,7 +101,9 @@ protected:
     // stroke on a level, that level only (pickOnLevel), so the stroke never falls through to the ground below.
     bool pickSpot(S32 x, S32 y, LLVector3d& spot, LLViewerRegion** regionp = nullptr, S32* level = nullptr);
     // One dab of a stroke on mSkyLevel: the region's brush maths on the level's heights, kept in mSkyWork until sent.
-    void modifySkyLevelAtPoint(const LLVector3d& spot, F32 dab_seconds);
+    // [W104 FEATFIX 2026-11-11 B2] begun by beginSkyDab and done by stepSkyDab, a bounded number of cells a frame (mSkyDab).
+    void beginSkyDab(const LLVector3d& spot, F32 dab_seconds);
+    void stepSkyDab();
     // Sends the cells changed since the last request (one 256 m block a request, one request at a time; the region allows
     // 30 changes a minute, WolfTerrainHistory.cs WolfTerrainRate).
     void sendSkyWork();
@@ -133,9 +136,42 @@ protected:
     std::unordered_set<U32> mSkyDirty;              // cells of mSkyWork the region has not been sent yet
     bool mSkyInFlight = false;
     F64 mSkyNextPost = 0.0;                         // not before (pacing, or the region's retry_after)
-    S32 mSkyStrokeSteps = 0;                        // changes the region kept for the stroke going on / just ended
-    S32 mSkyUndoSteps = 0;                          // Edit > Undo puts back this many (the last stroke's) on mSkyUndoRegion
-    U64 mSkyUndoRegion = 0;
+    // [W104 FEATFIX 2026-11-11 B1] Edit > Undo puts back exactly the last stroke's own cells, as they were before it, with an
+    // "apply" (as the Terraform window's sky Undo does, wolfterraform.cpp levelCoro) - never the region's "undo", which
+    // undoes the caller's LAST change of any kind (WolfSkyLevelsModule.Edit.cs Undo), perhaps a Terraform window job, and
+    // keeps only 20 steps an agent (MaxStepsPerAgent), fewer than a long stroke sends.
+    // [W104 FEATFIX 2026-11-11 B2] the dab being done (lltoolbrush.cpp beginSkyDab / stepSkyDab): its square, its maths and the
+    // heights before it, read column by column ahead of the writes
+    struct SkyDab
+    {
+        bool mActive = false;
+        S32 mAction = 0, mW = 0, mSsize = 0;
+        F32 mRx = 0.f, mRy = 0.f, mSize = 0.f, mStrength = 0.f, mRz = 0.f, mLo = 0.f, mHi = 0.f;
+        S32 mStartX = 0, mStartY = 0, mEndX = -1, mEndY = -1;   // the square shaped
+        S32 mGx0 = 0, mGy0 = 0, mGx1 = -1, mGw = 0, mGh = 0;    // the grid read (the square and Smooth's margin)
+        bool mExact = true;                                     // Smooth adds each neighbourhood up one by one
+        std::vector<F32> mGrid;
+        std::vector<U8> mGround;
+        std::vector<F64> mSatSum, mSatN;                        // Smooth above SKY_SMOOTH_EXACT_M: summed-area tables
+        S32 mReadX = 0, mNextX = 0;                             // the next column to read / to shape
+    };
+    SkyDab mSkyDab;
+    U32 mSkyStroke = 0;                             // the stroke going on / just ended (a number, for mSkyUndo)
+    std::unordered_map<U32, F32> mSkyBefore;        // its cells as they were before it touched them
+    struct SkyUndo
+    {
+        U32 mStroke = 0;                            // the stroke these are (0: nothing to undo)
+        U64 mRegion = 0;
+        S32 mLevel = 0;
+        std::unordered_map<U32, F32> mBefore;       // the cells the region kept, and their heights before the stroke
+    };
+    SkyUndo mSkyUndo;
+    bool mSkyUndoBusy = false;                      // an Undo is being sent
+    bool mSkyStrokeAlerted = false;                 // [B5] one alert a stroke when the region refuses or does not answer
+    // [B5] the request's cells the region did not keep: back out of the stroke (mSkyWork, mSkyDirty), so later dabs and Undo
+    // work from the heights the region has
+    void rollBackSkyCells(const std::vector<U32>& cells);
+    static void skyUndoCoro(U64 handle, S32 level, std::unordered_map<U32, F32> before);
 
 private:
     U8 getBrushIndex();

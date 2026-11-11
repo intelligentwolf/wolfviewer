@@ -335,6 +335,7 @@ void WolfDryVolumes::collect()
         Volume v;
         if (volumeOf(objectp, v))
         {
+            v.mId = id;   // [W104 FEATFIX 2026-11-11 B3/] the sea plants tell a moving prim from one at rest (wolfundersea.cpp dryUpdate)
             mFrame.push_back(v);
         }
     }

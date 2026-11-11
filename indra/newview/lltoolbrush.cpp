@@ -56,6 +56,10 @@
 #include "roles_constants.h"
 #include "llglheaders.h"
 #include "wolfterrainlevels.h"   // [SKY LAND TOOLS 2026-11-10]
+#include "llcoros.h"             // [W104 FEATFIX 2026-11-11 B1] the stroke's Undo (skyUndoCoro)
+#include "lleventcoro.h"
+#include <limits>
+#include <map>
 
 const std::string REGION_BLOCKS_TERRAFORM_MSG = "This region does not allow terraforming.\n"
                 "You will need to buy land in another part of the world to terraform it.";
@@ -123,6 +127,12 @@ namespace
     constexpr F32 SKY_MAX_BRUSH = 128.f;    // TerrainModule.WolfTerraform.cs:44 WolfMaxBrushSize
     constexpr S32 SKY_BLOCK = 256;          // TerrainModule.WolfTerraform.cs:47 WolfMaxApplySide, metres a side a request
     constexpr F64 SKY_POST_SECS = 1.0;      // at most one request a second while brushing (the region: 30 a minute, a burst of 30)
+    // [W104 FEATFIX 2026-11-11 B2] (CHOSEN) Smooth adds each neighbourhood up one height at a time up to this brush size, exactly
+    // as before; above it a summed-area table gives the sum (lltoolbrush.cpp stepSkyDab)
+    constexpr F32 SKY_SMOOTH_EXACT_M = 32.f;
+    // [W104 FEATFIX 2026-11-11 B2] (CHOSEN) at most about this many cells of a dab are read and shaped in one frame (stepSkyDab,
+    // whole columns): a dab up to about a 30 m brush is done at once, as before; a 128 m one over about 16 frames
+    constexpr S32 SKY_DAB_CELLS_PER_FRAME = 8192;
 
     U32 sky_key(S32 x, S32 y) { return (U32)x | ((U32)y << 16); }
 
@@ -142,19 +152,53 @@ namespace
         return corners + sides + center;
     }
     F64 sky_interpolate(F64 x, F64 y, F64 z) { return (x * (1.0 - z)) + (y * z); }
+    // [W104 FEATFIX 2026-11-11 B2] sky_smoothed_noise at whole lattice points 0..SKY_LATTICE, made once: Roughen's PerlinNoise2D
+    // takes x / Width (0 <= x < 1) times 2^i for its 8 octaves (i < 8), so ix = (S32)(x * 2^i) is at most 127 and ix + 1 at most
+    // 128. The same function of the same numbers: the same values, without its 9 noise calls a point each time.
+    constexpr S32 SKY_LATTICE = 128;
+    F64 sky_lattice(S32 ix, S32 iy)
+    {
+        static const std::vector<F64> table = []()
+        {
+            std::vector<F64> t((size_t)(SKY_LATTICE + 1) * (size_t)(SKY_LATTICE + 1));
+            for (S32 y = 0; y <= SKY_LATTICE; ++y)
+                for (S32 x = 0; x <= SKY_LATTICE; ++x)
+                    t[(size_t)y * (size_t)(SKY_LATTICE + 1) + (size_t)x] = sky_smoothed_noise(x, y);
+            return t;
+        }();
+        if (ix < 0 || iy < 0 || ix > SKY_LATTICE || iy > SKY_LATTICE) return sky_smoothed_noise(ix, iy);
+        return table[(size_t)iy * (size_t)(SKY_LATTICE + 1) + (size_t)ix];
+    }
     F64 sky_interpolated_noise(F64 x, F64 y)
     {
         const S32 ix = (S32)x;
         const F64 fx = x - ix;
         const S32 iy = (S32)y;
         const F64 fy = y - iy;
-        const F64 v1 = sky_smoothed_noise(ix, iy), v2 = sky_smoothed_noise(ix + 1, iy);
-        const F64 v3 = sky_smoothed_noise(ix, iy + 1), v4 = sky_smoothed_noise(ix + 1, iy + 1);
+        const F64 v1 = sky_lattice(ix, iy), v2 = sky_lattice(ix + 1, iy);
+        const F64 v3 = sky_lattice(ix, iy + 1), v4 = sky_lattice(ix + 1, iy + 1);
         return sky_interpolate(sky_interpolate(v1, v2, fx), sky_interpolate(v3, v4, fx), fy);
     }
     F64 sky_perlin(F64 x, F64 y, S32 octaves, F64 persistence)
     {
+        // [W104 FEATFIX 2026-11-11 B2] Roughen's call (8 octaves, persistence 1.0) takes the powers from a table of the same
+        // std::pow results, made once: the same numbers in the same sums, without 16 pow calls a cell
+        constexpr S32 OCTAVES = 8;
+        static const F64* const pows = []()
+        {
+            static F64 t[2 * OCTAVES];
+            for (S32 i = 0; i < OCTAVES; i++) { t[i] = std::pow(2.0, i); t[OCTAVES + i] = std::pow(1.0, i); }
+            return t;
+        }();
         F64 total = 0.0;
+        if (octaves == OCTAVES && persistence == 1.0)
+        {
+            for (S32 i = 0; i < OCTAVES; i++)
+            {
+                total += sky_interpolated_noise(x * pows[i], y * pows[i]) * pows[OCTAVES + i];
+            }
+            return total;
+        }
         for (S32 i = 0; i < octaves; i++)
         {
             total += sky_interpolated_noise(x * std::pow(2.0, i), y * std::pow(2.0, i)) * std::pow(persistence, i);
@@ -439,6 +483,13 @@ void LLToolBrushLand::brush( void )
 {
     // [WOLF TERRAFORM 2026-10-23] at most one dab every DAB_SECS, carrying the time since the last (see DAB_SECS)
     const F64 now = LLFrameTimer::getElapsedSeconds();
+    // [W104 FEATFIX 2026-11-11 B2] a dab on sky land still being done goes on; the next starts when it is finished
+    if (mSkyLevel && mSkyDab.mActive)
+    {
+        stepSkyDab();
+        sendSkyWork();
+        return;
+    }
     if (now - mLastDabAt < DAB_SECS) return;
     const F32 dab_seconds = (F32)llmin(now - mLastDabAt, DAB_MAX_SECS);
     mLastDabAt = now;
@@ -452,7 +503,8 @@ void LLToolBrushLand::brush( void )
         // [SKY LAND TOOLS 2026-11-10] a stroke that began on a sky level shapes that level only - never the ground below it
         if (mSkyLevel)
         {
-            modifySkyLevelAtPoint(spot, dab_seconds);
+            beginSkyDab(spot, dab_seconds);   // [W104 FEATFIX 2026-11-11 B2/] begun here, done by stepSkyDab (now, and next frames)
+            stepSkyDab();
             sendSkyWork();
             return;
         }
@@ -484,108 +536,192 @@ bool LLToolBrushLand::pickSpot(S32 x, S32 y, LLVector3d& spot, LLViewerRegion** 
 // changes so far, mSkyWork), with the region's maths for the action (see sky_noise above). Only cells where the level has ground
 // are changed: the brush shapes sky land, it does not make it (the Sky Land window's "Make ground here" does). Every height stays
 // between the level's base and the region's highest (WolfSkyLevelsModule.Edit.cs Apply refuses a request with one outside).
-void LLToolBrushLand::modifySkyLevelAtPoint(const LLVector3d& spot, F32 dab_seconds)
+// [W104 FEATFIX 2026-11-11 B2] The work is bounded: a dab is begun here and done by stepSkyDab, at most SKY_DAB_CELLS_PER_FRAME
+// cells a frame, column by column. Each cell's new height depends only on heights from BEFORE the dab (Smooth's neighbours
+// included), and those are read into the dab's own grid before any of them is written (a column is read before the column
+// Smooth's ssize to its left is written), so a dab done over several frames gives exactly what it gave done at once. Each cell is
+// read once (Smooth looked each neighbour up again, up to 81 times a cell); Smooth on a brush wider than SKY_SMOOTH_EXACT_M takes
+// each neighbourhood's sum from a summed-area table; Roughen's noise lattice and powers come from tables made once. The next
+// dab starts when this one is done, carrying the time since the last began, so a stroke's strength over time is unchanged.
+// Up to SKY_SMOOTH_EXACT_M (Smooth) - every size for the other tools - the heights are exactly those of the one-pass code
+// (checked against it: region-terrain-work/w104-review-2026-11-11/featfix/b2_dab_check.sh).
+void LLToolBrushLand::beginSkyDab(const LLVector3d& spot, F32 dab_seconds)
 {
+    mSkyDab = SkyDab();
     LLViewerRegion* regionp = LLWorld::getInstance()->getRegionFromHandle(mSkyRegion);
     WolfTerrainLevels* sky = regionp ? regionp->getWolfSkyLevels() : nullptr;
     const WolfTerrainLevels::Level* level = sky ? sky->findLevel(mSkyLevel) : nullptr;
     if (!level) return;
-    const S32 action = gSavedSettings.getS32("RadioLandBrushAction");
-    if (action < 0 || action > 4) return;   // Revert (5) has nothing to go back to on sky land (handleMouseDown says so)
-    const F32 strength = dab_seconds * gSavedSettings.getF32("LandBrushForce");   // as modifyLandAtPointGlobal's Seconds
+    SkyDab& d = mSkyDab;
+    d.mAction = gSavedSettings.getS32("RadioLandBrushAction");
+    if (d.mAction < 0 || d.mAction > 4) return;   // Revert (5) has nothing to go back to on sky land (handleMouseDown says so)
+    d.mStrength = dab_seconds * gSavedSettings.getF32("LandBrushForce");   // as modifyLandAtPointGlobal's Seconds
     const LLVector3 p = regionp->getPosRegionFromGlobal(spot);
-    const F32 rx = p.mV[VX], ry = p.mV[VY];
-    const F32 size = llmin(mBrushSize, SKY_MAX_BRUSH);
-    const S32 W = (S32)regionp->getWidth();
-    const S32 start_x = llmax(0, (S32)(rx - size + 0.5f)), start_y = llmax(0, (S32)(ry - size + 0.5f));
-    const S32 end_x = llmin(W - 1, (S32)(rx + size + 0.5f)), end_y = llmin(W - 1, (S32)(ry + size + 0.5f));
-    if (end_x < start_x || end_y < start_y) return;
-    const F32 lo = level->mBase, hi = sky->maxHeight();
-    const F32 rz = llclamp(wolf_flatten_height(action, mStartingZ), lo, hi);
-    auto get = [&](S32 x, S32 y, F32& z) -> bool
+    d.mRx = p.mV[VX];
+    d.mRy = p.mV[VY];
+    d.mSize = llmin(mBrushSize, SKY_MAX_BRUSH);
+    d.mW = (S32)regionp->getWidth();
+    d.mStartX = llmax(0, (S32)(d.mRx - d.mSize + 0.5f));
+    d.mStartY = llmax(0, (S32)(d.mRy - d.mSize + 0.5f));
+    d.mEndX = llmin(d.mW - 1, (S32)(d.mRx + d.mSize + 0.5f));
+    d.mEndY = llmin(d.mW - 1, (S32)(d.mRy + d.mSize + 0.5f));
+    if (d.mEndX < d.mStartX || d.mEndY < d.mStartY) return;
+    d.mLo = level->mBase;
+    d.mHi = sky->maxHeight();
+    d.mRz = llclamp(wolf_flatten_height(d.mAction, mStartingZ), d.mLo, d.mHi);
+    // SmoothSphere.cs: ssize at most 4 (the neighbourhood is (2 ssize + 1)^2 cells round each)
+    d.mSsize = d.mAction == 3 ? llmin(4, (S32)(d.mSize + 0.5f)) : 0;
+    d.mExact = d.mSize <= SKY_SMOOTH_EXACT_M;
+    // the grid: the square and Smooth's margin, inside the region
+    d.mGx0 = llmax(0, d.mStartX - d.mSsize);
+    d.mGy0 = llmax(0, d.mStartY - d.mSsize);
+    d.mGx1 = llmin(d.mW - 1, d.mEndX + d.mSsize);
+    const S32 gy1 = llmin(d.mW - 1, d.mEndY + d.mSsize);
+    d.mGw = d.mGx1 - d.mGx0 + 1;
+    d.mGh = gy1 - d.mGy0 + 1;
+    d.mGrid.assign((size_t)d.mGw * (size_t)d.mGh, 0.f);
+    d.mGround.assign((size_t)d.mGw * (size_t)d.mGh, 0);
+    if (d.mAction == 3 && !d.mExact)
     {
-        auto it = mSkyWork.find(sky_key(x, y));
-        if (it != mSkyWork.end()) { z = it->second; return true; }
-        return sky->sample(*level, x, y, z);
-    };
-    auto put = [&](S32 x, S32 y, F32 z)
+        d.mSatSum.assign((size_t)(d.mGw + 1) * (size_t)(d.mGh + 1), 0.0);
+        d.mSatN.assign((size_t)(d.mGw + 1) * (size_t)(d.mGh + 1), 0.0);
+    }
+    d.mReadX = d.mGx0;
+    d.mNextX = d.mStartX;
+    d.mActive = true;
+}
+
+// [W104 FEATFIX 2026-11-11 B2] lltoolbrush.h. The begun dab's next columns, at most SKY_DAB_CELLS_PER_FRAME cells (read and written).
+void LLToolBrushLand::stepSkyDab()
+{
+    SkyDab& d = mSkyDab;
+    if (!d.mActive) return;
+    LLViewerRegion* regionp = LLWorld::getInstance()->getRegionFromHandle(mSkyRegion);
+    WolfTerrainLevels* sky = regionp ? regionp->getWolfSkyLevels() : nullptr;
+    const WolfTerrainLevels::Level* level = sky ? sky->findLevel(mSkyLevel) : nullptr;
+    if (!level)
     {
-        z = llclamp(z, lo, hi);
-        F32 was;
-        if (!get(x, y, was) || was == z) return;
-        mSkyWork[sky_key(x, y)] = z;
-        mSkyDirty.insert(sky_key(x, y));
-    };
-    if (action == 3)
-    {
-        // SmoothSphere.cs: the deltas from the heights before this dab, then applied (ssize at most 4, strength at most 1). Only
-        // neighbours with ground count in the mean (the ground has every cell; a level's edge has none beyond it).
-        const S32 ssize = llmin(4, (S32)(size + 0.5f));
-        const F32 size2 = size * size;
-        const F32 st = llmin(strength, 1.f);
-        std::vector<std::pair<U32, F32>> tweaks;
-        for (S32 x = start_x; x <= end_x; ++x)
-        {
-            const F32 dx2 = ((F32)x - rx) * ((F32)x - rx);
-            for (S32 y = start_y; y <= end_y; ++y)
-            {
-                F32 here;
-                if (!get(x, y, here)) continue;
-                F32 df = (dx2 + ((F32)y - ry) * ((F32)y - ry)) / size2;
-                if (df > 1.f) continue;
-                df = st * (1.f - df);
-                F32 sum = 0.f;
-                S32 n = 0;
-                for (S32 a = x - ssize; a <= x + ssize; ++a)
-                    for (S32 b = y - ssize; b <= y + ssize; ++b)
-                    {
-                        F32 q;
-                        if (a >= 0 && a < W && b >= 0 && b < W && get(a, b, q)) { sum += q; ++n; }
-                    }
-                tweaks.emplace_back(sky_key(x, y), df * (here - sum / (F32)n));   // n >= 1: (x, y) itself
-            }
-        }
-        for (const auto& t : tweaks)
-        {
-            if (t.second == 0.f) continue;
-            const S32 x = (S32)(t.first & 0xFFFFu), y = (S32)(t.first >> 16);
-            F32 here;
-            if (get(x, y, here)) put(x, y, here - t.second);
-        }
+        d = SkyDab();   // the level went: sendSkyWork says so
         return;
     }
-    const F32 cos_size = 0.5f * F_PI / size;   // RaiseSphere.cs / LowerSphere.cs: size = 0.5 * PI / size
-    for (S32 x = start_x; x <= end_x; ++x)
+    auto at = [&d](S32 x, S32 y) { return (size_t)(y - d.mGy0) * (size_t)d.mGw + (size_t)(x - d.mGx0); };
+    const S32 sw = d.mGw + 1;   // the summed-area tables' row length (one more column and row of zeros)
+    // one column of the grid: the heights before this dab (the stroke's own, else the level's), and its summed-area columns
+    auto read_column = [&](S32 x)
     {
-        const F32 dx2 = ((F32)x - rx) * ((F32)x - rx);
-        for (S32 y = start_y; y <= end_y; ++y)
+        for (S32 y = d.mGy0; y < d.mGy0 + d.mGh; ++y)
         {
-            F32 here;
-            if (!get(x, y, here)) continue;
-            const F32 d2 = dx2 + ((F32)y - ry) * ((F32)y - ry);
-            if (action == 1 || action == 2)
+            const size_t i = at(x, y);
+            auto it = mSkyWork.find(sky_key(x, y));
+            if (it != mSkyWork.end()) { d.mGrid[i] = it->second; d.mGround[i] = 1; }
+            else if (sky->sample(*level, x, y, d.mGrid[i])) d.mGround[i] = 1;
+        }
+        if (d.mSatSum.empty()) return;
+        const S32 cx = x - d.mGx0 + 1;
+        for (S32 gy = 0; gy < d.mGh; ++gy)
+        {
+            const size_t c = (size_t)(gy + 1) * (size_t)sw + (size_t)cx;
+            const size_t i = (size_t)gy * (size_t)d.mGw + (size_t)(x - d.mGx0);
+            d.mSatSum[c] = (d.mGround[i] ? (F64)d.mGrid[i] : 0.0) + d.mSatSum[c - 1] + d.mSatSum[c - (size_t)sw] - d.mSatSum[c - (size_t)sw - 1];
+            d.mSatN[c] = (d.mGround[i] ? 1.0 : 0.0) + d.mSatN[c - 1] + d.mSatN[c - (size_t)sw] - d.mSatN[c - (size_t)sw - 1];
+        }
+    };
+    // grid cells ax0..ax1, ay0..ay1 (grid coordinates, inclusive) of a summed-area table
+    auto box = [&](const std::vector<F64>& t, S32 ax0, S32 ay0, S32 ax1, S32 ay1)
+    {
+        const size_t r0 = (size_t)ay0 * (size_t)sw, r1 = (size_t)(ay1 + 1) * (size_t)sw;
+        return t[r1 + (size_t)(ax1 + 1)] - t[r0 + (size_t)(ax1 + 1)] - t[r1 + (size_t)ax0] + t[r0 + (size_t)ax0];
+    };
+    // put: as before, a cell keeps its height when it is already that (or has no ground); [B1] its height before the stroke is
+    // kept the first time the stroke changes it
+    auto put = [&](S32 x, S32 y, F32 z)
+    {
+        z = llclamp(z, d.mLo, d.mHi);
+        const size_t i = at(x, y);
+        if (!d.mGround[i] || d.mGrid[i] == z) return;
+        const U32 k = sky_key(x, y);
+        mSkyBefore.emplace(k, d.mGrid[i]);   // (no-op when the stroke changed it before: mSkyWork then held this height)
+        mSkyWork[k] = z;
+        mSkyDirty.insert(k);
+    };
+    const F32 size2 = d.mSize * d.mSize;
+    const F32 st = llmin(d.mStrength, 1.f);
+    const F32 cos_size = 0.5f * F_PI / d.mSize;   // RaiseSphere.cs / LowerSphere.cs: size = 0.5 * PI / size
+    S32 budget = SKY_DAB_CELLS_PER_FRAME;
+    while (d.mNextX <= d.mEndX && budget > 0)
+    {
+        const S32 x = d.mNextX;
+        // every column this one's cells read (Smooth: up to ssize to its right) is read before anything is written to it
+        while (d.mReadX <= llmin(d.mGx1, x + d.mSsize))
+        {
+            read_column(d.mReadX++);
+            budget -= d.mGh;
+        }
+        const F32 dx2 = ((F32)x - d.mRx) * ((F32)x - d.mRx);
+        for (S32 y = d.mStartY; y <= d.mEndY; ++y)
+        {
+            const size_t i = at(x, y);
+            if (!d.mGround[i]) continue;
+            const F32 here = d.mGrid[i];
+            const F32 d2 = dx2 + ((F32)y - d.mRy) * ((F32)y - d.mRy);
+            if (d.mAction == 3)
+            {
+                // SmoothSphere.cs: the delta from the heights before this dab (the grid), then applied (strength at most 1). Only
+                // neighbours with ground count in the mean (the ground has every cell; a level's edge has none beyond it).
+                F32 df = d2 / size2;
+                if (df > 1.f) continue;
+                df = st * (1.f - df);
+                F32 mean;
+                if (d.mExact)
+                {
+                    F32 sum = 0.f;
+                    S32 n = 0;
+                    for (S32 a = x - d.mSsize; a <= x + d.mSsize; ++a)
+                        for (S32 b = y - d.mSsize; b <= y + d.mSsize; ++b)
+                        {
+                            if (a < 0 || a >= d.mW || b < 0 || b >= d.mW) continue;
+                            const size_t j = at(a, b);
+                            if (d.mGround[j]) { sum += d.mGrid[j]; ++n; }
+                        }
+                    mean = sum / (F32)n;   // n >= 1: (x, y) itself
+                }
+                else
+                {
+                    // the neighbourhood's sum and count from the summed-area tables (F64 sums: only the last bits of a big
+                    // brush's result differ from adding the 81 heights one by one)
+                    const S32 ax0 = llmax(0, x - d.mSsize) - d.mGx0, ax1 = llmin(d.mW - 1, x + d.mSsize) - d.mGx0;
+                    const S32 ay0 = llmax(0, y - d.mSsize) - d.mGy0, ay1 = llmin(d.mW - 1, y + d.mSsize) - d.mGy0;
+                    mean = (F32)(box(d.mSatSum, ax0, ay0, ax1, ay1) / box(d.mSatN, ax0, ay0, ax1, ay1));
+                }
+                const F32 tweak = df * (here - mean);
+                if (tweak != 0.f) put(x, y, here - tweak);
+            }
+            else if (d.mAction == 1 || d.mAction == 2)
             {
                 const F32 f = (F32)std::cos(std::sqrt((F64)d2) * cos_size);
-                if (f > 0.f) put(x, y, action == 1 ? here + f * strength : here - f * strength);
+                if (f > 0.f) put(x, y, d.mAction == 1 ? here + f * d.mStrength : here - f * d.mStrength);
             }
-            else if (action == 0)
+            else if (d.mAction == 0)
             {
                 // FlattenSphere.cs: size *= 2 * size
-                F32 df = d2 / (2.f * size * size);
+                F32 df = d2 / (2.f * d.mSize * d.mSize);
                 if (df > 1.f) continue;
-                df = strength * (1.f - df);
-                put(x, y, df >= 1.f ? rz : here + (rz - here) * df);
+                df = d.mStrength * (1.f - df);
+                put(x, y, df >= 1.f ? d.mRz : here + (d.mRz - here) * df);
             }
             else
             {
                 // NoiseSphere.cs: size *= size; PerlinNoise2D(x / Width, y / Height, 8, 1.0)
-                F32 df = d2 / (size * size);
+                F32 df = d2 / size2;
                 if (df > 1.f) continue;
-                df = strength * (1.f - df);
-                put(x, y, here + (F32)sky_perlin((F64)x / (F64)W, (F64)y / (F64)W, 8, 1.0) * df);
+                df = d.mStrength * (1.f - df);
+                put(x, y, here + (F32)sky_perlin((F64)x / (F64)d.mW, (F64)y / (F64)d.mW, 8, 1.0) * df);
             }
         }
+        budget -= d.mEndY - d.mStartY + 1;
+        ++d.mNextX;
     }
+    if (d.mNextX > d.mEndX) d = SkyDab();   // done (and its grid let go)
 }
 
 // [SKY LAND TOOLS 2026-11-10] lltoolbrush.h. The cells not sent yet go as one "apply" (WolfTerrainLevels::applyBody, as the Sky Land
@@ -626,18 +762,56 @@ void LLToolBrushLand::sendSkyWork()
     mSkyInFlight = true;
     mSkyNextPost = now + SKY_POST_SECS;
     const U64 handle = mSkyRegion;
-    sky->post(WolfTerrainLevels::applyBody(mSkyLevel, x0, y0, w, h, heights, "land brush"), [this, cells, handle](const LLSD& answer)
+    const S32 level_id = mSkyLevel;
+    const U32 stroke = mSkyStroke;
+    sky->post(WolfTerrainLevels::applyBody(mSkyLevel, x0, y0, w, h, heights, "land brush"),
+              [this, cells, handle, level_id, stroke, x0, y0, w, h](const LLSD& answer)
     {
-        // the tool is a singleton (LLSingleton<LLToolBrushLand>): `this` outlives every request
+        // the tool is a singleton (LLSingleton<LLToolBrushLand>): `this` outlives every request. A new stroke cannot start
+        // before this one's cells are all answered (handleMouseDown), so the answer is the current stroke's.
         mSkyInFlight = false;
         if (answer["success"].asBoolean())
         {
-            if (answer["changed"].asInteger() > 0)
+            // [W104 FEATFIX 2026-11-11 B1/B5] cell by cell: WolfSkyLevelsModule.Edit.cs Handle sends "cells" (one byte a cell of
+            // the rectangle, row by row from y0: CellSet 0, CellLeft 1 = NaN, CellRights 2, CellNoRoom 4) only when some were
+            // refused; without it every cell sent was kept
+            std::vector<U32> kept, refused;
+            const LLSD::Binary* states = answer.has("cells") ? &answer["cells"].asBinary() : nullptr;
+            const bool per_cell = states && states->size() == (size_t)w * (size_t)h;
+            for (U32 k : cells)
             {
-                ++mSkyStrokeSteps;   // WolfSkyLevelsModule.Edit.cs Apply: one undo step for a request that changed something
-                mSkyUndoSteps = mSkyStrokeSteps;
-                mSkyUndoRegion = handle;
+                const S32 x = (S32)(k & 0xFFFFu), y = (S32)(k >> 16);
+                const U8 state = per_cell ? (*states)[(size_t)(y - y0) * (size_t)w + (size_t)(x - x0)] : (U8)0;
+                (state == 0 ? kept : refused).push_back(k);
             }
+            if (!per_cell && (answer["refused"].asInteger() > 0 || answer["no_room"].asInteger() > 0))
+            {
+                // refused, but not said which: none counted as kept (the Undo then never "puts back" them)
+                refused.insert(refused.end(), kept.begin(), kept.end());
+                kept.clear();
+            }
+            if (!kept.empty() && answer["changed"].asInteger() > 0)
+            {
+                // [W104 FEATFIX review 2026-11-11] the region remembers this as this login's last change (wolfterrainlevels.h)
+                WolfTerrainLevels::noteChange(handle, WolfTerrainLevels::EDITOR_BRUSH);
+            }
+            if (!kept.empty())
+            {
+                // the stroke's Undo: these cells as they were before it
+                if (mSkyUndo.mStroke != stroke)
+                {
+                    mSkyUndo = SkyUndo();
+                    mSkyUndo.mStroke = stroke;
+                    mSkyUndo.mRegion = handle;
+                    mSkyUndo.mLevel = level_id;
+                }
+                for (U32 k : kept)
+                {
+                    auto b = mSkyBefore.find(k);
+                    if (b != mSkyBefore.end()) mSkyUndo.mBefore.emplace(k, b->second);
+                }
+            }
+            if (!refused.empty()) rollBackSkyCells(refused);
             if (answer["refused"].asInteger() > 0 || answer["no_room"].asInteger() > 0)
             {
                 // Apply's Words(): which parcels, and whose (the cells it would not change)
@@ -652,13 +826,30 @@ void LLToolBrushLand::sendSkyWork()
         }
         else
         {
+            // [W104 FEATFIX 2026-11-11 B5] the region refused the request or did not answer: its cells go back to the region's
+            // heights, and ONE alert a stroke (it stays until OK is pressed); the status line says each later one
+            rollBackSkyCells(cells);
             const std::string text = answer["message"].asString();
-            if (gFloaterTools) gFloaterTools->setStatusText(text);
-            LLSD args;
-            args["MESSAGE"] = "The sky land change was not kept: " + text;
-            LLNotificationsUtil::add("GenericAlert", args);
+            if (gFloaterTools) gFloaterTools->setStatusText("The sky land change was not kept: " + text);
+            if (!mSkyStrokeAlerted)
+            {
+                mSkyStrokeAlerted = true;
+                LLSD args;
+                args["MESSAGE"] = "The sky land change was not kept: " + text;
+                LLNotificationsUtil::add("GenericAlert", args);
+            }
         }
     });
+}
+
+// [W104 FEATFIX 2026-11-11 B5] lltoolbrush.h
+void LLToolBrushLand::rollBackSkyCells(const std::vector<U32>& cells)
+{
+    for (U32 k : cells)
+    {
+        mSkyWork.erase(k);    // later dabs read the region's height again (WolfTerrainLevels::sample)
+        mSkyDirty.erase(k);   // and a newer value made from the refused one is not sent
+    }
 }
 
 // [SKY LAND TOOLS 2026-11-10] After a stroke on a level: what is left goes at the region's pace, then the stroke's heights are let go.
@@ -667,7 +858,8 @@ void LLToolBrushLand::onSkyFlushIdle(void* brush_tool)
 {
     LLToolBrushLand* self = reinterpret_cast<LLToolBrushLand*>(brush_tool);
     if (self->hasMouseCapture()) return;   // (a new stroke cannot start before this one is all sent: handleMouseDown)
-    if (self->mSkyDirty.empty() && !self->mSkyInFlight)
+    if (self->mSkyDab.mActive) self->stepSkyDab();   // [W104 FEATFIX 2026-11-11 B2/] the last dab is finished first
+    if (self->mSkyDirty.empty() && !self->mSkyInFlight && !self->mSkyDab.mActive)
     {
         self->mSkyWork.clear();
         gIdleCallbacks.deleteFunction(&LLToolBrushLand::onSkyFlushIdle, self);
@@ -722,9 +914,14 @@ bool LLToolBrushLand::handleMouseDown(S32 x, S32 y, MASK mask)
         }
 
         // [SKY LAND TOOLS 2026-11-10] the last stroke on sky land must be all sent first (its cells and their level are kept here)
-        if (mSkyInFlight || !mSkyDirty.empty())
+        if (mSkyInFlight || !mSkyDirty.empty() || mSkyDab.mActive)
         {
             if (gFloaterTools) gFloaterTools->setStatusText("Still sending your last change to the sky land - try again in a moment.");
+            return true;
+        }
+        if (mSkyUndoBusy)   // [W104 FEATFIX 2026-11-11 B1/]
+        {
+            if (gFloaterTools) gFloaterTools->setStatusText("Still putting back your last brush stroke on the sky land - try again in a moment.");
             return true;
         }
         if (level && gSavedSettings.getS32("RadioLandBrushAction") == E_LAND_REVERT)
@@ -754,16 +951,21 @@ bool LLToolBrushLand::handleMouseDown(S32 x, S32 y, MASK mask)
         // [SKY LAND TOOLS 2026-11-10] a stroke on a level: its height there, and every dab goes to that level (brush)
         mSkyLevel = level ? sky_level : 0;
         mSkyRegion = level ? regionp->getHandle() : 0;
-        mSkyStrokeSteps = 0;
         if (level)
         {
             mStartingZ = level_z;
             mSkyWork.clear();
             mSkyNextPost = 0.0;
+            // [W104 FEATFIX 2026-11-11 B1/B5] a new stroke: its own cells' first heights, its own alert; the last stroke's Undo
+            // stays offered until this one has a change the region kept
+            ++mSkyStroke;
+            if (mSkyStroke == 0) ++mSkyStroke;   // 0 is "nothing to undo"
+            mSkyBefore.clear();
+            mSkyStrokeAlerted = false;
         }
         else
         {
-            mSkyUndoSteps = 0;   // Edit > Undo is the ground's again (UndoLand)
+            mSkyUndo = SkyUndo();   // Edit > Undo is the ground's again (UndoLand)
         }
         mMouseX = x;
         mMouseY = y;
@@ -1062,6 +1264,12 @@ void LLToolBrushLand::onIdle( void* brush_tool )
 void LLToolBrushLand::onMouseCaptureLost()
 {
     gIdleCallbacks.deleteFunction(&LLToolBrushLand::onIdle, this);
+    // [W104 FEATFIX 2026-11-11 B5] the mouse taken away mid-stroke on sky land (not by a mouse-up): what is left is still sent,
+    // so the next stroke is never refused for good with "Still sending your last change"
+    if (mSkyLevel && !gIdleCallbacks.containsFunction(&LLToolBrushLand::onSkyFlushIdle, (void*)this))
+    {
+        gIdleCallbacks.addFunction(&LLToolBrushLand::onSkyFlushIdle, (void*)this);
+    }
 }
 
 // [WOLF TERRAFORM 2026-10-23] DESIGN.md 0 / 1.3: "Undo does nothing" - the viewer sent UndoLand, and OpenSim's handler is empty
@@ -1091,39 +1299,115 @@ void LLToolBrushLand::redo()
 bool LLToolBrushLand::canUndo() const
 {
     LLViewerRegion* regionp = gAgent.getRegion();
-    // [SKY LAND TOOLS 2026-11-10] after a stroke on sky land: its changes, through the WolfSkyLevels cap's undo
-    if (regionp && mSkyUndoSteps > 0 && regionp->getHandle() == mSkyUndoRegion) return !mSkyInFlight && mSkyDirty.empty();
+    // [SKY LAND TOOLS 2026-11-10] after a stroke on sky land: its changes ([W104 FEATFIX 2026-11-11 B1] its own cells, skyUndoCoro)
+    if (regionp && mSkyUndo.mStroke && !mSkyUndo.mBefore.empty() && regionp->getHandle() == mSkyUndo.mRegion)
+        return !mSkyInFlight && mSkyDirty.empty() && !mSkyUndoBusy;
     return regionp && !regionp->getCapability("WolfTerraform").empty();
 }
 
-// [SKY LAND TOOLS 2026-11-10] One "undo" a step (WolfSkyLevelsModule.Edit.cs Undo: the caller's last change), one after the other.
-static void wolf_sky_undo_steps(U64 handle, S32 left)
+// [W104 FEATFIX 2026-11-11 B1] lltoolbrush.h. The stroke's cells go back to their heights before it, through the WolfSkyLevels cap's
+// "apply" (WolfTerrainLevels::applyBody, labelled "undo land brush"), at most SKY_BLOCK metres a side a request, NaN where a cell
+// is left alone - as the Terraform window's sky Undo (wolfterraform.cpp levelCoro). The region's own "undo" is never sent: it
+// undoes the caller's LAST change, whatever made it (WolfSkyLevelsModule.Edit.cs Undo), so the Terraform window's history and
+// this brush's never take each other's steps. Like that window's Undo, a cell someone changed since the stroke is put back too.
+// static
+void LLToolBrushLand::skyUndoCoro(U64 handle, S32 level, std::unordered_map<U32, F32> before)
 {
-    WolfTerrainLevels* sky = sky_of(handle);
-    if (!sky || left <= 0) return;
-    LLSD body = LLSD::emptyMap();
-    body["op"] = "undo";
-    sky->post(body, [handle, left](const LLSD& answer)
+    constexpr S32 BUSY_TRIES = 6;   // wolfterraform.cpp levelCoro BUSY_TRIES
+    LLToolBrushLand* self = LLToolBrushLand::getInstance();
+    // the 256 m blocks with cells to put back
+    std::map<std::pair<S32, S32>, std::vector<U32>> blocks;
+    for (const auto& kv : before)
     {
+        const S32 x = (S32)(kv.first & 0xFFFFu), y = (S32)(kv.first >> 16);
+        blocks[std::make_pair(x / SKY_BLOCK, y / SKY_BLOCK)].push_back(kv.first);
+    }
+    S32 changed = 0, refused = 0;
+    std::string reason, failed;
+    for (const auto& b : blocks)
+    {
+        S32 x0 = S32_MAX, y0 = S32_MAX, x1 = -1, y1 = -1;
+        for (U32 k : b.second)
+        {
+            const S32 x = (S32)(k & 0xFFFFu), y = (S32)(k >> 16);
+            x0 = llmin(x0, x); y0 = llmin(y0, y); x1 = llmax(x1, x); y1 = llmax(y1, y);
+        }
+        const S32 w = x1 - x0 + 1, h = y1 - y0 + 1;
+        std::vector<F32> heights((size_t)w * (size_t)h, std::numeric_limits<F32>::quiet_NaN());
+        for (U32 k : b.second)
+        {
+            const S32 x = (S32)(k & 0xFFFFu), y = (S32)(k >> 16);
+            heights[(size_t)(y - y0) * (size_t)w + (size_t)(x - x0)] = before[k];
+        }
+        const LLSD body = WolfTerrainLevels::applyBody(level, x0, y0, w, h, heights, "undo land brush");
+        LLSD answer;
+        for (S32 tries = 0; ; ++tries)
+        {
+            // the region takes changes only from an avatar standing in it (wolfterrainlevels.h post), looked up after every wait
+            LLViewerRegion* rgn = gAgent.getRegion();
+            if (!rgn || rgn->getHandle() != handle)
+            {
+                answer = LLSD::emptyMap();
+                answer["message"] = "you left the region";
+                break;
+            }
+            answer = WolfTerrainLevels::postAndWait(rgn, body);
+            if (answer["success"].asBoolean() || !answer["busy"].asBoolean() || tries + 1 >= BUSY_TRIES) break;
+            llcoro::suspendUntilTimeout((F32)llmax(1, answer["retry_after"].asInteger()));
+        }
         if (!answer["success"].asBoolean())
         {
-            if (gFloaterTools) gFloaterTools->setStatusText("Undo on the sky land stopped: " + answer["message"].asString());
-            return;
+            failed = answer["message"].asString();
+            break;
         }
-        if (left > 1) wolf_sky_undo_steps(handle, left - 1);
-        else if (gFloaterTools) gFloaterTools->setStatusText("Your last brush stroke on the sky land is undone.");
-    });
+        changed += answer["changed"].asInteger();
+        if (answer["changed"].asInteger() > 0)
+        {
+            // [W104 FEATFIX review 2026-11-11] the brush's Undo is itself a change the region remembers (wolfterrainlevels.h),
+            // in the region the request was made for ([review 2] its handle, not wherever the agent is now)
+            WolfTerrainLevels::noteChange(handle, WolfTerrainLevels::EDITOR_BRUSH);
+        }
+        const S32 r = answer["refused"].asInteger() + answer["no_room"].asInteger();
+        refused += r;
+        if (r > 0 && reason.empty()) reason = answer["message"].asString();
+    }
+    self->mSkyUndoBusy = false;
+    std::string text;
+    if (!failed.empty())
+    {
+        text = llformat("Undo of your last brush stroke on the sky land stopped (%d m\xC2\xB2 put back): %s", changed, failed.c_str());
+        LLNotificationsUtil::add("GenericAlert", LLSD().with("MESSAGE", text));
+    }
+    else if (refused > 0)
+    {
+        text = llformat("Your last brush stroke on the sky land is undone where the region allowed it: %d m\xC2\xB2 put back, %d m\xC2\xB2 not. %s",
+                        changed, refused, reason.c_str());
+    }
+    else
+    {
+        text = llformat("Your last brush stroke on the sky land is undone (%d m\xC2\xB2 put back).", changed);
+    }
+    if (gFloaterTools) gFloaterTools->setStatusText(text);
+    LL_INFOS("WolfSkyBrush") << "brush undo: " << changed << " changed, " << refused << " refused" << (failed.empty() ? "" : ", stopped: ") << failed << LL_ENDL;
 }
 
 void LLToolBrushLand::undo()
 {
     LLViewerRegion* regionp = gAgent.getRegion();
-    if (regionp && mSkyUndoSteps > 0 && regionp->getHandle() == mSkyUndoRegion)
+    if (regionp && mSkyUndo.mStroke && !mSkyUndo.mBefore.empty() && regionp->getHandle() == mSkyUndo.mRegion)
     {
-        if (mSkyInFlight || !mSkyDirty.empty()) return;
-        const S32 steps = mSkyUndoSteps;
-        mSkyUndoSteps = 0;
-        wolf_sky_undo_steps(mSkyUndoRegion, steps);
+        if (mSkyInFlight || !mSkyDirty.empty() || mSkyUndoBusy) return;
+        // [W104 FEATFIX 2026-11-11 B1] one Undo a stroke: the record is handed to the coroutine and gone from here
+        SkyUndo u;
+        std::swap(u, mSkyUndo);
+        mSkyUndoBusy = true;
+        if (gFloaterTools) gFloaterTools->setStatusText("Putting back your last brush stroke on the sky land...");
+        const U64 handle = u.mRegion;
+        const S32 level = u.mLevel;
+        LLCoros::instance().launch("WolfSkyBrushUndo", [handle, level, before = std::move(u.mBefore)]() mutable
+        {
+            skyUndoCoro(handle, level, std::move(before));
+        });
         return;
     }
     if (!regionp || regionp->getCapability("WolfTerraform").empty()) return;

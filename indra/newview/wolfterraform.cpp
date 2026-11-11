@@ -823,6 +823,9 @@ namespace WolfTerraform
             }
         S32 changed = 0, refused = 0, no_room = 0, sent = 0;
         std::string reason;
+        // [review 2 2026-11-11] the region this job is for, by handle, for the Sky Land window's Undo rule (wolfterrainlevels.h)
+        LLViewerRegion* job_rgn = here();
+        const U64 job_handle = job_rgn ? job_rgn->getHandle() : 0;
         auto stopped = [&](const std::string& why)
         {
             if (kind == KIND_APPLY)
@@ -874,11 +877,24 @@ namespace WolfTerraform
             }
             ++sent;
             changed += answer["changed"].asInteger();
+            if (answer["changed"].asInteger() > 0)
+            {
+                // [W104 FEATFIX review 2026-11-11] the region remembers this as this login's last sky change (wolfterrainlevels.h)
+                WolfTerrainLevels::noteChange(job_handle, WolfTerrainLevels::EDITOR_TERRAFORM);
+            }
             refused += answer["refused"].asInteger();
             no_room += answer["no_room"].asInteger();
             if ((answer["refused"].asInteger() > 0 || answer["no_room"].asInteger() > 0) && reason.empty()) reason = answer["message"].asString();
             mProgress = (F32)sent / (F32)llmax((size_t)1, blocks.size());
             mStatus = llformat("%s: the region has set %d of %d block%s", verb.c_str(), sent, (S32)blocks.size(), blocks.size() == 1 ? "" : "s");
+        }
+        // [W104 FEATFIX 2026-11-11 B6] an Undo / Redo the region refused everywhere changed nothing: the history stays where it was
+        // (the step can still be undone / redone, and is said not done) rather than move on as if it had gone through
+        if (kind != KIND_APPLY && changed == 0 && (refused > 0 || no_room > 0))
+        {
+            const std::string verb_done = kind == KIND_UNDO ? "Undo of " : "Redo of ";
+            finish(false, verb_done + label + " was not done: nothing could be changed. The region says: " + reason);
+            return;
         }
         // the history moves on once the job went through
         auto it = mHistory.find(region);
@@ -905,8 +921,10 @@ namespace WolfTerraform
         }
         if (refused > 0 || no_room > 0)
         {
-            // Apply's Words(): the parcels and their owners it would not change
-            finish(false, llformat("%s, but %d m² did not change. The region says: %s", what.c_str(), refused + no_room, reason.c_str()));
+            // Apply's Words(): the parcels and their owners it would not change. [W104 FEATFIX 2026-11-11 B6] the step counts as
+            // done for what changed, and the words say how much did and did not
+            finish(false, llformat("%s for %d m², but %d m² did not change. The region says: %s", what.c_str(), changed,
+                                   refused + no_room, reason.c_str()));
             if (kind == KIND_APPLY) markStopped();
             return;
         }

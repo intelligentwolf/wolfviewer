@@ -69,6 +69,13 @@ namespace
     constexpr F32 SAME_CLICK_M = 1.f;          // the second press of a double-click (wolffloaterterraform.cpp SAME_CLICK_M)
     constexpr F64 PLAN_WAIT_S = 0.6;           // the plan is asked for this long after the drawing last changed
     constexpr F64 BUILD_QUIET_S = 60.0;        // no news from the box for this long while building: say so
+    // [W104 FEATFIX 2026-11-11 A1] no news for this long: the window stops waiting. The box itself gives up after 30 s without
+    // news (lift_setup.lsl timer(): llGetTime() - gLastNews > 30.0 -> failBuild), so by then its "fail" line was lost or it is gone.
+    constexpr F64 BUILD_GIVE_UP_S = 120.0;
+    // [W104 FEATFIX 2026-11-11 A5] after a failed kit fetch / rez the kit is asked for again only after this (CHOSEN), doubling
+    // after each further failure up to BOX_RETRY_MAX_S, and only when the resident changes the drawing
+    constexpr F64 BOX_RETRY_FIRST_S = 30.0;
+    constexpr F64 BOX_RETRY_MAX_S = 300.0;
     constexpr F32 TOP_VIEW_M = 120.f;          // wolffloatertunnels.cpp TOP_VIEW_M's role: the lowest camera height
     constexpr F32 TOP_VIEW_TILT = 0.35f;       // and a slight tilt, so the hill's shape shows
 
@@ -168,11 +175,14 @@ namespace
     }
 }
 
-bool WolfLifts::onObjectChat(const LLUUID& source, U8 chat_type, const std::string& text)
+bool WolfLifts::onObjectChat(const LLUUID& source, const LLUUID& owner, U8 chat_type, const std::string& text)
 {
     if (text.compare(0, PREFIX.size(), PREFIX) != 0) return false;
     // [WOLF ONLY] as WolfAir::onObjectChat: off Wolf the line is left to chat like any other
     if (!onWolf() || chat_type != CHAT_TYPE_DIRECT) return false;
+    // [W104 FEATFIX 2026-11-11 A2] only an object this agent owns is the kit (lift_setup.lsl listens to and answers only its
+    // owner): the same test as WolfFishing::onObjectChat - the region writes the OwnerID. Anyone else's line is left to chat.
+    if (source.isNull() || owner != gAgent.getID()) return false;
     // from here the line is the window's, never chat (the box only answers this window)
     if (text.size() > MAX_LINE) return true;
     if (WolfFloaterLifts* f = LLFloaterReg::findTypedInstance<WolfFloaterLifts>("wolf_lifts")) f->onBoxLine(source, text);
@@ -226,6 +236,18 @@ void WolfFloaterLifts::onOpen(const LLSD& key)
         }
     }
     mStartPending = true;
+    // [W104 FEATFIX 2026-11-11 A1/A5] a fresh start: nothing is waited for from before, and a kit that failed is tried again
+    // (the failure messages say "close the window and open it again")
+    if (mBuilding) endBuilding(std::string(), false);
+    mBoxRetryAt = 0.0;
+    mBoxBackoff = 0.0;
+    mBoxAlerted = false;
+    if (!mOpenNote.empty())
+    {
+        setStatus(mOpenNote, false);
+        mOpenNote.clear();
+    }
+    if (mClicks.size() >= 2) changed();   // the plan is asked for again (the box was let go on close)
     updateControls();
 }
 
@@ -236,8 +258,21 @@ void WolfFloaterLifts::onClose(bool app_quitting)
     if (app_quitting) return;
     // a box this window found but nothing was built with: it tidies itself away (lift_setup.lsl "bye")
     if (mBox == BOX_READY && !mBuilding) say("WLIFT|" + mBox8 + "|bye");
-    mBox = BOX_NONE;
-    mBoxId.setNull();
+    // [W104 FEATFIX 2026-11-11 A5] one this window rezzed that has not answered yet: told the same (its box8 is the first 8
+    // letters of its key, lift_setup.lsl state_entry gBox8). If it was not listening yet it stays, and the next window finds it.
+    else if (mBox == BOX_FINDING && mWaitFor.notNull()) say("WLIFT|" + mWaitFor.asString().substr(0, 8) + "|bye");
+    // [W104 FEATFIX 2026-11-11 A1] closed mid-build: the kit builds on by itself (and takes the parts away if it fails); this
+    // window stops waiting, so it never stays locked, and says so when it is opened again. The drawing went into the build.
+    if (mBuilding)
+    {
+        endBuilding(std::string(), false);
+        mClicks.clear();
+        mPlanText.clear();
+        mOpenNote = "The window was closed while your lift was being built. The lift kit carries on by itself and tidies itself "
+                    "away when it has finished - look for the lift in the world.";
+    }
+    if (mBoxCoroRunning) LL_INFOS("WolfLifts") << "window closed while getting the kit ready: that stops" << LL_ENDL;
+    stopBox();
     mPlan.clear();
     mPlanOk = false;
     giveCameraBack();
@@ -366,6 +401,13 @@ std::string WolfFloaterLifts::routeHint() const
     if (mBuilding) return "Building your lift - the parts are being put in place.";
     if (mClicks.empty()) return "Click on the ground where the BOTTOM station goes.";
     if (mClicks.size() == 1) return "Now click where the TOP station goes (to bend the line, click the bend first). Too far to click? Alt + drag moves the camera.";
+    // [W104 FEATFIX 2026-11-11 A5] after a failure the kit is tried again when the drawing changes, after a short wait
+    if (mBox == BOX_NONE && mBoxBackoff > 0.0)
+    {
+        return LLFrameTimer::getElapsedSeconds() < mBoxRetryAt
+            ? "Your lift kit is not ready - the window says why. Wait a little, then move a point to try again."
+            : "Move a point to try getting your lift kit ready again.";
+    }
     if (mBox != BOX_READY) return "Getting your lift kit ready...";
     if (mPlanDirty) return "Working out where the towers go...";
     if (!mPlanOk) return "This line cannot be built yet - see the window. Drag a point to move it.";
@@ -453,6 +495,7 @@ void WolfFloaterLifts::onBuild()
     if (mBuilding || !mPlanOk || mPlanDirty || mBox != BOX_READY || mClicks.size() < 2) return;
     mBuilding = true;
     mBuildNewsAt = LLFrameTimer::getElapsedSeconds();
+    mQuietSaid = false;
     mProgress->setValue(0.f);
     mProgress->setVisible(true);
     say("WLIFT|" + mBox8 + "|build|" + kindWord() + "|" + pointsText());
@@ -483,10 +526,19 @@ void WolfFloaterLifts::onBoxLine(const LLUUID& source, const std::string& text)
         LLUUID id;
         if (!LLUUID::validate(f[2]) || !id.set(f[2]) || id != source) return;
         if (mWaitFor.notNull() && id != mWaitFor) return;
-        if (f[3] != "0") return;
+        if (f[3] != "0")
+        {
+            // [W104 FEATFIX 2026-11-11 A1] a kit of ours still building a lift (this window was closed or left the region while
+            // it built): no second kit is put down beside it (boxCoro reads this after its hello)
+            if (mBox == BOX_FINDING) mBusyKitSeen = true;
+            return;
+        }
         mBox = BOX_READY;
         mBoxId = id;
         mBox8 = f[2].substr(0, 8);
+        mBoxBackoff = 0.0;      // [A5] working again: a later failure starts from the first wait, with its alert
+        mBoxRetryAt = 0.0;
+        mBoxAlerted = false;
         setStatus(std::string(), false);
         sendPlan();
         updateControls();
@@ -535,6 +587,7 @@ void WolfFloaterLifts::onBoxLine(const LLUUID& source, const std::string& text)
         const F32 placed = (F32)atoi(f[3].c_str()), total = (F32)llmax(1, atoi(f[4].c_str()));
         mProgress->setValue(100.f * placed / total);
         mBuildNewsAt = LLFrameTimer::getElapsedSeconds();
+        mQuietSaid = false;
         setStatus(llformat("Building: %d of %d parts in place.", (S32)placed, (S32)total), false);
         return;
     }
@@ -572,27 +625,67 @@ void WolfFloaterLifts::onBoxLine(const LLUUID& source, const std::string& text)
 void WolfFloaterLifts::needBox()
 {
     if (mBoxCoroRunning || mBox != BOX_NONE) return;
+    // [W104 FEATFIX 2026-11-11 A5] after a failure, not again before its wait is over (the status line still says why): a drag
+    // or a click no longer sets off a fetch and an alert each time
+    if (LLFrameTimer::getElapsedSeconds() < mBoxRetryAt) return;
     mBox = BOX_FINDING;
     mBoxCoroRunning = true;
+    mBusyKitSeen = false;
     mWaitFor.setNull();
     LLHandle<LLFloater> h = getHandle();
-    LLCoros::instance().launch("WolfLiftsBox", [h]() { boxCoro(h); });
+    const U32 gen = mBoxGen;
+    LLCoros::instance().launch("WolfLiftsBox", [h, gen]() { boxCoro(h, gen); });
+}
+
+// [W104 FEATFIX 2026-11-11 A5] wolffloaterlifts.h
+void WolfFloaterLifts::stopBox()
+{
+    ++mBoxGen;
+    mBoxCoroRunning = false;
+    mBox = BOX_NONE;
+    mBoxId.setNull();
+    mWaitFor.setNull();
 }
 
 void WolfFloaterLifts::boxFailed(const std::string& why)
 {
     mBox = BOX_NONE;
     setStatus(why, true);
-    LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", why));
+    // [W104 FEATFIX 2026-11-11 A5] one alert for a run of failures (it stays until OK is pressed); the status line says each one
+    mBoxBackoff = mBoxBackoff <= 0.0 ? BOX_RETRY_FIRST_S : llmin(mBoxBackoff * 2.0, BOX_RETRY_MAX_S);
+    mBoxRetryAt = LLFrameTimer::getElapsedSeconds() + mBoxBackoff;
+    if (!mBoxAlerted)
+    {
+        mBoxAlerted = true;
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", why));
+    }
+    updateControls();
+}
+
+// [W104 FEATFIX 2026-11-11 A1] wolffloaterlifts.h
+void WolfFloaterLifts::endBuilding(const std::string& why, bool error)
+{
+    mBuilding = false;
+    if (mProgress) mProgress->setVisible(false);
+    stopBox();   // the kit is let go: the next plan finds it again (or another)
+    mPlan.clear();
+    mPlanOk = false;
+    if (!why.empty()) setStatus(why, error);
     updateControls();
 }
 
 // static
-void WolfFloaterLifts::boxCoro(LLHandle<LLFloater> h)
+void WolfFloaterLifts::boxCoro(LLHandle<LLFloater> h, U32 gen)
 {
     // The window is looked up again through its handle after every wait (wolffloaterskis.cpp giveCoro): closed meanwhile,
-    // the coroutine stops.
-    auto self = [&h]() { return dynamic_cast<WolfFloaterLifts*>(h.get()); };
+    // the coroutine stops. [W104 FEATFIX 2026-11-11 A5] The window is kept when closed (single_instance floaters are reused,
+    // llfloater.cpp mReuseInstance), so closing (or a region change) bumps mBoxGen and a coroutine of an older generation
+    // stops at its next wake-up: no kit is fetched or rezzed for a closed window.
+    auto self = [&h, gen]() -> WolfFloaterLifts*
+    {
+        WolfFloaterLifts* f = dynamic_cast<WolfFloaterLifts*>(h.get());
+        return f && f->mBoxGen == gen ? f : nullptr;
+    };
     auto done = [&self]() { if (WolfFloaterLifts* f = self()) f->mBoxCoroRunning = false; };
     // 1. a box of ours already in this region (left from before, or rezzed by hand) answers hello
     if (WolfFloaterLifts* f = self()) f->say("WLIFT|*|hello");
@@ -600,6 +693,13 @@ void WolfFloaterLifts::boxCoro(LLHandle<LLFloater> h)
     WolfFloaterLifts* f = self();
     if (!f) return;
     if (f->mBox == BOX_READY || !f->getVisible()) { done(); return; }
+    if (f->mBusyKitSeen)
+    {
+        // [W104 FEATFIX 2026-11-11 A1] a kit of ours is still building the last lift: wait for it rather than put down another
+        f->mBoxCoroRunning = false;
+        f->boxFailed("Your lift kit is still building your last lift. When it has finished, move a point to carry on.");
+        return;
+    }
     // 2. the kit in the inventory; when there is none, the grid gives one (php/wolflifts.php) and it is waited for
     LLViewerInventoryItem* kit = findKit();
     if (!kit)
@@ -658,6 +758,7 @@ void WolfFloaterLifts::boxCoro(LLHandle<LLFloater> h)
         if (o && !o->isDead() && o->isRoot()) before.insert(o->getID());
     }
     f->setStatus("Putting your lift kit down beside you (it tidies itself away after building)...", false);
+    LL_INFOS("WolfLifts") << "putting the lift kit down at " << at << LL_ENDL;   // [W104 FEATFIX 2026-11-11/] one line a kit
     rezAt(kit, at);
     for (S32 t = 0; t < 40; ++t)
     {
@@ -785,21 +886,32 @@ void WolfFloaterLifts::draw()
         mPenWanted = true;
     }
     LLViewerRegion* rgn = gAgent.getRegion();
-    if (rgn && rgn->getRegionID() != mRegionAt && !mBuilding)
+    if (rgn && rgn->getRegionID() != mRegionAt)
     {
-        if (!mClicks.empty() && mRegionAt.notNull()) setStatus("You are on another region now: the drawing was put away.", true);
+        // [W104 FEATFIX 2026-11-11 A1] a region change mid-build too: the kit's lines (llRegionSayTo) do not reach another
+        // region, so the window stops waiting rather than stay locked
+        const bool was_building = mBuilding;
+        if (mBuilding) endBuilding(std::string(), false);
+        if (was_building) setStatus("You left the region while your lift was being built. The lift kit carries on by itself - go back to see the lift.", true);
+        else if (!mClicks.empty() && mRegionAt.notNull()) setStatus("You are on another region now: the drawing was put away.", true);
         mRegionAt = rgn->getRegionID();
         mClicks.clear();
         mPlan.clear();
         mPlanOk = false;
-        mBox = BOX_NONE;   // a box belongs to the region it is in
-        mBoxId.setNull();
+        stopBox();   // a box belongs to the region it is in; a coroutine looking for one stops (A5)
         changed();
     }
     if (mPlanDirty && mBox == BOX_READY && LLFrameTimer::getElapsedSeconds() - mChangedAt >= PLAN_WAIT_S) sendPlan();
-    if (mBuilding && LLFrameTimer::getElapsedSeconds() - mBuildNewsAt > BUILD_QUIET_S)
+    if (mBuilding && LLFrameTimer::getElapsedSeconds() - mBuildNewsAt > BUILD_GIVE_UP_S)
     {
-        mBuildNewsAt = LLFrameTimer::getElapsedSeconds();
+        // [W104 FEATFIX 2026-11-11 A1] the real timeout: the window can never stay disabled
+        endBuilding("Nothing has been heard from your lift kit for 2 minutes, so this window has stopped waiting. Look in the "
+                    "world: if the lift is not there, press Build again.", true);
+        changed();   // the plan is asked for again, so Build can be pressed
+    }
+    else if (mBuilding && LLFrameTimer::getElapsedSeconds() - mBuildNewsAt > BUILD_QUIET_S && !mQuietSaid)
+    {
+        mQuietSaid = true;
         setStatus("The lift kit has not said anything for a minute. If you left it, come back near it; it gives up by itself "
                   "and takes away what it had built if the region stops answering.", true);
     }
@@ -808,15 +920,22 @@ void WolfFloaterLifts::draw()
     LLFloater::draw();
 }
 
+// [W104 FEATFIX 2026-11-11 A7] updateControls runs every frame (draw): a text box is only set when its words change, as
+// wolffloaterhuds.cpp refreshTiles does - LLTextBox::setText lays the text out again each time.
+void WolfFloaterLifts::setTextIfChanged(LLTextBox* box, const std::string& text)
+{
+    if (box && box->getText() != text) box->setText(text);
+}
+
 void WolfFloaterLifts::updateControls()
 {
     if (!mHint) return;
-    mHint->setText(onWolf() ? routeHint() : std::string("Cable Cars and Ski Lifts works on Wolf Territories regions only."));
+    setTextIfChanged(mHint, onWolf() ? routeHint() : std::string("Cable Cars and Ski Lifts works on Wolf Territories regions only."));
     mKind->setEnabled(!mBuilding);
     mUndoBtn->setEnabled(!mBuilding && !mClicks.empty());
     mStartOverBtn->setEnabled(!mBuilding && !mClicks.empty());
     mBuildBtn->setEnabled(!mBuilding && mPlanOk && !mPlanDirty && mBox == BOX_READY && mClicks.size() >= 2);
     std::string info;
     if (mClicks.size() >= 2 && !mPlanDirty && mBox == BOX_READY) info = mPlanText;
-    mPlanInfo->setText(info);
+    setTextIfChanged(mPlanInfo, info);
 }

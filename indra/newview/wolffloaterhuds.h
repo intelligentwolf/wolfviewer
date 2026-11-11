@@ -31,7 +31,12 @@ public:
     void onOpen(const LLSD& key) override;
     void draw() override;
 
-    enum ETile { T_GAME = 0, T_CAR, T_SKIS, T_PLANE, T_SPACESHIP, T_BOAT, T_SHIP, T_SPEEDBOAT, T_SUBMARINE, T_COUNT };
+    // [W104 FEATFIX 2026-11-11] Paul: "greedy the hud isn't on the hud menu, I think there are a lot of huds not on the floater
+    // that should be": + Greedy, the Roleplay console, Tessa's Compass and Xenon's WolfSpeed (each a window shown and hidden
+    // from the Wolf World menu). A new tile goes before T_COUNT, with its TILE_IDS / TILE_NAMES / TILE_WOLF_ONLY entries,
+    // tileOn and onTile cases and its XML block (floater_wolf_huds.xml: the next free slot of the 3-wide grid).
+    enum ETile { T_GAME = 0, T_CAR, T_SKIS, T_PLANE, T_SPACESHIP, T_BOAT, T_SHIP, T_SPEEDBOAT, T_SUBMARINE,
+                 T_GREEDY, T_ROLEPLAY, T_COMPASS, T_SPEED, T_COUNT };
 
     /** Lit as its old icon was (the HUD shows). */
     static bool tileOn(ETile t);
@@ -43,6 +48,7 @@ private:
     LLButton*  mTiles[T_COUNT] = { nullptr };
     LLTextBox* mStates[T_COUNT] = { nullptr };
     LLTextBox* mStatus = nullptr;
+    std::string mNote;   // [W104 FEATFIX 2026-11-11 A7] the status line's words after a press that did not switch a HUD on
 };
 
 #endif // WOLF_FLOATERHUDS_H

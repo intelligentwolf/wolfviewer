@@ -836,10 +836,16 @@ void WolfFloaterTerraform::draw()
 void WolfFloaterTerraform::fillSurfaces()
 {
     LLViewerRegion* rgn = gAgent.getRegion();
-    if (WolfTerrainLevels::changeCount() == mSeenSkyChange && rgn == mSeenSkyRegion) return;
+    const LLUUID rgn_id = rgn ? rgn->getRegionID() : LLUUID::null;
+    if (WolfTerrainLevels::changeCount() == mSeenSkyChange && rgn == mSeenSkyRegion && rgn_id == mSeenSkyRegionId) return;
+    // [W104 FEATFIX 2026-11-11 B4] another region (a teleport or a crossing): the choice goes back to Ground, even when the new
+    // region has a level with the same number (ids are per region: WolfSkyLevelSet), and the window says so
+    const bool new_region = rgn_id != mSeenSkyRegionId;
+    const S32 was = surfaceLevel();
     mSeenSkyChange = WolfTerrainLevels::changeCount();
     mSeenSkyRegion = rgn;
-    const S32 keep = surfaceLevel();
+    mSeenSkyRegionId = rgn_id;
+    const S32 keep = new_region ? 0 : was;
     const WolfTerrainLevels* sky = rgn ? rgn->getWolfSkyLevels() : nullptr;
     std::vector<const WolfTerrainLevels::Level*> list;
     if (sky) for (const WolfTerrainLevels::Level& l : sky->levels()) list.push_back(&l);
@@ -855,7 +861,8 @@ void WolfFloaterTerraform::fillSurfaces()
     mSurface->selectByValue(LLSD(kept ? keep : 0));
     mSurface->setEnabled(!list.empty());
     mSurfaceNote->setText(list.empty() ? std::string("No sky land here") : std::string());
-    if (keep) changed();   // the level went (the plan is the ground's now), or its heights changed (the preview follows them)
+    if (keep || was) changed();   // the level went (the plan is the ground's now), or its heights changed (the preview follows them)
+    if (new_region && was) setStatus("You are on another region now: Shape is back to Ground.", false);
 }
 
 S32 WolfFloaterTerraform::surfaceLevel() const

@@ -2126,6 +2126,9 @@ void LLAppViewer::flushLFSIO()
 
 bool LLAppViewer::cleanup()
 {
+    // [W104 FEATFIX review 2 2026-11-11] the Greedy session (a singleton, which outlives gTextureList.shutdown() and
+    // LLUIImageList::cleanUp() below) lets go of its dice textures first
+    if (WolfGreedyGame::instanceExists()) WolfGreedyGame::instance().releaseImages();
 #if LL_VELOPACK
     // Apply any pending Velopack update before shutdown
     if (velopack_is_update_pending())

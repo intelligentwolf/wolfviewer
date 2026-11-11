@@ -10,12 +10,15 @@
      are mouse_opaque="false" and let the press through, llview.cpp childrenHandleMouseEvent / blockMouseEvent); Tab moves
      between tiles, Enter or Space presses. Pictures: our own artwork, textures/icons/wolf_huds_<id>.png
      (region-terrain-work/huds-button-2026-11-10/make_hud_art.py), the same as WolfStorm's icons/huds/<id>.svg.
-     Same tiles, order and words as WolfStorm floater_wolf_huds.js (which has the HUDs WolfStorm has). -->
+     Same tiles, order and words as WolfStorm floater_wolf_huds.js (which has the HUDs WolfStorm has).
+     [W104 FEATFIX 2026-11-11] Paul: "greedy the hud isn't on the hud menu, I think there are a lot of huds not on the floater
+     that should be": rows 4-5 add Greedy, Roleplay, Tessa's Compass and WolfSpeed (pictures: region-terrain-work/
+     w104-review-2026-11-11/featfix/make_hud_art_extra.py). WolfStorm has not had them added yet. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="452"
+ height="688"
  layout="topleft"
  name="wolf_huds"
  save_rect="true"
@@ -77,5 +80,31 @@
     <text follows="left|top" layout="topleft" left="640" top="306" width="148" height="20" name="name_submarine" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Submarine</text>
     <text follows="left|top" layout="topleft" left="640" top="328" width="148" height="46" name="desc_submarine" font="SansSerif" wrap="true" mouse_opaque="false">Instruments and sonar for going under the sea.</text>
     <text follows="left|top" layout="topleft" left="640" top="378" width="148" height="18" name="state_submarine" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="12" name="status" top="414" width="784" wrap="true" />
+    <!-- Greedy [W104 FEATFIX 2026-11-11] -->
+    <button follows="left|top" layout="topleft" left="12" top="412" width="256" height="108" name="tile_greedy" is_toggle="true" label="" tab_stop="true" tool_tip="Greedy: The dice game on the screen: play while you walk round the grid." />
+    <icon follows="left|top" layout="topleft" left="22" top="426" width="80" height="80" name="pic_greedy" image_name="WolfHuds_greedy" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="112" top="422" width="148" height="20" name="name_greedy" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Greedy</text>
+    <text follows="left|top" layout="topleft" left="112" top="444" width="148" height="46" name="desc_greedy" font="SansSerif" wrap="true" mouse_opaque="false">The dice game on the screen: play while you walk round the grid.</text>
+    <text follows="left|top" layout="topleft" left="112" top="494" width="148" height="18" name="state_greedy" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Roleplay [W104 FEATFIX 2026-11-11] -->
+    <button follows="left|top" layout="topleft" left="276" top="412" width="256" height="108" name="tile_roleplay" is_toggle="true" label="" tab_stop="true" tool_tip="Roleplay: The game console: your hero, stats, bag, pets and the game&apos;s pages." />
+    <icon follows="left|top" layout="topleft" left="286" top="426" width="80" height="80" name="pic_roleplay" image_name="WolfHuds_roleplay" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="376" top="422" width="148" height="20" name="name_roleplay" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Roleplay</text>
+    <text follows="left|top" layout="topleft" left="376" top="444" width="148" height="46" name="desc_roleplay" font="SansSerif" wrap="true" mouse_opaque="false">The game console: your hero, stats, bag and pets.</text>
+    <text follows="left|top" layout="topleft" left="376" top="494" width="148" height="18" name="state_roleplay" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- Tessa's Compass [W104 FEATFIX 2026-11-11] -->
+    <button follows="left|top" layout="topleft" left="540" top="412" width="256" height="108" name="tile_compass" is_toggle="true" label="" tab_stop="true" tool_tip="Tessa&apos;s Compass: A mariner&apos;s compass: North, where you look and where you go." />
+    <icon follows="left|top" layout="topleft" left="550" top="426" width="80" height="80" name="pic_compass" image_name="WolfHuds_compass" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="640" top="422" width="148" height="20" name="name_compass" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Tessa's Compass</text>
+    <text follows="left|top" layout="topleft" left="640" top="444" width="148" height="46" name="desc_compass" font="SansSerif" wrap="true" mouse_opaque="false">A mariner's compass: North, where you look and where you go.</text>
+    <text follows="left|top" layout="topleft" left="640" top="494" width="148" height="18" name="state_compass" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- WolfSpeed [W104 FEATFIX 2026-11-11] -->
+    <button follows="left|top" layout="topleft" left="12" top="528" width="256" height="108" name="tile_speed" is_toggle="true" label="" tab_stop="true" tool_tip="WolfSpeed: Xenon&apos;s WolfSpeed: a speed dial to walk, run, go fast or super fast." />
+    <icon follows="left|top" layout="topleft" left="22" top="542" width="80" height="80" name="pic_speed" image_name="WolfHuds_speed" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="112" top="538" width="148" height="20" name="name_speed" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">WolfSpeed</text>
+    <text follows="left|top" layout="topleft" left="112" top="560" width="148" height="46" name="desc_speed" font="SansSerif" wrap="true" mouse_opaque="false">Xenon's WolfSpeed: a speed dial to walk, run, go fast or super fast.</text>
+    <text follows="left|top" layout="topleft" left="112" top="610" width="148" height="18" name="state_speed" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <!-- [W104 FEATFIX 2026-11-11] rows 4 and 5 (116 apart, as rows 1-3); row 5's middle (left 276, top 528) is kept for the Fishing
+         tile and its right-hand slot (left 540) is free. Status line under row 5, 36 high: two lines fit. -->
+    <text follows="left|top" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="644" width="784" wrap="true" />
 </floater>

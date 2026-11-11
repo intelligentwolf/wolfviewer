@@ -2878,7 +2878,7 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
         }
         // [WOLF LIFTS 2026-11-10] the lift kit's "WolfLift1|..." lines to the Cable Cars and Ski Lifts window
         // (wolffloaterlifts.h), taken the same way. </WolfViewer>
-        if (WolfLifts::onObjectChat(from_id, type_temp, helm_line))
+        if (WolfLifts::onObjectChat(from_id, owner_id, type_temp, helm_line))
         {
             return;
         }

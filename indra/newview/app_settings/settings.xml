@@ -30240,10 +30240,34 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <integer>1</integer>
     </map>
+    <key>WolfGreedyDebugDelaySecs</key>
+    <map>
+      <key>Comment</key>
+      <string>[W104 FEATFIX review 2026-11-11] Tests only, off (0): every Greedy request waits this many seconds (at most 30) before it goes, like a slow link.</string>
+      <key>Persist</key>
+      <integer>0</integer>
+      <key>HideFromEditor</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>0.0</real>
+    </map>
+    <key>WolfGreedyHudScale</key>
+    <map>
+      <key>Comment</key>
+      <string>[W104 FEATFIX 2026-11-11] Size of the Greedy HUD, 0.4 to 1.0 of its full size (wolfgreedyhud.cpp). Drag its top edge to change it; double-click the edge for the default.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>1.0</real>
+    </map>
     <key>WolfGreedyMode</key>
     <map>
       <key>Comment</key>
-      <string>[GREEDY WINDOW 2026-11-10] The Greedy window's view, chosen by the player: full, table (controls only) or strip</string>
+      <string>[GREEDY WINDOW 2026-11-10] The Greedy window's view, chosen by the player: full or table (controls only). [W104 FEATFIX 2026-11-11] The old strip bar is the Greedy HUD now (Wolf World > Greedy); a saved "strip" opens as full.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>

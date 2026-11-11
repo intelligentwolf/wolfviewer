@@ -936,6 +936,8 @@ set(viewer_SOURCE_FILES
     wolffloaterdob.cpp   # [DOB IN THE VIEWER 2026-10-26] Your Date of Birth (asked after login when the account has none)
     wolffloatergreedy.cpp   # [GREEDY WINDOW 2026-11-10] Greedy, the dice game (ticket 721)
     wolfgreedyhud.cpp   # [W104 FEATFIX 2026-11-11] the Greedy HUD (Paul: "a HUD not a floater")
+    wolfgreedysetup.cpp   # [GREEDY TABLE HERE 2026-11-11] "Put a Greedy table here", the set-up helper
+    wolfgreedylocal.cpp   # [GREEDY COMPUTER PLAYER 2026-11-11] practice against the computer, played in the viewer
     wolfvrpipe.cpp   # [VR PIPE 2026-11-03] VR in the headset browser: LAN HTTPS/WebSocket server (no viewer headers)
     wolfvrpipe_video.cpp   # [VR PIPE 2026-11-03] test pattern + GStreamer H.264 (dlopen) / libjpeg encoders
     wolfvrdevice.cpp   # [VR SIMPLE 2026-11-03] the headset page id and browser name (no pairing)
@@ -1980,6 +1982,9 @@ set(viewer_HEADER_FILES
     wolffloaterdob.h   # [DOB IN THE VIEWER 2026-10-26]
     wolffloatergreedy.h   # [GREEDY WINDOW 2026-11-10]
     wolfgreedyhud.h   # [W104 FEATFIX 2026-11-11]
+    wolfgreedysetup.h   # [GREEDY TABLE HERE 2026-11-11]
+    wolfgreedylocal.h   # [GREEDY COMPUTER PLAYER 2026-11-11]
+    wolfgreedyrules.h   # [GREEDY COMPUTER PLAYER 2026-11-11]
     wolfvrpipe.h   # [VR PIPE 2026-11-03]
     wolfvrpipe_video.h   # [VR PIPE 2026-11-03]
     wolfvrdevice.h   # [VR SIMPLE 2026-11-03]

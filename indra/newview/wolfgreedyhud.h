@@ -64,7 +64,7 @@ public:
     void onMouseCaptureLost() override;
 
     enum EHit { H_NONE = 0, H_ROLL, H_BANK, H_NEW, H_PRACTICE, H_JOIN, H_LEAVE, H_PASS, H_HELP, H_WINDOW, H_PANEL, H_LESS,
-                H_CLOSE, H_DICE };
+                H_CLOSE, H_DICE, H_SETUP };   // [GREEDY TABLE HERE 2026-11-11/] H_SETUP: "Put a Greedy table here"
 
 private:
     struct Hit

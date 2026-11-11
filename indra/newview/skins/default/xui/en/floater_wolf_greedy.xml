@@ -22,6 +22,9 @@
  single_instance="true"
  title="Greedy"
  width="520">
+    <!-- [GREEDY BOARD 2026-11-11] the wood showed BLACK: a panel's background image is drawn tinted by bg_*_image_overlay, and the
+         skins set that default in widgets/panel.xml (wolfglass, the default skin: "SL-Background_Light" 0.06 0.09 0.16; starlight
+         the same name; default "White"), so the wood came out nearly black. The panels below name White themselves. -->
     <!-- [W104 FEATFIX 2026-11-11] Paul: "the design is really no fun and that's what this is about!", "make the dice 3d".
          FULL view as a game table: the Greedy logo in the header, a scoreboard, this turn's points big and gold, 3D dice on
          green baize (rendered sprites, region-terrain-work/w104-review-2026-11-11/featfix/greedy-art; held dice gold, a bust
@@ -29,7 +32,7 @@
          illustrated cards (dice pictures for every scoring combination) with Back / Next and page dots.
          Who and why: a resident aged 35-65 wants a friendly, fun game of dice; big targets, no countdowns or twitch timing,
          the moments are brief and need no reaction (the event line under the dice keeps the words). -->
-    <panel follows="left|top" height="680" layout="topleft" left="0" name="full_panel" top="20" width="520" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood">
+    <panel follows="left|top" height="680" layout="topleft" left="0" name="full_panel" top="20" width="520" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood" bg_opaque_image_overlay="White" bg_alpha_image_overlay="White">
         <icon follows="left|top" height="48" layout="topleft" left="10" name="f_logo" top="4" width="48" image_name="WolfGreedy_Logo" tool_tip="Greedy" />
         <icon follows="left|top" height="40" layout="topleft" left="62" name="f_wordmark" top="8" width="160" image_name="WolfGreedy_Wordmark" tool_tip="Greedy" />
         <text follows="left|top" height="20" layout="topleft" left="232" name="f_view_label" top="20" width="64" font="SansSerifBold" halign="right" text_color="0.89 0.73 0.35 1">View:</text>
@@ -45,7 +48,10 @@
 
         <text follows="left|top" font="SansSerifLarge" font.style="BOLD" height="26" layout="topleft" left="12" name="f_status" top="90" width="496" text_color="Yellow">Greedy</text>
         <!-- the scoreboard -->
-        <scroll_list follows="left|top" height="150" layout="topleft" left="12" name="f_board" top="118" width="496" draw_heading="true" column_padding="4" multi_select="false" bg_readonly_color="0.07 0.06 0.05 0.92" bg_writeable_color="0.07 0.06 0.05 0.92" fg_readonly_color="White" fg_unselected_color="White" heading_height="24">
+        <!-- [GREEDY BOARD 2026-11-11] the scoreboard as a painted wooden score panel: a dark painted board with the plate's gold
+             edge (contrast: white words on 0.15 0.10 0.07 = 16.2:1), and the dice tray's felt gets a stitched edge (WolfGreedy_Stitch) -->
+        <icon follows="left|top" height="158" layout="topleft" left="8" name="f_board_panel" top="114" width="504" image_name="WolfGreedy_Plate" color="0.2 0.13 0.08 1" mouse_opaque="false" />
+        <scroll_list follows="left|top" height="150" layout="topleft" left="12" name="f_board" top="118" width="496" draw_heading="true" column_padding="4" multi_select="false" bg_readonly_color="0.15 0.1 0.07 0.95" bg_writeable_color="0.15 0.1 0.07 0.95" fg_readonly_color="White" fg_unselected_color="White" heading_height="24">
             <scroll_list.columns label="" name="mark" width="28" />
             <scroll_list.columns label="Player" name="name" dynamic_width="true" />
             <scroll_list.columns label="Busts" name="busts" width="70" />
@@ -62,6 +68,7 @@
         <icon follows="left|top" height="404" layout="topleft" left="8" name="f_guide_card" top="56" width="504" image_name="WolfGreedy_Plate" color="0.12 0.1 0.08 0.96" visible="false" />
         <!-- the dice on baize -->
         <icon follows="left|top" height="80" layout="topleft" left="12" name="f_felt" top="366" width="496" image_name="WolfGreedy_Plate" color="0.16 0.52 0.3 1" />
+        <icon follows="left|top" height="80" layout="topleft" left="12" name="f_felt_stitch" top="366" width="496" image_name="WolfGreedy_Stitch" mouse_opaque="false" />
         <icon follows="left|top" height="64" layout="topleft" left="38" name="f_die0" top="374" width="64" image_name="WolfGreedy_Die0" />
         <icon follows="left|top" height="64" layout="topleft" left="114" name="f_die1" top="374" width="64" image_name="WolfGreedy_Die0" />
         <icon follows="left|top" height="64" layout="topleft" left="190" name="f_die2" top="374" width="64" image_name="WolfGreedy_Die0" />
@@ -77,7 +84,7 @@
         <text follows="left|top" height="20" layout="topleft" left="12" name="f_target_label" top="532" width="110">Points to win:</text>
         <combo_box follows="left|top" height="26" layout="topleft" left="124" name="f_target" top="529" width="110" />
         <button follows="left|top" height="30" layout="topleft" left="244" name="f_new" top="527" width="130" label="New game" tool_tip="Start a game; others can join it from their Greedy window or a table" />
-        <button follows="left|top" height="30" layout="topleft" left="380" name="f_practice" top="527" width="128" label="Practice" tool_tip="A game on your own with tips. Nothing is saved." />
+        <button follows="left|top" height="30" layout="topleft" left="380" name="f_practice" top="527" width="128" label="Practice" tool_tip="A game against Bramble, the computer, with tips at every step. Nothing is saved." />
         <combo_box follows="left|top" height="26" layout="topleft" left="12" name="f_games" top="565" width="296" />
         <button follows="left|top" height="30" layout="topleft" left="314" name="f_join" top="563" width="90" label="Join" />
         <button follows="left|top" height="30" layout="topleft" left="410" name="f_refresh" top="563" width="98" label="Refresh" tool_tip="Look again for games being played now" />
@@ -85,6 +92,8 @@
         <button follows="left|top" height="30" layout="topleft" left="12" name="f_leave" top="527" width="150" label="Leave this game" />
         <button follows="left|top" height="30" layout="topleft" left="170" name="f_pass" top="527" width="170" label="Pass their turn" tool_tip="When the player whose turn it is has been away for a few minutes" />
         <button follows="left|top" height="30" layout="topleft" left="12" name="f_help" top="599" width="150" label="How to play" />
+        <!-- [GREEDY TABLE HERE 2026-11-11] Paul: "there's no button to rez a table" - the set-up helper (wolfgreedysetup.cpp) -->
+        <button follows="left|top" height="30" layout="topleft" left="170" name="f_setup" top="599" width="338" image_color="0.42 0.5 0.56 1" label_color="White" label="Put a Greedy table here" tool_tip="Put a Greedy table (and a board, if you like) on the land in front of you, one step at a time" />
 
         <!-- the guide: nine illustrated cards over the game (wolffloatergreedy.cpp GUIDE) -->
         <icon follows="left|top" height="40" layout="topleft" left="20" name="f_guide_logo" top="64" width="40" image_name="WolfGreedy_Logo" visible="false" />
@@ -143,7 +152,7 @@
     </panel>
 
     <!-- TABLE: controls only -->
-    <panel follows="left|top" height="230" layout="topleft" left="0" name="table_panel" top="20" width="380" visible="false" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood">
+    <panel follows="left|top" height="230" layout="topleft" left="0" name="table_panel" top="20" width="380" visible="false" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood" bg_opaque_image_overlay="White" bg_alpha_image_overlay="White">
         <button follows="left|top" height="24" layout="topleft" left="8" name="t_mode_full" top="4" width="116" label="Full" is_toggle="true" />
         <button follows="left|top" height="24" layout="topleft" left="132" name="t_mode_table" top="4" width="116" label="Table" is_toggle="true" />
         <button follows="left|top" height="24" layout="topleft" left="256" name="t_mode_strip" top="4" width="116" label="HUD" is_toggle="true" tool_tip="Play on the Greedy HUD along the bottom of the screen (this window closes)" />

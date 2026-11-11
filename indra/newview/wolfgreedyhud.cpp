@@ -23,6 +23,7 @@
 #include <optional>
 
 #include "llapp.h"
+#include "llfloaterreg.h"   // [GREEDY TABLE HERE 2026-11-11/] TABLE HERE opens wolf_greedy_setup
 #include "llfocusmgr.h"
 #include "llfontgl.h"
 #include "llfontregistry.h"
@@ -311,11 +312,79 @@ namespace
         c.hit(l, b, r, t, id, tip);
     }
 
+    /** [GREEDY COMPUTER PLAYER 2026-11-11] the button to press next in a practice game (WolfGreedyGame::coach): a gold ring
+     *  around it that slowly brightens and fades (CHOSEN 1.6 s, gentle, never a flash); Reduce motion: a steady ring. */
+    void pulseRing(F32 l, F32 b, F32 r, F32 t)
+    {
+        const F32 a = reduce_motion() ? 0.9f
+            : 0.45f + 0.45f * sinf((F32)fmod(LLFrameTimer::getElapsedSeconds(), 1.6) / 1.6f * 2.f * F_PI);
+        frameW(l - S(4.f), b - S(4.f), r + S(4.f), t + S(4.f), 3.f, alpha(GOLD, a));
+    }
+
     void image(const char* name, F32 l, F32 b, F32 w, F32 h, const LLColor4& c = LLColor4::white)
     {
         if (LLUIImagePtr img = LLUI::getUIImage(name))
         {
             img->draw((S32)llround(l), (S32)llround(b), (S32)llround(w), (S32)llround(h), c);
+        }
+    }
+
+    // ---- [GREEDY BOARD 2026-11-11] Paul: "improve the graphics, a board-game kind of background for the Greedy HUD - super!" ----
+    // BACKGROUND ON: the band is a games table, drawn here in code (our own art; every size in mock units, so it scales with
+    // UI Size and the HUD's own zoom): a walnut top with its grain (the window's wood, region-terrain-work/greedy-dice-2026-11-10
+    // art/make_art.py wood_dark 61,45,32 with lighter grain), a gold inlay round the edge, the dice tray a felt-lined well of
+    // green baize with a stitched edge, the scoreboard a painted (dark) wooden panel with a gold pinstripe and brass studs, and
+    // the logo on a brass-rimmed plaque. BACKGROUND OFF draws none of it. CONTRAST (WCAG relative luminance, CHOSEN colours):
+    // the wood the words sit on, (0.24, 0.17, 0.12), against SNOW = 12.8:1, GOLD = 9.2:1; the score panel (0.15, 0.10, 0.07)
+    // against SNOW 16.2:1, GREEN (0.30, 0.90, 0.45) 10.4:1; the tips (ICE at 0.8) in the message area's inset over the wood
+    // 8.0:1. The white dice on the baize (0.10, 0.36, 0.19) 6.7:1.
+    const LLColor4 WOOD_TOP(0.30f, 0.21f, 0.14f, 0.97f), WOOD_BOT(0.20f, 0.14f, 0.09f, 0.97f);
+    const LLColor4 GRAIN_LIGHT(0.46f, 0.33f, 0.21f, 1.f), GRAIN_DARK(0.10f, 0.06f, 0.03f, 1.f);
+    const LLColor4 INLAY(0.89f, 0.73f, 0.35f, 1.f);           // the window's gold title colour (226, 186, 89)
+    const LLColor4 FELT_TOP(0.11f, 0.40f, 0.21f, 1.f), FELT_BOT(0.07f, 0.29f, 0.15f, 1.f);
+    const LLColor4 PANEL_TOP(0.17f, 0.11f, 0.07f, 0.96f), PANEL_BOT(0.12f, 0.08f, 0.05f, 0.96f);
+    const LLColor4 BRASS(0.80f, 0.64f, 0.30f, 1.f), BRASS_DARK(0.42f, 0.30f, 0.10f, 1.f);
+
+    void disc(F32 cx, F32 cy, F32 r, const LLColor4& in, const LLColor4& out)
+    {
+        noTex();
+        gGL.begin(LLRender::TRIANGLES);
+        for (S32 i = 0; i < 16; ++i)
+        {
+            const F32 a0 = 2.f * PI_F * (F32)i / 16.f, a1 = 2.f * PI_F * (F32)(i + 1) / 16.f;
+            vtx(cx, cy, in); vtx(cx + r * cosf(a0), cy + r * sinf(a0), out); vtx(cx + r * cosf(a1), cy + r * sinf(a1), out);
+        }
+        gGL.end();
+    }
+
+    /** Running stitches just inside a rectangle: short pale dashes, evenly spaced (the felt's sewn edge). */
+    void stitches(F32 l, F32 b, F32 r, F32 t, F32 inset, F32 dash, F32 gap, F32 w, const LLColor4& c)
+    {
+        l += inset; b += inset; r -= inset; t -= inset;
+        for (F32 x = l; x + dash <= r; x += dash + gap) { rectF(x, t - w, x + dash, t, c); rectF(x, b, x + dash, b + w, c); }
+        for (F32 y = b + gap; y + dash <= t - gap; y += dash + gap) { rectF(l, y, l + w, y + dash, c); rectF(r - w, y, r, y + dash, c); }
+    }
+
+    /** The walnut top over the band: the gradient, then grain streaks placed by a fixed sequence (the same every frame). */
+    void woodTop(F32 l, F32 b, F32 r, F32 t, F32 unit)
+    {
+        rectG(l, b, r, t, WOOD_TOP, WOOD_BOT);
+        const F32 h = t - b;
+        for (S32 i = 0; i < 46; ++i)
+        {
+            const F32 f = fmodf(0.37f + (F32)i * 0.6180339f, 1.f);            // spread over the height
+            const F32 y = b + h * f;
+            const F32 len = (r - l) * (0.18f + 0.5f * fmodf((F32)i * 0.4142136f, 1.f));
+            const F32 x0 = l + (r - l - len) * fmodf((F32)i * 0.7320508f, 1.f);
+            const F32 thick = unit * (1.f + 2.f * fmodf((F32)i * 0.2360680f, 1.f));
+            const bool light = (i % 3) != 0;
+            // each streak in three pieces that drift up and down a little, as grain does
+            for (S32 k = 0; k < 3; ++k)
+            {
+                const F32 a = x0 + len * (F32)k / 3.f, z = x0 + len * (F32)(k + 1) / 3.f;
+                const F32 dy = unit * 1.5f * sinf((F32)(i * 3 + k));
+                rectF(a, y + dy, z, y + dy + thick, alpha(light ? GRAIN_LIGHT : GRAIN_DARK, light ? 0.10f : 0.16f));
+            }
         }
     }
 
@@ -330,6 +399,16 @@ namespace
         if (st == "finished") { col = GOLD; return "GAME OVER"; }
         if (st == "lobby") return "WAITING TO START - PRESS START WHEN EVERYONE IS IN";
         if (g["my_turn"].asBoolean()) { col = GOLD; return g["rolled"].asBoolean() ? "YOUR TURN: ROLL AGAIN OR BANK" : "YOUR TURN: ROLL"; }
+        // [GREEDY COMPUTER PLAYER 2026-11-11] whose turn it is, by name (Bramble's in practice; any player's in a real game)
+        for (const LLSD& p : llsd::inArray(s.state()["players"]))
+        {
+            if (!p["current"].asBoolean()) continue;
+            std::string who = p["name"].asString();
+            const size_t paren = who.find(" (");
+            if (paren != std::string::npos) who.erase(paren);
+            LLStringUtil::toUpper(who);
+            if (!who.empty()) return who + (who.back() == 'S' ? "' TURN - WATCH THE DICE" : "'S TURN - WATCH THE DICE");
+        }
         return "WAITING FOR THE OTHER PLAYERS";
     }
 }
@@ -374,6 +453,7 @@ void WolfGreedyHud::press(EHit id)
     case H_LEAVE:    s.leave(); break;
     case H_PASS:     s.pass(); break;
     case H_HELP:     WolfFloaterGreedy::showGuideWindow(); break;
+    case H_SETUP:    LLFloaterReg::showInstance("wolf_greedy_setup"); break;   // [GREEDY TABLE HERE 2026-11-11/]
     case H_WINDOW:   WolfFloaterGreedy::showLobbyWindow(); break;
     case H_PANEL:    gSavedPerAccountSettings.setBOOL("WolfGreedyHudBackground", !gSavedPerAccountSettings.getBOOL("WolfGreedyHudBackground")); break;
     case H_LESS:     gSavedPerAccountSettings.setBOOL("WolfGreedyHudLess", !gSavedPerAccountSettings.getBOOL("WolfGreedyHudLess")); break;
@@ -473,9 +553,23 @@ void WolfGreedyHud::draw()
     use(g.L);
     if (bg)
     {
-        rectG(0.f, g.bandB, W, g.panelTop, NAVY_HI, NAVY_LO);
-        rectF(0.f, g.panelTop - S(4.f), W, g.panelTop, alpha(ICE, 0.35f));
-        rectF(0.f, g.panelTop - S(2.f), W, g.panelTop - S(1.f), alpha(SNOW, 0.8f));
+        // [GREEDY BOARD 2026-11-11] the games table (see woodTop): walnut, a dark groove and a gold inlay along the top edge and
+        // round the sides, then the logo's plaque, the score panel and the dice tray
+        woodTop(0.f, g.bandB, W, g.panelTop, S(1.f));
+        rectF(0.f, g.panelTop - S(6.f), W, g.panelTop, alpha(GRAIN_DARK, 0.85f));
+        rectF(0.f, g.panelTop - S(9.f), W, g.panelTop - S(6.f), alpha(INLAY, 0.9f));
+        frameW(S(6.f), g.bandB + S(6.f), W - S(6.f), g.panelTop - S(14.f), llmax(1.f, S(2.f)), alpha(INLAY, 0.55f));
+        // the logo's plaque
+        roundRectF(X(12.f), YM(712.f), X(344.f), YM(612.f), S(16.f), alpha(BRASS, 0.95f), alpha(BRASS_DARK, 0.95f));
+        roundRectF(X(16.f), YM(708.f), X(340.f), YM(616.f), S(13.f), PANEL_TOP, PANEL_BOT);
+        if (!less)
+        {
+            // the painted score panel: a pinstripe and a brass stud in each corner
+            roundRectF(X(16.f), YM(896.f), X(544.f), YM(720.f), S(12.f), alpha(GRAIN_DARK, 0.9f), alpha(GRAIN_DARK, 0.9f));
+            roundRectF(X(20.f), YM(892.f), X(540.f), YM(724.f), S(10.f), PANEL_TOP, PANEL_BOT);
+            frameW(X(28.f), YM(884.f), X(532.f), YM(732.f), llmax(1.f, S(1.5f)), alpha(INLAY, 0.6f));
+            for (F32 sx : { 34.f, 526.f }) for (F32 sy : { 738.f, 878.f }) disc(X(sx), YM(sy), S(4.f), BRASS, BRASS_DARK);
+        }
     }
 
     // ── LEFT: the logo, and the scoreboard ──
@@ -493,9 +587,8 @@ void WolfGreedyHud::draw()
         }
         else
         {
-            if (bg) roundRectF(X(20.f), YM(892.f), X(540.f), YM(716.f), S(10.f), alpha(GOLD, 0.12f), INSET);
-            T(X(40.f), YM(734.f), "PLAYERS", 11.f, GOLD, true, false, LLFontGL::LEFT);
-            T(X(524.f), YM(734.f), "SCORE", 11.f, GOLD, true, false, LLFontGL::RIGHT);
+            T(X(40.f), YM(734.f) - (bg ? S(10.f) : 0.f), "PLAYERS", 11.f, GOLD, true, false, LLFontGL::LEFT);
+            T(X(524.f), YM(734.f) - (bg ? S(10.f) : 0.f), "SCORE", 11.f, GOLD, true, false, LLFontGL::RIGHT);
             if (!state.has("players") || state["players"].size() == 0)
             {
                 msgT(X(280.f), YM(752.f), s.game() ? "Waiting for players..." : "No game yet. Press NEW GAME or PRACTICE - or JOIN a game being played now.",
@@ -535,6 +628,15 @@ void WolfGreedyHud::draw()
         const LLSD& dice = gm["dice"];
         const std::string kept = gm["kept"].asString();
         const F32 dw = 58.f;
+        if (bg)
+        {
+            // [GREEDY BOARD 2026-11-11] the dice tray: a dark rim (lit from above), a shadow inside the top edge, green baize, a
+            // stitched edge - the dice sit in it
+            roundRectF(X(C_L - 6.f), YM(718.f), X(C_R + 6.f), YM(644.f), S(12.f), alpha(GRAIN_DARK, 0.95f), alpha(WOOD_TOP, 0.95f));
+            roundRectF(X(C_L - 1.f), YM(713.f), X(C_R + 1.f), YM(649.f), S(9.f), FELT_TOP, FELT_BOT);
+            rectG(X(C_L + 4.f), YM(656.f), X(C_R - 4.f), YM(649.f), alpha(GRAIN_DARK, 0.45f), alpha(GRAIN_DARK, 0.f));
+            stitches(X(C_L - 1.f), YM(713.f), X(C_R + 1.f), YM(649.f), S(4.f), S(6.f), S(5.f), llmax(1.f, S(1.2f)), alpha(SNOW, 0.35f));
+        }
         addHit(X(C_L), YM(712.f), X(C_R), YM(650.f), H_DICE, "Click to land the dice at once");
         for (S32 i = 0; i < 6; ++i)
         {
@@ -590,7 +692,8 @@ void WolfGreedyHud::draw()
                 lines.emplace_back(m.mText, m.mError ? AMBER : SNOW);
             }
             if (!ev.empty()) lines.insert(lines.begin(), { ev, gm["event_kind"].asString() == "bust" ? RED_DIE : ICE });
-            if (state.has("tips") && state["tips"].size() > 0) lines.emplace_back(state["tips"][0].asString(), ICE_DIM);
+            // [GREEDY COMPUTER PLAYER 2026-11-11] the tip in ICE (8:1 on the inset at the 0.8 of a later line); ICE_DIM was 3.5:1
+            if (state.has("tips") && state["tips"].size() > 0) lines.emplace_back(state["tips"][0].asString(), ICE);
             for (size_t i = 0; i < lines.size() && top > YM(880.f); ++i)
             {
                 const F32 used = msgT(X((C_L + C_R) * 0.5f), top, lines[i].first, i == 0 ? 12.f : 11.f, S(C_R - C_L - 40.f), 2,
@@ -614,6 +717,10 @@ void WolfGreedyHud::draw()
                "Roll the dice that are left (the Greedy server rolls them, so nobody can cheat)", 18.f, BTN_GO_HI, BTN_GO_LO, wolf && canRoll);
         button(c, X(bl), YM(700.f), X(br), YM(612.f), "BANK", H_BANK, "Keep this turn's points; then it is the next player's turn",
                18.f, BTN_GOLD_HI, BTN_GOLD_LO, wolf && changes_ok && inGame && buttons.find('B') != std::string::npos);
+        // [GREEDY COMPUTER PLAYER 2026-11-11] practice: the button to press next glows
+        const std::string next = s.coach();
+        if (next == "R" && canRoll) pulseRing(X(R_L), YM(700.f), X(rr), YM(612.f));
+        else if (next == "B" && buttons.find('B') != std::string::npos) pulseRing(X(bl), YM(700.f), X(br), YM(612.f));
         if (less)
         {
             button(c, X(R_L + 412.f), YM(700.f), X(R_L + 478.f), YM(612.f), "MORE", H_LESS, "Show the whole Greedy HUD again", 10.f, BTN_HI, BTN_LO);
@@ -625,6 +732,8 @@ void WolfGreedyHud::draw()
             if (inGame)
             {
                 button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "LEAVE", H_LEAVE, "Leave this game", 12.f, BTN_HI, BTN_LO, changes_ok);
+                // [GREEDY COMPUTER PLAYER 2026-11-11/] practice: Bramble never needs passing
+                if (!s.localGame())
                 button(c, X(R_L + 182.f), YM(780.f), X(R_L + 358.f), YM(716.f), "PASS THEIR TURN", H_PASS,
                        "When the player whose turn it is has been away for a few minutes", 11.f, BTN_HI, BTN_LO, changes_ok && going && !gm["my_turn"].asBoolean());
                 button(c, X(R_L + 364.f), YM(780.f), X(1588.f), YM(716.f), "WINDOW", H_WINDOW,
@@ -635,20 +744,24 @@ void WolfGreedyHud::draw()
                 button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "NEW GAME", H_NEW,
                        "Start a game to 10,000 that others can join from their Greedy HUD or window, or a Greedy table", 12.f, BTN_MAIN_HI, BTN_MAIN_LO, wolf && changes_ok);
                 button(c, X(R_L + 182.f), YM(780.f), X(R_L + 358.f), YM(716.f), "PRACTICE", H_PRACTICE,
-                       "A game on your own with tips. Nothing is saved and it is not ranked.", 12.f, BTN_HI, BTN_LO, wolf && changes_ok);
+                       "A game against Bramble, the computer, with tips at every step. Nothing is saved and it is not ranked.", 12.f, BTN_HI, BTN_LO, wolf && changes_ok);
                 button(c, X(R_L + 364.f), YM(780.f), X(1588.f), YM(716.f), "JOIN A GAME", H_JOIN,
                        "The games being played now (the Greedy window)", 12.f, BTN_HI, BTN_LO, wolf);
             }
-            button(c, X(R_L), YM(860.f), X(R_L + 150.f), YM(796.f), "HOW TO PLAY", H_HELP, "The rules, on nine short cards", 11.f, BTN_HI, BTN_LO);
+            // [GREEDY TABLE HERE 2026-11-11] Paul: "there's no button to rez a table" - TABLE HERE joins this row (the others a
+            // little narrower; fitT shrinks a label that would not fit)
+            button(c, X(R_L), YM(860.f), X(R_L + 118.f), YM(796.f), "HOW TO PLAY", H_HELP, "The rules, on nine short cards", 11.f, BTN_HI, BTN_LO);
+            button(c, X(R_L + 124.f), YM(860.f), X(R_L + 254.f), YM(796.f), "TABLE HERE", H_SETUP,
+                   "Put a Greedy table (and a board, if you like) on the land in front of you, one step at a time", 11.f, BTN_HI, BTN_LO, wolf);
             // the word as well as the light: ON / OFF (never colour alone)
-            button(c, X(R_L + 156.f), YM(860.f), X(R_L + 320.f), YM(796.f), bg ? "BACKGROUND: ON" : "BACKGROUND: OFF", H_PANEL,
+            button(c, X(R_L + 260.f), YM(860.f), X(R_L + 402.f), YM(796.f), bg ? "BACKGROUND: ON" : "BACKGROUND: OFF", H_PANEL,
                    bg ? "The night-blue background is on. Click to take it away and see more of the world: just the buttons and words stay."
                       : "The background is off. Click to put the night-blue background back behind the HUD.", 10.f,
                    bg ? BTN_MAIN_HI : BTN_HI, BTN_LO);
-            button(c, X(R_L + 326.f), YM(860.f), X(R_L + 440.f), YM(796.f), "LESS", H_LESS,
-                   "Just one row: the dice, ROLL and BANK (MORE brings the rest back)", 11.f, BTN_HI, BTN_LO);
-            button(c, X(R_L + 446.f), YM(860.f), X(1588.f), YM(796.f), "CLOSE", H_CLOSE,
-                   "Close the Greedy HUD (Wolf World > Greedy brings it back; your game goes on)", 11.f, BTN_HI, BTN_LO);
+            button(c, X(R_L + 408.f), YM(860.f), X(R_L + 476.f), YM(796.f), "LESS", H_LESS,
+                   "Just one row: the dice, ROLL and BANK (MORE brings the rest back)", 10.f, BTN_HI, BTN_LO);
+            button(c, X(R_L + 482.f), YM(860.f), X(1588.f), YM(796.f), "CLOSE", H_CLOSE,
+                   "Close the Greedy HUD (Wolf World > Greedy brings it back; your game goes on)", 10.f, BTN_HI, BTN_LO);
         }
     }
 

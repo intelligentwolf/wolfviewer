@@ -17,6 +17,7 @@
 
 #include "wolffishingoverlay.h"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <map>
@@ -36,6 +37,7 @@
 #include "llframetimer.h"
 #include "llinventoryfunctions.h"
 #include "llinventorymodel.h"
+#include "llinventorymodelbackgroundfetch.h"
 #include "llrand.h"
 #include "llrender.h"
 #include "lluiimage.h"
@@ -122,6 +124,55 @@ namespace
             if (!first) first = p.get();
         }
         return first;
+    }
+
+    // [FISHFIX 2026-11-11] Paul's W104 test: "getting one for you", then "...could not see it yet", again and again, while his
+    // rod WAS in Objects > Fishing on the grid (made 11-11 04:34). CAUSE, reproduced with the w104-merge build and Shadow
+    // Testwolf: the rod and its Fishing folder were put on the grid during a login without the viewer being told (no
+    // inventory offer reached it), so this login's model never had them. The old search only looked at loaded folders; the
+    // grid then answered "you have one" ({have: true}, no folder id) and the 30 s wait fetched nothing, every time until a
+    // new login (Paul's next login loaded it: his inventory cache written 13:39 holds it). Fix: the folders that can hold the
+    // rod are asked for again - Objects (so a folder new to this login appears) and every "Fishing" folder under it - and the
+    // grid is not asked until the login's inventory fetch has finished. The same reproduction with this build finds the rod
+    // 2 s after the grid's answer.
+
+    /** Objects (Source: wolfai.cpp collectBuild, findUserDefinedCategoryUUIDForType). */
+    LLUUID objectsFolder() { return gInventory.findUserDefinedCategoryUUIDForType(LLFolderType::FT_OBJECT); }
+
+    /** The folders directly under Objects named "Fishing" (build_fishing.py FOLDER_NAME, wolffishing_items.php 'folder'; the
+     *  grid gives the rod into the first such folder: wsk_pick_folder). */
+    std::vector<LLUUID> fishingFolders()
+    {
+        std::vector<LLUUID> out;
+        const LLUUID objects = objectsFolder();
+        if (objects.isNull()) return out;
+        LLInventoryModel::cat_array_t* cats = nullptr;
+        LLInventoryModel::item_array_t* items = nullptr;
+        gInventory.getDirectDescendentsOf(objects, cats, items);
+        if (!cats) return out;
+        for (const LLPointer<LLViewerInventoryCategory>& c : *cats)
+        {
+            if (c.notNull() && LLStringUtil::compareInsensitive(c->getName(), "Fishing") == 0) out.push_back(c->getUUID());
+        }
+        return out;
+    }
+
+    /** Ask the region for a folder's contents again (once per folder per search: `asked`). False: the viewer does not know
+     *  the folder (yet). */
+    bool refetchFolder(const LLUUID& id, std::vector<LLUUID>& asked, const char* what)
+    {
+        if (id.isNull() || std::find(asked.begin(), asked.end(), id) != asked.end()) return true;
+        LLViewerInventoryCategory* cat = gInventory.getCategory(id);
+        if (!cat)
+        {
+            LL_INFOS("WolfFishing") << "rod search: " << what << " folder " << id << " is not known to this viewer yet" << LL_ENDL;
+            return false;
+        }
+        asked.push_back(id);
+        cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
+        cat->fetch();
+        LL_INFOS("WolfFishing") << "rod search: asked again for the " << what << " folder '" << cat->getName() << "' " << id << LL_ENDL;
+        return true;
     }
 
     /** "a|b||c" -> {"a", "b", "", "c"} (empty fields kept). */
@@ -662,8 +713,36 @@ void WolfFishingSession::rodCoro(U32 gen)
     WolfFishingSession* s = live(gen);
     if (!s) return;
     if (s->mRod == ROD_READY) { s->mRodCoroRunning = false; return; }
-    // 2. the rod in the inventory; when there is none, the grid gives one (php/wolffishing.php) and it is waited for
+    // 2. the rod in the inventory; when there is none, the grid gives one (php/wolffishing.php) and it is waited for.
+    // [FISHFIX 2026-11-11] never on a half-loaded inventory: the login's background fetch finishes first (a big inventory -
+    // Paul's has 62,945 items - takes a while), and the Fishing folders are asked for again, before the grid is asked
     LLViewerInventoryItem* rod = findRod();
+    std::vector<LLUUID> asked;
+    if (!rod)
+    {
+        LL_INFOS("WolfFishing") << "rod search: not in the loaded inventory; background fetch "
+                                << (LLInventoryModelBackgroundFetch::instance().isEverythingFetched() ? "complete" : "still running")
+                                << ", Objects " << objectsFolder() << ", Fishing folders " << fishingFolders().size() << LL_ENDL;
+        s->setStatus("Looking through your inventory for your fishing rod...", false, true);
+        for (const LLUUID& f : fishingFolders()) refetchFolder(f, asked, "Fishing");
+        // CHOSEN: up to 60 s for the inventory to finish loading, then 6 s for the Fishing folders to come back
+        for (S32 i = 0; i < 66 && !rod; ++i)
+        {
+            const bool loaded = LLInventoryModelBackgroundFetch::instance().isEverythingFetched();
+            if (loaded && i >= 6) break;
+            llcoro::suspendUntilTimeout(1.f);
+            s = live(gen);
+            if (!s) return;
+            for (const LLUUID& f : fishingFolders()) refetchFolder(f, asked, "Fishing");
+            rod = findRod();
+        }
+        LL_INFOS("WolfFishing") << "rod search: " << (rod ? "found " + rod->getUUID().asString() + " after the folders came back"
+                                                         : std::string("still none - asking the grid")) << LL_ENDL;
+    }
+    else
+    {
+        LL_INFOS("WolfFishing") << "rod search: found " << rod->getUUID() << " in the loaded inventory" << LL_ENDL;
+    }
     if (!rod)
     {
         s->setStatus("You have no fishing rod yet - getting one for you (it goes into Objects > Fishing)...", false);
@@ -678,18 +757,29 @@ void WolfFishingSession::rodCoro(U32 gen)
         {
             std::string why = reply.isMap() && reply.has("error") ? reply["error"].asString()
                 : (transport.empty() ? llformat("the grid answered HTTP %d", status) : transport);
+            LL_INFOS("WolfFishing") << "rod give: refused (" << status << "): " << why << LL_ENDL;
             s->rodFailed("The fishing rod could not be fetched: " + why);
             return;
         }
+        // Source: wolffishing_lib.php wf_give -> {have: true} | {have: false, given: {name, item}, folderId, folderNew, ...}
+        const bool have = reply["have"].asBoolean();
         LLUUID folder = reply["folderId"].asUUID();
         LLUUID item_id = reply["given"].isMap() ? reply["given"]["item"].asUUID() : LLUUID::null;
+        LL_INFOS("WolfFishing") << "rod give: " << (have ? "the grid says you already have one" : "given item " + item_id.asString())
+                                << " folder " << folder << (reply["folderNew"].asBoolean() ? " (new)" : "") << LL_ENDL;
+        if (have) s->setStatus("You have a fishing rod already - finding it in your inventory...", false, true);
+        // the rod's folder may be new to this viewer (made by the grid just now, or while we were logged in): Objects is
+        // asked for again so that it appears, then the folder itself (once each)
+        bool objects_asked = false;
         for (S32 i = 0; i < 30 && !rod; ++i)
         {
-            if (folder.notNull())
+            if (i % 5 == 4) asked.clear();   // the rod's and the Fishing folders again every 5 s (Objects only once: objects_asked)
+            if (!objects_asked && (have || folder.isNull() || !gInventory.getCategory(folder)))
             {
-                if (LLViewerInventoryCategory* cat = gInventory.getCategory(folder)) cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
-                gInventory.fetchDescendentsOf(folder);
+                objects_asked = refetchFolder(objectsFolder(), asked, "Objects");
             }
+            if (folder.notNull()) refetchFolder(folder, asked, "the rod's");
+            for (const LLUUID& f : fishingFolders()) refetchFolder(f, asked, "Fishing");
             llcoro::suspendUntilTimeout(1.f);
             if (!live(gen)) return;
             rod = item_id.notNull() ? gInventory.getItem(item_id) : nullptr;
@@ -698,6 +788,7 @@ void WolfFishingSession::rodCoro(U32 gen)
         }
         s = live(gen);
         if (!s) return;
+        LL_INFOS("WolfFishing") << "rod give: " << (rod ? "found " + rod->getUUID().asString() : std::string("not seen after 30 s")) << LL_ENDL;
         if (!rod)
         {
             s->rodFailed("Your fishing rod is in your inventory (Objects > Fishing), but this viewer could not see it yet. "
@@ -945,6 +1036,9 @@ namespace
         gGL.end();
     }
 
+    void triF(F32 x1, F32 y1, F32 x2, F32 y2, F32 x3, F32 y3, const LLColor4& c);
+    void ellipseF(F32 cx, F32 cy, F32 rx, F32 ry, const LLColor4& c, S32 seg = 24);
+
     void triF(F32 x1, F32 y1, F32 x2, F32 y2, F32 x3, F32 y3, const LLColor4& c)
     {
         noTex();
@@ -1133,6 +1227,82 @@ namespace
         return lh * (F32)lines.size();
     }
 
+    // [FISHFIX 2026-11-11] Paul: "improve the graphics, maybe an ocean background for the fishing HUD - super!". The band under
+    // the sea, all drawn here (our own): deep water from teal at the surface to navy below, the surface's waves along the top
+    // edge with a line of foam, a few faint sun shafts, bubbles, and a sandy bottom with weed in the two corners. Still, so
+    // nothing moves behind the words (the viewer has no reduce-motion setting to honour). CHECKED CONTRAST: the lightest water
+    // behind any words is SURF_LO (0.04, 0.24, 0.36; relative luminance 0.042) plus at most 2.5 % of white from a shaft (0.049):
+    // grey (0.66, 0.72, 0.78) text is 5.2:1 there, amber 5.5:1, gold 7.3:1, snow white 10:1 (WCAG formula); the water is 97 %
+    // opaque, so a white sky behind barely lightens it; the cards and the state line keep their dark insets, and the message
+    // words are outlined. Every size is in the HUD's units (S()), so it follows UI Size and the size handle.
+    const LLColor4 SURF_HI(0.10f, 0.42f, 0.55f, 0.95f);   // the surface band at the very top (no words sit there)
+    const LLColor4 SURF_LO(0.04f, 0.24f, 0.36f, 0.97f);
+    const LLColor4 DEEP(0.01f, 0.05f, 0.12f, 0.97f);
+    const LLColor4 FOAM(0.85f, 0.95f, 1.00f, 0.75f);
+    const LLColor4 SAND(0.36f, 0.30f, 0.20f, 0.95f);
+    const LLColor4 WEED(0.10f, 0.42f, 0.24f, 0.90f), WEED_HI(0.22f, 0.60f, 0.34f, 0.90f);
+
+    void drawOcean(F32 W, F32 bottom, F32 top)
+    {
+        const F32 h = top - bottom;
+        if (h <= 1.f) return;
+        // the water: the surface band, then teal to navy
+        const F32 surf = top - S(18.f);
+        rectG(0.f, surf, W, top, SURF_HI, SURF_LO);
+        rectG(0.f, bottom, W, surf, SURF_LO, DEEP);
+        // the waves along the top edge: a row of soft crests rising above the band's line, and the foam on them
+        const F32 wl = S(46.f), amp = S(5.f);
+        for (F32 x = 0.f; x < W; x += wl)
+        {
+            const S32 steps = 8;
+            for (S32 i = 0; i < steps; ++i)
+            {
+                const F32 x0 = x + wl * (F32)i / (F32)steps, x1 = x + wl * (F32)(i + 1) / (F32)steps;
+                const F32 y0 = top + amp * sinf(PI_F * (F32)i / (F32)steps), y1 = top + amp * sinf(PI_F * (F32)(i + 1) / (F32)steps);
+                triF(x0, top, x1, top, x1, y1, SURF_HI);
+                triF(x0, top, x1, y1, x0, y0, SURF_HI);
+                triF(x0, y0 - S(1.f), x1, y1 - S(1.f), x1, y1, FOAM);
+                triF(x0, y0 - S(1.f), x1, y1, x0, y0, FOAM);
+            }
+        }
+        // sun shafts: slanted, very faint (2.5 % white at most), from the surface down
+        for (S32 k = 0; k < 6; ++k)
+        {
+            const F32 cx = W * (0.08f + 0.17f * (F32)k), w0 = S(70.f), w1 = S(140.f), slant = S(80.f);
+            const LLColor4 a(1.f, 1.f, 1.f, 0.025f), z(1.f, 1.f, 1.f, 0.f);
+            noTex();
+            gGL.begin(LLRender::TRIANGLES);
+            vtx(cx - w0 * 0.5f, surf, a); vtx(cx + w0 * 0.5f, surf, a); vtx(cx + slant + w1 * 0.5f, bottom, z);
+            vtx(cx - w0 * 0.5f, surf, a); vtx(cx + slant + w1 * 0.5f, bottom, z); vtx(cx + slant - w1 * 0.5f, bottom, z);
+            gGL.end();
+        }
+        // the sea bed: a strip of sand along the bottom, and weed in the two corners (behind nothing but the band)
+        rectG(0.f, bottom, W, bottom + S(10.f), alpha(SAND, 0.6f), SAND);
+        auto weed = [&](F32 x, F32 tall, F32 lean)
+        {
+            for (S32 i = 0; i < 5; ++i)
+            {
+                const F32 bx = x + S(9.f) * (F32)i, t = tall * (0.65f + 0.35f * (F32)((i * 3) % 4) / 3.f);
+                const F32 tx = bx + lean * (F32)(i % 2 == 0 ? 1 : -1), mid = bottom + t * 0.5f;
+                triF(bx - S(3.f), bottom, bx + S(3.f), bottom, tx + S(4.f), mid, i % 2 ? WEED : WEED_HI);
+                triF(bx - S(3.f), bottom, tx + S(4.f), mid, tx - S(2.f), mid, i % 2 ? WEED : WEED_HI);
+                triF(tx - S(2.f), mid, tx + S(4.f), mid, bx + lean * 0.3f, bottom + t, i % 2 ? WEED : WEED_HI);
+            }
+        };
+        weed(S(4.f), h * 0.38f, S(7.f));
+        weed(W - S(50.f), h * 0.42f, -S(7.f));
+        // bubbles, rising past the weed (outlines: a ring of a lighter blue)
+        static const F32 B[][3] = { { 0.012f, 0.22f, 5.f }, { 0.022f, 0.45f, 3.5f }, { 0.016f, 0.66f, 4.5f },
+                                    { 0.985f, 0.30f, 4.5f }, { 0.975f, 0.52f, 3.f }, { 0.990f, 0.72f, 5.5f } };
+        for (const auto& b : B)
+        {
+            const F32 bx = W * b[0], by = bottom + h * b[1], r = S(b[2]);
+            ellipseF(bx, by, r, r, LLColor4(0.70f, 0.90f, 1.f, 0.35f), 14);
+            ellipseF(bx, by, r * 0.72f, r * 0.72f, alpha(SURF_LO, 0.9f), 14);
+            ellipseF(bx - r * 0.3f, by + r * 0.3f, r * 0.22f, r * 0.22f, LLColor4(1.f, 1.f, 1.f, 0.6f), 8);
+        }
+    }
+
     struct Ctx
     {
         std::function<void(F32, F32, F32, F32, WolfFishingHud::EHit, const std::string&)> hit;
@@ -1314,14 +1484,10 @@ void WolfFishingHud::draw()
     const bool lineOut = s.fish() == WolfFishingSession::FISH_WAITING || s.fish() == WolfFishingSession::FISH_BITE;
     const bool bite = s.fish() == WolfFishingSession::FISH_BITE;
 
-    // the band: night blue, a frosted top edge - or nothing at all, the read-outs floating over the world (PANEL)
+    // the band: under the sea (Paul 11-11: "improve the graphics, maybe an ocean background for the fishing HUD") - or nothing
+    // at all, the read-outs floating over the world (BACKGROUND: OFF)
     use(g.L);
-    if (bg)
-    {
-        rectG(0.f, g.bandB, W, g.panelTop, NAVY_HI, NAVY_LO);
-        rectF(0.f, g.panelTop - S(4.f), W, g.panelTop, alpha(ICE, 0.35f));
-        rectF(0.f, g.panelTop - S(2.f), W, g.panelTop - S(1.f), alpha(SNOW, 0.8f));
-    }
+    if (bg) drawOcean(W, g.bandB, g.panelTop);
 
     // ── LEFT: your week ──
     use(g.L);
@@ -1522,7 +1688,7 @@ void WolfFishingHud::draw()
 namespace
 {
     // ── today's catch: the pictures (all drawn here, our own: a body, a tail, a fin, an eye, a pattern) ──
-    void ellipseF(F32 cx, F32 cy, F32 rx, F32 ry, const LLColor4& c, S32 seg = 24)
+    void ellipseF(F32 cx, F32 cy, F32 rx, F32 ry, const LLColor4& c, S32 seg)
     {
         noTex();
         gGL.begin(LLRender::TRIANGLES);

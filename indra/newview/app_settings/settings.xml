@@ -20485,7 +20485,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanAutoFailStamp</key>
 		<map>
 			<key>Comment</key>
-			<string>[G5 2026-11-11] "viewer version|OpenGL driver" the automatic OpenGL switches were counted for (version "*" when only a driver change can help: no Vulkan, or no Vulkan card that is OpenGL's). Set by the viewer.</string>
+			<string>[G5 2026-11-11] "viewer version|OpenGL driver" the automatic OpenGL switches were counted for (version "*" when only a driver change can help: no Vulkan, or no usable Vulkan graphics card). Set by the viewer.</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>
@@ -20511,11 +20511,11 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanDebugBlackLogin</key>
 		<map>
 			<key>Comment</key>
-			<string>[G2 2026-11-11] Testing: the Vulkan login check reads every sample of the presented login screen as black, so after about 2 s the renderer falls back to OpenGL in the same session with its notice (on a native Wayland window: the run-time stop). For the test rig; off by default.</string>
+			<string>[G2 2026-11-11] Testing: the Vulkan login check reads every sample of the presented login screen as black, so after about 2 s the renderer falls back to OpenGL in the same session with its notice (on a native Wayland window: the run-time stop). For the test rig (--set WolfVulkanDebugBlackLogin 1); off by default and never saved ([W1] Persist 0).</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>
-			<integer>1</integer>
+			<integer>0</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
@@ -20524,11 +20524,24 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanDebugFailRebuild</key>
 		<map>
 			<key>Comment</key>
-			<string>[V1 2026-11-11] Testing: switching this on asks for a Vulkan swapchain rebuild, and every run-time rebuild then fails with a real (not window-minimised) error, so the bounded retries and the run-time stop can be shown. For the test rig; off by default.</string>
+			<string>[V1 2026-11-11] Testing: switching this on asks for a Vulkan swapchain rebuild, and every run-time rebuild then fails with a real (not window-minimised) error, so the bounded retries and the run-time stop can be shown. For the test rig (--set WolfVulkanDebugFailRebuild 1); off by default and never saved ([W1] Persist 0).</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugHangNow</key>
+		<map>
+			<key>Comment</key>
+			<string>[B2 2026-11-11] Testing: at the next frame the Vulkan device is declared hung (as when the hang guard's wait runs out), so the renderer stops by its hung path; switches itself off. For the test rig (set through LEAP or --set WolfVulkanDebugHangNow 1); off by default and never saved (Persist 0).</string>
+			<key>HideFromEditor</key>
 			<integer>1</integer>
+			<key>Persist</key>
+			<integer>0</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
@@ -20537,11 +20550,11 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanDebugHangAtStart</key>
 		<map>
 			<key>Comment</key>
-			<string>[V2 2026-11-11] Testing: at the next Vulkan start the start-up hang guard fires after the window surface, its child window and the swapchain were made, and the start falls back to OpenGL; switches itself off. For the test rig; off by default.</string>
+			<string>[V2 2026-11-11] Testing: at the next Vulkan start the start-up hang guard fires after the window surface, its child window and the swapchain were made, and the start falls back to OpenGL; switches itself off. For the test rig (--set WolfVulkanDebugHangAtStart 1); off by default and never saved ([W1] Persist 0).</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>
-			<integer>1</integer>
+			<integer>0</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>

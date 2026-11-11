@@ -447,14 +447,16 @@ bool WolfVkSwapchain::drainPresents()
     }
     else
     {
-        // No present fence exists without swapchain_maintenance1. [V4 2026-11-11] This was vkQueueWaitIdle, which takes no
-        // timeout. The specification defines it as no more than the device's own bounded wait: "vkQueueWaitIdle is
-        // equivalent to having submitted a valid fence to every previously executed queue submission command that accepts
-        // a fence, then waiting for all of those fences to signal using vkWaitForFences with an infinite timeout"
-        // (vkQueueWaitIdle refpage), and without the extension vkQueuePresentKHR accepts no fence. Every batch this
-        // backend submits is tracked by WolfVkDevice (timeline value or fence), so waitIdle() is that same wait with the
-        // 8 s limit; on a timeout the device is marked hung and the caller abandons the swapchains instead of destroying.
+        // No present fence exists without swapchain_maintenance1. [V4/W2 2026-11-11] This was a bare vkQueueWaitIdle,
+        // which takes no timeout. The specification gives no wait that covers a present here: vkQueueWaitIdle "is
+        // equivalent to having submitted a valid fence to every previously executed queue submission command that
+        // accepts a fence" (vkQueueWaitIdle refpage), and without the extension vkQueuePresentKHR accepts none. The
+        // queue-idle wait is still the strongest wait on offer for the queue the presents went to (and what this code
+        // relied on before), so it is kept, after the device's own bounded wait for every tracked submit, but
+        // bounded too (queueWaitIdleBounded: a helper thread, 8 s). A timeout marks the device hung, and the caller
+        // abandons the swapchains instead of destroying them.
         if (!mDevice->waitIdle()) return false;
+        if (!mDevice->queueWaitIdleBounded("vkQueueWaitIdle (presents)")) return false;
     }
     for (Retired& r : mRetired) releaseRetired(r);
     mRetired.clear();

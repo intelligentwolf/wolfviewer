@@ -32,9 +32,9 @@
  *   - without it there is no fence to wait for; the old swapchain goes when the first image presented on its successor
  *     has been acquired again, which is ANGLE's rule for the same case (SurfaceVk.cpp:1521-1523 "scheduled for destruction
  *     when the semaphore of the first image of the next swapchain can be recycled"), and at shutdown or past the retired
- *     cap after WolfVkDevice::waitIdle ([V4 2026-11-11] was vkQueueWaitIdle, which takes no timeout; the spec defines
- *     it as a fence wait on every submit that accepts a fence, which waitIdle does with the 8 s limit; that path is not
- *     used on either test GPU).
+ *     cap after WolfVkDevice::waitIdle and vkQueueWaitIdle on a helper thread ([V4/W2 2026-11-11] was a bare
+ *     vkQueueWaitIdle, which takes no timeout; now both waits are bounded at 8 s and a timeout abandons the swapchains;
+ *     that path is not used on either test GPU).
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer Source Code

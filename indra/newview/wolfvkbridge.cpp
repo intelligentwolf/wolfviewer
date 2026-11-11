@@ -149,12 +149,14 @@ namespace
 
     // [V1/G1 2026-11-11] Swapchain rebuilds at run time. "The window has no size" (minimised, WolfVkSwapchain::noSize) is
     // waited out for as long as it lasts; any other failure (surface lost, vkCreateSwapchainKHR refused, out of memory) is
-    // retried at most SWAPCHAIN_TRIES times, SWAPCHAIN_RETRY_SPACING s apart, each logged at WARN, and then the renderer
+    // retried every SWAPCHAIN_RETRY_SPACING s for SWAPCHAIN_RETRY_WINDOW s from the first failure ([W5] time-based, so a
+    // window system that takes a few seconds to settle gets them), each logged at WARN, and then the renderer
     // stops (stopAtRunTime: its message box, OpenGL at the next start). Before, every failure was taken for a minimised
     // window: logged at DEBUG only and retried every frame for ever - a frozen or black picture with no way out.
     uint32_t sSwapchainFailures = 0;
     F64 sSwapchainRetryAt = 0.0;
-    constexpr uint32_t SWAPCHAIN_TRIES = 5;
+    F64 sSwapchainFirstFailure = 0.0;
+    constexpr F64 SWAPCHAIN_RETRY_WINDOW = 4.0;
     constexpr F64 SWAPCHAIN_RETRY_SPACING = 0.25;
     // [V8 2026-11-11] VK_SUBOPTIMAL_KHR (the image was shown, but a rebuilt swapchain would match the surface better).
     // A rebuild follows it only when the window's size differs from the one the swapchain was built for, or at most once
@@ -350,8 +352,14 @@ namespace
     //    while fewer than AUTO_RETRY_LIMIT failures were counted under the current stamp. So one passing failure (a driver
     //    reset, a suspend, a monitor change) costs one OpenGL session at most; a second one in a row keeps OpenGL.
     //  - A new viewer version or a different OpenGL driver starts the count again (one more try each time). Failures that
-    //    no retry can change - no Vulkan at all, no Vulkan card that is OpenGL's - wait for a driver change only.
-    //  - A confirmed good start (the login check) or the resident's own choice (V button / Wolf World menu) clears it.
+    //    no retry can change - no Vulkan at all, no usable Vulkan graphics card - wait for a driver change only.
+    //  - [B1 2026-11-11] The count is cleared only by a session that PROVED itself: Vulkan still running at a clean quit,
+    //    after its login check and its in-world world check both passed (shutdown). Not at the login check: a run-time
+    //    stop that comes later in every session (a hang a minute in-world, a rebuild that always fails) would otherwise be
+    //    cleared at each login and stop again at each start - a resident looped through forced quits for ever. And the
+    //    resident's own choice (V button / Wolf World menu) clears it.
+    //  - [W4 2026-11-11] A clean quit before the login check had any black sample (a hidden or minimised start that never
+    //    presented, a quick quit at the login screen) is not a failure: the start is marked done without clearing.
     // So a resident is never put through more than AUTO_RETRY_LIMIT failed Vulkan starts per viewer version and driver.
     // The driver is OpenGL's, recorded by every start once OpenGL is up (WolfVulkanLastGLDriver): decideBackend runs
     // before the window exists, so it compares against the driver the last start saw.
@@ -466,6 +474,7 @@ namespace
     // In every case the child window stops covering the viewer's window: destroyed with the surface, or unmapped/hidden
     // (WolfVkSurface::abandon), which needs no device. Before, a hung device skipped WolfVkSurface::destroy altogether and the
     // child (it covers the whole GL window) stayed on top of a working OpenGL: a black login/splash screen.
+    bool sWaylandSwapchainLeft = false;   // [W6 2026-11-11] see releaseSurface
     void releaseSurface()
     {
         const bool hung = gWolfVkDevice.hung();
@@ -475,7 +484,14 @@ namespace
         if (sSurface != VK_NULL_HANDLE)
         {
             if (swapchains_gone && gWolfVkDevice.hasInstance()) WolfVkSurface::destroy(gWolfVkDevice.instance(), sSurface);
-            else WolfVkSurface::abandon();
+            else
+            {
+                // [W6 2026-11-11] a native Wayland surface is SDL's own wl_surface (no child to hide): a swapchain left on it
+                // stays attached to the very surface OpenGL's EGL presents to, so OpenGL cannot carry on in this window
+                // (fallBack turns this into the run-time stop)
+                if (WolfVkSurface::kind() == "Wayland") sWaylandSwapchainLeft = true;
+                WolfVkSurface::abandon();
+            }
             sSurface = VK_NULL_HANDLE;
         }
     }
@@ -536,6 +552,15 @@ namespace
         sState = State::FELL_BACK;
         sLogin.mStage = sLogin.mStage == LoginCheck::RUNNING ? LoginCheck::FAILED : sLogin.mStage;
         tearDown();
+        if (sWaylandSwapchainLeft)
+        {
+            // [W6 2026-11-11] the swapchain could not be taken off the native Wayland surface (hung device, unfinished
+            // presents): OpenGL presenting to that surface under a live swapchain is not safe, so this start ends the way
+            // a run-time failure does - the message box, OpenGL at the next start, quit (stopAtRunTime counts it)
+            LL_WARNS("Vulkan") << "The Vulkan swapchain is still on the native Wayland window: stopping instead of drawing with OpenGL under it" << LL_ENDL;
+            stopAtRunTime(reason);
+            return;
+        }
         // the setting follows what is running, so the floater and About tell the truth; the resident can ask again
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
@@ -979,7 +1004,8 @@ namespace
         sLogin.mStage = LoginCheck::PASSED;
         LL_INFOS("WolfVulkanCheck") << "Login check passed after " << llformat("%.1f", LLTimer::getTotalSeconds() - sLogin.mStarted) << " s: " << how << LL_ENDL;
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
-        clearAutomaticFailures();   // [G5 2026-11-11] a confirmed good start
+        // [B1 2026-11-11] the failure count is NOT cleared here (rule at recordAutomaticFailure): only a session that ends
+        // cleanly with Vulkan still running and the world check passed clears it (shutdown)
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
     }
 
@@ -1194,9 +1220,10 @@ void initAfterGL(LLWindow* window)
     }
     if (sVulkanDeviceLine.empty())
     {
-        // [V7/G5 2026-11-11] no Vulkan graphics card to use (none can present, only a processor-based device, or none is
-        // the card OpenGL draws with): said now, before a surface or child window is made; only a driver change can mend it
-        fallBack(sLastError.empty() ? std::string("no Vulkan graphics card can be used") : sLastError, "WolfVulkanFellBack", false);
+        // [V7/G5 2026-11-11] no Vulkan graphics card to use: said now, before a surface or child window is made. [W3] None
+        // at all (no presenting GPU, only a processor-based device) waits for a driver change; a card by another maker
+        // than OpenGL's is retried by the usual rule
+        fallBack(sLastError.empty() ? std::string("no Vulkan graphics card can be used") : sLastError, "WolfVulkanFellBack", !gWolfVkDevice.noCandidates());
         return;
     }
     // [VULKAN WAYLAND 2026-11-09] A native Wayland window (only when SDL_VIDEODRIVER forced it: a Vulkan start otherwise
@@ -1748,6 +1775,15 @@ bool presentFrame()
         stopAtRunTime("test: WolfVulkanDebugFallBack");
         return false;
     }
+    // [B2 2026-11-11] test only (WolfVulkanDebugHangNow, Persist 0, switches itself off): the device is declared hung
+    // mid-session - after the shader mirrors exist - so the hung teardown and what outlives it (the mirrors, deleted at
+    // a shader reload or quit) can be exercised; the hung check just below then stops the renderer
+    static LLCachedControl<bool> test_hang(gSavedSettings, "WolfVulkanDebugHangNow", false);
+    if (test_hang)
+    {
+        gSavedSettings.setBOOL("WolfVulkanDebugHangNow", false);
+        gWolfVkDevice.declareHung("test: WolfVulkanDebugHangNow");
+    }
     // [HANG GUARD / HAND-OVER 2026-11-08 8.2k] a device marked hung or a hand-over broken earlier in this frame (GL
     // capture, G-buffer pass, a bounded wait): fall back before anything else is waited on or submitted
     if (gWolfVkDevice.hung())
@@ -1810,9 +1846,12 @@ bool presentFrame()
             }
             // [V1/G1 2026-11-11] a real error: a few spaced retries (a surface briefly unavailable while the window system
             // reconfigures), then the run-time stop with the reason in its message box
+            if (sSwapchainFailures == 0) sSwapchainFirstFailure = t0;
             sSwapchainFailures++;
-            LL_WARNS("Vulkan") << "Swapchain rebuild failed (" << sSwapchainFailures << " of " << SWAPCHAIN_TRIES << "): " << error << LL_ENDL;
-            if (sSwapchainFailures >= SWAPCHAIN_TRIES)
+            const F64 failing_for = t0 - sSwapchainFirstFailure;
+            LL_WARNS("Vulkan") << "Swapchain rebuild failed (attempt " << sSwapchainFailures << ", " << llformat("%.2f", failing_for) << " s of "
+                               << SWAPCHAIN_RETRY_WINDOW << " s): " << error << LL_ENDL;
+            if (failing_for >= SWAPCHAIN_RETRY_WINDOW)
             {
                 const std::string where = WolfVkSurface::describe();
                 if (!where.empty()) LL_WARNS("Vulkan") << "Swapchain refused on: " << where << LL_ENDL;
@@ -2076,6 +2115,27 @@ void onLoginScreenShown()
 void shutdown()
 {
     if (sState == State::VULKAN_ACTIVE) logSessionSummary("shutdown");   // [BLACK WORLD 2026-11-10]
+    // [B1/W4 2026-11-11] a clean quit with Vulkan still running (stopAtRunTime and fallBack leave VULKAN_ACTIVE first).
+    // shutdownGL runs after LLAppViewer::cleanup saved the settings (llappviewer.cpp:2240/2433), so they are saved here.
+    if (sState == State::VULKAN_ACTIVE && sRequested && !LLAppViewer::instance()->isSecondInstance())
+    {
+        bool changed = false;
+        if (!gSavedSettings.getBOOL("WolfVulkanStartOK") && sLogin.mBlackRun == 0)
+        {
+            // W4: nothing was seen to fail (no black sample against a lit OpenGL frame): not counted at the next start
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            LL_INFOS("WolfVulkanCheck") << "Clean quit before the login check concluded, with no failed sample: not counted as a failed start" << LL_ENDL;
+            changed = true;
+        }
+        if (sLogin.mStage == LoginCheck::PASSED && sBlack.mSummary.compare(0, 6, "passed") == 0 && gSavedSettings.getU32("WolfVulkanAutoFailures") > 0)
+        {
+            // B1: login check and world check passed, and Vulkan ran to a clean quit
+            LL_INFOS("Vulkan") << "Vulkan session proved itself (login and world checks passed, clean quit): automatic failure count cleared" << LL_ENDL;
+            clearAutomaticFailures();
+            changed = true;
+        }
+        if (changed) gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+    }
     LLRenderTarget::sWolfVkProvider = nullptr;
     // [HANG GUARD 2026-11-08 8.2k] as fallBack: from the first step that finds the card hung, the rest is abandoned
     if (sGBuffer && !gWolfVkDevice.hung()) delete sGBuffer;

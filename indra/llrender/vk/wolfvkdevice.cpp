@@ -18,6 +18,9 @@
 #include "linden_common.h"
 #include "wolfvkdevice.h"
 #include <chrono>   // [AMD PERF] endOneTimeAndWait timing
+#include <future>   // [W2 2026-11-11] queueWaitIdleBounded
+#include <memory>
+#include <thread>
 #include <cstring>
 #include <cctype>
 #include <algorithm>
@@ -466,6 +469,7 @@ bool WolfVkDevice::queryPhysicalDevices(std::string& error)
 
 bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error)
 {
+    mNoCandidates = false;
     // Candidates: a graphics queue family that can present to the surface, and VK_KHR_swapchain.
     std::vector<WolfVkPhysicalDeviceInfo> candidates;
     for (WolfVkPhysicalDeviceInfo d : mPhysicalDevices)
@@ -509,6 +513,7 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
     if (candidates.empty())
     {
         error = "No Vulkan graphics card can draw to this window (no graphics queue with presentation, no VK_KHR_swapchain, or only a processor-based device)";
+        mNoCandidates = true;
         return false;
     }
 
@@ -541,12 +546,10 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
                 return true;
             }
         }
-        // [V7 2026-11-11] OpenGL named its card and no Vulkan graphics card is that one (OpenGL on a software renderer, or
-        // on a card this Vulkan loader does not list): Vulkan on another card could share no image with OpenGL, so it is
-        // not started at all (the caller falls back to OpenGL with this reason). Was: c.-e. picked any other device.
-        error = "no Vulkan graphics card is the one OpenGL draws with (" + std::to_string(candidates.size()) + " other Vulkan device(s) offered)";
-        LL_WARNS("Vulkan") << error << LL_ENDL;
-        return false;
+        // [W3 2026-11-11] OpenGL named its card and no Vulkan device has that UUID (a driver that reports UUIDs
+        // differently between the two APIs, or OpenGL on a software renderer): the vendor match below decides, and only
+        // when that fails too is Vulkan not started (V7). Was (V7 first version): fail here, as permanent.
+        LL_WARNS("Vulkan") << "No Vulkan device has the OpenGL device UUID (" << candidates.size() << " offered); choosing by the OpenGL vendor" << LL_ENDL;
     }
     // c. the OpenGL vendor
     if (mConfig.mGLVendorID)
@@ -1525,6 +1528,31 @@ bool WolfVkDevice::waitIdle()
     // swapchain must have completed execution", VUID-vkDestroyImage-image-01000 / VUID-vkFreeMemory-memory-00677 /
     // VUID-vkDestroySemaphore-semaphore-05149 "submitted commands / batches" - all of them tracked and waited here.
     return waitAllSubmitted("waitIdle");
+}
+
+bool WolfVkDevice::queueWaitIdleBounded(const char* what)
+{
+    if (mDevice == VK_NULL_HANDLE || mQueue == VK_NULL_HANDLE) return true;
+    if (mHung) return false;
+    // the helper owns copies of what it needs (the shared state outlives this call when it times out)
+    auto result = std::make_shared<std::promise<VkResult>>();
+    std::future<VkResult> done = result->get_future();
+    const PFN_vkQueueWaitIdle wait_fn = gVk.vkQueueWaitIdle;
+    const VkQueue queue = mQueue;
+    std::thread([result, wait_fn, queue]() { result->set_value(wait_fn(queue)); }).detach();
+    if (done.wait_for(std::chrono::nanoseconds(FRAME_WAIT_LIMIT_NS)) != std::future_status::ready)
+    {
+        declareHung(llformat("%s: vkQueueWaitIdle has not returned after %llu s", what, static_cast<unsigned long long>(FRAME_WAIT_LIMIT_NS / 1000000000ull)));
+        return false;
+    }
+    const VkResult res = done.get();
+    if (lost(res, what)) return false;
+    if (res != VK_SUCCESS)
+    {
+        LL_WARNS("Vulkan") << what << ": vkQueueWaitIdle: " << WolfVkLoader::resultString(res) << LL_ENDL;
+        return false;
+    }
+    return true;
 }
 
 void WolfVkDevice::waitIdleAndFlushDeferred()

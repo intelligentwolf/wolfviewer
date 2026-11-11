@@ -2935,7 +2935,7 @@ The age check is done once, on wolf-grid.com. General, Moderate and Adult region
    name="WolfVulkanFellBack"
    type="alertmodal">
     <unique/>
-WolfViewer could not start its Vulkan renderer on this computer, so it is drawing with OpenGL as before. Nothing else has changed. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+WolfViewer could not start its Vulkan renderer on this computer, so it is drawing with OpenGL as before. Nothing else has changed. WolfViewer may try Vulkan once more at a later start, and stays with OpenGL if it fails again. You can also choose Vulkan from Wolf World &gt; Tools &gt; Vulkan Renderer.
 
 Reason: [REASON]
     <usetemplate

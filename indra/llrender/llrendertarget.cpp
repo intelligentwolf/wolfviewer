@@ -27,6 +27,7 @@
 #include "linden_common.h"
 
 #include "llrendertarget.h"
+#include <algorithm>   // [G8 2026-11-11] std::find in release()
 #include "llrender.h"
 #include "llgl.h"
 

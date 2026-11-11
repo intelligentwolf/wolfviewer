@@ -204,7 +204,8 @@ private:
     std::unordered_set<const LLDrawInfo*> mDrawnByVulkan;
     // true when the composite's draw was recorded with the GL frame layer bound ([G2] the login check). check_pass: the
     // twin pass that ends in TRANSFER_SRC (requestFrameCheck)
-    bool drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index, bool check_pass);
+    // pass_ran: the render pass was recorded (the image then ends in the pass's final layout - TRANSFER_SRC for the twin)
+    bool drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index, bool check_pass, bool& pass_ran);
     void frameCheckRecord(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index);
     void frameCheckCollect();
     void frameCheckGLSample(uint32_t& max, uint32_t& lit);   // OpenGL's back buffer, the same tiles (synchronous read)

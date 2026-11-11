@@ -17,8 +17,7 @@
  *   b. the device whose VkPhysicalDeviceIDProperties::deviceUUID (vulkan_core.h:5941) equals the OpenGL context's
  *      GL_DEVICE_UUID_EXT (GL_EXT_memory_object, glext.h:7736): the very card OpenGL is drawing with, which the
  *      staged hand-over (GL and Vulkan sharing images) needs. Proven on NVIDIA and radeonsi by the vkglshare probe.
- *      [V7 2026-11-11] When OpenGL gave its UUID and no device has it, the choice FAILS (no c.-e.): the caller falls
- *      back to OpenGL with the reason.
+ *      [W3 2026-11-11] When OpenGL gave its UUID and no device has it, c. decides (logged).
  *   c. the device whose vendor matches the OpenGL renderer's vendor (gGLManager.mIsNVIDIA/mIsAMD/mIsIntel); [V7] when the
  *      vendor is known and no device matches, the choice fails likewise
  *   d. the first VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU (vulkan_core.h:2235)
@@ -139,6 +138,9 @@ public:
     // Runs the physical device choice (a.-e. above) without creating a device, so About and the renderer floater
     // can name the card that would be used; chosen()/aboutLine() are valid afterwards.
     bool chooseOnly(VkSurfaceKHR surface, std::string& error) { return choosePhysicalDevice(surface, error); }
+    // [W3 2026-11-11] the last choice failed because no device can be used at all (no GPU with a presenting graphics
+    // queue and VK_KHR_swapchain): a driver change only can mend it; a vendor mismatch may be retried
+    bool noCandidates() const { return mNoCandidates; }
     // surface: the window surface to present to (VK_NULL_HANDLE allowed for an off-screen device, e.g. tests)
     bool createDevice(VkSurfaceKHR surface, std::string& error);
     void destroy();
@@ -241,6 +243,10 @@ public:
     // [HANG GUARD 2026-11-08 8.2k] Bounded: every batch this device submitted is tracked (timeline value or fence) and
     // waited for at most FRAME_WAIT_LIMIT_NS; false = the device is (now) hung and nothing may be destroyed or waited on.
     bool waitIdle();
+    // [W2 2026-11-11] vkQueueWaitIdle (vulkan_core.h:4549), which takes no timeout, on a helper thread, waited at most
+    // FRAME_WAIT_LIMIT_NS. On a timeout the device is declared hung at once - the helper still holds the queue, which
+    // must be externally synchronised, so nothing may touch it again - and the helper is left to finish or not.
+    bool queueWaitIdleBounded(const char* what);
 
     // [HANG GUARD 2026-11-08] beginFrame waits at most FRAME_WAIT_LIMIT_NS for the slot's previous frame; when the card
     // has not finished by then the device is marked hung: no further waits anywhere (they would never return), the owner
@@ -307,7 +313,8 @@ private:
     uint32_t mOneTimeCount = 0;   // [AMD PERF] takeOneTimeStats
     double mOneTimeMs = 0.0;
     bool mHung = false;
-    bool mAbandoned = false;   // [V4 2026-11-11] the device was dropped undestroyed: the instance stays for the process
+    bool mAbandoned = false;
+    bool mNoCandidates = false;   // [W3 2026-11-11] noCandidates()   // [V4 2026-11-11] the device was dropped undestroyed: the instance stays for the process
     std::string mHungReason;
     VkSemaphore mTimeline = VK_NULL_HANDLE;   // timeline semaphore: value = number of frames completed
     uint64_t mTimelineNext = 0;

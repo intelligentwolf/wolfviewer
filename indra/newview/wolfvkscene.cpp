@@ -234,6 +234,7 @@ void WolfVkScene::destroy()
         mProbeVkHost.clear();
         for (auto& b : mFrameCheckHost) (void)b.release();   // [G2 2026-11-11] likewise
         mFrameCheckHost.clear();
+        mPipelines.abandon();   // [B2 2026-11-11] its pipelines stay with the device; the cache leaves the live list
         mCompositeFramebuffers.clear();
         mCompositePass = VK_NULL_HANDLE;
         mCompositeCheckPass = VK_NULL_HANDLE;
@@ -1144,9 +1145,11 @@ void WolfVkScene::probeBatch(const LLDrawInfo* params, const LLVertexBuffer* glv
 // ---------------------------------------------------------------------------------------------------------------
 // The composite into the swapchain image
 
-bool WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index, bool check_pass)
+bool WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index, bool check_pass, bool& pass_ran)
 {
+    pass_ran = false;
     if (!mComposite || mCompositePass == VK_NULL_HANDLE || image_index >= mCompositeFramebuffers.size()) return false;
+    pass_ran = true;
     bool drawn = false;
 
     VkClearValue clear{};
@@ -1729,8 +1732,11 @@ bool WolfVkScene::recordFrame(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, u
     }
     mFrameCheckWanted = false;
     mFrameCheckRecorded = 0;
-    mLastComposited = drawComposite(cmd, swapchain, image_index, check);
-    if (check) frameCheckRecord(cmd, swapchain, image_index);
+    bool pass_ran = false;
+    mLastComposited = drawComposite(cmd, swapchain, image_index, check, pass_ran);
+    // only when the twin pass really ran: the copy reads, and the barrier back to PRESENT_SRC starts from, its
+    // TRANSFER_SRC final layout ([Low 2026-11-11]: a composite that returned before its pass left no such layout)
+    if (check && pass_ran) frameCheckRecord(cmd, swapchain, image_index);
     if (mShare && mLayersAcquired)
     {
         mShare->release(cmd);   // back to GL for the next frame's writes

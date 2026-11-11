@@ -154,8 +154,16 @@ struct WolfVkPipelineState
 class WolfVkPipelineCache
 {
 public:
+    WolfVkPipelineCache() = default;
+    // [B2 2026-11-11] the cache is registered by address (sLiveCaches): it unregisters itself whatever ends it, and is
+    // never copied or moved
+    ~WolfVkPipelineCache();
+    WolfVkPipelineCache(const WolfVkPipelineCache&) = delete;
+    WolfVkPipelineCache& operator=(const WolfVkPipelineCache&) = delete;
     void init(WolfVkDevice& device);
     void destroy();
+    // [B2 2026-11-11] the device is hung: the pipelines are left to it (no Vulkan call) and the cache unregisters
+    void abandon();
     // The pipeline for program + state in render_pass (subpass 0); created on first use. VK_NULL_HANDLE on failure (logged once).
     VkPipeline get(const WolfVkProgram& program, const WolfVkPipelineState& state, VkRenderPass render_pass);
     uint32_t pipelineCount() const { return static_cast<uint32_t>(mPipelines.size()); }

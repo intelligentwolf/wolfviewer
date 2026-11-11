@@ -31,8 +31,7 @@
 
 #include "llgl.h"
 #include "llrender.h"
-#include <algorithm>   // [G8 2026-11-11] std::find (isWolfVkProvided)
-#include <vector>
+#include <vector>   // [G8 2026-11-11] mWolfVkProvidedNames
 
 /*
  Wrapper around OpenGL framebuffer objects for use in render-to-texture
@@ -210,7 +209,6 @@ protected:
     // rest. [G8 2026-11-11] Per texture, not one flag: a target the provider shared only in part (a colour format it
     // cannot share, or no shared depth) has textures of its own as well, which one flag left undeleted (leaked).
     std::vector<U32> mWolfVkProvidedNames;
-    bool isWolfVkProvided(U32 tex) const { return std::find(mWolfVkProvidedNames.begin(), mWolfVkProvidedNames.end(), tex) != mWolfVkProvidedNames.end(); }
     LLTexUnit::eTextureMipGeneration mGenerateMipMaps;
     U32 mMipLevels;
 

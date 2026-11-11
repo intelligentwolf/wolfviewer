@@ -678,9 +678,10 @@ swapchain is destroyed when the first image presented on its successor has been 
 same case (chromium `third_party/angle/.../SurfaceVk.cpp:1521-1523`, on this machine) - and at shutdown or past the cap
 after `vkQueueWaitIdle`, which takes no timeout: the one CPU wait of the backend that cannot be bounded. The spec text
 behind both rules is not on this machine; ANGLE's source is the reference used.
-[V4 2026-11-11] That wait is now `WolfVkDevice::waitIdle()` (8 s): the vkQueueWaitIdle refpage defines it as "equivalent
-to having submitted a valid fence to every previously executed queue submission command that accepts a fence, then
-waiting for all of those fences", and the device tracks every one of its submits. A swapchain that still cannot be
+[V4/W2 2026-11-11] That wait is now `WolfVkDevice::waitIdle()` (every tracked submit, 8 s) followed by vkQueueWaitIdle on
+a helper thread waited at most 8 s (`queueWaitIdleBounded`; a timeout declares the device hung, since the helper still
+holds the queue). The spec promises no wait that covers a present without maintenance1 (vkQueueWaitIdle covers
+submissions that accept a fence), so the queue-idle wait is kept as the strongest one on offer, now bounded. A swapchain that still cannot be
 destroyed is reported by `WolfVkSwapchain::destroy()` (false); the bridge then hides the child window and abandons the
 surface and device (`WolfVkSurface::abandon`, `WolfVkDevice::abandon`) instead of destroying them under it.
 

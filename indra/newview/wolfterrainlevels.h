@@ -165,16 +165,18 @@ public:
     // [W104 FEATFIX review 2026-11-11] Two kinds of undo touch sky land: the Sky Land window's "Undo my last change" sends the
     // region's "undo" (WolfSkyLevelsModule.Edit.cs Undo: the caller's LAST change in this region, whatever made it), while the
     // land brush and the Terraform window keep their own histories and undo by sending the old heights back ("apply", itself a
-    // change the region remembers). So the window's Undo is offered only for the window's own changes: those made since this
-    // viewer's last brush stroke / brush Undo / Terraform job here (or, when nothing else changed sky land here this session, as
-    // before). Otherwise it is refused with where to undo instead (stroke, brush Undo, window Undo would re-apply the stroke).
+    // change the region remembers). So the window's Undo goes only for the window's OWN changes made this session that are
+    // still on top: those since this viewer's last brush stroke / brush Undo / Terraform job in that region. Otherwise it is
+    // refused with where to undo instead (stroke, brush Undo, window Undo would re-apply the stroke).
+    // [review 2 2026-11-11] Kept for the session per region HANDLE (not on this object, which is made again when the region is
+    // left and come back to), and fail safe: nothing known (a fresh login) = refused.
     enum EEditor { EDITOR_WINDOW, EDITOR_BRUSH, EDITOR_TERRAFORM };
-    /** A change the region kept (it remembers it as one undo step). */
-    void noteChange(EEditor by);
-    /** May the Sky Land window's Undo go now? If not, `why` says where to undo instead. */
-    bool windowMayUndo(std::string& why) const;
-    /** The window's Undo went through (the region took back one of the window's steps). */
-    void noteWindowUndo();
+    /** A change the region `region` (its handle, taken when the request was made) kept: one undo step there. */
+    static void noteChange(U64 region, EEditor by);
+    /** May the Sky Land window's Undo go now in `region`? If not, `why` says where to undo instead. */
+    static bool windowMayUndo(U64 region, std::string& why);
+    /** The window's Undo went through there (the region took back one of the window's steps). */
+    static void noteWindowUndo(U64 region);
 
 private:
     Level* findLevelMutable(S32 id);
@@ -193,9 +195,7 @@ private:
     U32 mSerial;                // tells a coroutine's region from a later region with the same handle
     bool mFetching = false;
     bool mAgain = false;
-    S32 mWindowSteps = 0;               // [review] the window's changes on top of the region's history (this viewer's)
-    bool mOtherChanged = false;         // [review] the brush or the Terraform window changed sky land here this session
-    EEditor mLastOther = EDITOR_BRUSH;
+
 
     static U32 sChangeCount;
     static U32 sNextSerial;

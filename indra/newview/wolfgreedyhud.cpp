@@ -22,6 +22,7 @@
 #include <map>
 #include <optional>
 
+#include "llapp.h"
 #include "llfocusmgr.h"
 #include "llfontgl.h"
 #include "llfontregistry.h"
@@ -386,6 +387,8 @@ void WolfGreedyHud::draw()
 {
     mHits.clear();
     mDrawn = false;
+    if (LLApp::isExiting()) return;   // [review 2] nothing of the vehicles or the game is asked for while the viewer quits
+    if (WolfGreedyGame::instanceExists()) WolfGreedyGame::instance().pendingTick();   // [review 2 W4] a waiting HUD appears
     if (!WolfGreedyGame::instanceExists() || !WolfGreedyGame::instance().hudOn() || !WolfGrid::isOnWolfTerritories())
     {
         mOtherWasUp = WolfGreedyGame::instanceExists() && !WolfGreedyGame::bottomTakenBy().empty();
@@ -403,9 +406,17 @@ void WolfGreedyHud::draw()
     mOtherWasUp = other_up;
     if (newly)
     {
-        s.setMessage("The Greedy HUD made way for the " + other + ". Your game goes on: Wolf World > Greedy brings the HUD back.", false);
         WolfGreedyGame::closeHud();
         mResize.hide();
+        if (other != "game HUD")
+        {
+            // [review 2 W4] a vehicle's panel: Greedy waits for it and comes back by itself (playing while wandering)
+            WolfGreedyGame::openHud();   // (waits: vehiclePanelUp is not empty, and says so)
+        }
+        else
+        {
+            s.setMessage("The Greedy HUD made way for the game HUD. Your game goes on: Wolf World > Greedy brings the HUD back.", false);
+        }
         return;
     }
     s.tick(false);
@@ -600,15 +611,15 @@ void WolfGreedyHud::draw()
     use(g.R);
     {
         const bool wolf = WolfGrid::isOnWolfTerritories();
-        const bool free = !s.changeInFlight();   // [W104 FEATFIX review 2026-11-11] change buttons off while one is out
-        const bool canRoll = free && inGame && (buttons.find('R') != std::string::npos || buttons.find('S') != std::string::npos || buttons.find('A') != std::string::npos);
+        const bool changes_ok = !s.changeInFlight();   // [W104 FEATFIX review 2026-11-11] change buttons off while one is out
+        const bool canRoll = changes_ok && inGame && (buttons.find('R') != std::string::npos || buttons.find('S') != std::string::npos || buttons.find('A') != std::string::npos);
         const std::string rollLabel = buttons.find('S') != std::string::npos ? "START" : buttons.find('A') != std::string::npos ? "PLAY AGAIN" : "ROLL";
         const F32 rr = less ? R_L + 200.f : R_L + 268.f;   // LESS: room on the row for MORE and CLOSE
         const F32 bl = less ? R_L + 206.f : R_L + 280.f, br = less ? R_L + 406.f : 1588.f;
         button(c, X(R_L), YM(700.f), X(rr), YM(612.f), rollLabel, H_ROLL,
                "Roll the dice that are left (the Greedy server rolls them, so nobody can cheat)", 18.f, BTN_GO_HI, BTN_GO_LO, wolf && canRoll);
         button(c, X(bl), YM(700.f), X(br), YM(612.f), "BANK", H_BANK, "Keep this turn's points; then it is the next player's turn",
-               18.f, BTN_GOLD_HI, BTN_GOLD_LO, wolf && free && inGame && buttons.find('B') != std::string::npos);
+               18.f, BTN_GOLD_HI, BTN_GOLD_LO, wolf && changes_ok && inGame && buttons.find('B') != std::string::npos);
         if (less)
         {
             button(c, X(R_L + 412.f), YM(700.f), X(R_L + 478.f), YM(612.f), "MORE", H_LESS, "Show the whole Greedy HUD again", 10.f, BTN_HI, BTN_LO);
@@ -619,18 +630,18 @@ void WolfGreedyHud::draw()
         {
             if (inGame)
             {
-                button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "LEAVE", H_LEAVE, "Leave this game", 12.f, BTN_HI, BTN_LO, free);
+                button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "LEAVE", H_LEAVE, "Leave this game", 12.f, BTN_HI, BTN_LO, changes_ok);
                 button(c, X(R_L + 182.f), YM(780.f), X(R_L + 358.f), YM(716.f), "PASS THEIR TURN", H_PASS,
-                       "When the player whose turn it is has been away for a few minutes", 11.f, BTN_HI, BTN_LO, free && going && !gm["my_turn"].asBoolean());
+                       "When the player whose turn it is has been away for a few minutes", 11.f, BTN_HI, BTN_LO, changes_ok && going && !gm["my_turn"].asBoolean());
                 button(c, X(R_L + 364.f), YM(780.f), X(1588.f), YM(716.f), "WINDOW", H_WINDOW,
                        "The Greedy window: the whole game, every player, and games to join", 12.f, BTN_HI, BTN_LO);
             }
             else
             {
                 button(c, X(R_L), YM(780.f), X(R_L + 176.f), YM(716.f), "NEW GAME", H_NEW,
-                       "Start a game to 10,000 that others can join from their Greedy HUD or window, or a Greedy table", 12.f, BTN_MAIN_HI, BTN_MAIN_LO, wolf && free);
+                       "Start a game to 10,000 that others can join from their Greedy HUD or window, or a Greedy table", 12.f, BTN_MAIN_HI, BTN_MAIN_LO, wolf && changes_ok);
                 button(c, X(R_L + 182.f), YM(780.f), X(R_L + 358.f), YM(716.f), "PRACTICE", H_PRACTICE,
-                       "A game on your own with tips. Nothing is saved and it is not ranked.", 12.f, BTN_HI, BTN_LO, wolf && free);
+                       "A game on your own with tips. Nothing is saved and it is not ranked.", 12.f, BTN_HI, BTN_LO, wolf && changes_ok);
                 button(c, X(R_L + 364.f), YM(780.f), X(1588.f), YM(716.f), "JOIN A GAME", H_JOIN,
                        "The games being played now (the Greedy window)", 12.f, BTN_HI, BTN_LO, wolf);
             }

@@ -35,6 +35,7 @@
 #include "llhttpconstants.h"
 #include "lliconctrl.h"
 #include "llscrolllistctrl.h"
+#include "llnotificationsutil.h"   // [review 2/] "Greedy will appear when ..."
 #include "llsdjson.h"
 #include "llstyle.h"
 #include "lltextbox.h"
@@ -266,6 +267,14 @@ void WolfGreedyGame::viewOpened(EView v)
 void WolfGreedyGame::viewClosed(EView v)
 {
     mViews &= ~(U32)v;
+    if (mViews == 0) mHeldImages.clear();   // [review 2 W1] reloaded when a view opens again (viewOpened)
+    if (v == VIEW_HUD && mHidGameHud)
+    {
+        // [review 2 W4] the game HUD Greedy put away comes back, if Game Mode is still on and its HUD still hidden
+        mHidGameHud = false;
+        WolfGame& wg = WolfGame::instance();
+        if (WolfGrid::isOnWolfTerritories() && wg.gameModeShownOn() && !wg.hudShowing() && vehiclePanelUp().empty()) wg.toggleHud();
+    }
     changed();
 }
 
@@ -274,6 +283,17 @@ void WolfGreedyGame::openHud()
 {
     WolfGreedyGame& g = instance();
     if (g.hudOn()) return;
+    // [review 2 W4] someone driving, flying, sailing or skiing keeps their panel: Greedy waits for it (pendingTick)
+    const std::string vehicle = WolfGrid::isOnWolfTerritories() ? vehiclePanelUp() : std::string();
+    if (!vehicle.empty())
+    {
+        g.mHudPending = true;
+        g.changed();
+        LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE",
+            "Greedy will appear along the bottom of the screen when you have finished with the " + vehicle + "."));
+        return;
+    }
+    g.mHudPending = false;
     if (WolfGrid::isOnWolfTerritories()) claimBottom();   // [W104 FEATFIX review 2026-11-11/] one bottom panel at a time
     g.viewOpened(VIEW_HUD);
     // the first time: the guide's cards (as the window did, WolfGreedyGuideSeen)
@@ -282,6 +302,19 @@ void WolfGreedyGame::openHud()
         gSavedSettings.setBOOL("WolfGreedyGuideSeen", true);
         WolfFloaterGreedy::showGuideWindow();
     }
+}
+
+// static
+std::string WolfGreedyGame::vehiclePanelUp()
+{
+    // Source: wolfgame.cpp WolfGame::bottomTaken (the deck on screen while active and not hidden; the dashboard; the helm),
+    // and the Ski HUD (wolfskis.h hudShowing)
+    const WolfFlight& wf = WolfFlight::instance();
+    if (wf.active() && !wf.deckHidden()) return wf.sailing() ? "sailing deck" : "flight deck";
+    if (WolfDrive::instance().dashboardOn()) return "dashboard";
+    if (WolfHelm::instance().hudShowing()) return "Captain's Helm";
+    if (WolfSkis::instance().hudShowing()) return "Ski HUD";
+    return std::string();
 }
 
 // static
@@ -301,20 +334,14 @@ std::string WolfGreedyGame::bottomTakenBy()
 // static
 void WolfGreedyGame::claimBottom()
 {
-    // Source: wolfskis.cpp WolfSkis::claimBottom - the dashboard closes (requestDashboard(false) does not reopen it for this
-    // seat), the deck is hidden (its mode keeps running), the Captain's Helm gives way; and here the Ski HUD and the game HUD
-    // too (the game keeps running with its HUD hidden, WolfGame::toggleHud)
-    std::string put_away = bottomTakenBy();
-    if (WolfDrive::instance().dashboardOn()) WolfDrive::instance().requestDashboard(false);
-    WolfFlight& wf = WolfFlight::instance();
-    if (wf.active() && !wf.deckHidden()) wf.toggleDeck(wf.sailing());
-    if (WolfHelm::instance().hudShowing()) WolfHelm::instance().showHud(false);
-    if (WolfSkis::instance().hudShowing()) WolfSkis::instance().showHud(false);
-    if (WolfGame::instance().hudShowing()) WolfGame::instance().toggleHud();
-    if (!put_away.empty())
+    // [review 2 W4] only the game HUD is put away (the game keeps running with its HUD hidden, WolfGame::toggleHud); a vehicle's
+    // panel never is (openHud waits for it instead), so nobody driving has their controls pulled away
+    if (WolfGame::instance().hudShowing())
     {
-        instance().setMessage("The " + put_away + " was put away so Greedy can sit along the bottom of the screen "
-                              "(the Wolf HUDs window brings it back).", false);
+        WolfGame::instance().toggleHud();
+        instance().mHidGameHud = true;
+        instance().setMessage("The game HUD was put away so Greedy can sit along the bottom of the screen; it comes back when "
+                              "you close Greedy.", false);
     }
 }
 
@@ -327,8 +354,22 @@ void WolfGreedyGame::closeHud()
 // static
 void WolfGreedyGame::toggleHud()
 {
+    if (instanceExists() && instance().mHudPending)
+    {
+        // [review 2] switched off while waiting: it does not come
+        instance().mHudPending = false;
+        instance().changed();
+        LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", std::string("Greedy will not appear after all.")));
+        return;
+    }
     if (instanceExists() && instance().hudOn()) closeHud();
     else openHud();
+}
+
+void WolfGreedyGame::pendingTick()
+{
+    if (!mHudPending || LLApp::isExiting() || !WolfGrid::isOnWolfTerritories()) return;
+    if (vehiclePanelUp().empty()) openHud();   // the vehicle's panel has gone: Greedy appears
 }
 
 void WolfGreedyGame::noteActivity()
@@ -446,14 +487,17 @@ void WolfGreedyGame::send(const std::string& op, const std::string& extra)
     if (mBusy)
     {
         // the newest press wins; it goes when the answer comes. [W104 FEATFIX review 2026-11-11] the same press as the one out
-        // now is dropped: a second ROLL / BANK / NEW GAME pressed before the first was answered was made on an unchanged
-        // screen, and sent after it would roll twice or make a second game. (A different press - "leave" then "new" - waits.)
-        if (op != "poll" && op != mInFlight) mQueued = op + "\n" + extra;
-        else if (op != "poll") LL_INFOS("WolfGreedy") << "a second " << op << " while the first is out: dropped" << LL_ENDL;
+        // now (the same op AND arguments: a join of another game is not a repeat) is dropped: a second ROLL / BANK / NEW GAME
+        // pressed before the first was answered was made on an unchanged screen, and sent after it would roll twice or make a
+        // second game. (A different press - "leave" then "new" - waits.)
+        const bool repeat = op == mInFlight && extra == mInFlightExtra;
+        if (op != "poll" && !repeat) mQueued = op + "\n" + extra;
+        else if (op != "poll") LL_DEBUGS("WolfGreedy") << "a second " << op << " while the first is out: dropped" << LL_ENDL;
         return;
     }
     mBusy = true;
     mInFlight = op;
+    mInFlightExtra = extra;
     if (op != "poll") noteActivity();   // [A6/] a press: the quick pace again
     // [A6/] DEBUG only (logcontrol tag WolfGreedy): every request, to count the polls of an idle view
     LL_DEBUGS("WolfGreedy") << "request " << op << " game " << mGame << " quiet " << (S32)(LLFrameTimer::getElapsedSeconds() - mLastActivity) << " s" << LL_ENDL;
@@ -500,6 +544,7 @@ void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std
 {
     mBusy = false;
     mInFlight.clear();
+    mInFlightExtra.clear();
     changed();
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!error.empty())
@@ -1039,10 +1084,10 @@ void WolfFloaterGreedy::refreshButtons()
         LLButton* roll = getChild<LLButton>(pre + "roll");
         roll->setLabel(rollLabel);
         // [W104 FEATFIX review 2026-11-11] off while a press that changes the game is out (changeInFlight)
-        const bool free = !game.changeInFlight();
-        roll->setEnabled(free && inGame && (b.find('R') != std::string::npos || b.find('S') != std::string::npos || b.find('A') != std::string::npos));
-        getChild<LLButton>(pre + "bank")->setEnabled(free && inGame && b.find('B') != std::string::npos);
-        getChild<LLButton>(pre + "leave")->setEnabled(free && inGame);
+        const bool changes_ok = !game.changeInFlight();
+        roll->setEnabled(changes_ok && inGame && (b.find('R') != std::string::npos || b.find('S') != std::string::npos || b.find('A') != std::string::npos));
+        getChild<LLButton>(pre + "bank")->setEnabled(changes_ok && inGame && b.find('B') != std::string::npos);
+        getChild<LLButton>(pre + "leave")->setEnabled(changes_ok && inGame);
     }
     const bool guide = mGuidePage >= 0;
     for (const char* n : { "f_target_label", "f_target", "f_new", "f_practice", "f_games", "f_join", "f_refresh" })

@@ -135,7 +135,7 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_SPEEDBOAT: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPEEDBOAT);
         case T_SUBMARINE: return WolfDrive::instance().showingDesign(WolfDrive::TYPE_SUBMARINE);
         // [W104 FEATFIX 2026-11-11] Greedy is a HUD now (wolfgreedyhud.h), as its menu tick (WolfGreedy.HudOn)
-        case T_GREEDY:    return WolfGreedyGame::instanceExists() && WolfGreedyGame::instance().hudOn();
+        case T_GREEDY:    return WolfGreedyGame::instanceExists() && WolfGreedyGame::instance().hudWanted();   // (on, or waiting for a vehicle panel)
         case T_ROLEPLAY:
         case T_COMPASS:
         case T_SPEED:     return LLFloaterReg::instanceVisible(floaterOf(t));   // as their menu ticks (Floater.Visible)

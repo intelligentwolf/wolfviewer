@@ -823,6 +823,9 @@ namespace WolfTerraform
             }
         S32 changed = 0, refused = 0, no_room = 0, sent = 0;
         std::string reason;
+        // [review 2 2026-11-11] the region this job is for, by handle, for the Sky Land window's Undo rule (wolfterrainlevels.h)
+        LLViewerRegion* job_rgn = here();
+        const U64 job_handle = job_rgn ? job_rgn->getHandle() : 0;
         auto stopped = [&](const std::string& why)
         {
             if (kind == KIND_APPLY)
@@ -877,8 +880,7 @@ namespace WolfTerraform
             if (answer["changed"].asInteger() > 0)
             {
                 // [W104 FEATFIX review 2026-11-11] the region remembers this as this login's last sky change (wolfterrainlevels.h)
-                if (LLViewerRegion* rgn = here(); rgn && rgn->getWolfSkyLevels())
-                    rgn->getWolfSkyLevels()->noteChange(WolfTerrainLevels::EDITOR_TERRAFORM);
+                WolfTerrainLevels::noteChange(job_handle, WolfTerrainLevels::EDITOR_TERRAFORM);
             }
             refused += answer["refused"].asInteger();
             no_room += answer["no_room"].asInteger();

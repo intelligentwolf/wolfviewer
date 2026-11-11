@@ -30246,6 +30246,8 @@ Change of this parameter will affect the layout of buttons in notification toast
       <string>[W104 FEATFIX review 2026-11-11] Tests only, off (0): every Greedy request waits this many seconds (at most 30) before it goes, like a slow link.</string>
       <key>Persist</key>
       <integer>0</integer>
+      <key>HideFromEditor</key>
+      <integer>1</integer>
       <key>Type</key>
       <string>F32</string>
       <key>Value</key>

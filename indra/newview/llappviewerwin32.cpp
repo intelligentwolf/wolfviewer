@@ -368,8 +368,9 @@ static WolfInstallerState wolfInstallerState()
     WIN32_FILE_ATTRIBUTE_DATA marker;
     if (!GetFileAttributesExW((dir + L"WolfViewerInstalling.txt").c_str(), GetFileExInfoStandard, &marker))
     {
-        // [W104 FEATFIX review 2026-11-11] no marker here: an installer for another folder - or this folder's, if the marker
-        // could not be written. The files whose absence stopped the viewer (llappviewer.cpp initStrings strings.xml,
+        // [W104 FEATFIX review 2026-11-11] BEST EFFORT. No marker here: an installer for another folder - or this folder's, if
+        // the marker could not be written. (A folder caught after both files are written but before the rest are is not
+        // caught by this fallback; the marker is the real protection.) The files whose absence stopped the viewer (llappviewer.cpp initStrings strings.xml,
         // initConfiguration settings_files.xml; RemoveProgFilesOnInst deletes app_settings and skins first) tell them apart:
         // both there, this install is whole and starts; either missing, it is being written - wait, as with the marker.
         const DWORD a1 = GetFileAttributesW((dir + L"app_settings\\settings_files.xml").c_str());

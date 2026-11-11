@@ -13038,7 +13038,7 @@ void initialize_menus()
     commit.add("WolfAIMode.Toggle", [](LLUICtrl*, const LLSD&) { WolfAIMode::instance().toggle(); });
     // [W104 FEATFIX 2026-11-11] Wolf World > Greedy: the Greedy HUD on / off (wolfgreedyhud.h)
     commit.add("WolfGreedy.ToggleHud", [](LLUICtrl*, const LLSD&) { WolfGreedyGame::toggleHud(); });
-    enable.add("WolfGreedy.HudOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfGreedyGame::instanceExists() && WolfGreedyGame::instance().hudOn(); });
+    enable.add("WolfGreedy.HudOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfGreedyGame::instanceExists() && WolfGreedyGame::instance().hudWanted(); });
     enable.add("WolfAIMode.IsOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfAIMode::instance().isOn(); });
     commit.add("WolfSpeech.ToggleDictation", boost::bind(&wolf_toggle_dictation));
     enable.add("WolfSpeech.IsDictating", boost::bind(&wolf_is_dictating));

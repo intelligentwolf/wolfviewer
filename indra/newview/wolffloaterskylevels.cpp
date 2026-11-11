@@ -81,7 +81,7 @@ bool WolfFloaterSkyLevels::postBuild()
         // [W104 FEATFIX review 2026-11-11] only the window's own changes (wolfterrainlevels.h windowMayUndo): the region's
         // "undo" takes back whatever this login changed last, and the brush / Terraform window undo by sending heights back
         std::string why;
-        if (WolfTerrainLevels* s = sky(); s && !s->windowMayUndo(why))
+        if (WolfTerrainLevels* s = sky(); s && s->getRegion() && !WolfTerrainLevels::windowMayUndo(s->getRegion()->getHandle(), why))
         {
             say(why, true);
             return;
@@ -266,13 +266,9 @@ void WolfFloaterSkyLevels::act(const LLSD& body, const std::string& done_text)
         // create / delete / set always make a step; apply / remove only when they changed something; undo takes one back
         if (answer["success"].asBoolean())
         {
-            LLViewerRegion* rgn = region ? LLWorld::getInstance()->getRegionFromHandle(region) : nullptr;
-            if (WolfTerrainLevels* sl = rgn ? rgn->getWolfSkyLevels() : nullptr)
-            {
-                if (op == "undo") sl->noteWindowUndo();
-                else if (op == "create" || op == "delete" || op == "set" || answer["changed"].asInteger() > 0)
-                    sl->noteChange(WolfTerrainLevels::EDITOR_WINDOW);
-            }
+            if (op == "undo") WolfTerrainLevels::noteWindowUndo(region);
+            else if (op == "create" || op == "delete" || op == "set" || answer["changed"].asInteger() > 0)
+                WolfTerrainLevels::noteChange(region, WolfTerrainLevels::EDITOR_WINDOW);
         }
         WolfFloaterSkyLevels* self = static_cast<WolfFloaterSkyLevels*>(h.get());
         if (!self)

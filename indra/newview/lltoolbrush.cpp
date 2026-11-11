@@ -793,7 +793,7 @@ void LLToolBrushLand::sendSkyWork()
             if (!kept.empty() && answer["changed"].asInteger() > 0)
             {
                 // [W104 FEATFIX review 2026-11-11] the region remembers this as this login's last change (wolfterrainlevels.h)
-                if (WolfTerrainLevels* sl = sky_of(handle)) sl->noteChange(WolfTerrainLevels::EDITOR_BRUSH);
+                WolfTerrainLevels::noteChange(handle, WolfTerrainLevels::EDITOR_BRUSH);
             }
             if (!kept.empty())
             {
@@ -1363,9 +1363,9 @@ void LLToolBrushLand::skyUndoCoro(U64 handle, S32 level, std::unordered_map<U32,
         changed += answer["changed"].asInteger();
         if (answer["changed"].asInteger() > 0)
         {
-            // [W104 FEATFIX review 2026-11-11] the brush's Undo is itself a change the region remembers (wolfterrainlevels.h)
-            if (LLViewerRegion* rgn = gAgent.getRegion(); rgn && rgn->getHandle() == handle && rgn->getWolfSkyLevels())
-                rgn->getWolfSkyLevels()->noteChange(WolfTerrainLevels::EDITOR_BRUSH);
+            // [W104 FEATFIX review 2026-11-11] the brush's Undo is itself a change the region remembers (wolfterrainlevels.h),
+            // in the region the request was made for ([review 2] its handle, not wherever the agent is now)
+            WolfTerrainLevels::noteChange(handle, WolfTerrainLevels::EDITOR_BRUSH);
         }
         const S32 r = answer["refused"].asInteger() + answer["no_room"].asInteger();
         refused += r;

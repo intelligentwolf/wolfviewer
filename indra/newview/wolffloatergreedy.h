@@ -58,6 +58,13 @@ public:
     void viewOpened(EView v);
     void viewClosed(EView v);
     bool hudOn() const { return (mViews & VIEW_HUD) != 0; }
+    /** [W104 FEATFIX review 2 2026-11-11] switched on, or waiting to come back once the resident has finished with a vehicle's
+     *  panel (see claimBottom): the menu tick and the Wolf HUDs tile show this */
+    bool hudWanted() const { return hudOn() || mHudPending; }
+    /** Every frame from the HUD control (wolfgreedyhud.cpp), also while it is off: a waiting HUD appears when the bottom is free. */
+    void pendingTick();
+    /** [review 2] the textures let go before the texture system shuts down (LLAppViewer::cleanup) */
+    void releaseImages() { mHeldImages.clear(); }
     /** Wolf World > Greedy, the Wolf HUDs tile: the HUD on or off. */
     static void toggleHud();
     static void openHud();
@@ -67,8 +74,14 @@ public:
      *  speedboat / submarine dashboard, the flight or sailing deck, the Captain's Helm, the Ski HUD, the game HUD. The Greedy
      *  HUD switched on puts those away (claimBottom, and says so in its message area); one of them switched on later puts the
      *  Greedy HUD away (WolfGreedyHud::draw). At the fishing-overlay merge: add the Fishing HUD to both (bottomTakenBy and
-     *  claimBottom here), and have the Fishing HUD close this one as it claims the bottom. */
+     *  claimBottom here), and have the Fishing HUD close this one as it claims the bottom.
+     *  [W104 FEATFIX review 2 2026-11-11] Paul: "play while wandering". A VEHICLE's panel (dashboard, deck, helm, skis) is never
+     *  pulled away from someone driving, flying, sailing or skiing: the Greedy HUD waits ("Greedy will appear when you have
+     *  finished with the dashboard") and appears by itself when that panel goes; one of those switched on while Greedy shows
+     *  sends Greedy back to waiting the same way. Only the game HUD (not a vehicle) is put away by Greedy, and it is brought
+     *  back when the Greedy HUD closes (if Game Mode is still on). */
     static std::string bottomTakenBy();
+    static std::string vehiclePanelUp();   // the vehicle panel showing ("" none)
     static void claimBottom();
 
     /** Every frame from a view that shows (minimised = the window is minimised): the polling. */
@@ -124,7 +137,10 @@ private:
     LLSD mGames;
     bool mBusy = false;
     std::string mQueued;            // one action pressed while a request was out
-    std::string mInFlight;          // [review] the request out now ("" none)
+    std::string mInFlight;          // [review] the request out now ("" none), and its arguments (W5: a join of another game is not a repeat)
+    std::string mInFlightExtra;
+    bool mHudPending = false;       // [review 2] waiting for a vehicle's panel to go
+    bool mHidGameHud = false;       // [review 2] the Greedy HUD put the game HUD away: it comes back when Greedy closes
     std::vector<LLPointer<LLUIImage>> mHeldImages;   // [review] the dice faces and tumble frames, loaded while a view is open
     F64 mNextPoll = 0.0;
     F64 mLastActivity = 0.0;        // [A6] the last press, game change or return to a view: the poll pace slows after it

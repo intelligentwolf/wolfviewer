@@ -23,8 +23,9 @@ import os
 import sys
 
 # The lowest share of linked programs that must have SPIR-V. 2026-11-11 measurements of the transform (shader_check.py
-# --vulkan-out, glslang 16.6.0): 924 of 1314 (70%) with --quick, the full set in the build's own summary.json. Below
-# this the store is "mostly missing", not "the known transform gaps".
+# --vulkan-out, glslang 16.6.0, this tree's shaders): 924 of 1314 (70%) with --quick; 5207 of 7254 (72%, 18766 recipe
+# keys, the size of the W103 release store) with the full CI set. Below 60% the store is "mostly missing", not "the
+# known transform gaps".
 MIN_RATIO = 0.6
 
 
@@ -54,10 +55,10 @@ def check(spv_dir):
     if programs <= 0 or ratio < required:
         errors.append("only %d of %d linked programs have SPIR-V (%.0f%%, at least %.0f%% required)" % (compiled, programs, ratio * 100, required * 100))
     keys = {v.get("spv") for v in manifest.values() if isinstance(v, dict) and v.get("spv")}
-    missing = [k for k in sorted(keys) for st in ("vert", "frag")
+    missing = ["%s.%s.spv" % (k, st) for k in sorted(keys) for st in ("vert", "frag")
                if not os.path.isfile(os.path.join(spv_dir, "%s.%s.spv" % (k, st))) or os.path.getsize(os.path.join(spv_dir, "%s.%s.spv" % (k, st))) == 0]
     if missing:
-        errors.append("%d program file(s) named in manifest.json are missing or empty (first: %s.spv)" % (len(missing), missing[0]))
+        errors.append("%d program file(s) named in manifest.json are missing or empty (first: %s)" % (len(missing), missing[0]))
     if len(keys) != spv_programs:
         errors.append("manifest.json names %d programs, the SPIR-V step wrote %d (summary.json): the store is not one run's output" % (len(keys), spv_programs))
     line = "%d of %d linked programs with SPIR-V (%.0f%%), %d program files, %d recipe keys" % (compiled, programs, ratio * 100, len(keys), len(manifest))

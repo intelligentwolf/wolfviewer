@@ -1704,6 +1704,17 @@ Findings V1-V14 and G1-G8 of region-terrain-work/w104-review-2026-11-11/FINDINGS
   t2-hang (child unmapped, OpenGL login with the notice), t3-blacklogin (in-session fall-back with the notice),
   t5a/t5b (retry once, then OpenGL kept), t4-failrebuild (5 WARN tries, the message box, OpenGL recorded). Windows (G3,
   Win32 child hide) and macOS (Metal layer detach) are not built or run here.
+- Review round 2 (commit 077de7eb13): B1 the failure count is cleared only by a proving session (login + world checks
+  passed, clean quit with Vulkan running) - runs b1-s1/b1-s2 (a stop after a passed login check, twice: count 1 then 2),
+  b1-s3 (stays OpenGL), b1-prove (a proving session clears it); B2 the pipeline cache unregisters in its destructor and
+  in the hung teardown - runs b2b (NVIDIA) and b2c (AMD): WolfVulkanDebugHangNow in-world, shader reload after the stop
+  box, clean quit (no ASan build: the old use-after-free was found by reading, not reproduced); W1 test switches are
+  Persist 0 (`--set Key 1`); W2 bounded vkQueueWaitIdle helper (no-maintenance1 path, not used on either GPU here);
+  W3 UUID mismatch -> vendor match; W4 a clean quit with no failed sample is not counted; W5 rebuild retries for 4 s
+  (run w5: 17 attempts over 4.15 s, then the stop); W6 a swapchain left on a native Wayland surface turns the start-up
+  fall-back into the run-time stop (not run: no native-Wayland start here).
+- Test windows open on the hidden Hyprland workspace special:wolftest (window rules on the test's own X11 class and the
+  stop box's zenity title, ~/.cache/vkfix/rig/session2.sh), never over the desktop in use.
 
 ## 8.5 Design for the next pass: `PASS_SIMPLE` into the G-buffer (stage 4 proper)
 

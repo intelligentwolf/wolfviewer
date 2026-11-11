@@ -54,7 +54,9 @@ private:
 
     void setMode(const std::string& mode, bool remember);
     void send(const std::string& op, const std::string& extra = std::string());
-    void onReply(const std::string& op, const LLSD& reply, const std::string& error);
+    void onReply(const std::string& op, const LLSD& reply, const std::string& error, bool uncertain);
+    /** [W104 FEATFIX 2026-11-11 A6] The player did something (or came back to the window): polls go at the quick pace again. */
+    void noteActivity();
     static void sendCoro(LLHandle<LLFloater> handle, std::string op, std::string body);
     void show(const LLSD& state);
     void showNoGame();
@@ -77,6 +79,9 @@ private:
     bool mBusy = false;
     std::string mQueued;      // one action pressed while a request was out
     F64 mNextPoll = 0.0;
+    F64 mLastActivity = 0.0;  // [A6] the last press, game change or return to the window: the poll pace slows after it
+    bool mWasMinimised = false;   // [A6] no polls while minimised; one at once when it is opened out again
+    bool mPollNow = false;    // [A3/A6] the next frame polls whatever the pace (after a press whose answer was lost)
     S32 mGuidePage = -1;      // -1: the guide is not showing
     S32 mTableGame = 0;       // the game of the table we sit at (0: none)
     std::string mTableLabel;

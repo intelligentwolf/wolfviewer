@@ -61,6 +61,17 @@ namespace
     // Source: wolfdice_window.php - a game going is polled every 2 s, a lobby or a finished game every 4 s (README s3)
     const F64 POLL_PLAYING_S = 2.0;
     const F64 POLL_WAITING_S = 4.0;
+    // [W104 FEATFIX 2026-11-11 A6] Paul: think of 2,000 users. With nothing happening the pace slows (CHOSEN): the wait is
+    // 0.15 x the seconds since the last change or press, never under the pace above and never over POLL_PLAYING_MAX_S
+    // (a game going: other players' turns must still show soon) or POLL_LOBBY_MAX_S (a lobby), and after POLL_LONG_QUIET_S
+    // of nothing at all, POLL_QUIET_MAX_S. A finished game is not polled at all (it never changes again); a minimised
+    // window is not polled; a press, a change or opening the window out again brings back the quick pace at once.
+    // An open window left alone in a lobby all day: about 1,500 requests (was 21,600).
+    const F64 POLL_SLOWING = 0.15;
+    const F64 POLL_PLAYING_MAX_S = 8.0;
+    const F64 POLL_LOBBY_MAX_S = 15.0;
+    const F64 POLL_LONG_QUIET_S = 600.0;
+    const F64 POLL_QUIET_MAX_S = 60.0;
     // Source: region-terrain-work/greedy-dice-2026-11-10/test/delivery_lonewolf.json "sounds" (our own, art/make_art.py)
     const char* SND_ROLL = "2888b686-e2c2-48c0-bc92-3ec2ad4c63fd";
     const char* SND_BUST = "db99ff28-3bc3-432a-a991-a4bf8a4adf11";
@@ -103,14 +114,36 @@ namespace
         return LlsdFromJson(v);
     }
 
-    /** One request to the dice server as this login. Runs in a coroutine. Source: wolffloaterdob.cpp post_dob. */
-    LLSD post_greedy(const char* url, const std::string& body, LLCore::HttpStatus& status)
+    /** [W104 FEATFIX 2026-11-11 A3] The requests that are safe to send twice (wolfdice_window.php): mine, list and poll only
+     *  read (poll's last_seen touch and away-pass are the same whoever asks), and join of a game the player is already in only
+     *  touches last_seen (wdw_join). new, start, roll, bank, pass and leave change the game: a second copy rolls again,
+     *  starts a second game, passes the NEXT player's turn, or answers "not in that game". */
+    bool safe_to_repeat(const std::string& op)
+    {
+        return op == "mine" || op == "list" || op == "poll" || op == "join";
+    }
+
+    /** [W104 FEATFIX 2026-11-11 A3] The request certainly never reached the server: no name lookup, no connection, or the TLS
+     *  handshake failed - all before curl sends the request (curl CURLE_COULDNT_RESOLVE_HOST 6, CURLE_COULDNT_CONNECT 7,
+     *  CURLE_SSL_CONNECT_ERROR 35; httpcommon.cpp isRetryable names the first two). Only then may a change go to the other host. */
+    bool never_sent(const LLCore::HttpStatus& status)
+    {
+        return status == LLCore::HttpStatus(LLCore::HttpStatus::EXT_CURL_EASY, CURLE_COULDNT_RESOLVE_HOST)
+            || status == LLCore::HttpStatus(LLCore::HttpStatus::EXT_CURL_EASY, CURLE_COULDNT_CONNECT)
+            || status == LLCore::HttpStatus(LLCore::HttpStatus::EXT_CURL_EASY, CURLE_SSL_CONNECT_ERROR);
+    }
+
+    /** One request to the dice server as this login. Runs in a coroutine. Source: wolffloaterdob.cpp post_dob.
+     *  [W104 FEATFIX 2026-11-11 A3] repeat = false: LLCore's own retries are off (HttpOptions default HTTP_RETRY_COUNT_DEFAULT = 5,
+     *  _httppolicy.cpp stageAfterCompletion retries a timed-out or 5xx request, which for a roll would roll again). */
+    LLSD post_greedy(const char* url, const std::string& body, LLCore::HttpStatus& status, bool repeat)
     {
         LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
             std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfGreedy", LLCore::HttpRequest::DEFAULT_POLICY_ID);
         LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
         LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
         options->setTimeout(20);
+        if (!repeat) options->setRetries(0);
         LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
         headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
         headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/x-www-form-urlencoded");
@@ -229,6 +262,8 @@ void WolfFloaterGreedy::onOpen(const LLSD& key)
         onTable(key["table"].asInteger(), key["label"].asString());
         return;
     }
+    noteActivity();   // [A6] opened (again): the quick pace, and a poll at once
+    mNextPoll = 0.0;
     if (!mGame)
     {
         send("mine");
@@ -294,10 +329,33 @@ void WolfFloaterGreedy::draw()
         getChild<LLButton>(pre + "mode_strip")->setToggleState(mMode == "strip");
     }
     LLFloater::draw();
+    // [W104 FEATFIX 2026-11-11 A6] draw() runs only while the window shows (a closed window is hidden, not drawn); minimised,
+    // nothing is polled, and opened out again it polls at once
+    if (isMinimized())
+    {
+        mWasMinimised = true;
+        return;
+    }
+    if (mWasMinimised)
+    {
+        mWasMinimised = false;
+        noteActivity();
+        mNextPoll = 0.0;
+    }
     if (!mGame || mBusy || !WolfGrid::isWolfTerritories()) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (now < mNextPoll) return;
+    if (!mPollNow)
+    {
+        if (now < mNextPoll) return;
+        if (mState["game"]["state"].asString() == "finished") return;   // [A6] it never changes again
+    }
+    mPollNow = false;
     send("poll", "&v=" + llformat("%d", mVersion));
+}
+
+void WolfFloaterGreedy::noteActivity()
+{
+    mLastActivity = LLFrameTimer::getElapsedSeconds();
 }
 
 void WolfFloaterGreedy::onTable(S32 game, const std::string& label)
@@ -305,6 +363,7 @@ void WolfFloaterGreedy::onTable(S32 game, const std::string& label)
     if (game <= 0) return;
     mTableGame = game;
     mTableLabel = label;
+    noteActivity();   // [A6/]
     if (mGame != game)
     {
         // the table has already seated them in this game: this just loads it (wolfdice_window.php wdw_join). The game
@@ -374,6 +433,7 @@ void WolfFloaterGreedy::send(const std::string& op, const std::string& extra)
         return;
     }
     mBusy = true;
+    if (op != "poll") noteActivity();   // [A6/] a press: the quick pace again
     const std::string body = "op=" + op + "&g=" + llformat("%d", mGame) + extra;
     LLHandle<LLFloater> handle = getHandle();
     LLCoros::instance().launch("WolfGreedy", [handle, op, body]() { sendCoro(handle, op, body); });
@@ -383,32 +443,56 @@ void WolfFloaterGreedy::send(const std::string& op, const std::string& extra)
 void WolfFloaterGreedy::sendCoro(LLHandle<LLFloater> handle, std::string op, std::string body)
 {
     LLCore::HttpStatus status;
-    LLSD reply = post_greedy(API_1, body, status);
-    if (!reply.isMap())
+    // [W104 FEATFIX 2026-11-11 A3] a read is asked again (LLCore's retries, then the second host); a change goes once, and to
+    // the second host only when it certainly never reached the first (never_sent): no roll, bank or new game twice
+    const bool safe = safe_to_repeat(op);
+    LLSD reply = post_greedy(API_1, body, status, safe && op != "poll");   // a poll is asked again soon anyway
+    if (!reply.isMap() && (safe || never_sent(status)))
     {
         // the first web host did not answer: the second has the same file and the same database (README s3)
-        reply = post_greedy(API_2, body, status);
+        reply = post_greedy(API_2, body, status, safe && op != "poll");
     }
     std::string error;
+    bool uncertain = false;
     if (!reply.isMap() || !reply["ok"].asBoolean())
     {
         error = reply.isMap() && reply.has("error") ? reply["error"].asString() : std::string();
-        if (error.empty()) error = "The Greedy server did not answer (" + status.toString() + "). Please try again in a moment.";
+        // no answer to a change that may have reached the server: whether it counted is not known
+        uncertain = !reply.isMap() && !safe && !never_sent(status);
+        if (error.empty() && uncertain)
+            error = "The Greedy server did not answer (" + status.toString() + "), so that press may or may not have counted. "
+                    "The game is being checked now - look at it before you press again.";
+        else if (error.empty())
+            error = "The Greedy server did not answer (" + status.toString() + "). Please try again in a moment.";
         if (op != "poll") LL_WARNS("WolfGreedy") << op << ": " << status.toString() << " " << error << LL_ENDL;
     }
     WolfFloaterGreedy* self = static_cast<WolfFloaterGreedy*>(handle.get());
     if (!self) return;
-    self->onReply(op, reply, error);
+    self->onReply(op, reply, error, uncertain);
 }
 
-void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const std::string& error)
+void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const std::string& error, bool uncertain)
 {
     mBusy = false;
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!error.empty())
     {
         if (op != "poll") setMessage(error, EStatus::ERR);
-        mNextPoll = now + POLL_WAITING_S;
+        if (uncertain)
+        {
+            // [W104 FEATFIX 2026-11-11 A3] what the server has now, at once: the game if there is one (a full answer, not
+            // "same"), else whether a new game was made; a press queued behind the lost one was made on the old picture
+            mQueued.clear();
+            if (mGame)
+            {
+                mVersion = -1;
+                mPollNow = true;
+            }
+            else
+            {
+                mQueued = "mine\n";
+            }
+        }
     }
     else if (op == "list")
     {
@@ -462,13 +546,19 @@ void WolfFloaterGreedy::onReply(const std::string& op, const LLSD& reply, const 
         const bool first = mVersion < 0 || mGame != g["id"].asInteger();
         mGame = g["id"].asInteger();
         if (!first && v != mVersion) playSound(g["event_kind"].asString());
+        if (first || v != mVersion) noteActivity();   // [A6/] something happened: the quick pace again
         mVersion = v;
         mState = reply;
         show(reply);
         if (op != "poll") setMessage(std::string(), EStatus::INFO);
     }
     const std::string st = mState["game"]["state"].asString();
-    mNextPoll = now + ((st == "playing" || st == "final") ? POLL_PLAYING_S : POLL_WAITING_S);
+    // [W104 FEATFIX 2026-11-11 A6] the pace slows while nothing happens (see POLL_SLOWING)
+    const bool going = st == "playing" || st == "final";
+    const F64 quiet = now - mLastActivity;
+    const F64 base = going ? POLL_PLAYING_S : POLL_WAITING_S;
+    const F64 cap = quiet > POLL_LONG_QUIET_S ? POLL_QUIET_MAX_S : going ? POLL_PLAYING_MAX_S : POLL_LOBBY_MAX_S;
+    mNextPoll = now + llclamp(quiet * POLL_SLOWING, base, cap);
     if (!mQueued.empty())
     {
         const size_t nl = mQueued.find('\n');

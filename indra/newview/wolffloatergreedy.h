@@ -108,7 +108,9 @@ public:
     bool busy() const { return mBusy; }
     /** [W104 FEATFIX review 2026-11-11] a press that changes the game (new, start, roll, bank, pass, leave, join) is out and
      *  not answered yet: the views show those buttons off until it is (no second roll pressed on an unchanged screen). */
-    bool changeInFlight() const { return mBusy && !mInFlight.empty() && mInFlight != "poll" && mInFlight != "list" && mInFlight != "mine"; }
+    bool changeInFlight() const { return mBusy && !mLocal && !mInFlight.empty() && mInFlight != "poll" && mInFlight != "list" && mInFlight != "mine"; }
+    // ([W104 review 2026-11-11 W4] not during practice: its presses are played here and never wait for a server request, and
+    // the one out then is only the leave of a server game, sendLeaveOwed)
     const std::vector<Msg>& messages() const { return mLog; }
     const std::string& message() const { return mMessage; }   // the line under the window's controls ("" none)
     bool messageIsError() const { return mMessageError; }
@@ -135,6 +137,7 @@ private:
     void noteActivity();
     // [GREEDY COMPUTER PLAYER 2026-11-11] the practice game played here (wolfgreedylocal.h)
     void startLocal();
+    void sendLeaveOwed();                    // [W104 review W4] the next server game still to be left, when nothing is out
     void endLocal(const std::string& why);
     void showLocal(const std::string& op);   // the local game's answer, through onReply as a server answer
     void localTick();                        // the computer's moves, paced so they can be watched
@@ -150,6 +153,8 @@ private:
     std::string mQueued;            // one action pressed while a request was out
     std::string mInFlight;          // [review] the request out now ("" none), and its arguments (W5: a join of another game is not a repeat)
     std::string mInFlightExtra;
+    std::vector<S32> mLeaveOwed;    // [W104 review 2026-11-11 W4] server games to leave, sent beside a practice game (not queued:
+                                    // the queue is cleared when practice starts and by a server answer that comes during it)
     bool mHudPending = false;       // [review 2] waiting for a vehicle's panel to go
     LLUUID mPendingSession;         // [review 3 F2] the login a wait belongs to
     std::vector<LLPointer<LLUIImage>> mHeldImages;   // [review] the dice faces and tumble frames, loaded while a view is open

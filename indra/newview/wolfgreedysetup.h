@@ -56,7 +56,7 @@ private:
 
     S32 mStep = 1;                  // 1 the table, 2 the board, 3 done
     bool mBusy = false;             // a piece is on its way: the buttons wait
-    U32 mGen = 0;                   // goes up on close: a coroutine of an older one stops at its next wake-up
+    U32 mGen = 0;                   // goes up on open and on close: an older press stops touching the window at its next wake-up
     std::vector<std::pair<LLUUID, std::string>> mPlaced;   // the pieces this window has put down, and what each is ("table",
                                                            // "board"): the "already one here" check names the one found
     LLRadioGroup* mWhich = nullptr;

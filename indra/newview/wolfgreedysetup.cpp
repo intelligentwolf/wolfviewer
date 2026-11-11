@@ -17,6 +17,7 @@
 
 #include "wolfgreedysetup.h"
 
+#include <cctype>
 #include <cmath>
 #include <set>
 
@@ -42,6 +43,7 @@
 #include "message.h"
 #include "wolfcave.h"
 #include "wolfgrid.h"
+#include "wolfobjectprops.h"
 
 namespace
 {
@@ -51,6 +53,8 @@ namespace
     constexpr F32 GIVE_TIMEOUT_S = 30.f;           // wolffloaterlifts.cpp GIVE_TIMEOUT_S
     constexpr S32 GIVE_WAIT_S = 30;                // the given item is looked for this many seconds (wolffloaterlifts.cpp boxCoro)
     constexpr S32 APPEAR_TRIES = 40;               // x 0.5 s: the rezzed piece is looked for 20 s (wolfvehiclerez.cpp APPEAR_SECS)
+    constexpr S32 SETTLE_TRIES = 4;                // x 0.5 s: a match waits this long for other new things of ours not named yet
+                                                   // (wolfvehiclerez.cpp SETTLE_SECS 2.0)
     constexpr F32 FOUND_XY_M = 2.5f;               // a new root of ours this near the spot (across the ground) is the piece
     constexpr F32 SAME_SPOT_M = 3.f;               // a piece this window put down this near the new spot: "already one here"
     constexpr F32 EDGE_M = 2.f;                    // the spot keeps this far inside the region (a table is about 2 x 1.2 m)
@@ -71,6 +75,21 @@ namespace
         { "board",          "Greedy Board",             "a92c4c97-9cbc-4785-bdd8-5b942f0b5a5f", "greedy board", 2.0f, 1.575f, "board" },
     };
     constexpr S32 PIECE_BOARD = 2;
+
+    // [W104 review 2026-11-11 W2] pieces sent to the region and not yet placed, by any coroutine. A rez once sent is placed even
+    // when the window has been closed (else the Wolf Grid table stays where the region's rez height put it, ~30 m up); while one
+    // is out, Put waits, so two rezzes can never be looking for their piece at the same time.
+    S32 sPlacing = 0;
+    struct PlacingGuard
+    {
+        PlacingGuard() { ++sPlacing; }
+        ~PlacingGuard() { done(); }
+        void done() { if (mOn) { --sPlacing; mOn = false; } }
+        bool mOn = true;
+        PlacingGuard(const PlacingGuard&) = delete;
+        PlacingGuard& operator=(const PlacingGuard&) = delete;
+    };
+    const char* WAIT_FOR_OLD = "The piece you asked for before is still being put down. Please wait a moment.";
 
     /** wolfdice_give_lib.php wdg_desc_is: the description starts with the word (leading spaces and case aside), and it ends there. */
     bool descIs(std::string d, const std::string& word)
@@ -122,7 +141,7 @@ namespace
      *  (wolffloatertunnels.cpp rezTunnel; lltooldraganddrop.cpp:1970-2028 dropObject). RayEndIsIntersection = 1 places it at
      *  RayEnd (OpenSim Scene.cs GetNewRezLocation), and a single object is raised by its root's height over the bottom of its
      *  box (InventoryAccessModule.cs RezObject: pos.Z += offsetHeight); RayStart = RayEnd keeps the water test from moving it. */
-    void rezAt(LLViewerInventoryItem* item, const LLVector3& at)
+    void rezAt(LLViewerInventoryItem* item, const LLVector3& at, const LLUUID& group)
     {
         LLViewerRegion* rgn = gAgent.getRegion();
         if (!rgn || !item) return;
@@ -131,7 +150,7 @@ namespace
         msg->nextBlockFast(_PREHASH_AgentData);
         msg->addUUIDFast(_PREHASH_AgentID, gAgent.getID());
         msg->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
-        msg->addUUIDFast(_PREHASH_GroupID, FSCommon::getGroupForRezzing());
+        msg->addUUIDFast(_PREHASH_GroupID, group);   // FSCommon::getGroupForRezzing(), taken once by the caller
         msg->nextBlock("RezData");
         msg->addUUIDFast(_PREHASH_FromTaskID, LLUUID::null);
         msg->addU8Fast(_PREHASH_BypassRaycast, (U8)1);
@@ -195,16 +214,26 @@ bool WolfFloaterGreedySetup::postBuild()
 
 void WolfFloaterGreedySetup::onOpen(const LLSD& key)
 {
-    // a fresh start each time it is opened (single_instance floaters are kept, llfloater.cpp mReuseInstance)
-    mBusy = false;
-    setMessage(WolfGrid::isOnWolfTerritories() ? "" : "Greedy tables are put down here on Wolf Territories. On other grids, rez the "
-               "table from your inventory (Objects > Greedy), if you have one.", !WolfGrid::isOnWolfTerritories());
+    // [W104 review 2026-11-11 B1] LLFloater::openFloater calls onOpen on every showInstance, also when the window is already
+    // open (llfloater.cpp openFloater: onOpen after the "already open" branch) - the Greedy window's TABLE HERE and the HUD's
+    // press it again. A piece on its way keeps its window as it is: resetting mBusy here re-enabled Put while the first
+    // coroutine was still out, and a second table was rezzed.
+    if (mBusy) return;
+    // a fresh start each time it is opened (single_instance floaters are kept, llfloater.cpp mReuseInstance); a coroutine of
+    // an earlier opening stops touching this window (its generation moved on)
+    ++mGen;
+    const bool wolf = WolfGrid::isOnWolfTerritories();
+    setMessage(!wolf ? std::string("Greedy tables are put down here on Wolf Territories. On other grids, rez the table from your "
+                                   "inventory (Objects > Greedy), if you have one.")
+               : sPlacing > 0 ? std::string(WAIT_FOR_OLD) : std::string(), !wolf);
     setStep(1);
 }
 
 void WolfFloaterGreedySetup::onClose(bool app_quitting)
 {
-    ++mGen;          // a piece on its way stops being watched (if it was already sent, the region still puts it down)
+    // a piece still being fetched stops here; one already sent to the region is still placed, and what became of it is said in
+    // nearby chat (putCoro, [W104 review W2])
+    ++mGen;
     mBusy = false;
 }
 
@@ -263,7 +292,7 @@ void WolfFloaterGreedySetup::refreshControls()
     mWhich->setEnabled(!mBusy);
     for (const char* n : { "gs_die_a", "gs_die_b", "gs_die_c" }) getChild<LLUICtrl>(n)->setVisible(mStep == 3);
     getChild<LLUICtrl>("gs_put")->setVisible(mStep < 3);
-    getChild<LLUICtrl>("gs_put")->setEnabled(wolf && !mBusy);
+    getChild<LLUICtrl>("gs_put")->setEnabled(wolf && !mBusy && sPlacing == 0);   // [W104 review W2] one rez out at a time
     getChild<LLUICtrl>("gs_skip")->setEnabled(!mBusy);
     getChild<LLUICtrl>("gs_back")->setVisible(mStep == 2);
     getChild<LLUICtrl>("gs_back")->setEnabled(!mBusy);
@@ -272,6 +301,11 @@ void WolfFloaterGreedySetup::refreshControls()
 void WolfFloaterGreedySetup::onPut()
 {
     if (mBusy || mStep >= 3) return;
+    if (sPlacing > 0)
+    {
+        setMessage(WAIT_FOR_OLD, false);
+        return;
+    }
     if (!WolfGrid::isOnWolfTerritories())
     {
         setMessage("Greedy tables are put down here on Wolf Territories only.", true);
@@ -288,16 +322,19 @@ void WolfFloaterGreedySetup::onPut()
 // static
 void WolfFloaterGreedySetup::putCoro(LLHandle<LLFloater> h, U32 gen, S32 index)
 {
-    // The window is looked up again through its handle after every wait (wolffloaterlifts.cpp boxCoro): closed meanwhile (its
-    // generation moved on), the coroutine stops.
+    // The window is looked up again through its handle after every wait (wolffloaterlifts.cpp boxCoro): closed or opened
+    // afresh meanwhile (its generation moved on), it is no longer this press's window.
     auto self = [&h, gen]() -> WolfFloaterGreedySetup*
     {
         WolfFloaterGreedySetup* f = dynamic_cast<WolfFloaterGreedySetup*>(h.get());
         return f && f->mGen == gen ? f : nullptr;
     };
+    // the window whatever its generation (single_instance: kept when closed) - what it has put down is remembered there
+    auto any = [&h]() -> WolfFloaterGreedySetup* { return dynamic_cast<WolfFloaterGreedySetup*>(h.get()); };
     const Piece& p = PIECES[index];
     const std::string name(p.name);
     const std::string what(p.what);
+    // before the rez is sent: a closed window stops it, and the words go to the window
     auto fail = [&self](const std::string& why)
     {
         if (WolfFloaterGreedySetup* f = self())
@@ -308,38 +345,49 @@ void WolfFloaterGreedySetup::putCoro(LLHandle<LLFloater> h, U32 gen, S32 index)
         }
     };
 
-    // 1. where it goes: in front of them, facing them (lsl/wolfdice_setup.lsl rezPiece)
+    // 1. where it goes: in front of them, facing them (lsl/wolfdice_setup.lsl rezPiece). [W104 review 2026-11-11 W1] worked
+    // out again after the give (step 2 can wait a minute): from where they stand and look then, not where they were.
+    LLVector3 at, fwd;
+    auto where = [&](LLViewerRegion* rgn, WolfFloaterGreedySetup* f, std::string& why) -> bool
+    {
+        if (!rgn || !isAgentAvatarValid()) { why = "You are not in a region just now."; return false; }
+        if (gAgentAvatarp->isSitting()) { why = "Please stand up first, then stand where you want the " + what + " and press the button again."; return false; }
+        if (gAgent.getFlying()) { why = "Please land first (stop flying), then stand where you want the " + what + " and press the button again."; return false; }
+        const LLVector3 me = rgn->getPosRegionFromAgent(gAgent.getPositionAgent());
+        fwd.set(gAgent.getAtAxis().mV[VX], gAgent.getAtAxis().mV[VY], 0.f);
+        if (fwd.length() < 0.01f) fwd.set(1.f, 0.f, 0.f);
+        fwd.normalize();
+        at = me + fwd * p.ahead;
+        const F32 width = rgn->getWidth();
+        if (at.mV[VX] < EDGE_M || at.mV[VY] < EDGE_M || at.mV[VX] > width - EDGE_M || at.mV[VY] > width - EDGE_M)
+        {
+            why = "You are too near the edge of the region for the " + what + ". Walk a few steps inwards, then press the button again.";
+            return false;
+        }
+        // the surface they stand on: their feet (llGetAgentSize / 2 below the avatar's centre, as the box), never under the ground
+        const F32 ground = rgn->getLand().resolveHeightRegion(at.mV[VX], at.mV[VY]);
+        at.mV[VZ] = llmax(ground, me.mV[VZ] - gAgentAvatarp->mBodySize.mV[VZ] * 0.5f);
+        for (const auto& placed : f->mPlaced)
+        {
+            LLViewerObject* o = gObjectList.findObject(placed.first);
+            if (o && !o->isDead() && o->getRegion() == rgn && distXY(o->getPositionRegion(), at) < SAME_SPOT_M)
+            {
+                // the piece that is in the way, by name (a board pressed right in front of the new table is "the table")
+                why = "Your Greedy " + placed.second + " is right where the " + what + " would go. Walk a few steps away, or turn "
+                      "round, then press the button again.";
+                return false;
+            }
+        }
+        return true;
+    };
+
     WolfFloaterGreedySetup* f = self();
     if (!f) return;
     LLViewerRegion* rgn = gAgent.getRegion();
-    if (!rgn || !isAgentAvatarValid()) { fail("You are not in a region just now."); return; }
-    if (gAgentAvatarp->isSitting()) { fail("Please stand up first, then stand where you want the " + what + " and press the button again."); return; }
-    if (gAgent.getFlying()) { fail("Please land first (stop flying), then stand where you want the " + what + " and press the button again."); return; }
-    const LLVector3 me = rgn->getPosRegionFromAgent(gAgent.getPositionAgent());
-    LLVector3 fwd(gAgent.getAtAxis().mV[VX], gAgent.getAtAxis().mV[VY], 0.f);
-    if (fwd.length() < 0.01f) fwd.set(1.f, 0.f, 0.f);
-    fwd.normalize();
-    LLVector3 at = me + fwd * p.ahead;
-    const F32 width = rgn->getWidth();
-    if (at.mV[VX] < EDGE_M || at.mV[VY] < EDGE_M || at.mV[VX] > width - EDGE_M || at.mV[VY] > width - EDGE_M)
-    {
-        fail("You are too near the edge of the region for the " + what + ". Walk a few steps inwards, then press the button again.");
-        return;
-    }
-    // the surface they stand on: their feet (llGetAgentSize / 2 below the avatar's centre, as the box), never under the ground
-    const F32 ground = rgn->getLand().resolveHeightRegion(at.mV[VX], at.mV[VY]);
-    at.mV[VZ] = llmax(ground, me.mV[VZ] - gAgentAvatarp->mBodySize.mV[VZ] * 0.5f);
-    for (const auto& placed : f->mPlaced)
-    {
-        LLViewerObject* o = gObjectList.findObject(placed.first);
-        if (o && !o->isDead() && o->getRegion() == rgn && distXY(o->getPositionRegion(), at) < SAME_SPOT_M)
-        {
-            // the piece that is in the way, by name (a board pressed right in front of the new table is "the table")
-            fail("Your Greedy " + placed.second + " is right where the " + what + " would go. Walk a few steps away, or turn "
-                 "round, then press the button again.");
-            return;
-        }
-    }
+    std::string why;
+    if (!where(rgn, f, why)) { fail(why); return; }
+    // [W104 review W1] the region they pressed in: a move to another while the piece is fetched is said, not rezzed over there
+    const LLUUID region = rgn->getRegionID();
 
     // 2. their copy, or the grid gives one (wolffloaterlifts.cpp boxCoro step 2)
     LLViewerInventoryItem* item = findPiece(p);
@@ -355,10 +403,10 @@ void WolfFloaterGreedySetup::putCoro(LLHandle<LLFloater> h, U32 gen, S32 index)
         if (status != 200 || !reply.isMap() || !reply["success"].asBoolean())
         {
             // a 404: the give is not on this web host (not installed yet, or being updated) - said in words, not "Not Found"
-            const std::string why = reply.isMap() && reply.has("error") ? reply["error"].asString()
+            const std::string err = reply.isMap() && reply.has("error") ? reply["error"].asString()
                 : status == 404 ? std::string("the grid does not hand out Greedy tables just now. Please try again later, or ask Wolf Territories support.")
                 : (transport.empty() ? llformat("the grid answered HTTP %d", status) : transport);
-            fail("Your " + name + " could not be fetched: " + why);
+            fail("Your " + name + " could not be fetched: " + err);
             return;
         }
         const LLUUID folder = reply["folderId"].asUUID();
@@ -383,69 +431,148 @@ void WolfFloaterGreedySetup::putCoro(LLHandle<LLFloater> h, U32 gen, S32 index)
                  "then press the button again.");
             return;
         }
+        // [W104 review W1] the same region, and the spot from where they are now
+        rgn = gAgent.getRegion();
+        if (!rgn || rgn->getRegionID() != region)
+        {
+            fail("You are in another region now, so your " + name + " was not put down. It is in your inventory (Objects > Greedy). "
+                 "Stand where you want it, then press the button again.");
+            return;
+        }
+        if (!where(rgn, f, why)) { fail(why); return; }
     }
 
-    // 3. rez it; the new root of ours that appears over the spot is it
-    if (!(rgn = gAgent.getRegion())) { fail("You are not in a region just now."); return; }
-    const LLUUID region = rgn->getRegionID();
+    // 3. rez it; the new root of ours, named as the item, that appears over the spot is it
     std::set<LLUUID> before;
     for (S32 i = 0, n = gObjectList.getNumObjects(); i < n; ++i)
     {
         LLViewerObject* o = gObjectList.getObject(i);
         if (o && !o->isDead() && o->isRoot()) before.insert(o->getID());
     }
+    // OpenSim InventoryAccessModule.cs DoPreRezWhenFromItem: a single object's root takes the item's Name and Description
+    const std::string item_name = item->getName();
+    const std::string item_desc = item->getDescription();
+    const LLUUID group = FSCommon::getGroupForRezzing();
+    // where it is moved to and how it is turned, fixed now: the placing below no longer looks at the window
+    // 4 (below): turned to face them - the piece keeps its own upright turn (the Wolf Grid table lies on its side,
+    // build_jimmy_table.py; its script's NATURAL_ROT), and the turn about the vertical goes on top of it, as
+    // lsl/wolfdice_table.lsl llSetRot(NATURAL_ROT * rot) after the box's yaw-only rez (rot = llEuler2Rot(<0, 0, atan2(fwd.y, fwd.x)>));
+    // and put on the floor at the box's height (rootZ above it), over the spot
+    const LLQuaternion yaw(atan2f(fwd.mV[VY], fwd.mV[VX]), LLVector3::z_axis);
+    const LLVector3 dest(at.mV[VX], at.mV[VY], at.mV[VZ] + p.rootZ);
     f->setMessage("Putting your " + name + " down in front of you...", false);
     LL_INFOS("WolfGreedy") << "putting " << name << " down at " << at << " in " << rgn->getName() << LL_ENDL;
-    rezAt(item, at);
+    rezAt(item, at, group);
+
+    // [W104 review 2026-11-11 W2] from here the piece is on its way and is placed whatever happens to the window. While the
+    // press's window is still open the words go there; closed (or opened afresh), they go to nearby chat.
+    PlacingGuard placing;
+    auto tell = [&](const std::string& text, bool error, S32 next_step)
+    {
+        placing.done();
+        if (WolfFloaterGreedySetup* w = self())
+        {
+            w->mBusy = false;
+            if (next_step > 0) w->setStep(next_step);
+            w->setMessage(text, error);
+            w->refreshControls();
+            return;
+        }
+        FSCommon::report_to_nearby_chat("Greedy: " + text);
+        if (WolfFloaterGreedySetup* w = any())
+        {
+            // opened again meanwhile: Put waited for this one (WAIT_FOR_OLD); it may go now
+            if (w->mMessage && w->mMessage->getText() == WAIT_FOR_OLD) w->setMessage("", false);
+            w->refreshControls();
+        }
+    };
+
+    WolfObjectProps& props = WolfObjectProps::instance();
     LLViewerObject* got = nullptr;
+    S32 settle = 0;
     for (S32 t = 0; t < APPEAR_TRIES && !got; ++t)
     {
         llcoro::suspendUntilTimeout(0.5f);
-        if (!self()) return;
-        if (!gAgent.getRegion() || gAgent.getRegion()->getRegionID() != region)
+        LLViewerRegion* now_rgn = gAgent.getRegion();
+        if (!now_rgn || now_rgn->getRegionID() != region)
         {
-            fail("You left the region while the " + what + " was being put down.");
+            tell("You left the region while the " + what + " was being put down. If it appeared, it is still there, where you "
+                 "were standing.", true, 0);
             return;
         }
+        // [W104 review W3] a candidate is new to the viewer, a root, not an avatar or anything worn, the agent's (or, rezzed
+        // with a group, group-owned: llviewerobject.cpp permGroupOwner, FLAGS_OBJECT_GROUP_OWNED), over the spot, and named
+        // and described as the item. OpenSim keeps the rezzer as owner when it sets the rez group (InventoryAccessModule.cs
+        // RezObject: group.SetGroup(groupID, ...), the owner stays remoteClient.AgentId), so permYouOwner is what normally
+        // matches; group ownership is accepted for a grid that deeds on rez. Names arrive only in ObjectPropertiesFamily, asked
+        // for through the shared store (wolfvehiclerez.cpp tickRezzing). The nearest match wins.
+        LLViewerObject* best = nullptr;
+        F32 best_d = 0.f;
+        bool unnamed = false;
         for (S32 i = 0, n = gObjectList.getNumObjects(); i < n; ++i)
         {
             LLViewerObject* o = gObjectList.getObject(i);
-            if (!o || o->isDead() || !o->isRoot() || o->isAvatar() || before.count(o->getID()) || o->getRegion() != gAgent.getRegion()
-                || !o->permYouOwner() || distXY(o->getPositionRegion(), at) > FOUND_XY_M) continue;
-            got = o;
-            break;
+            if (!o || o->isDead() || !o->isRoot() || o->isAvatar() || o->isAttachment() || o->isHUDAttachment()
+                || before.count(o->getID()) || o->getRegion() != now_rgn) continue;
+            if (!(o->permYouOwner() || (group.notNull() && o->permGroupOwner()))) continue;
+            const F32 d = distXY(o->getPositionRegion(), at);
+            if (d > FOUND_XY_M) continue;
+            const WolfObjectProps::Props* pr = props.get(o->getID());
+            if (!pr)
+            {
+                props.want(o);
+                unnamed = true;
+                continue;
+            }
+            if (pr->mName != item_name || !(pr->mDescription == item_desc || descIs(pr->mDescription, p.prefix)))
+            {
+                before.insert(o->getID());   // another of the agent's things: never looked at again
+                continue;
+            }
+            if (!best || d < best_d) { best = o; best_d = d; }
         }
+        if (!best) continue;
+        // another new thing of ours over the spot not named yet: a moment for it, it may be the nearer one
+        if (unnamed && settle < SETTLE_TRIES && t + 1 < APPEAR_TRIES) { ++settle; continue; }
+        got = best;
     }
-    if (!(f = self())) return;
     if (!got)
     {
         // Source: wolfvehiclerez.cpp tickRezzing - the sim refuses a rez without saying so when the parcel is over its limits
-        // (InventoryAccessModule.cs RezObject); only a refusal of its own checks says "Can't rez object ..."
-        fail(LLViewerParcelMgr::getInstance()->allowAgentBuild()
-            ? "The region did not put the " + what + " down. The land may be full (its object limit), or the region is busy. "
-              "Try again in a moment, or somewhere else."
-            : "This land does not let you build, so the " + what + " could not be put here. Go to land where you may build "
-              "(a sandbox, or your own land), then press the button again.");
+        // (InventoryAccessModule.cs RezObject); only a refusal of its own checks says "Can't rez object ...".
+        // [W104 review W3] the build right is only known for the agent's own parcel (llviewerparcelmgr.cpp allowAgentBuild:
+        // mAgentParcel; the viewer holds no other parcel's flags), so it is used only when the spot is on that parcel
+        // (inAgentParcel, the parcel overlay). The piece may only be late: they are told to look and wait, not to press again.
+        LLViewerParcelMgr* pm = LLViewerParcelMgr::getInstance();
+        const LLViewerRegion* now_rgn = gAgent.getRegion();
+        const bool own_parcel = now_rgn && pm->inAgentParcel(now_rgn->getPosGlobalFromRegion(at));
+        if (own_parcel && !pm->allowAgentBuild())
+        {
+            tell("This land does not let you build, so the " + what + " could not be put here. Go to land where you may build "
+                 "(a sandbox, or your own land), then press the button again.", true, 0);
+        }
+        else
+        {
+            tell("The " + what + " has not appeared yet. It may just be slow: please look around you and wait a minute before you "
+                 "press the button again, so you do not get two. If it still does not come, the land may be full (its object "
+                 "limit)" + std::string(own_parcel ? "" : " or may not let you build there") + ". A sandbox or your own land is "
+                 "the easiest place to try.", true, 0);
+        }
         return;
     }
 
-    // 4. turned to face them: the piece keeps its own upright turn (the Wolf Grid table lies on its side, build_jimmy_table.py;
-    // its script's NATURAL_ROT), and the turn about the vertical goes on top of it, as lsl/wolfdice_table.lsl
-    // llSetRot(NATURAL_ROT * rot) after the box's yaw-only rez (rot = llEuler2Rot(<0, 0, atan2(fwd.y, fwd.x)>))
-    // and put on the floor at the box's height (rootZ above it), over the spot
-    const LLQuaternion yaw(atan2f(fwd.mV[VY], fwd.mV[VX]), LLVector3::z_axis);
-    placeAt(got, LLVector3(at.mV[VX], at.mV[VY], at.mV[VZ] + p.rootZ), got->getRotationRegion() * yaw);
-    f->mPlaced.emplace_back(got->getID(), what);
+    // 4. turned to face them and put at the box's height (dest and yaw above)
+    placeAt(got, dest, got->getRotationRegion() * yaw);
+    if (WolfFloaterGreedySetup* w = any()) w->mPlaced.emplace_back(got->getID(), what);
     LL_INFOS("WolfGreedy") << name << " is down: " << got->getID() << LL_ENDL;
-    f->mBusy = false;
     if (index == PIECE_BOARD)
     {
-        f->setStep(3);
-        f->setMessage("Your Greedy Board is up. It shows the top 10 and the games being played now.", false);
+        tell(self() ? std::string("Your Greedy Board is up. It shows the top 10 and the games being played now.")
+                    : std::string("Your Greedy Board is up, just in front of where you were standing."), false, 3);
     }
     else
     {
-        f->setStep(2);
-        f->setMessage("Your " + name + " is here! Sit at it to play. Next, the board - or press Finish.", false);
+        tell(self() ? "Your " + name + " is here! Sit at it to play. Next, the board - or press Finish."
+                    : "Your " + name + " is down, just in front of where you were standing. Sit at it to play.", false, 2);
     }
 }

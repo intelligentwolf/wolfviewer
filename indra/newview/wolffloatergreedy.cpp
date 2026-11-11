@@ -17,6 +17,7 @@
 
 #include "wolffloatergreedy.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 #include <boost/json.hpp>
@@ -452,8 +453,17 @@ void WolfGreedyGame::newGame(bool practice, S32 target)
     {
         // [GREEDY COMPUTER PLAYER 2026-11-11] practice is against the computer, played here (wolfgreedylocal.h); a server game
         // they are in is left first, as before
-        if (!mLocal && mGame && mState["game"]["in_game"].asBoolean() && mState["game"]["state"].asString() != "finished") send("leave");
+        // [W104 review 2026-11-11 W4] the leave is not queued: startLocal clears the queue, and a server answer that comes during
+        // practice clears it too (onReply), so a leave queued behind a request still out was lost and they stayed in the game.
+        // The game is named in the request itself (the body's "&g="), as mGame is -1 from here.
+        const S32 old = !mLocal && mGame > 0 && mState["game"]["in_game"].asBoolean() && mState["game"]["state"].asString() != "finished"
+            ? mGame : 0;
         startLocal();
+        if (old > 0)
+        {
+            mLeaveOwed.push_back(old);
+            sendLeaveOwed();   // at once when nothing is out, else when the answer to what is out comes (onReply)
+        }
         return;
     }
     if (mGame && mState["game"]["in_game"].asBoolean() && mState["game"]["state"].asString() != "finished")
@@ -587,6 +597,15 @@ void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std
         mInFlight.clear();
         mInFlightExtra.clear();
         mQueued.clear();
+        // [W104 review W4] that answer seated them in a game (a new game or a join pressed just before Practice): left too
+        const LLSD gone = reply.isMap() ? reply["game"] : LLSD();
+        const S32 seated = gone.isMap() ? gone["id"].asInteger() : 0;
+        if (op != "leave" && seated > 0 && gone["in_game"].asBoolean() && gone["state"].asString() != "finished"
+            && std::find(mLeaveOwed.begin(), mLeaveOwed.end(), seated) == mLeaveOwed.end())
+        {
+            mLeaveOwed.push_back(seated);
+        }
+        sendLeaveOwed();
         changed();
         return;
     }
@@ -697,6 +716,7 @@ void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std
     const F64 cap = going ? (quiet > POLL_LONG_QUIET_S ? POLL_PLAYING_QUIET_MAX_S : POLL_PLAYING_MAX_S)
                           : (quiet > POLL_LONG_QUIET_S ? POLL_QUIET_MAX_S : POLL_LOBBY_MAX_S);
     mNextPoll = now + llclamp(quiet * POLL_SLOWING, base, cap);
+    if (!local_answer) sendLeaveOwed();   // [W104 review W4] a practice game that ended before its leave could go
     if (!mQueued.empty())
     {
         const size_t nl = mQueued.find('\n');
@@ -717,6 +737,21 @@ void WolfGreedyGame::startLocal()
     mQueued.clear();
     noteActivity();
     showLocal("local");
+}
+
+void WolfGreedyGame::sendLeaveOwed()
+{
+    // straight to the server, not through send(): during practice send() plays "leave" here (endLocal)
+    if (mBusy || mLeaveOwed.empty()) return;
+    const S32 g = mLeaveOwed.front();
+    mLeaveOwed.erase(mLeaveOwed.begin());
+    mBusy = true;
+    mInFlight = "leave";
+    mInFlightExtra.clear();
+    LL_INFOS("WolfGreedy") << "leaving server game " << g << " (practice started)" << LL_ENDL;
+    const std::string body = "op=leave&g=" + llformat("%d", g);
+    changed();
+    LLCoros::instance().launch("WolfGreedy", [body]() { sendCoro("leave", body); });
 }
 
 void WolfGreedyGame::endLocal(const std::string& why)

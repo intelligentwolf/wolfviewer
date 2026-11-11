@@ -17,6 +17,7 @@
 
 #include "wolfgreedylocal.h"
 
+#include <algorithm>
 #include <array>
 
 #include "llrand.h"

@@ -29,6 +29,28 @@
 #include <iostream>
 #include "llfilepicker_mac.h"
 
+// <WolfViewer 2026-11-11> File names, extensions and paths cross between the viewer and Cocoa as UTF-8 both ways.
+// Into Cocoa: the callers (llfilepicker.cpp doNavSaveDialog / doNavSaveDialogModeless / navOpenFilterProc) pass
+// UTF-8 std::strings - a suggested name can carry an object's or snapshot's non-English name - and
+// [NSString defaultCStringEncoding] (the legacy system encoding, MacRoman on an English macOS) turned every
+// non-ASCII character into several wrong ones. stringWithCString:encoding: returns nil for bytes that are not valid
+// UTF-8, so the old encoding stays as the fall-back (the same rule as llwindowmacosx-objc.mm wolfNSStringFromUTF8).
+// Back to C++: [NSString UTF8String], as before - mFiles is used with LLFile / std::ifstream, which take UTF-8 POSIX
+// paths; the precomposed form it gives names the same file as fileSystemRepresentation's decomposed one on APFS and
+// HFS+, and is what the rest of the viewer shows and compares.
+static NSString* wolfNSStringFromUTF8(const std::string& s)
+{
+    NSString* str = [NSString stringWithCString:s.c_str() encoding:NSUTF8StringEncoding];
+    return str ? str : [NSString stringWithCString:s.c_str() encoding:[NSString defaultCStringEncoding]];
+}
+
+static std::string wolfUTF8FromNSString(NSString* str)
+{
+    const char* utf8 = str ? [str UTF8String] : nullptr;   // nil for a nil string; never nil for a file URL's path
+    return utf8 ? std::string(utf8) : std::string();
+}
+// </WolfViewer>
+
 NSOpenPanel *init_panel(const std::vector<std::string>* allowed_types, unsigned int flags)
 {
     int i;
@@ -43,9 +65,7 @@ NSOpenPanel *init_panel(const std::vector<std::string>* allowed_types, unsigned 
 
         for (i=0;i<allowed_types->size();++i)
         {
-            [fileTypes addObject:
-             [NSString stringWithCString:(*allowed_types)[i].c_str()
-                                encoding:[NSString defaultCStringEncoding]]];
+            [fileTypes addObject:wolfNSStringFromUTF8((*allowed_types)[i])];   // <WolfViewer 2026-11-11/> UTF-8
         }
     }
 
@@ -97,9 +117,7 @@ std::unique_ptr<std::vector<std::string>> doLoadDialog(const std::vector<std::st
             }
 
             for (i=0; i<count; i++) {
-                NSString *aFile = [[filesToOpen objectAtIndex:i] path];
-                std::string afilestr = std::string([aFile UTF8String]);
-                outfiles->push_back(afilestr);
+                outfiles->push_back(wolfUTF8FromNSString([[filesToOpen objectAtIndex:i] path]));   // <WolfViewer 2026-11-11/>
             }
         }
     }
@@ -132,9 +150,8 @@ void doLoadDialogModeless(const std::vector<std::string>* allowed_types,
                     {
 
                         for (i=0; i<count; i++) {
-                            NSString *aFile = [[filesToOpen objectAtIndex:i] path];
-                            std::string *afilestr = new std::string([aFile UTF8String]);
-                            outfiles.push_back(*afilestr);
+                            // <WolfViewer 2026-11-11/> UTF-8 helper; was a heap std::string per file, never deleted
+                            outfiles.push_back(wolfUTF8FromNSString([[filesToOpen objectAtIndex:i] path]));
                         }
                         callback(true, outfiles, userdata);
                     }
@@ -164,9 +181,8 @@ void doLoadDialogModeless(const std::vector<std::string>* allowed_types,
                     {
 
                         for (i=0; i<count; i++) {
-                            NSString *aFile = [[filesToOpen objectAtIndex:i] path];
-                            std::string *afilestr = new std::string([aFile UTF8String]);
-                            outfiles.push_back(*afilestr);
+                            // <WolfViewer 2026-11-11/> UTF-8 helper; was a heap std::string per file, never deleted
+                            outfiles.push_back(wolfUTF8FromNSString([[filesToOpen objectAtIndex:i] path]));
                         }
                         callback(true, outfiles, userdata);
                     }
@@ -195,14 +211,14 @@ std::unique_ptr<std::string> doSaveDialog(const std::string* file,
     {
         NSSavePanel *panel = [NSSavePanel savePanel];
 
-        NSString *extensionns = [NSString stringWithCString:extension->c_str() encoding:[NSString defaultCStringEncoding]];
+        NSString *extensionns = wolfNSStringFromUTF8(*extension);   // <WolfViewer 2026-11-11/> UTF-8
         NSArray *fileType = [extensionns componentsSeparatedByString:@","];
 
         //[panel setMessage:@"Save Image File"];
         [panel setTreatsFilePackagesAsDirectories: ( flags & F_NAV_SUPPORT ) ];
         [panel setCanSelectHiddenExtension:true];
         [panel setAllowedFileTypes:fileType];
-        NSString *fileName = [NSString stringWithCString:file->c_str() encoding:[NSString defaultCStringEncoding]];
+        NSString *fileName = wolfNSStringFromUTF8(*file);   // <WolfViewer 2026-11-11/> UTF-8
 
         NSURL* url = [NSURL fileURLWithPath:fileName];
         [panel setNameFieldStringValue: fileName];
@@ -212,7 +228,7 @@ std::unique_ptr<std::string> doSaveDialog(const std::string* file,
         {
             NSURL* url = [panel URL];
             NSString* p = [url path];
-            outfile.reset(new std::string([p UTF8String]));
+            outfile.reset(new std::string(wolfUTF8FromNSString(p)));   // <WolfViewer 2026-11-11/>
             // write the file
         }
     }
@@ -230,14 +246,14 @@ void doSaveDialogModeless(const std::string* file,
     @autoreleasepool {
         NSSavePanel *panel = [NSSavePanel savePanel];
 
-        NSString *extensionns = [NSString stringWithCString:extension->c_str() encoding:[NSString defaultCStringEncoding]];
+        NSString *extensionns = wolfNSStringFromUTF8(*extension);   // <WolfViewer 2026-11-11/> UTF-8
         NSArray *fileType = [extensionns componentsSeparatedByString:@","];
 
         //[panel setMessage:@"Save Image File"];
         [panel setTreatsFilePackagesAsDirectories: ( flags & F_NAV_SUPPORT ) ];
         [panel setCanSelectHiddenExtension:true];
         [panel setAllowedFileTypes:fileType];
-        NSString *fileName = [NSString stringWithCString:file->c_str() encoding:[NSString defaultCStringEncoding]];
+        NSString *fileName = wolfNSStringFromUTF8(*file);   // <WolfViewer 2026-11-11/> UTF-8
 
         NSURL* url = [NSURL fileURLWithPath:fileName];
         [panel setNameFieldStringValue: fileName];
@@ -255,7 +271,7 @@ void doSaveDialogModeless(const std::string* file,
             {
                 NSURL* url = [panel URL];
                 NSString* p = [url path];
-                std::string outfile([p UTF8String]);
+                std::string outfile(wolfUTF8FromNSString(p));   // <WolfViewer 2026-11-11/>
 
                 callback(true, outfile, userdata);
             }

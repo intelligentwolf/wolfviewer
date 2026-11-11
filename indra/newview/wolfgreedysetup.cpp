@@ -54,17 +54,21 @@ namespace
     constexpr F32 FOUND_XY_M = 2.5f;               // a new root of ours this near the spot (across the ground) is the piece
     constexpr F32 SAME_SPOT_M = 3.f;               // a piece this window put down this near the new spot: "already one here"
     constexpr F32 EDGE_M = 2.f;                    // the spot keeps this far inside the region (a table is about 2 x 1.2 m)
-    // Source: lltooldraganddrop.h / llselectmgr.h UPD_ROTATION 0x02, UPD_LINKED_SETS 0x08; OpenSim LLClientView.cs
-    // HandleMultipleObjUpdate case 0x0A "(8 + 2) group rotation" turns the whole linkset about its root
-    constexpr U8 UPD_GROUP_ROTATION = 0x0A;
+    // Source: llselectmgr.h UPD_POSITION 0x01, UPD_ROTATION 0x02, UPD_LINKED_SETS 0x08; OpenSim LLClientView.cs
+    // HandleMultipleObjUpdate case 0x0B "(8 + 2 + 1) group rotation and position": the whole linkset, position first
+    constexpr U8 UPD_GROUP_POS_ROT = 0x0B;
 
     // The pieces. Source: server/wolfdice_items.php (name, asset, the description's first word), build_wolfdice.py
     // TABLE_DESC / FOLDER_NAME, build_jimmy_table.py NAME / DESC; how far in front: lsl/wolfdice_setup.lsl TABLE_AHEAD / BOARD_AHEAD.
-    struct Piece { const char* key; const char* name; const char* asset; const char* prefix; F32 ahead; const char* what; };
+    // rootZ, the root's height over the floor, as the set up box puts it (wolfdice_setup.lsl pos.z = feet + TABLE_ROOT_Z):
+    // build_wolfdice.py table root_z 0.78 and board root_z 1.575; build_jimmy_table.py the Sandbox copy's gz = ground + 0.49 + 0.02.
+    // The region's own placing is not used for the height: it raised the Wolf Grid table about 30 m (its root lies on its side,
+    // and OpenSim's rez height comes from the object's box; seen 2026-11-11 on Sandbox 2).
+    struct Piece { const char* key; const char* name; const char* asset; const char* prefix; F32 ahead; F32 rootZ; const char* what; };
     const Piece PIECES[] = {
-        { "table",          "Greedy Table",             "5ae30a6b-a81f-4998-b64a-86ebeca689da", "greedy-table", 2.6f, "table" },
-        { "table_wolfgrid", "Greedy Table (Wolf Grid)", "1df63892-4ab9-4e5d-83cd-55d9727fa13b", "greedy-table", 2.6f, "table" },
-        { "board",          "Greedy Board",             "a92c4c97-9cbc-4785-bdd8-5b942f0b5a5f", "greedy board", 2.0f, "board" },
+        { "table",          "Greedy Table",             "5ae30a6b-a81f-4998-b64a-86ebeca689da", "greedy-table", 2.6f, 0.78f,  "table" },
+        { "table_wolfgrid", "Greedy Table (Wolf Grid)", "1df63892-4ab9-4e5d-83cd-55d9727fa13b", "greedy-table", 2.6f, 0.51f,  "table" },
+        { "board",          "Greedy Board",             "a92c4c97-9cbc-4785-bdd8-5b942f0b5a5f", "greedy board", 2.0f, 1.575f, "board" },
     };
     constexpr S32 PIECE_BOARD = 2;
 
@@ -144,9 +148,10 @@ namespace
         FSCommon::sObjectAddMsg = 0;   // lltooldraganddrop.cpp:2030-2032: no build defaults for it
     }
 
-    /** Turn the whole linkset of root `o` to `rot`. Source: fsfloaterimport.cpp setPrimPosition (MultipleObjectUpdate, one
-     *  block; the rotation packed with packToVector3 as llselectmgr.cpp packMultipleUpdate). */
-    void turnTo(LLViewerObject* o, const LLQuaternion& rot)
+    /** Move the whole linkset of root `o` to `pos` (region metres) and turn it to `rot`. Source: fsfloaterimport.cpp
+     *  setPrimPosition (MultipleObjectUpdate, one block: position, then the rotation packed with packToVector3 as
+     *  llselectmgr.cpp packMultipleUpdate). */
+    void placeAt(LLViewerObject* o, const LLVector3& pos, const LLQuaternion& rot)
     {
         if (!o || !o->getRegion()) return;
         LLMessageSystem* msg = gMessageSystem;
@@ -156,11 +161,12 @@ namespace
         msg->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
         msg->nextBlockFast(_PREHASH_ObjectData);
         msg->addU32Fast(_PREHASH_ObjectLocalID, o->getLocalID());
-        msg->addU8Fast(_PREHASH_Type, UPD_GROUP_ROTATION);
-        U8 data[12];
+        msg->addU8Fast(_PREHASH_Type, UPD_GROUP_POS_ROT);
+        U8 data[24];
+        htolememcpy(data, pos.mV, MVT_LLVector3, 12);
         LLVector3 vec = rot.packToVector3();
-        htolememcpy(data, vec.mV, MVT_LLQuaternion, 12);
-        msg->addBinaryDataFast(_PREHASH_Data, data, 12);
+        htolememcpy(data + 12, vec.mV, MVT_LLQuaternion, 12);
+        msg->addBinaryDataFast(_PREHASH_Data, data, 24);
         msg->sendReliable(o->getRegion()->getHost());
     }
 
@@ -323,13 +329,14 @@ void WolfFloaterGreedySetup::putCoro(LLHandle<LLFloater> h, U32 gen, S32 index)
     // the surface they stand on: their feet (llGetAgentSize / 2 below the avatar's centre, as the box), never under the ground
     const F32 ground = rgn->getLand().resolveHeightRegion(at.mV[VX], at.mV[VY]);
     at.mV[VZ] = llmax(ground, me.mV[VZ] - gAgentAvatarp->mBodySize.mV[VZ] * 0.5f);
-    for (const LLUUID& id : f->mPlaced)
+    for (const auto& placed : f->mPlaced)
     {
-        LLViewerObject* o = gObjectList.findObject(id);
+        LLViewerObject* o = gObjectList.findObject(placed.first);
         if (o && !o->isDead() && o->getRegion() == rgn && distXY(o->getPositionRegion(), at) < SAME_SPOT_M)
         {
-            fail("There is already a Greedy " + what + " right here (the one you just put down). Walk a few steps away to put "
-                 "another one down" + (what == "table" ? std::string(", or sit at it to play.") : std::string(".")));
+            // the piece that is in the way, by name (a board pressed right in front of the new table is "the table")
+            fail("Your Greedy " + placed.second + " is right where the " + what + " would go. Walk a few steps away, or turn "
+                 "round, then press the button again.");
             return;
         }
     }
@@ -425,9 +432,10 @@ void WolfFloaterGreedySetup::putCoro(LLHandle<LLFloater> h, U32 gen, S32 index)
     // 4. turned to face them: the piece keeps its own upright turn (the Wolf Grid table lies on its side, build_jimmy_table.py;
     // its script's NATURAL_ROT), and the turn about the vertical goes on top of it, as lsl/wolfdice_table.lsl
     // llSetRot(NATURAL_ROT * rot) after the box's yaw-only rez (rot = llEuler2Rot(<0, 0, atan2(fwd.y, fwd.x)>))
+    // and put on the floor at the box's height (rootZ above it), over the spot
     const LLQuaternion yaw(atan2f(fwd.mV[VY], fwd.mV[VX]), LLVector3::z_axis);
-    turnTo(got, got->getRotationRegion() * yaw);
-    f->mPlaced.push_back(got->getID());
+    placeAt(got, LLVector3(at.mV[VX], at.mV[VY], at.mV[VZ] + p.rootZ), got->getRotationRegion() * yaw);
+    f->mPlaced.emplace_back(got->getID(), what);
     LL_INFOS("WolfGreedy") << name << " is down: " << got->getID() << LL_ENDL;
     f->mBusy = false;
     if (index == PIECE_BOARD)

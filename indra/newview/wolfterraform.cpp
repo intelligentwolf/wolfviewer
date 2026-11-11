@@ -874,6 +874,12 @@ namespace WolfTerraform
             }
             ++sent;
             changed += answer["changed"].asInteger();
+            if (answer["changed"].asInteger() > 0)
+            {
+                // [W104 FEATFIX review 2026-11-11] the region remembers this as this login's last sky change (wolfterrainlevels.h)
+                if (LLViewerRegion* rgn = here(); rgn && rgn->getWolfSkyLevels())
+                    rgn->getWolfSkyLevels()->noteChange(WolfTerrainLevels::EDITOR_TERRAFORM);
+            }
             refused += answer["refused"].asInteger();
             no_room += answer["no_room"].asInteger();
             if ((answer["refused"].asInteger() > 0 || answer["no_room"].asInteger() > 0) && reason.empty()) reason = answer["message"].asString();

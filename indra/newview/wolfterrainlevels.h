@@ -162,6 +162,20 @@ public:
     // post() for a coroutine: the region's answer (or {success:false, message}); the list is read again after it.
     static LLSD postAndWait(LLViewerRegion* regionp, const LLSD& body);
 
+    // [W104 FEATFIX review 2026-11-11] Two kinds of undo touch sky land: the Sky Land window's "Undo my last change" sends the
+    // region's "undo" (WolfSkyLevelsModule.Edit.cs Undo: the caller's LAST change in this region, whatever made it), while the
+    // land brush and the Terraform window keep their own histories and undo by sending the old heights back ("apply", itself a
+    // change the region remembers). So the window's Undo is offered only for the window's own changes: those made since this
+    // viewer's last brush stroke / brush Undo / Terraform job here (or, when nothing else changed sky land here this session, as
+    // before). Otherwise it is refused with where to undo instead (stroke, brush Undo, window Undo would re-apply the stroke).
+    enum EEditor { EDITOR_WINDOW, EDITOR_BRUSH, EDITOR_TERRAFORM };
+    /** A change the region kept (it remembers it as one undo step). */
+    void noteChange(EEditor by);
+    /** May the Sky Land window's Undo go now? If not, `why` says where to undo instead. */
+    bool windowMayUndo(std::string& why) const;
+    /** The window's Undo went through (the region took back one of the window's steps). */
+    void noteWindowUndo();
+
 private:
     Level* findLevelMutable(S32 id);
     bool vertexTop(const Level& level, S32 X, S32 Y, S32 px, S32 py, F32& out) const;
@@ -179,6 +193,9 @@ private:
     U32 mSerial;                // tells a coroutine's region from a later region with the same handle
     bool mFetching = false;
     bool mAgain = false;
+    S32 mWindowSteps = 0;               // [review] the window's changes on top of the region's history (this viewer's)
+    bool mOtherChanged = false;         // [review] the brush or the Terraform window changed sky land here this session
+    EEditor mLastOther = EDITOR_BRUSH;
 
     static U32 sChangeCount;
     static U32 sNextSerial;

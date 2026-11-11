@@ -1099,3 +1099,32 @@ void WolfTerrainLevels::renderDeferred()
     }
     shader.unbind();
 }
+
+// [W104 FEATFIX review 2026-11-11] wolfterrainlevels.h noteChange / windowMayUndo / noteWindowUndo
+void WolfTerrainLevels::noteChange(EEditor by)
+{
+    if (by == EDITOR_WINDOW)
+    {
+        ++mWindowSteps;
+        return;
+    }
+    mWindowSteps = 0;   // the window's earlier changes are under this one now: the region's undo would take this first
+    mOtherChanged = true;
+    mLastOther = by;
+}
+
+bool WolfTerrainLevels::windowMayUndo(std::string& why) const
+{
+    if (mWindowSteps > 0 || !mOtherChanged) return true;
+    why = mLastOther == EDITOR_BRUSH
+        ? "Your last change to the sky land here was made with the land brush. Undo it with Edit > Undo while the land tool is "
+          "chosen (Build > Land); this window's Undo only takes back changes made in this window."
+        : "Your last change to the sky land here was made with the Terraform window. Undo it with that window's Undo; this "
+          "window's Undo only takes back changes made in this window.";
+    return false;
+}
+
+void WolfTerrainLevels::noteWindowUndo()
+{
+    if (mWindowSteps > 0) --mWindowSteps;
+}

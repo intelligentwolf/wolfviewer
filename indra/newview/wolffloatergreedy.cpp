@@ -120,7 +120,8 @@ namespace
         { "Winning", "The first to bank 10,000 (or that game's target) starts the LAST TURNS: everyone else has one more "
           "turn to beat them. The highest score wins.\n\nThere is no clock. Take all the time you need.", "000000", "000000", {} },
         { "Ready?", "Let's play!\n\nNew game starts a game others can join from their Greedy window or a Greedy table. "
-          "Join plays in a game going now.\n\nPRACTICE is a game on your own with tips. Nothing is saved and it is not ranked.\n\n"
+          "Join plays in a game going now.\n\nPRACTICE is a game against Bramble, the computer, with tips at every step. Nothing is "
+          "saved and it is not ranked.\n\n"
           "HOW TO PLAY shows this again.", "000000", "000000", {} },
     };
     const S32 GUIDE_PAGES = S32(sizeof(GUIDE) / sizeof(GUIDE[0]));
@@ -217,6 +218,13 @@ namespace
     const F64 BANNER_PULSE_SECS = 0.6;
     const F64 BANNER_SECS = 2.5;
     const LLColor4 BOARD_ME(0.55f, 1.f, 0.62f, 1.f);
+    // [GREEDY COMPUTER PLAYER 2026-11-11] practice against the computer (CHOSEN pace, Paul: "a short, visible pace so you can
+    // watch"): its first move this long after the resident's turn ends (the "Banked!" / "Bust!" moment shows first), then one
+    // move every COMPUTER_STEP_S (the tumble is ROLL_SECS of it). No countdown is shown and nothing needs a reaction.
+    const F64 COMPUTER_FIRST_S = 2.2;
+    const F64 COMPUTER_STEP_S = 2.6;
+    // Source: wolfdice_window.php new - a practice game is to 2,000 (newGame sent target=2000 for practice)
+    const S32 PRACTICE_TARGET = 2000;
 
     bool reduce_motion()
     {
@@ -409,6 +417,7 @@ void WolfGreedyGame::tick(bool minimised)
         noteActivity();
         mNextPoll = 0.0;
     }
+    if (mLocal) { localTick(); return; }   // [GREEDY COMPUTER PLAYER 2026-11-11/] a practice game is never polled: it is here
     if (!mGame || mBusy || !WolfGrid::isWolfTerritories()) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!mPollNow)
@@ -439,6 +448,14 @@ void WolfGreedyGame::bank()
 
 void WolfGreedyGame::newGame(bool practice, S32 target)
 {
+    if (practice)
+    {
+        // [GREEDY COMPUTER PLAYER 2026-11-11] practice is against the computer, played here (wolfgreedylocal.h); a server game
+        // they are in is left first, as before
+        if (!mLocal && mGame && mState["game"]["in_game"].asBoolean() && mState["game"]["state"].asString() != "finished") send("leave");
+        startLocal();
+        return;
+    }
     if (mGame && mState["game"]["in_game"].asBoolean() && mState["game"]["state"].asString() != "finished")
     {
         send("leave");   // one game at a time; the queue keeps the order
@@ -485,6 +502,24 @@ void WolfGreedyGame::onTable(S32 game)
 
 void WolfGreedyGame::send(const std::string& op, const std::string& extra)
 {
+    if (mLocal)
+    {
+        // [GREEDY COMPUTER PLAYER 2026-11-11] the practice game's presses are played here; anything that goes to another game
+        // ends it first (new, join, mine); a list is still asked of the server (the window's games to join)
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (op == "start" || op == "roll" || op == "bank")
+        {
+            const bool ok = op == "start" ? (mLocal->start(), true) : op == "roll" ? mLocal->roll(false) : mLocal->bank(false);
+            if (!ok) { setMessage("It is not your turn yet - " + std::string(WolfGreedyLocal::COMPUTER_NAME) + " is playing.", false); return; }
+            noteActivity();
+            showLocal(op);
+            mLocalNext = now + COMPUTER_FIRST_S;
+            return;
+        }
+        if (op == "leave") { endLocal("You have left the practice game."); return; }
+        if (op == "pass" || op == "poll") return;
+        if (op != "list") endLocal("");
+    }
     if (mBusy)
     {
         // the newest press wins; it goes when the answer comes. [W104 FEATFIX review 2026-11-11] the same press as the one out
@@ -543,9 +578,24 @@ void WolfGreedyGame::sendCoro(std::string op, std::string body)
 
 void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std::string& error, bool uncertain)
 {
-    mBusy = false;
-    mInFlight.clear();
-    mInFlightExtra.clear();
+    const bool local_answer = op == "local" || (mLocal && (op == "start" || op == "roll" || op == "bank"));
+    if (mLocal && !local_answer && op != "list")
+    {
+        // [GREEDY COMPUTER PLAYER 2026-11-11] a server answer that came back after a practice game began (the "leave" of the
+        // game they were in): it no longer changes what shows
+        mBusy = false;
+        mInFlight.clear();
+        mInFlightExtra.clear();
+        mQueued.clear();
+        changed();
+        return;
+    }
+    if (!local_answer)
+    {
+        mBusy = false;
+        mInFlight.clear();
+        mInFlightExtra.clear();
+    }
     changed();
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!error.empty())
@@ -614,7 +664,9 @@ void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std
             else if (kind == "bank")
             {
                 const S32 pts = before["turn_points"].asInteger();
-                banner = before["my_turn"].asBoolean() && pts > 0 ? "You banked " + number(pts) + "!" : std::string("Banked!");
+                banner = before["my_turn"].asBoolean() && pts > 0 ? "You banked " + number(pts) + "!"
+                       : (local_answer && pts > 0 ? std::string(WolfGreedyLocal::COMPUTER_NAME) + " banked " + number(pts) + "!"   // [GREEDY COMPUTER PLAYER/]
+                                                  : std::string("Banked!"));
                 banner_color = GREEN;
             }
         }
@@ -652,6 +704,47 @@ void WolfGreedyGame::onReply(const std::string& op, const LLSD& reply, const std
         mQueued.clear();
         send(q, extra);
     }
+}
+
+// ------------------------------------------------------------------------- [GREEDY COMPUTER PLAYER 2026-11-11] the local game
+
+void WolfGreedyGame::startLocal()
+{
+    std::string me = isAgentAvatarValid() ? gAgentAvatarp->getFullname() : std::string();
+    mLocal = std::make_unique<WolfGreedyLocal>(me, PRACTICE_TARGET);
+    mGame = -1;          // a game is on (the views test game() != 0); never sent to the server
+    mVersion = -1;       // the first answer is a first look: no sound, no tumble
+    mQueued.clear();
+    noteActivity();
+    showLocal("local");
+}
+
+void WolfGreedyGame::endLocal(const std::string& why)
+{
+    mLocal.reset();
+    mGame = 0;
+    mVersion = -1;
+    mState = LLSD();
+    mRollStart = -1.0;
+    mBanner.clear();
+    mBannerStart = -1.0;
+    if (!why.empty()) setMessage(why, false);
+    changed();
+}
+
+void WolfGreedyGame::showLocal(const std::string& op)
+{
+    if (mLocal) onReply(op, mLocal->reply(), std::string(), false);
+}
+
+void WolfGreedyGame::localTick()
+{
+    // the computer moves one step at a time: a roll tumbles (ROLL_SECS), then a moment to see what it kept, then the next step
+    if (!mLocal || !mLocal->computerTurn() || rolling()) return;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now < mLocalNext) return;
+    if (mLocal->computerStep()) showLocal("local");
+    mLocalNext = now + COMPUTER_STEP_S;
 }
 
 S32 WolfGreedyGame::rollFrame(S32 die) const
@@ -723,6 +816,8 @@ bool WolfFloaterGreedy::postBuild()
     getChild<LLButton>("f_practice")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onNew(true); });
     getChild<LLButton>("f_join")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onJoin(); });
     getChild<LLButton>("f_refresh")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfGreedyGame::instance().refreshList(); });
+    // [GREEDY TABLE HERE 2026-11-11] the set-up helper: the table, then the board (wolfgreedysetup.h)
+    getChild<LLButton>("f_setup")->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_greedy_setup"); });
     getChild<LLButton>("f_guide_back")->setCommitCallback([this](LLUICtrl*, const LLSD&) { showGuide(llmax(0, mGuidePage - 1)); });
     // [W104 FEATFIX 2026-11-11] on the last card Next reads "Start playing" and closes the guide (showGuide)
     getChild<LLButton>("f_guide_next")->setCommitCallback([this](LLUICtrl*, const LLSD&)
@@ -1029,6 +1124,20 @@ void WolfFloaterGreedy::animate()
 {
     const WolfGreedyGame& game = WolfGreedyGame::instance();
     if (mGuidePage >= 0) return;
+    {
+        // [GREEDY COMPUTER PLAYER 2026-11-11] practice: the button to press next slowly brightens and fades (CHOSEN 1.6 s, as
+        // the HUD's ring; Reduce motion: steadily bright). The faces are floater_wolf_greedy.xml's image_color values.
+        static const LLColor4 ROLL_FACE(0.13f, 0.55f, 0.29f, 1.f), BANK_FACE(0.77f, 0.55f, 0.09f, 1.f);
+        const std::string next = game.coach();
+        const F32 glow = reduce_motion() ? 0.6f
+            : 0.3f + 0.3f * sinf((F32)fmod(LLFrameTimer::getElapsedSeconds(), 1.6) / 1.6f * 2.f * F_PI);
+        for (const char* p : { "f_", "t_" })
+        {
+            const std::string pre(p);
+            getChild<LLButton>(pre + "roll")->setImageColor(next == "R" ? lerp(ROLL_FACE, LLColor4(0.45f, 0.95f, 0.6f, 1.f), glow) : ROLL_FACE);
+            getChild<LLButton>(pre + "bank")->setImageColor(next == "B" ? lerp(BANK_FACE, LLColor4(1.f, 0.85f, 0.35f, 1.f), glow) : BANK_FACE);
+        }
+    }
     if (game.rolling())
     {
         mWasRolling = true;
@@ -1096,6 +1205,8 @@ void WolfFloaterGreedy::refreshButtons()
     for (const char* n : { "f_leave", "f_pass" }) getChild<LLUICtrl>(n)->setVisible(!guide && inGame);
     for (const char* n : { "f_pass", "f_new", "f_practice", "f_join" }) getChild<LLUICtrl>(n)->setEnabled(!game.changeInFlight());
     getChild<LLUICtrl>("f_help")->setVisible(!guide);
+    getChild<LLUICtrl>("f_setup")->setVisible(!guide);   // [GREEDY TABLE HERE 2026-11-11/]
+    getChild<LLUICtrl>("f_board_panel")->setVisible(!guide);   // [GREEDY BOARD 2026-11-11/] the score panel with the scoreboard
     for (const char* n : { "f_board", "f_turn_label", "f_turn", "f_dice_left", "f_event", "f_roll", "f_bank", "f_status" })
         getChild<LLUICtrl>(n)->setVisible(!guide);
     getChild<LLUICtrl>("f_board_empty")->setVisible(!guide && mBoardEmpty);
@@ -1144,6 +1255,7 @@ void WolfFloaterGreedy::showGuide(S32 page)
     // the dice on the baize: the card's example, or (out of the guide) the game's
     const bool example = gp && strcmp(gp->dice, "000000") != 0;
     getChild<LLUICtrl>("f_felt")->setVisible(!on || example);
+    getChild<LLUICtrl>("f_felt_stitch")->setVisible(!on || example);   // [GREEDY BOARD 2026-11-11/] its stitched edge with it
     for (S32 i = 0; i < 6; ++i) getChild<LLUICtrl>(llformat("f_die%d", i))->setVisible(!on || example);
     if (on)
     {

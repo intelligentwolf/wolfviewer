@@ -116,6 +116,7 @@
 #include "wolffloaterbugreport.h"   // [WOLF BUG REPORT 2026-10-24/]
 #include "wolffloaterdob.h"   // [DOB IN THE VIEWER 2026-10-26/]
 #include "wolffloatergreedy.h"   // [GREEDY WINDOW 2026-11-10/] Greedy, the dice game
+#include "wolfgreedysetup.h"   // [GREEDY TABLE HERE 2026-11-11/] "Put a Greedy table here"
 #include "wolffloatervrstream.h"   // [VR PIPE 2026-11-03/]
 #include "wolffloaterinvisallow.h"   // [SELECTIVE INVISIBLE MODE 2026-10-30/]
 #include "wolffloateragecheck.h"   // [ADULT CONTENT 2026-10-26/]
@@ -708,6 +709,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_vr_stream", "floater_wolf_vr_stream.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterVRStream>);   // [VR PIPE 2026-11-03/] VR in Your Headset Browser
     LLFloaterReg::add("wolf_dob", "floater_wolf_dob.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDob>);   // [DOB IN THE VIEWER 2026-10-26/] Your Date of Birth
     LLFloaterReg::add("wolf_greedy", "floater_wolf_greedy.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGreedy>);   // [GREEDY WINDOW 2026-11-10/] Greedy
+    LLFloaterReg::add("wolf_greedy_setup", "floater_wolf_greedy_setup.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGreedySetup>);   // [GREEDY TABLE HERE 2026-11-11/]
     LLFloaterReg::add("wolf_invis_allow", "floater_wolf_invis_allow.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterInvisAllow>);   // [SELECTIVE INVISIBLE MODE 2026-10-30/] Invisible Mode: People Who Can See Me
     LLFloaterReg::add("wolf_age_check", "floater_wolf_age_check.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAgeCheck>);   // [ADULT CONTENT 2026-10-26/] Wolf World > Age Check: status + Verify my age
     LLFloaterReg::add("wolf_choose_avatar", "floater_wolf_choose_avatar.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChooseAvatar>);   // [STARTER AVATARS 2026-10-24/] Choose an Avatar

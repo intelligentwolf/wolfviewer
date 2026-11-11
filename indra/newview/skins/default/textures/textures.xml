@@ -1310,6 +1310,8 @@ with the same filename but different name
 <texture name="WolfGreedy_Die6" file_name="wolfgreedy/greedy_die_6.png" preload="false" />
 <!-- [W104 FEATFIX 2026-11-11] the Greedy logo and the 3D dice tumble (region-terrain-work/w104-review-2026-11-11/featfix/greedy-art) -->
 <texture name="WolfGreedy_Logo" file_name="wolfgreedy/greedy_logo_64.png" preload="false" />
+<!-- [GREEDY BOARD 2026-11-11] the felt's stitched edge and top shadow (our own art, drawn by PIL; a 9-slice) -->
+<texture name="WolfGreedy_Stitch" file_name="wolfgreedy/greedy_stitch.png" preload="false" scale.left="12" scale.top="114" scale.right="116" scale.bottom="12" />
 <texture name="WolfGreedy_Wordmark" file_name="wolfgreedy/greedy_wordmark.png" preload="false" />
 <texture name="WolfGreedy_Roll0" file_name="wolfgreedy/greedy_roll_0.png" preload="false" />
 <texture name="WolfGreedy_Roll1" file_name="wolfgreedy/greedy_roll_1.png" preload="false" />

@@ -37,6 +37,7 @@
 #include "llscrolllistctrl.h"
 #include "llnotificationsutil.h"   // [review 2/] "Greedy will appear when ..."
 #include "llsdjson.h"
+#include "llstartup.h"   // [review 3/] STATE_STARTED
 #include "llstyle.h"
 #include "lltextbox.h"
 #include "lltexteditor.h"
@@ -268,13 +269,7 @@ void WolfGreedyGame::viewClosed(EView v)
 {
     mViews &= ~(U32)v;
     if (mViews == 0) mHeldImages.clear();   // [review 2 W1] reloaded when a view opens again (viewOpened)
-    if (v == VIEW_HUD && mHidGameHud)
-    {
-        // [review 2 W4] the game HUD Greedy put away comes back, if Game Mode is still on and its HUD still hidden
-        mHidGameHud = false;
-        WolfGame& wg = WolfGame::instance();
-        if (WolfGrid::isOnWolfTerritories() && wg.gameModeShownOn() && !wg.hudShowing() && vehiclePanelUp().empty()) wg.toggleHud();
-    }
+    if (v == VIEW_HUD) restoreGameHud();
     changed();
 }
 
@@ -287,7 +282,9 @@ void WolfGreedyGame::openHud()
     const std::string vehicle = WolfGrid::isOnWolfTerritories() ? vehiclePanelUp() : std::string();
     if (!vehicle.empty())
     {
+        if (g.mHudPending) return;   // [review 3] already waiting: the tip was shown once for this wait
         g.mHudPending = true;
+        g.mPendingSession = gAgentSessionID;
         g.changed();
         LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE",
             "Greedy will appear along the bottom of the screen when you have finished with the " + vehicle + "."));
@@ -359,6 +356,7 @@ void WolfGreedyGame::toggleHud()
         // [review 2] switched off while waiting: it does not come
         instance().mHudPending = false;
         instance().changed();
+        instance().restoreGameHud();   // [review 3 F1] this is Greedy's real close
         LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", std::string("Greedy will not appear after all.")));
         return;
     }
@@ -368,8 +366,26 @@ void WolfGreedyGame::toggleHud()
 
 void WolfGreedyGame::pendingTick()
 {
-    if (!mHudPending || LLApp::isExiting() || !WolfGrid::isOnWolfTerritories()) return;
+    if (!mHudPending || LLApp::isExiting()) return;
+    // [review 3 F2] a wait belongs to this login on Wolf Territories: logged out, another login or grid, or off Wolf, it is
+    // forgotten (Greedy never appears later unasked)
+    if (!WolfGrid::isOnWolfTerritories() || gAgentSessionID != mPendingSession || LLStartUp::getStartupState() < STATE_STARTED)
+    {
+        mHudPending = false;
+        changed();
+        return;
+    }
     if (vehiclePanelUp().empty()) openHud();   // the vehicle's panel has gone: Greedy appears
+}
+
+// [review 3 F1] the game HUD Greedy put away comes back when Greedy finally closes (not while it only waits for a vehicle's
+// panel: then the flag stays, and the restore happens at the real close), if Game Mode is still on and its HUD still hidden
+void WolfGreedyGame::restoreGameHud()
+{
+    if (!mHidGameHud || !vehiclePanelUp().empty()) return;
+    mHidGameHud = false;
+    WolfGame& wg = WolfGame::instance();
+    if (WolfGrid::isOnWolfTerritories() && wg.gameModeShownOn() && !wg.hudShowing()) wg.toggleHud();
 }
 
 void WolfGreedyGame::noteActivity()

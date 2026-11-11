@@ -1113,6 +1113,13 @@ namespace
     std::map<U64, SkyUndoTrack>& sky_undo_tracks()
     {
         static std::map<U64, SkyUndoTrack> tracks;
+        // [review 3 F4] "since you logged in": a new login (another session id) starts with nothing known
+        static LLUUID session;
+        if (session != gAgentSessionID)
+        {
+            tracks.clear();
+            session = gAgentSessionID;
+        }
         return tracks;
     }
 }

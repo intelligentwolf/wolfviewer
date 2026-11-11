@@ -63,6 +63,7 @@ public:
     bool hudWanted() const { return hudOn() || mHudPending; }
     /** Every frame from the HUD control (wolfgreedyhud.cpp), also while it is off: a waiting HUD appears when the bottom is free. */
     void pendingTick();
+    void restoreGameHud();          // [review 3 F1]
     /** [review 2] the textures let go before the texture system shuts down (LLAppViewer::cleanup) */
     void releaseImages() { mHeldImages.clear(); }
     /** Wolf World > Greedy, the Wolf HUDs tile: the HUD on or off. */
@@ -141,6 +142,7 @@ private:
     std::string mInFlightExtra;
     bool mHudPending = false;       // [review 2] waiting for a vehicle's panel to go
     bool mHidGameHud = false;       // [review 2] the Greedy HUD put the game HUD away: it comes back when Greedy closes
+    LLUUID mPendingSession;         // [review 3 F2] the login a wait belongs to
     std::vector<LLPointer<LLUIImage>> mHeldImages;   // [review] the dice faces and tumble frames, loaded while a view is open
     F64 mNextPoll = 0.0;
     F64 mLastActivity = 0.0;        // [A6] the last press, game change or return to a view: the poll pace slows after it

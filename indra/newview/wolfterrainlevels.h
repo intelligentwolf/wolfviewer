@@ -196,7 +196,6 @@ private:
     bool mFetching = false;
     bool mAgain = false;
 
-
     static U32 sChangeCount;
     static U32 sNextSerial;
 };

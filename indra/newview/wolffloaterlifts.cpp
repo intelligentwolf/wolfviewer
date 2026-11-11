@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -39,6 +40,7 @@
 #include "llinventoryfunctions.h"
 #include "llinventorymodel.h"
 #include "llinventorymodelbackgroundfetch.h"
+#include "llinventoryobserver.h"
 #include "llnotificationsutil.h"
 #include "llprogressbar.h"
 #include "llradiogroup.h"
@@ -200,51 +202,131 @@ namespace
         return true;
     }
 
-    /** The kit search's scans while it waits (Source: wolfgreedysetup.cpp PieceSearch): the kit folders every time, the whole
-     *  inventory at most every WHOLE_SCAN_S. Every unfinished copy either scan meets is asked for, once per round (again()). */
+    /** The kit search's scans while it waits. Source: wolffishingoverlay.cpp RodWatch (the same gate, spacing and observer
+     *  lifetime); wolfgreedysetup.cpp PieceSearch, the same class for the lift kit. [W104 review 2026-11-11 W1 W2 S1]
+     *  - the kit folders (small; the grid gives into the first) are scanned every time;
+     *  - copies elsewhere that the last whole scan met unfinished are looked up by id every time (an item made complete by
+     *    its fetch keeps its id and the item count: llinventorymodel.cpp updateItem changes the old item in place);
+     *  - the whole inventory (63,000 items for some residents) is scanned only when it could have changed since the last
+     *    whole scan - the model told its observers of a change (updateItem / addChangedMask -> idleNotifyObservers ->
+     *    changed()), its item count moved, or the login's background fetch finished - and then at most every WHOLE_SCAN_S.
+     *  A finished copy ends the search at once and nothing is asked for. Otherwise the unfinished copies are asked for, at
+     *  most MAX_ASK a round (again() starts the next round), the kit folders' copies first, the rest in turn. */
     class KitSearch
     {
     public:
-        KitSearch() = default;
+        // gInventory.cleanupInventory() deletes every observer still added (llinventorymodel.cpp), so the observer lives on
+        // the heap and shares its state with this search: the search removes and deletes it only while it is alive
+        // (wolffishingoverlay.cpp RodWatch)
+        KitSearch() : mState(std::make_shared<State>()), mObserver(new Observer(mState)) { gInventory.addObserver(mObserver); }
+        ~KitSearch()
+        {
+            if (mState->mAlive)
+            {
+                gInventory.removeObserver(mObserver);
+                delete mObserver;
+            }
+        }
         KitSearch(const KitSearch&) = delete;
         KitSearch& operator=(const KitSearch&) = delete;
 
-        LLViewerInventoryItem* find()
-        {
-            uuid_vec_t unfinished;
-            LLViewerInventoryItem* got = nullptr;
-            const F64 t = LLFrameTimer::getTotalSeconds();
-            if (mWholeAt < 0.0 || t - mWholeAt >= WHOLE_SCAN_S)
-            {
-                mWholeAt = t;
-                got = findKit(&unfinished);
-            }
-            else
-            {
-                for (const LLUUID& f : kitFolders())
-                {
-                    if ((got = findKitIn(f, &unfinished))) break;
-                }
-            }
-            for (const LLUUID& id : unfinished)
-            {
-                if (std::find(mAsked.begin(), mAsked.end(), id) != mAsked.end()) continue;
-                mAsked.push_back(id);
-                LLInventoryModelBackgroundFetch::instance().start(id, false);
-                LL_INFOS("WolfLifts") << "kit search: asked for the lift kit " << id << " (read from the inventory cache, not complete yet)" << LL_ENDL;
-            }
-            return got;
-        }
+        /** The kit folders, the asked-for copies, and the whole inventory when it is due. */
+        LLViewerInventoryItem* find() { return look(false); }
 
-        /** The next round asks for the unfinished copies again. */
-        void again() { mAsked.clear(); }
+        /** The same with the whole inventory scanned now, due or not (the last look before the grid is asked or the search
+         *  gives up). */
+        LLViewerInventoryItem* findWhole() { return look(true); }
+
+        /** The next round asks for unfinished copies again: the ones after those just asked for, round and round. */
+        void again()
+        {
+            mTurn += mAsked.size();
+            mAsked.clear();
+        }
 
         /** How many unfinished copies have been asked for this round. */
         size_t askedCount() const { return mAsked.size(); }
 
     private:
-        static constexpr F64 WHOLE_SCAN_S = 5.0;   // CHOSEN (wolfgreedysetup.cpp PieceSearch WHOLE_SCAN_S)
-        uuid_vec_t mAsked;
+        struct State
+        {
+            bool mDirty = true;
+            bool mAlive = true;
+        };
+        class Observer : public LLInventoryObserver
+        {
+        public:
+            explicit Observer(const std::shared_ptr<State>& state) : mState(state) {}
+            ~Observer() override { mState->mAlive = false; }
+            void changed(U32) override { mState->mDirty = true; }
+        private:
+            std::shared_ptr<State> mState;
+        };
+
+        /** `item` (met unfinished by a whole scan) is complete now and still what a scan would take: a match, outside the
+         *  Trash. */
+        bool usable(LLViewerInventoryItem* item) const
+        {
+            if (!item || !item->isFinished()) return false;
+            KitItems match;
+            if (!match(nullptr, item)) return false;
+            const LLUUID trash = gInventory.findCategoryUUIDForType(LLFolderType::FT_TRASH);
+            return trash.isNull() || !gInventory.isObjectDescendentOf(item->getUUID(), trash);
+        }
+
+        LLViewerInventoryItem* look(bool whole_now)
+        {
+            // 1. the kit folders; their unfinished copies are the first in line to be asked for
+            uuid_vec_t wanted;
+            for (const LLUUID& f : kitFolders())
+            {
+                if (LLViewerInventoryItem* got = findKitIn(f, &wanted)) return got;
+            }
+            // 2. the copies elsewhere, by id
+            for (const LLUUID& id : mElsewhere)
+            {
+                LLViewerInventoryItem* got = gInventory.getItem(id);
+                if (usable(got)) return got;
+            }
+            // 3. the whole inventory, when something could have changed since the last whole scan
+            const S32 count = gInventory.getItemCount();
+            const bool all = LLInventoryModelBackgroundFetch::instance().isEverythingFetched();
+            const bool changed = !mState->mAlive || mState->mDirty || count != mCount || all != mAll;
+            const F64 t = LLFrameTimer::getTotalSeconds();
+            if (whole_now || (changed && (mWholeAt < 0.0 || t - mWholeAt >= WHOLE_SCAN_S)))
+            {
+                mWholeAt = t;
+                mState->mDirty = false;
+                mCount = count;
+                mAll = all;
+                mElsewhere.clear();
+                if (LLViewerInventoryItem* got = findKit(&mElsewhere)) return got;
+            }
+            // 4. no finished copy: ask for unfinished ones, a few a round
+            for (const LLUUID& id : mElsewhere)
+            {
+                if (std::find(wanted.begin(), wanted.end(), id) == wanted.end()) wanted.push_back(id);
+            }
+            for (size_t n = 0; n < wanted.size() && mAsked.size() < MAX_ASK; ++n)
+            {
+                const LLUUID& id = wanted[(mTurn + n) % wanted.size()];
+                if (std::find(mAsked.begin(), mAsked.end(), id) != mAsked.end()) continue;
+                mAsked.push_back(id);
+                LLInventoryModelBackgroundFetch::instance().start(id, false);
+                LL_INFOS("WolfLifts") << "kit search: asked for the lift kit " << id << " (read from the inventory cache, not complete yet)" << LL_ENDL;
+            }
+            return nullptr;
+        }
+
+        static constexpr F64 WHOLE_SCAN_S = 5.0;   // CHOSEN (wolffishingoverlay.cpp RodWatch WHOLE_SCAN_S)
+        static constexpr size_t MAX_ASK = 4;       // CHOSEN: unfinished copies asked for in one round
+        std::shared_ptr<State> mState;
+        Observer* mObserver;
+        uuid_vec_t mAsked;       // asked for this round
+        uuid_vec_t mElsewhere;   // unfinished copies met by the last whole scan
+        size_t mTurn = 0;        // where the next round's asking starts
+        S32 mCount = -1;
+        bool mAll = false;
         F64 mWholeAt = -1.0;
     };
 
@@ -863,9 +945,12 @@ void WolfFloaterLifts::boxCoro(LLHandle<LLFloater> h, U32 gen)
             llcoro::suspendUntilTimeout(1.f);
             if (!self()) return;
             for (const LLUUID& k : kitFolders()) refetchFolder(k, asked, "kit");
+            // [W104 review W3] an asked-for copy whose fetch failed is asked for again every 5 s, as after the give
+            if (i % 5 == 4) search.again();
             kit = search.find();
         }
-        if (!kit) kit = findKit();   // one whole scan before the grid is asked
+        // one whole scan before the grid is asked; unfinished copies it meets are asked for too [W104 review S1]
+        if (!kit) kit = search.findWhole();
         f = self();
         if (!f) return;
         LL_INFOS("WolfLifts") << "kit search: " << (kit ? "found " + kit->getUUID().asString() + " after the folders came back"
@@ -927,7 +1012,8 @@ void WolfFloaterLifts::boxCoro(LLHandle<LLFloater> h, U32 gen)
             }
             f = self();
             if (!f) return;
-            if (!kit) kit = findKit();   // one whole scan before giving up
+            // one whole scan before giving up; unfinished copies it meets are asked for (there for the next press) [W104 review S1]
+            if (!kit) kit = search.findWhole();
             LL_INFOS("WolfLifts") << "kit give: " << (kit ? "found " + kit->getUUID().asString()
                                                           : llformat("not seen after %d s", GIVE_WAIT_S)) << LL_ENDL;
             if (!kit)

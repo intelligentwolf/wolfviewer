@@ -464,14 +464,17 @@ void requestUserAttention()
     [[NSApplication sharedApplication] requestUserAttention:NSInformationalRequest];
 }
 
+static NSString* wolfNSStringFromUTF8(const std::string& s);   // <WolfViewer 2026-11-11/> below, by setTitleCocoa
+
 long showAlert(std::string text, std::string title, int type)
 {
     long ret = 0;
     @autoreleasepool {
         NSAlert *alert = [[[NSAlert alloc] init] autorelease];
 
-        [alert setMessageText:[NSString stringWithCString:title.c_str() encoding:[NSString defaultCStringEncoding]]];
-        [alert setInformativeText:[NSString stringWithCString:text.c_str() encoding:[NSString defaultCStringEncoding]]];
+        // <WolfViewer 2026-11-11/> UTF-8, as the window title (wolfNSStringFromUTF8): OSMessageBox text is UTF-8 too
+        [alert setMessageText:wolfNSStringFromUTF8(title)];
+        [alert setInformativeText:wolfNSStringFromUTF8(text)];
         if (type == 0)
         {
             [alert addButtonWithTitle:@"Okay"];
@@ -523,9 +526,22 @@ unsigned int getModifiers()
 }
 
 // <FS:CR> Set Window Title - sigh.
+// <WolfViewer 2026-11-11> The viewer's strings are UTF-8 (the window title: llappviewer.cpp "WolfViewer \xE2\x80\x94
+// <release>" and " \xC2\xB7 AVX2"). defaultCStringEncoding is the legacy system encoding (MacRoman on an English
+// macOS, per Apple's NSString documentation), which read the em dash and middle dot as several wrong characters - the
+// macOS twin of the Linux title fix (llwindowsdl2.cpp setX11TitleUTF8) and the Windows one (W103 f1f8ac8845).
+// stringWithCString:encoding: returns nil for bytes that are not valid UTF-8 (a title cut at 255 bytes by
+// LLStringUtil::truncate can end inside a character), so the old encoding stays as the fall-back.
+static NSString* wolfNSStringFromUTF8(const std::string& s)
+{
+    NSString* str = [NSString stringWithCString:s.c_str() encoding:NSUTF8StringEncoding];
+    return str ? str : [NSString stringWithCString:s.c_str() encoding:[NSString defaultCStringEncoding]];
+}
+// </WolfViewer>
+
 void setTitleCocoa(NSWindowRef window, const std::string &title)
 {
-    NSString *str = [NSString stringWithCString:title.c_str() encoding:[NSString defaultCStringEncoding]];
+    NSString *str = wolfNSStringFromUTF8(title);   // <WolfViewer 2026-11-11/> was defaultCStringEncoding
     [(LLNSWindow*)window setTitle:str];
 }
 // </FS:CR>

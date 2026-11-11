@@ -271,6 +271,7 @@ public:
 private:
     void tryFindFullscreenSize( int &aWidth, int &aHeight );
     void initialiseX11Clipboard();
+    void setX11TitleUTF8(const std::string& title);   // <WolfViewer 2026-11-11/> see llwindowsdl2.cpp
 
     bool getSelectionText(Atom selection, LLWString& text);
     bool getSelectionText( Atom selection, Atom type, LLWString &text );

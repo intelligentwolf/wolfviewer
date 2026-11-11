@@ -696,7 +696,43 @@ static int x11_detect_VRAM_kb()
 void LLWindowSDL::setTitle(const std::string &title)
 {
     SDL_SetWindowTitle( mWindow, title.c_str() );
+#if LL_X11
+    setX11TitleUTF8(title);   // <WolfViewer 2026-11-11/> after SDL's own, which it replaces
+#endif
 }
+
+#if LL_X11
+// <WolfViewer 2026-11-11> The window title as UTF-8 on X11 (and XWayland). The title is UTF-8 (llappviewer.cpp
+// "WolfViewer \xE2\x80\x94 <release>" and " \xC2\xB7 AVX2"), SDL_SetWindowTitle takes UTF-8, but the viewer never calls
+// setlocale(LC_CTYPE, ""), so the process runs in the "C" locale, and SDL 2.28's X11 title setter
+// (SDL_x11window.c X11_SetWindowTitle) then writes WM_NAME with XStringListToTextProperty as type STRING - Latin-1 by
+// ICCCM - holding the UTF-8 bytes, and its Xutf8TextListToTextProperty for _NET_WM_NAME fails, so _NET_WM_NAME is
+// left out. A window manager that honours the STRING type (GNOME's mutter, Jimmy Olsen's Fedora 45, ticket 760
+// picture) shows the bytes as Latin-1: "WolfViewer a-circumflex, two control characters, Vulcan's Forge
+// A-circumflex middle-dot AVX2". Proven with the bundled
+// libSDL2-2.0.so.0.2800.0 and xprop: no setlocale -> WM_NAME(STRING) e2 80 94 .. c2 b7, _NET_WM_NAME not found;
+// setlocale(LC_ALL, "") -> WM_NAME(UTF-8) and _NET_WM_NAME(UTF8_STRING) correct. Setting the process locale here
+// would change every locale-dependent call in the viewer, so the two properties are written directly instead, as
+// SDL writes them in a UTF-8 locale: _NET_WM_NAME (EWMH "Application Window Properties", UTF8_STRING) and WM_NAME
+// typed UTF8_STRING. Wayland (no X display) titles through xdg_toplevel in UTF-8 already.
+void LLWindowSDL::setX11TitleUTF8(const std::string& title)
+{
+    if (!mSDL_Display || mSDL_XWindowID == None)
+    {
+        return;
+    }
+    maybe_lock_display();
+    const Atom utf8_string = XInternAtom(mSDL_Display, "UTF8_STRING", False);
+    const Atom net_wm_name = XInternAtom(mSDL_Display, "_NET_WM_NAME", False);
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(title.c_str());
+    const int len = static_cast<int>(title.size());
+    XChangeProperty(mSDL_Display, mSDL_XWindowID, net_wm_name, utf8_string, 8, PropModeReplace, bytes, len);
+    XChangeProperty(mSDL_Display, mSDL_XWindowID, XA_WM_NAME, utf8_string, 8, PropModeReplace, bytes, len);
+    XFlush(mSDL_Display);
+    maybe_unlock_display();
+}
+// </WolfViewer>
+#endif // LL_X11
 
 void LLWindowSDL::tryFindFullscreenSize( int &width, int &height )
 {
@@ -1070,6 +1106,7 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
         {
             mSDL_Display = info.info.x11.display;
             mSDL_XWindowID = info.info.x11.window;
+            setX11TitleUTF8(mWindowTitle);   // <WolfViewer 2026-11-11/> SDL_CreateWindow titled it in the "C" locale
         }
         else
         {

@@ -368,7 +368,14 @@ static WolfInstallerState wolfInstallerState()
     WIN32_FILE_ATTRIBUTE_DATA marker;
     if (!GetFileAttributesExW((dir + L"WolfViewerInstalling.txt").c_str(), GetFileExInfoStandard, &marker))
     {
-        return WolfInstallerState::NONE;   // an installer for another folder: this install is complete
+        // [W104 FEATFIX review 2026-11-11] no marker here: an installer for another folder - or this folder's, if the marker
+        // could not be written. The files whose absence stopped the viewer (llappviewer.cpp initStrings strings.xml,
+        // initConfiguration settings_files.xml; RemoveProgFilesOnInst deletes app_settings and skins first) tell them apart:
+        // both there, this install is whole and starts; either missing, it is being written - wait, as with the marker.
+        const DWORD a1 = GetFileAttributesW((dir + L"app_settings\\settings_files.xml").c_str());
+        const DWORD a2 = GetFileAttributesW((dir + L"skins\\default\\xui\\en\\strings.xml").c_str());
+        if (a1 == INVALID_FILE_ATTRIBUTES || a2 == INVALID_FILE_ATTRIBUTES) return WolfInstallerState::RUNNING;
+        return WolfInstallerState::NONE;
     }
     FILETIME now_ft;
     GetSystemTimeAsFileTime(&now_ft);
@@ -642,9 +649,10 @@ int APIENTRY WINMAIN(HINSTANCE hInstance,
     if (installer == WolfInstallerState::STUCK)
     {
         MessageBoxW(NULL,
-                    L"An update of WolfViewer started more than 15 minutes ago and has not finished - it may be stuck.\n\n"
-                    L"WolfViewer will start now anyway. If something does not work, close WolfViewer, restart your computer "
-                    L"and install WolfViewer again.",
+                    L"WolfViewer has been updating for more than 15 minutes. An update usually takes a minute or two, "
+                    L"so this one may be stuck.\n\n"
+                    L"Press OK and WolfViewer will start anyway. If anything looks wrong, close WolfViewer, restart "
+                    L"your computer, and then install WolfViewer again.",
                     L"WolfViewer", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
     }
     // </WolfViewer>

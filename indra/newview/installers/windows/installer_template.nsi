@@ -1208,6 +1208,7 @@ IfErrors 0 PREINSTALL_DONE
       Goto PREINSTALL_DONE
 
 PREINSTALL_FAIL:
+    Delete "$INSTDIR\WolfViewerInstalling.txt"	# <WolfViewer 2026-11-11 W104 FEATFIX review/> every way out removes the marker
     Quit
 
 PREINSTALL_DONE:

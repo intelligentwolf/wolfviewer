@@ -232,14 +232,21 @@ void WolfVkScene::destroy()
         (void)mProbeVkImage.release();   // [BLACK WORLD 2026-11-10] left with the hung device, like the rest
         for (auto& b : mProbeVkHost) (void)b.release();
         mProbeVkHost.clear();
+        for (auto& b : mFrameCheckHost) (void)b.release();   // [G2 2026-11-11] likewise
+        mFrameCheckHost.clear();
         mCompositeFramebuffers.clear();
         mCompositePass = VK_NULL_HANDLE;
+        mCompositeCheckPass = VK_NULL_HANDLE;
         mDevice = nullptr;
         return;
     }
     mUniforms.resetPools();   // the descriptor sets name images that are about to go (also the deferred ones)
     mDevice->waitIdleAndFlushDeferred();
     probeDestroy();           // [BLACK WORLD 2026-11-10]
+    mFrameCheckHost.clear();  // [G2 2026-11-11] deferred destroys, as every buffer
+    mFrameCheckPending.clear();
+    mFrameCheckComposited.clear();
+    mFrameCheckDone.clear();
     mScene.reset();           // may hold the shared depth as its external attachment
     mShare.reset();
     destroyCompositePass();
@@ -337,27 +344,48 @@ bool WolfVkScene::createCompositePass(WolfVkSwapchain& swapchain, std::string& e
     sub.pColorAttachments = &ref;
     // the acquire semaphore is waited at COLOR_ATTACHMENT_OUTPUT (wolfvkdevice.cpp endFrame); this dependency makes the
     // layout transition wait for it too (spec 8.1, the usual swapchain external dependency)
-    VkSubpassDependency dep{};
-    dep.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dep.dstSubpass = 0;
-    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dep.srcAccessMask = 0;
-    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    // [G2 2026-11-11] and the composite's colour writes before a transfer read after the pass (the login check's copy of
+    // the presented picture, frameCheckRecord). Both passes below carry both dependencies: render passes that differ only
+    // in an attachment's final layout are compatible (spec "Render Pass Compatibility": identical except initial and final
+    // layouts, load/store ops and reference layouts), so the twin uses the same framebuffers and pipelines. With an
+    // explicit dependency to VK_SUBPASS_EXTERNAL the implicit one is not added; this one covers the final layout
+    // transition, and the frame's semaphore signal covers everything before the present.
+    VkSubpassDependency deps[2]{};
+    deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    deps[0].dstSubpass = 0;
+    deps[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].srcAccessMask = 0;
+    deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].srcSubpass = 0;
+    deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     VkRenderPassCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     info.attachmentCount = 1;
     info.pAttachments = &a;
     info.subpassCount = 1;
     info.pSubpasses = &sub;
-    info.dependencyCount = 1;
-    info.pDependencies = &dep;
+    info.dependencyCount = 2;
+    info.pDependencies = deps;
     VkResult res = gVk.vkCreateRenderPass(dev, &info, nullptr, &mCompositePass);
     if (res != VK_SUCCESS)
     {
         error = std::string("vkCreateRenderPass (composite): ") + WolfVkLoader::resultString(res);
         mCompositePass = VK_NULL_HANDLE;
         return false;
+    }
+    // [G2 2026-11-11] the twin: the same pass ending in TRANSFER_SRC_OPTIMAL (vulkan_core.h:2276) for a frame the login check copies
+    a.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    res = gVk.vkCreateRenderPass(dev, &info, nullptr, &mCompositeCheckPass);
+    if (res != VK_SUCCESS)
+    {
+        // not fatal: the login check then judges by the composite having been drawn (WolfVkBridge)
+        LL_WARNS("WolfVulkanCheck") << "vkCreateRenderPass (composite, check twin): " << WolfVkLoader::resultString(res) << LL_ENDL;
+        mCompositeCheckPass = VK_NULL_HANDLE;
     }
     mCompositeFormat = swapchain.format();
     mCompositeFramebuffers.assign(swapchain.imageCount(), VK_NULL_HANDLE);
@@ -385,19 +413,23 @@ bool WolfVkScene::createCompositePass(WolfVkSwapchain& swapchain, std::string& e
 
 void WolfVkScene::destroyCompositePass()
 {
+    WolfVkPipelineCache::forgetRenderPass(mCompositePass);   // [V5 2026-11-11] its pipelines first
+    WolfVkPipelineCache::forgetRenderPass(mCompositeCheckPass);
     if (mDevice && mDevice->hasDevice())
     {
         WolfVkDevice* device = mDevice;
         std::vector<VkFramebuffer> fbs = mCompositeFramebuffers;
-        VkRenderPass pass = mCompositePass;
-        device->deferDestroy([device, fbs, pass]()
+        VkRenderPass pass = mCompositePass, check_pass = mCompositeCheckPass;
+        device->deferDestroy([device, fbs, pass, check_pass]()
         {
             for (VkFramebuffer fb : fbs) if (fb) gVk.vkDestroyFramebuffer(device->device(), fb, nullptr);
             if (pass) gVk.vkDestroyRenderPass(device->device(), pass, nullptr);
+            if (check_pass) gVk.vkDestroyRenderPass(device->device(), check_pass, nullptr);
         });
     }
     mCompositeFramebuffers.clear();
     mCompositePass = VK_NULL_HANDLE;
+    mCompositeCheckPass = VK_NULL_HANDLE;
 }
 
 bool WolfVkScene::ensureSceneTarget(uint32_t width, uint32_t height, std::string& error)
@@ -1112,15 +1144,16 @@ void WolfVkScene::probeBatch(const LLDrawInfo* params, const LLVertexBuffer* glv
 // ---------------------------------------------------------------------------------------------------------------
 // The composite into the swapchain image
 
-void WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index)
+bool WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index, bool check_pass)
 {
-    if (!mComposite || mCompositePass == VK_NULL_HANDLE || image_index >= mCompositeFramebuffers.size()) return;
+    if (!mComposite || mCompositePass == VK_NULL_HANDLE || image_index >= mCompositeFramebuffers.size()) return false;
+    bool drawn = false;
 
     VkClearValue clear{};
     clear.color.float32[3] = 1.f;
     VkRenderPassBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    begin.renderPass = mCompositePass;
+    begin.renderPass = (check_pass && mCompositeCheckPass != VK_NULL_HANDLE) ? mCompositeCheckPass : mCompositePass;   // [G2] the twin is compatible
     begin.framebuffer = mCompositeFramebuffers[image_index];
     begin.renderArea = { { 0, 0 }, swapchain.extent() };
     begin.clearValueCount = 1;
@@ -1166,7 +1199,7 @@ void WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain,
             }
             VkDeviceSize offset = 0;
             VkDescriptorSet set = VK_NULL_HANDLE;
-            if (mUniforms.push(block.data(), block.size(), offset)
+            if (mUniforms.push(block.data(), block.size(), offset, true /* [V6] essential: the composite */)
                 && (set = mUniforms.allocate(mComposite->uniformSetLayout())) != VK_NULL_HANDLE)
             {
                 VkDescriptorBufferInfo bi{ mUniforms.buffer(), 0, block.size() };
@@ -1216,9 +1249,11 @@ void WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain,
             gVk.vkUpdateDescriptorSets(mDevice->device(), 4, writes, 0, nullptr);
             gVk.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mComposite->pipelineLayout(), WolfVkProgram::SET_SAMPLERS, 1, &set, 0, nullptr);
             gVk.vkCmdDraw(cmd, 3, 1, 0, 0);   // the full-screen triangle (compositeV.glsl)
+            drawn = by_binding[2].imageView != mTransparent->view();   // [G2] with the GL frame layer bound
         }
     }
     gVk.vkCmdEndRenderPass(cmd);
+    return drawn;
 }
 
 void WolfVkScene::beginFrame()
@@ -1226,6 +1261,118 @@ void WolfVkScene::beginFrame()
     mUniforms.beginFrame(static_cast<uint32_t>(mDevice->frameCounter()));
     mStaging.beginFrame(static_cast<uint32_t>(mDevice->frameCounter()));
     probeVkCollect();   // [BLACK WORLD 2026-11-10] this slot's fence has been waited: its probe buffer is final
+    frameCheckCollect();   // [G2 2026-11-11] likewise the login check's sample
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// [G2 2026-11-11] the login check's sample of the presented picture (wolfvkscene.h FrameCheck)
+
+bool WolfVkScene::frameCheckPossible(const WolfVkSwapchain& swapchain) const
+{
+    // the copy reads the swapchain image: TRANSFER_SRC usage (WolfVkSwapchain::build adds it when the surface offers it,
+    // vulkan_core.h:2808) and one of the 4-byte formats build prefers (frameCheckCollect reads exactly those)
+    const VkFormat f = swapchain.format();
+    const bool known = f == VK_FORMAT_B8G8R8A8_UNORM || f == VK_FORMAT_R8G8B8A8_UNORM || f == VK_FORMAT_B8G8R8A8_SRGB
+                       || f == VK_FORMAT_R8G8B8A8_SRGB || f == VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+    return mCompositeCheckPass != VK_NULL_HANDLE && (swapchain.usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) && known
+           && swapchain.extent().width >= CHECK_TILES * CHECK_TILE && swapchain.extent().height >= CHECK_TILES * CHECK_TILE;
+}
+
+void WolfVkScene::frameCheckRecord(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, uint32_t image_index)
+{
+    // the image is in TRANSFER_SRC_OPTIMAL now (the twin pass's final layout, its dependency made the composite's writes
+    // available to the transfer read)
+    const uint32_t slot = mDevice->frameIndex();
+    const VkExtent2D e = swapchain.extent();
+    VkBufferImageCopy regions[CHECK_TILES * CHECK_TILES]{};   // Source: vulkan_core.h:3996 VkBufferImageCopy
+    for (uint32_t ty = 0; ty < CHECK_TILES; ++ty)
+    {
+        for (uint32_t tx = 0; tx < CHECK_TILES; ++tx)
+        {
+            // tile centres at 1/8, 3/8, 5/8, 7/8 of the image, kept inside it
+            const uint32_t x = std::min((2 * tx + 1) * e.width / (2 * CHECK_TILES) - CHECK_TILE / 2, e.width - CHECK_TILE);
+            const uint32_t y = std::min((2 * ty + 1) * e.height / (2 * CHECK_TILES) - CHECK_TILE / 2, e.height - CHECK_TILE);
+            VkBufferImageCopy& r = regions[ty * CHECK_TILES + tx];
+            r.bufferOffset = static_cast<VkDeviceSize>(ty * CHECK_TILES + tx) * CHECK_TILE * CHECK_TILE * 4;   // 4-byte texels
+            r.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            r.imageOffset = { static_cast<int32_t>(x), static_cast<int32_t>(y), 0 };
+            r.imageExtent = { CHECK_TILE, CHECK_TILE, 1 };
+        }
+    }
+    gVk.vkCmdCopyImageToBuffer(cmd, swapchain.image(image_index), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, mFrameCheckHost[slot]->buffer(),
+                               CHECK_TILES * CHECK_TILES, regions);   // :4593
+    // host read of the buffer (:2936 HOST_BIT, :3117 HOST_READ), as the world probe
+    VkBufferMemoryBarrier hb{};
+    hb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    hb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    hb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    hb.srcQueueFamilyIndex = hb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hb.buffer = mFrameCheckHost[slot]->buffer();
+    hb.size = VK_WHOLE_SIZE;
+    // the image back to PRESENT_SRC_KHR for the present (after the copy's reads: an execution dependency is enough for a
+    // write-after-read; the frame's render-done semaphore signal covers the rest before vkQueuePresentKHR)
+    VkImageMemoryBarrier ib{};   // Source: vulkan_core.h:4025 VkImageMemoryBarrier
+    ib.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ib.srcAccessMask = 0;
+    ib.dstAccessMask = 0;
+    ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ib.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ib.image = swapchain.image(image_index);
+    ib.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    gVk.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+                             0, nullptr, 1, &hb, 1, &ib);
+    mFrameCheckSeq++;
+    mFrameCheckPending[slot] = mFrameCheckSeq;
+    mFrameCheckComposited[slot] = mLastComposited ? 1 : 0;
+    mFrameCheckFormat = swapchain.format();
+    mFrameCheckRecorded = mFrameCheckSeq;
+}
+
+void WolfVkScene::frameCheckCollect()
+{
+    if (!mDevice || mFrameCheckPending.empty()) return;
+    const uint32_t slot = mDevice->frameIndex();
+    if (slot >= mFrameCheckPending.size() || mFrameCheckPending[slot] == 0 || slot >= mFrameCheckHost.size()) return;
+    WolfVkBuffer& host = *mFrameCheckHost[slot];
+    host.invalidateForRead();   // [V14] non-coherent read-back memory
+    const uint8_t* data = host.hostData();
+    FrameCheck c;
+    c.mSeq = mFrameCheckPending[slot];
+    c.mComposited = mFrameCheckComposited[slot] != 0;
+    if (data)
+    {
+        const uint32_t count = CHECK_TILES * CHECK_TILES * CHECK_TILE * CHECK_TILE;
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            uint32_t m = 0;
+            if (mFrameCheckFormat == VK_FORMAT_A2B10G10R10_UNORM_PACK32)
+            {
+                // vulkan_core.h VK_FORMAT_A2B10G10R10_UNORM_PACK32: R bits 0-9, G 10-19, B 20-29, A 30-31 of a 32-bit word
+                uint32_t w = 0;
+                memcpy(&w, data + i * 4, 4);
+                m = std::max(w & 0x3ffu, std::max((w >> 10) & 0x3ffu, (w >> 20) & 0x3ffu)) >> 2;   // to 0..255
+            }
+            else
+            {
+                // B8G8R8A8 / R8G8B8A8: the colour channels are bytes 0-2 either way, alpha byte 3
+                m = std::max(data[i * 4], std::max(data[i * 4 + 1], data[i * 4 + 2]));
+            }
+            if (m > c.mMax) c.mMax = m;
+            if (m) c.mLit++;
+        }
+    }
+    mFrameCheckPending[slot] = 0;
+    mFrameCheckDone.push_back(c);
+    if (mFrameCheckDone.size() > 8) mFrameCheckDone.erase(mFrameCheckDone.begin());
+}
+
+bool WolfVkScene::takeFrameCheck(FrameCheck& out)
+{
+    if (mFrameCheckDone.empty()) return false;
+    out = mFrameCheckDone.front();
+    mFrameCheckDone.erase(mFrameCheckDone.begin());
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1438,6 +1585,7 @@ void WolfVkScene::probeVkCollect()
     if (!mDevice || mProbeVkPending.empty()) return;
     const uint32_t slot = mDevice->frameIndex();
     if (slot >= mProbeVkPending.size() || mProbeVkPending[slot] == 0 || slot >= mProbeVkHost.size()) return;
+    mProbeVkHost[slot]->invalidateForRead();   // [V14 2026-11-11] non-coherent read-back memory
     const uint8_t* data = mProbeVkHost[slot]->hostData();
     if (data)
     {
@@ -1508,7 +1656,37 @@ bool WolfVkScene::recordFrame(VkCommandBuffer cmd, WolfVkSwapchain& swapchain, u
     if (mProbeDueThisFrame && mShare && mLayersAcquired && mHaveUI) probeVkRecord(cmd);
     mProbeDueThisFrame = false;
     drawFullbright(cmd);
-    drawComposite(cmd, swapchain, image_index);
+    // [G2 2026-11-11] the login check's sample of this very frame, when asked and possible: the host buffers are made
+    // on the first request (one per frame slot), and a slot whose previous sample is still unread takes none
+    bool check = false;
+    if (mFrameCheckWanted && frameCheckPossible(swapchain))
+    {
+        const uint32_t slots = mDevice->framesInFlight();
+        if (mFrameCheckHost.size() != slots)
+        {
+            std::string error;
+            mFrameCheckHost.clear();
+            mFrameCheckPending.assign(slots, 0);
+            mFrameCheckComposited.assign(slots, 0);
+            for (uint32_t i = 0; i < slots; ++i)
+            {
+                std::unique_ptr<WolfVkBuffer> b(new WolfVkBuffer());
+                if (!b->create(*mDevice, static_cast<VkDeviceSize>(CHECK_TILES * CHECK_TILES * CHECK_TILE * CHECK_TILE * 4), VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, error))
+                {
+                    LL_WARNS("WolfVulkanCheck") << "login check: no read-back buffer (" << error << ")" << LL_ENDL;
+                    mFrameCheckHost.clear();
+                    break;
+                }
+                mFrameCheckHost.push_back(std::move(b));
+            }
+        }
+        const uint32_t slot = mDevice->frameIndex();
+        check = mFrameCheckHost.size() == slots && slot < mFrameCheckPending.size() && mFrameCheckPending[slot] == 0;
+    }
+    mFrameCheckWanted = false;
+    mFrameCheckRecorded = 0;
+    mLastComposited = drawComposite(cmd, swapchain, image_index, check);
+    if (check) frameCheckRecord(cmd, swapchain, image_index);
     if (mShare && mLayersAcquired)
     {
         mShare->release(cmd);   // back to GL for the next frame's writes

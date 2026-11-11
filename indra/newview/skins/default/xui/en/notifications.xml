@@ -2969,7 +2969,7 @@ WolfViewer will draw with OpenGL the next time you start it.
    name="WolfVulkanFellBackLastStart"
    type="alertmodal">
     <unique/>
-The last time WolfViewer started with the Vulkan renderer it did not get as far as the login screen, so this time it is drawing with OpenGL as before. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
+The last time WolfViewer started with the Vulkan renderer it did not get as far as showing the login screen, so this time it is drawing with OpenGL as before. You can try Vulkan again from Wolf World &gt; Tools &gt; Vulkan Renderer.
     <usetemplate
      name="okbutton"
      yestext="OK"/>

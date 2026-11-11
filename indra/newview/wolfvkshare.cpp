@@ -671,6 +671,7 @@ bool WolfVkSharedImage::roundTrip(uint32_t gl_sem_signal, uint32_t gl_sem_wait, 
     }
 
     // ---- compare ---------------------------------------------------------------------------------------------------
+    host.invalidateForRead();   // [V14 2026-11-11] non-coherent read-back memory
     const uint8_t* data = host.hostData();
     if (!data) { result = std::string("round trip (") + what + "): the host buffer is not mapped"; return false; }
     bool all_ok = true;

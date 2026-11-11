@@ -20469,6 +20469,84 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfVulkanAutoFailures</key>
+		<map>
+			<key>Comment</key>
+			<string>[G5 2026-11-11] How many automatic switches to OpenGL (start-up fall-back, run-time stop, failed login check, unconfirmed start) were counted for the viewer version and OpenGL driver in WolfVulkanAutoFailStamp. Below 2, the next start tries Vulkan again; a new viewer version or driver starts the count again. Cleared by a confirmed good Vulkan start and by the resident choosing a renderer. Set by the viewer.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>U32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanAutoFailStamp</key>
+		<map>
+			<key>Comment</key>
+			<string>[G5 2026-11-11] "viewer version|OpenGL driver" the automatic OpenGL switches were counted for (version "*" when only a driver change can help: no Vulkan, or no Vulkan card that is OpenGL's). Set by the viewer.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string></string>
+		</map>
+		<key>WolfVulkanLastGLDriver</key>
+		<map>
+			<key>Comment</key>
+			<string>[G5 2026-11-11] The OpenGL vendor / renderer / version of the last start (recorded once OpenGL is up), for WolfVulkanAutoFailStamp. Set by the viewer.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string></string>
+		</map>
+		<key>WolfVulkanDebugBlackLogin</key>
+		<map>
+			<key>Comment</key>
+			<string>[G2 2026-11-11] Testing: the Vulkan login check reads every sample of the presented login screen as black, so after about 2 s the renderer falls back to OpenGL in the same session with its notice (on a native Wayland window: the run-time stop). For the test rig; off by default.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugFailRebuild</key>
+		<map>
+			<key>Comment</key>
+			<string>[V1 2026-11-11] Testing: switching this on asks for a Vulkan swapchain rebuild, and every run-time rebuild then fails with a real (not window-minimised) error, so the bounded retries and the run-time stop can be shown. For the test rig; off by default.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugHangAtStart</key>
+		<map>
+			<key>Comment</key>
+			<string>[V2 2026-11-11] Testing: at the next Vulkan start the start-up hang guard fires after the window surface, its child window and the swapchain were made, and the start falls back to OpenGL; switches itself off. For the test rig; off by default.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfVulkanDebugFallBack</key>
 		<map>
 			<key>Comment</key>

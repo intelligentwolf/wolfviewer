@@ -678,6 +678,11 @@ swapchain is destroyed when the first image presented on its successor has been 
 same case (chromium `third_party/angle/.../SurfaceVk.cpp:1521-1523`, on this machine) - and at shutdown or past the cap
 after `vkQueueWaitIdle`, which takes no timeout: the one CPU wait of the backend that cannot be bounded. The spec text
 behind both rules is not on this machine; ANGLE's source is the reference used.
+[V4 2026-11-11] That wait is now `WolfVkDevice::waitIdle()` (8 s): the vkQueueWaitIdle refpage defines it as "equivalent
+to having submitted a valid fence to every previously executed queue submission command that accepts a fence, then
+waiting for all of those fences", and the device tracks every one of its submits. A swapchain that still cannot be
+destroyed is reported by `WolfVkSwapchain::destroy()` (false); the bridge then hides the child window and abandons the
+surface and device (`WolfVkSurface::abandon`, `WolfVkDevice::abandon`) instead of destroying them under it.
 
 Not yet built or run (the coordinator's OpenGL control session was running): to be confirmed by a build and a session
 with validation (expected: no 01282 / 05149 at recreates; check that no new present-fence VUID appears).
@@ -1657,6 +1662,40 @@ run 42815452819 is to be run the same way (`~/.cache/winvk/wine-session.sh`) as 
 installer (/downloads/wolfviewer/test/WolfViewer-vulkan-test-windows64-AVX2-Setup.exe) for Paul's cloud Windows PC and
 the Windows volunteers - a Windows PC with a real GPU and Vulkan driver (a GPU-less VM never starts Vulkan and proves
 nothing); what each machine says is in the log lines above. The macOS build of the branch is CI run 42816005089.
+
+### 8.2u W104 review fixes (branch w104-vkfix, 2026-11-11)
+
+Findings V1-V14 and G1-G8 of region-terrain-work/w104-review-2026-11-11/FINDINGS.md (G4, V9, G9, G10 not in this round).
+
+- **Child window never left over OpenGL (V2/V4).** `WolfVkBridge::releaseSurface` destroys swapchain, surface and child
+  in that order on a healthy device; when the device is hung or a swapchain cannot be destroyed (its presents did not
+  finish), the surface, device and instance are left alive (`WolfVkDevice::abandon`) and the X11 child is unmapped / the
+  Win32 child hidden / the Metal layer taken off the view (`WolfVkSurface::abandon`, needs no device). The unbounded
+  `vkQueueWaitIdle` of the no-maintenance1 path is now `WolfVkDevice::waitIdle` (the spec defines it as a fence wait on
+  every submit). Test: `WolfVulkanDebugHangAtStart`.
+- **Login check (G2).** `WolfVulkanStartOK` is saved only when a PRESENTED frame's picture has light: from the login
+  screen on, every 0.25 s the composite of one frame ends in TRANSFER_SRC (a compatible twin render pass) and 16 tiles of
+  8x8 pixels of the swapchain image are copied to a host buffer (`WolfVkScene::FrameCheck`). 8 black samples running ->
+  `fallBack` in this session with the WolfVulkanFellBack notice (native Wayland: the run-time stop). No TRANSFER_SRC on the
+  swapchain: a presented frame with the composite drawn over the GL frame layer counts. Test: `WolfVulkanDebugBlackLogin`.
+- **Swapchain rebuilds (V1/G1, V3, V8).** "No size" (VkSwapchainCreateInfoKHR: maxImageExtent (0,0) when minimised) waits
+  for ever; any other failure gets 5 tries 0.25 s apart, logged at WARN, then the run-time stop. A failed build after
+  vkCreateSwapchainKHR cleans up only its own objects (no more null `mDevice` in `recreate`). VK_SUBOPTIMAL_KHR rebuilds
+  only for a new window size, or at most every 10 s. Test: `WolfVulkanDebugFailRebuild` (switch on through LEAP).
+- **Bounded retry (G5).** Rule in wolfvkbridge.cpp `recordAutomaticFailure`: an automatic switch to OpenGL is counted per
+  viewer version + OpenGL driver; below 2 the next start tries Vulkan again; a new version or driver starts the count
+  again; failures no retry can mend (no Vulkan, no card that is OpenGL's) wait for a driver change only.
+- **World check A/B (G6).** A verdict needs the picture to follow Vulkan's part off/on/off (lit/black/lit); teleport
+  samples do not count; light that comes back with the part ON returns to watching.
+- **Packaging (G7).** `shader_check.py --vulkan-min-ratio 0.6` fails the SPIR-V step when fewer than 60% of the linked
+  programs compile, and writes spv/summary.json; `scripts/spv_store_check.py` (viewer_manifest.py, and inline in the
+  linux-bundle job) refuses a store below that or with any manifest program file missing.
+- Also: pipeline cache entries die with their render pass / program (V5); descriptor pools chain per frame slot, the ring
+  keeps 64 KB for the composite (V6); CPU devices and devices that are not OpenGL's card are never chosen (V7);
+  vkBeginCommandBuffer / vkCreateFence results checked (V10); createDevice failure leaves the instance (V11); present
+  fences after OUT_OF_DATE kept per the spec's "still considered to be enqueued" (V12, reviewed, unchanged);
+  vkInvalidateMappedMemoryRanges before every read-back (V14); Win32 NT handles closed after the GL import (G3); a
+  partly shared G-buffer deletes its own GL textures (G8).
 
 ## 8.5 Design for the next pass: `PASS_SIMPLE` into the G-buffer (stage 4 proper)
 

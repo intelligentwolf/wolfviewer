@@ -488,6 +488,7 @@ bool WolfVkGBuffer::writeDump(const std::string& dir, std::string& error)
         const std::string path = dir + llformat("/gbuf_%zu_%ux%u_%u.raw", i, images[i]->width(), images[i]->height(), bpt);
         std::ofstream out(path, std::ios::binary);
         if (!out) { error = "cannot write " + path; mDumpBuffers.clear(); return false; }
+        mDumpBuffers[buffer]->invalidateForRead();   // [V14 2026-11-11]
         out.write(reinterpret_cast<const char*>(mDumpBuffers[buffer]->hostData()), static_cast<std::streamsize>(mDumpBuffers[buffer]->size()));
         buffer++;
     }

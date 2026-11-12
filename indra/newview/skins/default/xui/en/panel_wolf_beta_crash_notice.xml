@@ -45,8 +45,8 @@
   <check_box
     name="mute_check"
     follows="left|top"
-    font="SansSerifLarge"
-    text_enabled_color="WolfUpdateNoticeText"
+    label_text.font="SansSerifLarge"
+    label_text.text_color="WolfUpdateNoticeText"
     label="Don't show this again for this beta"
     tool_tip="You will still be told if a later beta closes unexpectedly."
     left="20"

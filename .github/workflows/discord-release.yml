@@ -18,23 +18,18 @@ on:
       tag:
         description: "Tag of an existing release to announce"
         required: true
-      # [BETA CHANNEL 2026-11-12] "beta": a short post for volunteers that says Beta and links to the Beta section
-      # of the download page (publish_beta.sh). "release": the full notes, as always (promote_beta.sh starts it,
-      # because turning a pre-release into the release does not publish it a second time).
-      kind:
-        description: "release = the full announcement; beta = a short beta post"
-        type: choice
-        default: release
-        options: [release, beta]
+      # [BETA CHANNEL 2026-11-12] No "kind" input on purpose: whether a tag is announced as a beta or as the release is
+      # read from the release itself (its prerelease flag, below), so a beta tag cannot be announced as a release by
+      # a mistaken or default choice, and nothing depends on which copy of this file GitHub reads the inputs from.
 
 permissions:
   contents: read
 
 jobs:
   announce:
-    # [BETA CHANNEL 2026-11-12] A beta is a GitHub PRE-release (publish_beta.sh). Publishing one must never post the
-    # release announcement: only a full release does that by itself. Betas and promotions are started by hand
-    # (workflow_dispatch) with the kind they are.
+    # [BETA CHANNEL 2026-11-12] Publishing a GitHub PRE-release (a beta, publish_beta.sh) does not post by itself:
+    # betas and promotions are announced by starting this workflow by hand with the tag, and the job then reads from
+    # the release whether it is a beta or the release. A full release published directly still announces itself.
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
@@ -46,7 +41,6 @@ jobs:
           TAG:      ${{ github.event.release.tag_name || inputs.tag }}
           GET_IT:   "https://wolf-grid.com/viewers.php"
           WHO:      "WolfViewer"
-          KIND:     ${{ inputs.kind || 'release' }}
         run: |
           set -euo pipefail
           if [ -z "${WEBHOOK:-}" ]; then
@@ -56,7 +50,16 @@ jobs:
           rel=$(gh api "repos/$REPO/releases/tags/$TAG")
           title=$(printf '%s' "$rel" | jq -r '.name // .tag_name')
           body=$(printf '%s' "$rel"  | jq -r '.body // ""')
-          # [BETA CHANNEL 2026-11-12] A beta post: short, says what it is, and points at the Beta section.
+          # [BETA CHANNEL 2026-11-12] The release's own prerelease flag decides the kind of post. A GitHub PRE-release
+          # is a beta (publish_beta.sh makes it one; promote_beta.sh clears the flag before it starts this workflow).
+          pre=$(printf '%s' "$rel" | jq -r '.prerelease')
+          case "$pre" in
+            true)  KIND=beta ;;
+            false) KIND=release ;;
+            *) echo "::error::could not read the prerelease flag of $TAG (got '$pre'): nothing posted"; exit 1 ;;
+          esac
+          echo "announcing $TAG as: $KIND"
+          # A beta post: short, says what it is, and points at the Beta section.
           if [ "$KIND" = "beta" ]; then
             GET_IT="https://wolf-grid.com/viewers.php#beta"
             WHO="WolfViewer Beta"

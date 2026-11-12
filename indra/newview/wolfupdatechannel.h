@@ -143,6 +143,17 @@ namespace WolfUpdateChannel
         return !(revision == seen_revision && sequence < seen_sequence);
     }
 
+    /**
+     * The BETA feed's rule, stricter: that feed never legitimately goes back in time (a new beta, a withdrawal and a
+     * re-publish each carry a later signing time), so a manifest with a lower sequence than the highest one already
+     * verified (WolfViewerBetaSequenceSeen) is not acted on, whatever revision it names. This is what stops an old,
+     * genuinely signed beta manifest being replayed to a viewer that has seen it withdrawn or replaced.
+     */
+    inline bool feedSequenceAcceptable(long long sequence, long long seen_sequence)
+    {
+        return sequence >= seen_sequence;
+    }
+
     /// What the caller knows about this install and this check, for the staged rollout. See choose().
     struct Staging
     {
@@ -217,7 +228,9 @@ namespace WolfUpdateChannel
         SKIPPED,        // a newer release the resident said "Not now" / "Skip this version" to
         OFFER,
         PAUSED,         // [STAGED ROLLOUT] a newer release whose rollout we paused: offered to nobody, asked or not
-        HELD            // [STAGED ROLLOUT] a newer release not yet offered to this install's share; ask again next start
+        HELD,           // [STAGED ROLLOUT] a newer release not yet offered to this install's share; ask again next start
+        FAILED,         // (wolfupdatemanifest.h decide) no verified release manifest this time: act on nothing
+        STALE           // (wolfupdatemanifest.h decide) an older signed state of the same release than already seen
     };
 
     struct Choice

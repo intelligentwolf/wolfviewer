@@ -58,6 +58,8 @@ namespace
         case Verdict::OFFER: return "OFFER";
         case Verdict::PAUSED: return "PAUSED";
         case Verdict::HELD: return "HELD";
+        case Verdict::FAILED: return "FAILED";
+        case Verdict::STALE: return "STALE";
         }
         return "?";
     }

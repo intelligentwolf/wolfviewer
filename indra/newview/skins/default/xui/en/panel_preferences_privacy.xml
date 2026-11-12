@@ -216,6 +216,16 @@
     name="WolfCrashReportsAuto"
     top_pad="10"
     width="480" />
+   <!-- [BETA CHANNEL review 2026-11-12] the once-per-login version record (wolfupdate.cpp seen_coro, viewerseen.php) -->
+   <check_box
+    control_name="WolfViewerReportVersion"
+    height="16"
+    label="Tell Wolf Territories which WolfViewer version I use"
+    tool_tip="Each time you log in to Wolf Territories, WolfViewer tells the grid which version it is, whether you are on Windows, Mac or Linux, whether it is drawing with Vulkan or OpenGL, and whether Get beta versions is ticked. One line is kept against your account, replaced at each login and deleted 90 days after your last login. It tells us how many people run each version, so a beta is only made the release once enough people have used it. Untick to send nothing."
+    layout="topleft"
+    name="WolfViewerReportVersion"
+    top_pad="3"
+    width="480" />
 
     <button
      follows="left|top"

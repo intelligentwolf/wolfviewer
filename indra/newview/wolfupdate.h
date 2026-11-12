@@ -95,6 +95,8 @@ public:
     /// From FSPanelPrefs::postBuild: the "Get beta versions" box and the sentence under it (which says what
     /// unticking does while a beta is running, and why the box is greyed out on a package-repository install).
     static void setupPreferences(LLPanel* extras_panel);
+    /// From FSPanelPrefs::onOpen: the sentence only (setupPreferences connects the box's callback, once).
+    static void refreshPreferences(LLPanel* extras_panel);
 
     /// From LLAppViewer::cleanup(): stop a download in progress and wait for its thread.
     static void shutdown();

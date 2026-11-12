@@ -90,7 +90,7 @@ bool FSPanelPrefs::postBuild()
 void FSPanelPrefs::onOpen(const LLSD& key)
 {
     // [BETA CHANNEL 2026-11-12] the sentence under "Get beta versions" as things stand now (a Cancel may have put the box back)
-    WolfUpdate::setupPreferences(this);
+    WolfUpdate::refreshPreferences(this);
 
     if (LLStartUp::getStartupState() == STATE_STARTED)
     {

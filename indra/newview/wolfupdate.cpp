@@ -67,6 +67,7 @@ extern char** environ;
 #include "wolfgrid.h"
 #include "wolfterrainpaint.h"
 #include "wolfupdatechannel.h"
+#include "wolfupdatemanifest.h"
 #include "wolfcrashreport.h"
 #include "wolfvkbridge.h"
 
@@ -78,7 +79,7 @@ namespace
     const char* const MANIFEST_URL = "https://wolf-grid.com/downloads/wolfviewer/latest.json";
     const char* const SIGNATURE_URL = "https://wolf-grid.com/downloads/wolfviewer/latest.json.sig";
     /// [BETA CHANNEL 2026-11-12] The beta feed: the same format, signed with the same key and verified by the
-    /// same function (verified_manifest), plus "channel": "beta" inside the signed bytes. Fetched only when
+    /// same function (wolfupdatemanifest.h accept), plus "channel": "beta" inside the signed bytes. Fetched only when
     /// "Get beta versions" is ticked (BETA_SETTING) and this copy is not a package-repository install. Like
     /// the two above, a constant: no setting, file or server reply can supply a feed URL.
     const char* const BETA_MANIFEST_URL = "https://wolf-grid.com/downloads/wolfviewer/beta/latest.json";
@@ -91,11 +92,8 @@ namespace
     const char* const SEEN_URL = "https://www.wolf-grid.com/viewerseen.php";
     /// f=osv, NOT f=viewers: index.php routes "osv" to viewers.php (2026-09-12 fix).
     const char* const DOWNLOAD_PAGE_URL = "https://www.wolf-grid.com/index.php?f=osv";
-    /// The manifest signing key's public half (Ed25519, 32 bytes). The private half is
-    /// ~/wolfviewer-releases/keys/manifest-ed25519.pem, generated 2026-10-02.
-    const unsigned char MANIFEST_PUBKEY[32] = {
-        0x65, 0x44, 0x7d, 0x1e, 0xae, 0xf9, 0xdf, 0xa5, 0x6b, 0x2a, 0xbc, 0xdc, 0x72, 0x65, 0x77, 0x65,
-        0x7c, 0x52, 0x13, 0x40, 0x4b, 0x7f, 0x28, 0x1f, 0x09, 0x84, 0xc2, 0x32, 0x78, 0x7b, 0x2e, 0xe5 };
+    // The manifest signing key's public half and the signature check are in wolfupdatemanifest.h (MANIFEST_PUBKEY,
+    // verifySignature), so the stand-alone harness runs the very code this file does.
 
     // ── settings ─────────────────────────────────────────────────────────────────────────────
     const char* const CHECK_SETTING = "WolfViewerCheckForUpdates";
@@ -121,6 +119,11 @@ namespace
     // [BETA CRASH NOTICE 2026-11-12] wolfupdatechannel.h betaCrashNotice
     const char* const CRASH_SPOKEN_SETTING = "WolfViewerBetaCrashNoticeTime";
     const char* const CRASH_MUTED_SETTING = "WolfViewerBetaCrashNoticeMuted";
+    /// [review 2026-11-12] The highest sequence verified on the beta feed (wolfupdatechannel.h feedSequenceAcceptable).
+    const char* const BETA_SEQUENCE_SETTING = "WolfViewerBetaSequenceSeen";
+    /// [review 2026-11-12] Preferences > Privacy "Tell Wolf Territories which WolfViewer version I use" (on by default):
+    /// the once-per-login version record (seen_coro). Its own switch, not the update check's.
+    const char* const REPORT_VERSION_SETTING = "WolfViewerReportVersion";
     /// What the title bar, the login screen and About add to the release name of a beta.
     const char* const BETA_SUFFIX = " (Beta)";
 
@@ -213,22 +216,6 @@ namespace
         s.reserve(n * 2);
         for (size_t i = 0; i < n; ++i) { s += d[p[i] >> 4]; s += d[p[i] & 15]; }
         return s;
-    }
-
-    bool verify_signature(const std::string& message, const std::string& signature)
-    {
-        if (signature.size() != 64) return false;
-        bool ok = false;
-        EVP_PKEY* key = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr, MANIFEST_PUBKEY, sizeof(MANIFEST_PUBKEY));
-        EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-        if (key && ctx && EVP_DigestVerifyInit(ctx, nullptr, nullptr, nullptr, key) == 1)
-        {
-            ok = EVP_DigestVerify(ctx, (const unsigned char*)signature.data(), signature.size(),
-                                  (const unsigned char*)message.data(), message.size()) == 1;
-        }
-        EVP_MD_CTX_free(ctx);
-        EVP_PKEY_free(key);
-        return ok;
     }
 
     /// The SHA-256 of a whole file, or "" if it cannot be read.
@@ -580,6 +567,7 @@ namespace
 // static
 void WolfUpdate::setupPreferences(LLPanel* extras_panel)
 {
+    // postBuild only: setCommitCallback CONNECTS (it does not replace), so this must run once per panel.
     if (!extras_panel) return;
     const LLHandle<LLPanel> handle = extras_panel->getHandle();
     if (LLCheckBoxCtrl* box = extras_panel->findChild<LLCheckBoxCtrl>("wolf_get_beta_versions"))
@@ -587,6 +575,12 @@ void WolfUpdate::setupPreferences(LLPanel* extras_panel)
         box->setCommitCallback([handle](LLUICtrl*, const LLSD&) { refresh_beta_preference(handle); });
     }
     refresh_beta_preference(handle);
+}
+
+// static
+void WolfUpdate::refreshPreferences(LLPanel* extras_panel)
+{
+    if (extras_panel) refresh_beta_preference(extras_panel->getHandle());
 }
 
 // static
@@ -642,56 +636,10 @@ namespace
         return true;
     }
 
-    /// [BETA CHANNEL 2026-11-12] One feed's manifest: fetched, its signature verified against the compiled-in
-    /// key, parsed, and this platform's entry taken. THE one way a manifest is accepted, for the release feed
-    /// and the beta feed alike (the body is W104's checkCoro, moved here unchanged apart from "channel").
-    /// mVerified stays false on any failure; `what` names the file in the log.
-    WolfUpdateChannel::Entry verified_manifest(const char* manifest_url, const char* signature_url, const char* what)
+    /// One feed's two files. False unless both arrived. What is done with them is wolfupdatemanifest.h decide().
+    bool fetch_feed(const char* manifest_url, const char* signature_url, std::string& manifest, std::string& signature)
     {
-        WolfUpdateChannel::Entry e;
-        std::string manifest, signature;
-        if (!fetch_small(manifest_url, manifest) || !fetch_small(signature_url, signature)) return e;
-        if (!verify_signature(manifest, signature))
-        {
-            // Not ours, or tampered with. Said in the log, never acted on.
-            LL_WARNS("WolfUpdate") << "update check: " << what << " signature does not verify; ignored" << LL_ENDL;
-            return e;
-        }
-        boost::system::error_code ec;
-        const boost::json::value v = boost::json::parse(manifest, ec);
-        if (ec) { LL_WARNS("WolfUpdate") << "update check: unreadable " << what << LL_ENDL; return e; }
-        const LLSD m = LlsdFromJson(v);
-        const LLSD file = m["files"][platform_key()];
-        e.mRevision = m["revision"].asInteger();
-        e.mName = m["release_name"].asString();
-        e.mChannel = m["channel"].asString();
-        e.mUrl = file["url"].asString();
-        e.mSha256 = file["sha256"].asString();
-        e.mSize = (U64)file["size"].asReal();
-        LLStringUtil::toLower(e.mSha256);
-        // [STAGED ROLLOUT 2026-11-12] "sequence" and "rollout" (wolfupdatechannel.h Rollout). asReal: UTC seconds pass S32 in 2038.
-        e.mSequence = (long long)m["sequence"].asReal();
-        if (m.has("rollout"))
-        {
-            const LLSD r = m["rollout"];
-            e.mRollout.mPresent = true;
-            if (!r.isMap() || !r["steps"].isArray())
-            {
-                e.mRollout.mMalformed = true;
-            }
-            else
-            {
-                e.mRollout.mPaused = r["paused"].asBoolean();
-                e.mRollout.mStarted = (long long)r["started"].asReal();
-                for (LLSD::array_const_iterator it = r["steps"].beginArray(); it != r["steps"].endArray(); ++it)
-                {
-                    if (!it->isArray() || it->size() != 2) { e.mRollout.mMalformed = true; break; }
-                    e.mRollout.mSteps.emplace_back((int)(*it)[0].asInteger(), (int)(*it)[1].asInteger());
-                }
-            }
-        }
-        e.mVerified = true;
-        return e;
+        return fetch_small(manifest_url, manifest) && fetch_small(signature_url, signature);
     }
 
     /// [STAGED ROLLOUT 2026-11-12] This install's random seed for rolloutBucket: made once with the system's random
@@ -758,6 +706,7 @@ namespace
             if (a != std::string::npos)
             {
                 gWindowTitle.insert(a + anchor.size(), suffix);
+                LLStringUtil::truncate(gWindowTitle, 255);   // llappviewer.cpp initWindow's own limit for the title
                 changed = true;
             }
         }
@@ -782,7 +731,9 @@ namespace
     /// The release manifest verified: remember its revision (STABLE_SEEN_SETTING) and put the labels right.
     void note_stable_revision(S32 revision)
     {
-        if (revision <= 0 || gSavedSettings.getS32(STABLE_SEEN_SETTING) == revision) return;
+        // Only ever upwards (wolfupdatemanifest.h decide keeps the maximum: a replayed older release manifest must not
+        // make a release build call itself a beta).
+        if (revision <= gSavedSettings.getS32(STABLE_SEEN_SETTING)) return;
         const bool was_beta = WolfUpdate::isBetaBuild();
         gSavedSettings.setS32(STABLE_SEEN_SETTING, revision);
         LL_INFOS("WolfUpdate") << "the release is w" << revision << "; this build (w" << WolfUpdate::currentRevision()
@@ -1108,9 +1059,9 @@ void WolfUpdate::loggedIn()
     sLoggedIn = true;
     checkOnce();           // the login screen may have been skipped (no connect box)
     present_in_world();    // no-op until the check has answered; checkCoro calls it then
-    // [BETA CHANNEL 2026-11-12] the version record, once per run, under the same switch as the update check
+    // [BETA CHANNEL 2026-11-12] the version record, once per run; its own switch in Preferences > Privacy [review]
     static bool seen_sent = false;
-    if (!seen_sent && gSavedSettings.getBOOL(CHECK_SETTING) && WolfGrid::isWolfTerritories())
+    if (!seen_sent && gSavedSettings.getBOOL(REPORT_VERSION_SETTING) && WolfGrid::isWolfTerritories())
     {
         seen_sent = true;
         LLCoros::instance().launch("WolfUpdate seen", []() { seen_coro(); });
@@ -1125,82 +1076,93 @@ void WolfUpdate::checkCoro()
     struct Running { Running() { sCheckRunning = true; } ~Running() { sCheckRunning = false; } } running;
     const bool by_hand = sByHand;
     sByHand = false;
-    // The release feed, exactly as W104 asked for it: the same two files, first, whatever the beta setting.
-    const Entry stable = verified_manifest(MANIFEST_URL, SIGNATURE_URL, "latest.json");
-    if (!stable.mVerified)
-    {
-        if (by_hand) notify_check_failed();
-        return;
-    }
-    // [STAGED ROLLOUT 2026-11-12] An older signed state of the SAME release is not acted on (a replay must not undo a
-    // pause); a newer state, or a higher release, is remembered (wolfupdatechannel.h sequenceAcceptable).
-    {
-        const S32 seen_revision = gSavedSettings.getS32(MANIFEST_REVISION_SETTING);
-        const long long seen_sequence = (long long)gSavedSettings.getU32(MANIFEST_SEQUENCE_SETTING);
-        if (!sequenceAcceptable(stable.mRevision, stable.mSequence, seen_revision, seen_sequence))
-        {
-            LL_WARNS("WolfUpdate") << "update check: latest.json for w" << stable.mRevision << " has sequence " << stable.mSequence
-                                   << ", older than the " << seen_sequence << " already seen for that release; ignored" << LL_ENDL;
-            if (by_hand) notify_check_failed();
-            return;
-        }
-        if (channelMatches(stable, Feed::STABLE) && stable.mSequence >= 0 && stable.mSequence <= 0xffffffffLL
-            && (stable.mRevision > seen_revision || (stable.mRevision == seen_revision && stable.mSequence > seen_sequence)))
-        {
-            gSavedSettings.setS32(MANIFEST_REVISION_SETTING, stable.mRevision);
-            gSavedSettings.setU32(MANIFEST_SEQUENCE_SETTING, (U32)stable.mSequence);
-        }
-    }
-    const S32 mine = currentRevision();
-    LL_INFOS("WolfUpdate") << "this build is w" << mine << ", latest release is w" << stable.mRevision
-                           << " \"" << stable.mName << "\" (" << platform_key() << ")" << LL_ENDL;
-    if (channelMatches(stable, Feed::STABLE)) note_stable_revision(stable.mRevision);
 
+    // What this file does: fetch, read the settings, apply the answer. The thinking - signature, JSON, feed and
+    // sequence rules, staged rollout, what to remember - is WolfUpdateManifest::decide (wolfupdatemanifest.h), which
+    // tests/wolfupdatemanifest_harness.cpp drives with real signed manifests.
+    WolfUpdateManifest::Inputs in;
+    in.mPlatform = platform_key();
+    in.mMine = currentRevision();
+    in.mByHand = by_hand;
+    // The release feed, exactly as W104 asked for it: the same two files, first, whatever the beta setting.
+    in.mStableFetched = fetch_feed(MANIFEST_URL, SIGNATURE_URL, in.mStableManifest, in.mStableSignature);
     // [BETA CHANNEL 2026-11-12] The beta feed, only for a resident who ticked "Get beta versions", and never
     // for a copy from the Linux package repositories (they carry releases only; the Preferences box is greyed
-    // out there, but the setting is shared with any other copy on this computer).
-    Entry beta;
-    bool follow_beta = false;
-    if (gSavedSettings.getBOOL(BETA_SETTING))
+    // out there, but the setting is shared with any other copy on this computer). Not asked for at all when the
+    // release feed gave nothing: without a release answer nothing is acted on.
+    in.mBetaOptIn = gSavedSettings.getBOOL(BETA_SETTING);
+    if (in.mBetaOptIn && in.mStableFetched)
     {
         std::string where;
-        follow_beta = install_kind(where) != Install::PACKAGED;
+        in.mFollowBeta = install_kind(where) != Install::PACKAGED;
     }
-    if (follow_beta)
+    if (in.mFollowBeta)
     {
-        beta = verified_manifest(BETA_MANIFEST_URL, BETA_SIGNATURE_URL, "beta/latest.json");
-        if (beta.mVerified)
+        in.mBetaFetched = fetch_feed(BETA_MANIFEST_URL, BETA_SIGNATURE_URL, in.mBetaManifest, in.mBetaSignature);
+    }
+    in.mSkippedStable = gSavedSettings.getS32(SKIPPED_SETTING);
+    in.mSkippedBeta = gSavedSettings.getS32(SKIPPED_BETA_SETTING);
+    in.mStableSeen = gSavedSettings.getS32(STABLE_SEEN_SETTING);
+    in.mManifestRevisionSeen = gSavedSettings.getS32(MANIFEST_REVISION_SETTING);
+    in.mManifestSequenceSeen = (long long)gSavedSettings.getU32(MANIFEST_SEQUENCE_SETTING);
+    in.mBetaSequenceSeen = (long long)gSavedSettings.getU32(BETA_SEQUENCE_SETTING);
+    in.mSeed = rollout_seed();
+    in.mNow = (long long)time(nullptr);
+
+    const WolfUpdateManifest::Outcome out = WolfUpdateManifest::decide(in);
+
+    // What to remember.
+    if (out.mManifestRevisionSeen != in.mManifestRevisionSeen || out.mManifestSequenceSeen != in.mManifestSequenceSeen)
+    {
+        gSavedSettings.setS32(MANIFEST_REVISION_SETTING, out.mManifestRevisionSeen);
+        gSavedSettings.setU32(MANIFEST_SEQUENCE_SETTING, (U32)out.mManifestSequenceSeen);
+    }
+    if (out.mBetaSequenceSeen != in.mBetaSequenceSeen) gSavedSettings.setU32(BETA_SEQUENCE_SETTING, (U32)out.mBetaSequenceSeen);
+    if (out.mStable.mVerified)
+    {
+        LL_INFOS("WolfUpdate") << "this build is w" << in.mMine << ", latest release is w" << out.mStable.mRevision
+                               << " \"" << out.mStable.mName << "\" (" << platform_key() << ")" << LL_ENDL;
+        note_stable_revision(out.mStableSeen);   // the labels follow the release (only ever upwards)
+        if (out.mStable.mRollout.mPresent)
         {
-            LL_INFOS("WolfUpdate") << "beta feed: w" << beta.mRevision << " \"" << beta.mName << "\" channel \""
-                                   << beta.mChannel << "\"" << LL_ENDL;
+            LL_INFOS("WolfUpdate") << "release rollout: " << out.mPercent << "% now" << (out.mStable.mRollout.mPaused ? " (paused)" : "")
+                                   << "; this install's place is " << out.mBucket
+                                   << ((by_hand || in.mBetaOptIn) ? " (not staged: asked by hand or beta versions on)" : "") << LL_ENDL;
+        }
+    }
+    if (in.mFollowBeta)
+    {
+        if (out.mBeta.mVerified)
+        {
+            LL_INFOS("WolfUpdate") << "beta feed: w" << out.mBeta.mRevision << " \"" << out.mBeta.mName << "\"" << LL_ENDL;
+        }
+        else
+        {
+            LL_WARNS("WolfUpdate") << "update check: no usable beta/latest.json this time ("
+                                   << (!in.mBetaFetched ? "not reached" : out.mBetaStale ? "older than one already seen" : "signature or channel")
+                                   << "); the release answer stands, downloads are kept" << LL_ENDL;
         }
     }
 
-    // [STAGED ROLLOUT 2026-11-12] A release is offered by itself only to this install's share (the signed "rollout").
-    // Not staged: a resident who ticked "Get beta versions" (they are on those files already, or ahead), and a check
-    // asked for by hand. A paused release is offered to nobody.
-    Staging staging;
-    staging.mNow = (long long)time(nullptr);
-    staging.mBucket = rolloutBucket(rollout_seed(), stable.mRevision);
-    staging.mBypass = by_hand || gSavedSettings.getBOOL(BETA_SETTING);
-    if (stable.mRollout.mPresent)
+    switch (out.mVerdict)
     {
-        LL_INFOS("WolfUpdate") << "release rollout: " << rolloutPercent(stable.mRollout, staging.mNow) << "% now"
-                               << (stable.mRollout.mPaused ? " (paused)" : "") << "; this install's place is " << staging.mBucket
-                               << (staging.mBypass ? " (not staged: asked by hand or beta versions on)" : "") << LL_ENDL;
-    }
-    const Choice choice = choose(mine, by_hand ? 0 : gSavedSettings.getS32(SKIPPED_SETTING),
-                                 by_hand ? 0 : gSavedSettings.getS32(SKIPPED_BETA_SETTING),
-                                 stable, follow_beta ? &beta : nullptr, &staging);
-    switch (choice.mVerdict)
-    {
+    case Verdict::FAILED:
+        // Not reached, not ours, or tampered with. Said in the log, never acted on.
+        if (in.mStableFetched) LL_WARNS("WolfUpdate") << "update check: latest.json signature does not verify or it is unreadable; ignored" << LL_ENDL;
+        if (by_hand) notify_check_failed();
+        return;
+    case Verdict::STALE:
+        LL_WARNS("WolfUpdate") << "update check: latest.json for w" << out.mStable.mRevision << " has sequence " << out.mStable.mSequence
+                               << ", older than the " << in.mManifestSequenceSeen << " already seen for that release; ignored" << LL_ENDL;
+        if (by_hand) notify_check_failed();
+        return;
     case Verdict::REFUSED:
-        LL_WARNS("WolfUpdate") << "update check: latest.json is not a release manifest (channel \"" << stable.mChannel
+        LL_WARNS("WolfUpdate") << "update check: latest.json is not a release manifest (channel \"" << out.mStable.mChannel
                                << "\"); ignored" << LL_ENDL;
         if (by_hand) notify_check_failed();
         return;
     case Verdict::UP_TO_DATE:
-        clean_updates("");   // anything downloaded before is this build or older
+        if (out.mCleanUpdates) clean_updates("");   // anything downloaded before is this build or older
         if (by_hand) LLNotificationsUtil::add("WolfUpdateNone");
         return;
     case Verdict::UNUSABLE:
@@ -1210,24 +1172,23 @@ void WolfUpdate::checkCoro()
     case Verdict::SKIPPED:
         return;
     case Verdict::PAUSED:
-        LL_INFOS("WolfUpdate") << "w" << stable.mRevision << " is paused: not offered" << LL_ENDL;
+        LL_INFOS("WolfUpdate") << "w" << out.mStable.mRevision << " is paused: not offered" << LL_ENDL;
         if (by_hand) LLNotificationsUtil::add("WolfUpdatePaused");
         return;
     case Verdict::HELD:
-        LL_INFOS("WolfUpdate") << "w" << stable.mRevision << " is not yet offered to this install's share; Help > Check for "
+        LL_INFOS("WolfUpdate") << "w" << out.mStable.mRevision << " is not yet offered to this install's share; Help > Check for "
                                   "WolfViewer Updates offers it at once" << LL_ENDL;
         return;
     case Verdict::OFFER:
         break;
     }
-    const bool from_beta = choice.mFeed == Feed::BETA;
-    const Entry& e = from_beta ? beta : stable;
+    const bool from_beta = out.mFeed == Feed::BETA;
     Offer o;
-    o.mRevision = e.mRevision;
-    o.mName = e.mName;
-    o.mUrl = e.mUrl;
-    o.mSha256 = e.mSha256;
-    o.mSize = e.mSize;
+    o.mRevision = out.mOffer.mRevision;
+    o.mName = out.mOffer.mName;
+    o.mUrl = out.mOffer.mUrl;
+    o.mSha256 = out.mOffer.mSha256;
+    o.mSize = out.mOffer.mSize;
     o.mBeta = from_beta;
     if (by_hand && sHaveOffer && sOffer.mRevision == o.mRevision && (sBusy || !sReadyPath.empty()))
     {

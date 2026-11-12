@@ -20078,6 +20078,50 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>0</integer>
 		</map>
+		<key>WolfViewerGetBetaVersions</key>
+		<map>
+			<key>Comment</key>
+			<string>Get beta versions (Preferences, WolfViewer, Extras). On: the once-per-run update check also reads the signed beta feed (downloads/wolfviewer/beta/latest.json) and offers a beta when it is newer than both this copy and the current release. Off: only full releases are offered. Never downgrades; takes effect at the next start. Ignored by a copy installed from the Linux package repositories.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerUpdateSkippedBeta</key>
+		<map>
+			<key>Comment</key>
+			<string>The newest WolfViewer BETA the user chose Skip this version or Not now for. Kept apart from WolfViewerUpdateSkipped so that declining a beta never hides a full release.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerUpdateLastToldBeta</key>
+		<map>
+			<key>Comment</key>
+			<string>The newest WolfViewer BETA the user has already been told about once (a copy that cannot update itself). Kept apart from WolfViewerUpdateLastTold.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerStableRevisionSeen</key>
+		<map>
+			<key>Comment</key>
+			<string>The revision of the current full release, from the last signed release manifest this viewer verified. This copy calls itself a beta while its own revision is higher. Labels only (title bar, About, crash and flea reports); it plays no part in deciding an update. 0: no manifest verified yet.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfViewerDryHulls</key>
 		<map>
 			<key>Comment</key>

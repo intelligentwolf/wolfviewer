@@ -40,6 +40,7 @@
 #include "llstartup.h"
 #include "lltexturectrl.h"
 #include "llviewercontrol.h"
+#include "wolfupdate.h"   // [BETA CHANNEL 2026-11-12] WolfUpdate::setupPreferences
 
 static LLPanelInjector<FSPanelPrefs> t_pref_fs("panel_preference_firestorm");
 
@@ -79,11 +80,18 @@ bool FSPanelPrefs::postBuild()
     mCustomScriptDropTarget = getChild<FSEmbeddedItemDropTarget>("custom_script");
     mCustomScriptDropTarget->setDADCallback(boost::bind(&FSPanelPrefs::onDADCustomScript, this, _1));
 
+    // [BETA CHANNEL 2026-11-12] Extras > "Get beta versions": the sentence under the box, and the box greyed out on a
+    // package-repository install (wolfupdate.h).
+    WolfUpdate::setupPreferences(this);
+
     return LLPanelPreference::postBuild();
 }
 
 void FSPanelPrefs::onOpen(const LLSD& key)
 {
+    // [BETA CHANNEL 2026-11-12] the sentence under "Get beta versions" as things stand now (a Cancel may have put the box back)
+    WolfUpdate::setupPreferences(this);
+
     if (LLStartUp::getStartupState() == STATE_STARTED)
     {
         getChild<LLCheckBoxCtrl>("FSBuildPrefs_EmbedItem")->setEnabled(true);

@@ -71,6 +71,27 @@ public:
     /// The release this build is, taken from the viewer's own version (LL_VIEWER_VERSION_BUILD).
     static S32 currentRevision();
 
+    // ── [BETA CHANNEL 2026-11-12] "Get beta versions" (wolfupdatechannel.h; DESIGN.md in the firestorm repo,
+    //    region-terrain-work/beta-channel-2026-11-12) ────────────────────────────────────────────────────────
+    // With the box ticked (WolfViewerGetBetaVersions, Preferences > WolfViewer > Extras) the one check also reads
+    // .../downloads/wolfviewer/beta/latest.json, signed with the same key and verified by the same code, and offers
+    // whichever of the two is the higher revision (the release when they are equal). Unticked, it asks for and acts
+    // on exactly what W104 did. A beta is promoted to the release as the very same files, so "Beta" is not compiled
+    // in: a build is a beta while its revision is above the release in the last release manifest that verified.
+
+    /// Is this build a beta (see above)? False until a release manifest has ever been verified on this computer.
+    static bool isBetaBuild();
+    /// "beta", "stable" or "unknown" (no release manifest verified yet): crash reports, Flea Reports, the version record.
+    static std::string channelWord();
+    /// " (Beta)" for a beta, else "": the window title (llappviewer.cpp) and About's RELEASE_NAME.
+    static std::string betaSuffix();
+    /// The login screen's release text: the release name (or `unnamed_fallback` for a build with none), " (Beta)"
+    /// for a beta, " · AVX2" on the AVX2 build. Written again by the check when the answer changes it.
+    static std::string releaseLabel(const std::string& unnamed_fallback);
+    /// From FSPanelPrefs::postBuild: the "Get beta versions" box and the sentence under it (which says what
+    /// unticking does while a beta is running, and why the box is greyed out on a package-repository install).
+    static void setupPreferences(LLPanel* extras_panel);
+
     /// From LLAppViewer::cleanup(): stop a download in progress and wait for its thread.
     static void shutdown();
 

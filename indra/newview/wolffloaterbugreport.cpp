@@ -50,6 +50,7 @@
 #include "lltexteditor.h"
 #include "llversioninfo.h"
 #include "llviewercontrol.h"   // gSavedSettings
+#include "wolfupdate.h"         // [BETA CHANNEL 2026-11-12/] WolfUpdate::channelWord
 #include "llviewerinventory.h"   // [FLEA ATTACHMENTS 2026-11-03/] LLViewerInventoryItem
 #include "roles_constants.h"      // [FLEA ATTACHMENTS 2026-11-03/] GP_OBJECT_MANIPULATE, as llpreviewnotecard.cpp
 #include "llviewermenufile.h"  // [FLEA PICTURES 2026-10-27/] LLFilePickerReplyThread
@@ -1255,6 +1256,9 @@ void WolfFloaterBugReport::onSend()
     fields["subject"] = subject;
     fields["body"] = body;
     fields["viewer"] = LLVersionInfo::instance().getChannelAndVersion();
+    // [BETA CHANNEL 2026-11-12] so Flea Reports from beta builds can be told apart (viewerbugreport.php "Channel:")
+    fields["release_channel"] = WolfUpdate::channelWord();
+    fields["beta_optin"] = gSavedSettings.getBOOL("WolfViewerGetBetaVersions") ? "1" : "0";
     fields["os"] = LLOSInfo::instance().getOSString();
     fields["gpu"] = gGLManager.getRawGLString();
     {   // [VULKAN BACKEND 2026-11-08] renderer + Vulkan device with every problem report

@@ -936,6 +936,9 @@ static void wolf_write_client_info()
     gDebugInfo["ClientInfo"]["Flavor"] = "hvk";
 #endif
 // </FS:ND>
+    // [BETA CHANNEL 2026-11-12] "beta" / "stable" / "unknown" (wolfupdate.h channelWord), read back by
+    // wolfcrashreport.cpp as "crashed_channel". The settings are loaded by now (initConfiguration).
+    gDebugInfo["WolfReleaseChannel"] = WolfUpdate::channelWord();
 }
 
 bool LLAppViewer::init()
@@ -3723,6 +3726,9 @@ bool LLAppViewer::initConfiguration()
         const std::string release_name = LLVersionInfo::getInstance()->getReleaseName();
         gWindowTitle = release_name.empty() ? LLVersionInfo::getInstance()->getChannelAndVersion()    // <FS:CR>
                                             : std::string("WolfViewer \xE2\x80\x94 ") + release_name;   // U+2014 em dash
+        // [BETA CHANNEL 2026-11-12] "WolfViewer — <name> (Beta)" for a beta (wolfupdate.h isBetaBuild; corrected by the
+        // update check if its answer differs: wolfupdate.cpp refresh_channel_labels).
+        gWindowTitle += WolfUpdate::betaSuffix();
 #ifdef USE_AVX2_OPTIMIZATION
         // <WolfViewer 2026-09-28> Say so when this is the AVX2 build: the Linux launcher picks it
         // from /proc/cpuinfo and the Windows installer from the CPU, so nobody chose it knowingly.
@@ -4093,7 +4099,7 @@ LLSD LLAppViewer::getViewerInfo() const
     // with no release name (local or untagged) shows its version, as the login screen does.
     {
         const std::string release_name = versionInfo.getReleaseName();
-        info["RELEASE_NAME"] = release_name.empty() ? versionInfo.getVersion() : release_name;
+        info["RELEASE_NAME"] = (release_name.empty() ? versionInfo.getVersion() : release_name) + WolfUpdate::betaSuffix();   // [BETA CHANNEL 2026-11-12/]
     }
     info["VIEWER_VERSION_LL"] = versionInfo.getLLViewerVersion(); // <FS:PP>
     info["BUILD_DATE"] = __DATE__;

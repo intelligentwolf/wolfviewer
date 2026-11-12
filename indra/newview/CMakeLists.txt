@@ -1967,6 +1967,7 @@ set(viewer_HEADER_FILES
     wolfflight.h
     wolfflightdeck.h
     wolfupdate.h
+    wolfupdatechannel.h
     wolfnaturalwater.h
     wolfcellquadtree.h
     wolfnearbyregions.h

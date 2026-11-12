@@ -17,6 +17,8 @@
   bg_alpha_color="WolfUpdateNoticeBackground"
   mouse_opaque="true">
   <panel.string name="title_ready">A new WolfViewer is ready: [NAME]</panel.string>
+  <!-- [BETA CHANNEL 2026-11-12] an offer from the beta feed (only with "Get beta versions" ticked) -->
+  <panel.string name="title_ready_beta">A new WolfViewer beta is ready: [BARE_NAME]</panel.string>
   <panel.string name="body_self_windows">Update now downloads it ([SIZE] MB) and installs it. Windows will ask for permission, then WolfViewer starts again. Your settings and saved logins are kept.</panel.string>
   <panel.string name="body_self_linux">Update now downloads it ([SIZE] MB), puts it in place and starts WolfViewer again. Your settings and saved logins are kept.</panel.string>
   <panel.string name="body_self_mac">Update now downloads it ([SIZE] MB) and opens it in Finder, ready to drag into Applications. Your settings and saved logins are kept.</panel.string>

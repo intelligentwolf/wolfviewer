@@ -53,22 +53,40 @@ extern char** environ;
 #include "llproxy.h"
 #include "llpanel.h"
 #include "llsdjson.h"
+#include "lluri.h"
 #include "llstartup.h"
 #include "lltextbox.h"
 #include "lluictrlfactory.h"
 #include "llversioninfo.h"
 #include "llviewercontrol.h"
+#include "llviewerwindow.h"
 #include "llweb.h"
+#include "llcheckboxctrl.h"
+#include "llagent.h"
+#include "wolfgrid.h"
 #include "wolfterrainpaint.h"
+#include "wolfupdatechannel.h"
+#include "wolfvkbridge.h"
+
+extern std::string gWindowTitle;   // llappviewer.cpp
 
 namespace
 {
     // ── what is trusted ──────────────────────────────────────────────────────────────────────
     const char* const MANIFEST_URL = "https://wolf-grid.com/downloads/wolfviewer/latest.json";
     const char* const SIGNATURE_URL = "https://wolf-grid.com/downloads/wolfviewer/latest.json.sig";
-    /// Every download must live here: the website serves the installers (viewers.php reads them
-    /// from /downloads/wolfviewer/), and a manifest naming anywhere else is refused.
-    const char* const DOWNLOAD_PREFIX = "https://wolf-grid.com/downloads/wolfviewer/";
+    /// [BETA CHANNEL 2026-11-12] The beta feed: the same format, signed with the same key and verified by the
+    /// same function (verified_manifest), plus "channel": "beta" inside the signed bytes. Fetched only when
+    /// "Get beta versions" is ticked (BETA_SETTING) and this copy is not a package-repository install. Like
+    /// the two above, a constant: no setting, file or server reply can supply a feed URL.
+    const char* const BETA_MANIFEST_URL = "https://wolf-grid.com/downloads/wolfviewer/beta/latest.json";
+    const char* const BETA_SIGNATURE_URL = "https://wolf-grid.com/downloads/wolfviewer/beta/latest.json.sig";
+    /// Every download must live under WolfUpdateChannel::DOWNLOAD_PREFIX (wolfupdatechannel.h): the website
+    /// serves the installers (viewers.php reads them from /downloads/wolfviewer/), and a manifest naming
+    /// anywhere else is refused.
+    /// [BETA CHANNEL 2026-11-12] gridmanager/viewerseen.php: which version this resident last logged in with,
+    /// for the beta gate report's "how many people ran it" (DESIGN.md decision 4).
+    const char* const SEEN_URL = "https://www.wolf-grid.com/viewerseen.php";
     /// f=osv, NOT f=viewers: index.php routes "osv" to viewers.php (2026-09-12 fix).
     const char* const DOWNLOAD_PAGE_URL = "https://www.wolf-grid.com/index.php?f=osv";
     /// The manifest signing key's public half (Ed25519, 32 bytes). The private half is
@@ -84,6 +102,18 @@ namespace
     /// "Skip this version": the newest release the resident declined for good.
     const char* const SKIPPED_SETTING = "WolfViewerUpdateSkipped";
     const char* const AUTO_DOWNLOAD_SETTING = "WolfViewerAutoDownloadUpdates";
+    // [BETA CHANNEL 2026-11-12]
+    /// Preferences > WolfViewer > Extras "Get beta versions". Read once per run, by the one check.
+    const char* const BETA_SETTING = "WolfViewerGetBetaVersions";
+    /// TOLD_SETTING / SKIPPED_SETTING for a beta offer, kept apart so that declining a beta never hides a
+    /// release and declining a release never hides a beta (wolfupdatechannel.h choose).
+    const char* const TOLD_BETA_SETTING = "WolfViewerUpdateLastToldBeta";
+    const char* const SKIPPED_BETA_SETTING = "WolfViewerUpdateSkippedBeta";
+    /// The release revision in the last release manifest that verified: this build is a beta while its own
+    /// revision is above it (wolfupdatechannel.h isBetaBuild). Labels only, never an update decision.
+    const char* const STABLE_SEEN_SETTING = "WolfViewerStableRevisionSeen";
+    /// What the title bar, the login screen and About add to the release name of a beta.
+    const char* const BETA_SUFFIX = " (Beta)";
 
     enum class Install { SELF, PACKAGED, MANUAL };
 
@@ -94,6 +124,7 @@ namespace
         std::string mUrl;
         std::string mSha256;    // lower-case hex
         U64 mSize = 0;
+        bool mBeta = false;     // [BETA CHANNEL 2026-11-12] from the beta feed (its URL shape, its own skip/told)
     };
 
     /// The download's shared state: written by the worker thread, read by the coroutine.
@@ -125,6 +156,9 @@ namespace
     /// Update now was pressed on the login screen's band: from then on the download and the
     /// install report on the band (and in their own alerts on failure), not the in-world notices.
     bool sActedAtLogin = false;
+    /// [BETA CHANNEL 2026-11-12] What the login screen shows for a build with no release name (fspanellogin.cpp
+    /// passes it to releaseLabel), kept so refresh_channel_labels can write that text again.
+    std::string sLoginFallback;
 
     // ── the band on the login screen ─────────────────────────────────────────────────────────
     enum class Stage { OFFER, DOWNLOADING, INSTALLING, MAC_OPENED };
@@ -148,6 +182,14 @@ namespace
         return "linux64";          // one tarball, both builds; wrapper.sh picks (2026-09-28)
 #endif
     }
+
+#if LL_WINDOWS
+    const char* const PLATFORM_WORDS = "windows";   // panel_wolf_update_notice.xml body_*_windows; viewerseen.php platform
+#elif LL_DARWIN
+    const char* const PLATFORM_WORDS = "mac";
+#else
+    const char* const PLATFORM_WORDS = "linux";
+#endif
 
     std::string hex(const unsigned char* p, size_t n)
     {
@@ -203,41 +245,16 @@ namespace
         return gDirUtilp->getOSUserAppDir() + gDirUtilp->getDirDelimiter() + "updates";
     }
 
-    /// The file name of a download URL: DOWNLOAD_PREFIX, then optionally the release's own
-    /// folder "w<digits>/" (publish_downloads.sh links each release there, so a URL in a signed
-    /// manifest never changes under it while the next release is being published), then a plain
-    /// file name. "" when the URL is not of that shape.
-    std::string download_file_name(const std::string& url);
-
-    /// A plain file name only: the URL's last part, which becomes a path on disk.
-    bool safe_file_name(const std::string& name)
+    /// The file name of the offer's download URL, in the URL shape of the feed it came from
+    /// (wolfupdatechannel.h downloadFileName: the release's "w<digits>/" folder, the beta's "beta/w<digits>/").
+    std::string offer_file_name(const Offer& o)
     {
-        if (name.empty() || name.size() > 128 || name[0] == '.') return false;
-        for (char c : name)
-        {
-            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
-                return false;
-        }
-        return true;
+        return WolfUpdateChannel::downloadFileName(o.mUrl, o.mBeta ? WolfUpdateChannel::Feed::BETA : WolfUpdateChannel::Feed::STABLE);
     }
 
-    std::string download_file_name(const std::string& url)
-    {
-        if (url.rfind(DOWNLOAD_PREFIX, 0) != 0) return std::string();
-        std::string rest = url.substr(strlen(DOWNLOAD_PREFIX));
-        const size_t slash = rest.find('/');
-        if (slash != std::string::npos)
-        {
-            const std::string folder = rest.substr(0, slash);
-            if (folder.size() < 2 || folder[0] != 'w'
-                || folder.find_first_not_of("0123456789", 1) != std::string::npos)
-            {
-                return std::string();
-            }
-            rest = rest.substr(slash + 1);
-        }
-        return safe_file_name(rest) ? rest : std::string();
-    }
+    /// [BETA CHANNEL 2026-11-12] "Skip this version" / "told once" are kept per feed (see SKIPPED_BETA_SETTING).
+    const char* skip_setting() { return sOffer.mBeta ? SKIPPED_BETA_SETTING : SKIPPED_SETTING; }
+    const char* told_setting() { return sOffer.mBeta ? TOLD_BETA_SETTING : TOLD_SETTING; }
 
     /// Remove everything in the updates folder except `keep` (a full path; "" keeps nothing).
     void clean_updates(const std::string& keep)
@@ -303,6 +320,8 @@ namespace
     {
         LLSD args;
         args["NAME"] = sOffer.mName.empty() ? llformat("w%d", sOffer.mRevision) : sOffer.mName;
+        // [BETA CHANNEL 2026-11-12] every notice about a beta says so: "WolfViewer <name> (Beta) (w105) is available"
+        if (sOffer.mBeta) args["NAME"] = args["NAME"].asString() + BETA_SUFFIX;
         args["LATEST"] = sOffer.mRevision;
         args["MINE"] = WolfUpdate::currentRevision();
         args["SIZE"] = llformat("%.0f", (F64)sOffer.mSize / (1024.0 * 1024.0));
@@ -429,7 +448,7 @@ namespace
         }
         else if (opt == 2)
         {
-            gSavedSettings.setS32(SKIPPED_SETTING, sOffer.mRevision);
+            gSavedSettings.setS32(skip_setting(), sOffer.mRevision);
         }
         return false;
     }
@@ -439,7 +458,7 @@ namespace
         const S32 opt = LLNotificationsUtil::getSelectedOption(n, r);
         if (opt == 2)
         {
-            gSavedSettings.setS32(SKIPPED_SETTING, sOffer.mRevision);
+            gSavedSettings.setS32(skip_setting(), sOffer.mRevision);
         }
         return false;
     }
@@ -451,6 +470,108 @@ S32 WolfUpdate::currentRevision()
     // The 4th version field is the release number: the CI workflow sets `revision: "N"` and
     // BuildVersion.cmake:14 reads it into LL_VIEWER_VERSION_BUILD. So w53 is build 53.
     return (S32)LLVersionInfo::instance().getBuild();
+}
+
+// static
+bool WolfUpdate::isBetaBuild()
+{
+    return WolfUpdateChannel::isBetaBuild(currentRevision(), gSavedSettings.getS32(STABLE_SEEN_SETTING));
+}
+
+// static
+std::string WolfUpdate::channelWord()
+{
+    if (gSavedSettings.getS32(STABLE_SEEN_SETTING) <= 0) return "unknown";
+    return isBetaBuild() ? "beta" : "stable";
+}
+
+// static
+std::string WolfUpdate::betaSuffix()
+{
+    return isBetaBuild() ? std::string(BETA_SUFFIX) : std::string();
+}
+
+// static
+std::string WolfUpdate::releaseLabel(const std::string& unnamed_fallback)
+{
+    sLoginFallback = unnamed_fallback;
+    const std::string release_name = LLVersionInfo::instance().getReleaseName();
+    std::string label = (release_name.empty() ? unnamed_fallback : release_name) + betaSuffix();
+#ifdef USE_AVX2_OPTIMIZATION
+    label += " \xC2\xB7 AVX2";   // U+00B7 middle dot (fspanellogin.cpp, 2026-09-28: the same flag as About's SIMD field)
+#endif
+    return label;
+}
+
+namespace
+{
+    /// Preferences > WolfViewer > Extras: the sentence under "Get beta versions" for the box as it stands now.
+    void refresh_beta_preference(LLHandle<LLPanel> handle)
+    {
+        LLPanel* panel = handle.get();
+        if (!panel) return;
+        LLCheckBoxCtrl* box = panel->findChild<LLCheckBoxCtrl>("wolf_get_beta_versions");
+        LLTextBox* text = panel->findChild<LLTextBox>("wolf_get_beta_versions_text");
+        if (!box || !text) return;   // a skin with its own panel file
+        std::string where;
+        std::string key = "wolf_beta_text_off";
+        if (install_kind(where) == Install::PACKAGED)
+        {
+            box->setEnabled(false);
+            key = "wolf_beta_text_packaged";
+        }
+        else if (box->get())
+        {
+            key = "wolf_beta_text_on";
+        }
+        else if (WolfUpdate::isBetaBuild())
+        {
+            key = "wolf_beta_text_off_on_beta";   // unticked while running a beta: say what happens (no downgrade)
+        }
+        text->setText(panel->getString(key));
+    }
+
+    /// [BETA CHANNEL 2026-11-12] Once per login to Wolf Territories: this resident's version, platform, renderer
+    /// and channel to gridmanager/viewerseen.php (one row per resident), so the beta gate report can say how many
+    /// people ran a build, not only how many crashed. Signed-in residents only, as wolffloaterdob.cpp post_dob:
+    /// verified TLS, no redirects, this login's agent and session in the headers. A failure (or a server without
+    /// the endpoint) is logged and nothing else: nobody asked for this.
+    void seen_coro()
+    {
+        LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
+            std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfUpdateSeen", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+        LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+        LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
+        options->setTimeout(30);
+        LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
+        headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
+        headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/x-www-form-urlencoded");
+        headers->append("X-Wolf-Agent", gAgentID.asString());
+        headers->append("X-Wolf-Session", gAgentSessionID.asString());
+        const std::string body = "viewer=" + LLURI::escape(LLVersionInfo::instance().getChannelAndVersion())
+            + "&platform=" + PLATFORM_WORDS
+            + "&renderer=" + LLURI::escape(WolfVkBridge::reportFields()["renderer"].asString())
+            + "&channel=" + WolfUpdate::channelWord()
+            + "&beta_optin=" + (gSavedSettings.getBOOL(BETA_SETTING) ? "1" : "0");
+        LLCore::BufferArray::ptr_t raw(new LLCore::BufferArray());
+        raw->append(body.data(), body.size());
+        LLSD result = adapter->postRawAndSuspend(request, SEEN_URL, raw, options, headers);
+        const LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(
+            result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+        LL_INFOS("WolfUpdate") << "version record: " << status.toString() << LL_ENDL;
+    }
+}
+
+// static
+void WolfUpdate::setupPreferences(LLPanel* extras_panel)
+{
+    if (!extras_panel) return;
+    const LLHandle<LLPanel> handle = extras_panel->getHandle();
+    if (LLCheckBoxCtrl* box = extras_panel->findChild<LLCheckBoxCtrl>("wolf_get_beta_versions"))
+    {
+        box->setCommitCallback([handle](LLUICtrl*, const LLSD&) { refresh_beta_preference(handle); });
+    }
+    refresh_beta_preference(handle);
 }
 
 // static
@@ -496,14 +617,92 @@ namespace
         return true;
     }
 
+    /// [BETA CHANNEL 2026-11-12] One feed's manifest: fetched, its signature verified against the compiled-in
+    /// key, parsed, and this platform's entry taken. THE one way a manifest is accepted, for the release feed
+    /// and the beta feed alike (the body is W104's checkCoro, moved here unchanged apart from "channel").
+    /// mVerified stays false on any failure; `what` names the file in the log.
+    WolfUpdateChannel::Entry verified_manifest(const char* manifest_url, const char* signature_url, const char* what)
+    {
+        WolfUpdateChannel::Entry e;
+        std::string manifest, signature;
+        if (!fetch_small(manifest_url, manifest) || !fetch_small(signature_url, signature)) return e;
+        if (!verify_signature(manifest, signature))
+        {
+            // Not ours, or tampered with. Said in the log, never acted on.
+            LL_WARNS("WolfUpdate") << "update check: " << what << " signature does not verify; ignored" << LL_ENDL;
+            return e;
+        }
+        boost::system::error_code ec;
+        const boost::json::value v = boost::json::parse(manifest, ec);
+        if (ec) { LL_WARNS("WolfUpdate") << "update check: unreadable " << what << LL_ENDL; return e; }
+        const LLSD m = LlsdFromJson(v);
+        const LLSD file = m["files"][platform_key()];
+        e.mRevision = m["revision"].asInteger();
+        e.mName = m["release_name"].asString();
+        e.mChannel = m["channel"].asString();
+        e.mUrl = file["url"].asString();
+        e.mSha256 = file["sha256"].asString();
+        e.mSize = (U64)file["size"].asReal();
+        LLStringUtil::toLower(e.mSha256);
+        e.mVerified = true;
+        return e;
+    }
+
+    /// [BETA CHANNEL 2026-11-12] The title bar and the login screen's release text follow isBetaBuild(), which
+    /// can change when the run's check answers (a beta installed by hand on a new computer learns the release
+    /// number then; a promoted beta stops being one). The window title is only re-set while the login screen
+    /// waits: later it carries the avatar's name (llstartup.cpp, llappviewer.cpp handleLoginComplete), which
+    /// is built from gWindowTitle, so correcting the string is enough.
+    void refresh_channel_labels()
+    {
+        const bool beta = WolfUpdate::isBetaBuild();
+        gDebugInfo["WolfReleaseChannel"] = WolfUpdate::channelWord();
+        const std::string suffix = BETA_SUFFIX;
+        const size_t at = gWindowTitle.find(suffix);
+        bool changed = false;
+        if (beta && at == std::string::npos)
+        {
+            // after the release name, or after the version when this build has no name (llappviewer.cpp initWindow)
+            const std::string name = LLVersionInfo::instance().getReleaseName();
+            const std::string anchor = name.empty() ? LLVersionInfo::instance().getChannelAndVersion() : name;
+            const size_t a = gWindowTitle.find(anchor);
+            if (a != std::string::npos)
+            {
+                gWindowTitle.insert(a + anchor.size(), suffix);
+                changed = true;
+            }
+        }
+        else if (!beta && at != std::string::npos)
+        {
+            gWindowTitle.erase(at, suffix.size());
+            changed = true;
+        }
+        if (changed && gViewerWindow && !sLoggedIn && LLStartUp::getStartupState() <= STATE_LOGIN_WAIT)
+        {
+            gViewerWindow->setTitle(gWindowTitle);
+        }
+        if (LLPanel* login = sLoginPanel.get())
+        {
+            if (LLTextBox* release_text = login->findChild<LLTextBox>("wolf_release_text"))
+            {
+                release_text->setText(WolfUpdate::releaseLabel(sLoginFallback));
+            }
+        }
+    }
+
+    /// The release manifest verified: remember its revision (STABLE_SEEN_SETTING) and put the labels right.
+    void note_stable_revision(S32 revision)
+    {
+        if (revision <= 0 || gSavedSettings.getS32(STABLE_SEEN_SETTING) == revision) return;
+        const bool was_beta = WolfUpdate::isBetaBuild();
+        gSavedSettings.setS32(STABLE_SEEN_SETTING, revision);
+        LL_INFOS("WolfUpdate") << "the release is w" << revision << "; this build (w" << WolfUpdate::currentRevision()
+                               << ") is " << WolfUpdate::channelWord() << LL_ENDL;
+        if (was_beta != WolfUpdate::isBetaBuild()) refresh_channel_labels();
+        else gDebugInfo["WolfReleaseChannel"] = WolfUpdate::channelWord();   // "unknown" -> "stable"
+    }
+
     // ── the band on the login screen (ticket 532) ────────────────────────────────────────────
-#if LL_WINDOWS
-    const char* const PLATFORM_WORDS = "windows";   // panel_wolf_update_notice.xml body_*_windows
-#elif LL_DARWIN
-    const char* const PLATFORM_WORDS = "mac";
-#else
-    const char* const PLATFORM_WORDS = "linux";
-#endif
 
     /// Still on the login screen, before Log In: only then may Update now restart without asking
     /// again. STATE_LOGIN_WAIT is the login screen waiting for the resident (llstartup.h); a failed
@@ -521,6 +720,8 @@ namespace
         const LLSD r = release_args();
         LLStringUtil::format_map_t a;
         a["[NAME]"] = r["NAME"].asString();
+        // [BETA CHANNEL 2026-11-12] title_ready_beta says "beta" itself, so it takes the name without "(Beta)"
+        a["[BARE_NAME]"] = sOffer.mName.empty() ? llformat("w%d", sOffer.mRevision) : sOffer.mName;
         a["[SIZE]"] = r["SIZE"].asString();
         a["[DIR]"] = sKindWhere;
         a["[PERCENT]"] = llformat("%d", sOffer.mSize ? (S32)((sNoticeReceived * 100) / sOffer.mSize) : 0);
@@ -530,7 +731,8 @@ namespace
         switch (sStage)
         {
         case Stage::OFFER:
-            title = p->getString("title_ready", a);
+            // [BETA CHANNEL 2026-11-12] "A new WolfViewer beta is ready: <name>"
+            title = p->getString(sOffer.mBeta ? "title_ready_beta" : "title_ready", a);
             switch (sKind)
             {
             case Install::SELF:     body = p->getString("body_self_" + platform, a); button = p->getString("button_update"); not_now = true; break;
@@ -585,7 +787,7 @@ namespace
     /// present_in_world() checks it too, for the rest of this run.
     void on_notice_not_now()
     {
-        gSavedSettings.setS32(SKIPPED_SETTING, sOffer.mRevision);
+        gSavedSettings.setS32(skip_setting(), sOffer.mRevision);
         // Hidden, not deleted: this runs inside the band's own button. It goes with the login panel.
         if (LLPanel* p = sNotice.get()) p->setVisible(false);
         LL_INFOS("WolfUpdate") << "login screen notice for w" << sOffer.mRevision << " closed (Not now)" << LL_ENDL;
@@ -635,7 +837,7 @@ namespace
         }
         LLPanel* login = sLoginPanel.get();
         if (!login) return;
-        if (gSavedSettings.getS32(SKIPPED_SETTING) >= sOffer.mRevision) return;   // Not now, this run
+        if (gSavedSettings.getS32(skip_setting()) >= sOffer.mRevision) return;   // Not now, this run
 
         // Built with no parent and added below, as llconversationview.cpp:214 builds its item panel.
         LLPanel* p = LLUICtrlFactory::getInstance()->createFromFile<LLPanel>(
@@ -661,7 +863,7 @@ namespace
         sStage = Stage::OFFER;
 
         // The band says what the one-off in-world notices for these two would have said.
-        if (sKind != Install::SELF) gSavedSettings.setS32(TOLD_SETTING, sOffer.mRevision);
+        if (sKind != Install::SELF) gSavedSettings.setS32(told_setting(), sOffer.mRevision);
         refresh_notice();
         LL_INFOS("WolfUpdate") << "login screen notice shown for w" << sOffer.mRevision << LL_ENDL;
     }
@@ -674,26 +876,26 @@ namespace
         sInWorldDone = true;
         if (sActedAtLogin) return;   // that download reports for itself (downloadCoro)
         // Not now on the login screen's band, after this run's check had already made the offer.
-        if (gSavedSettings.getS32(SKIPPED_SETTING) >= sOffer.mRevision) return;
+        if (gSavedSettings.getS32(skip_setting()) >= sOffer.mRevision) return;
         switch (sKind)
         {
         case Install::PACKAGED:
             // The system's updater has it; say so once per release.
-            if (gSavedSettings.getS32(TOLD_SETTING) >= sOffer.mRevision) return;
-            gSavedSettings.setS32(TOLD_SETTING, sOffer.mRevision);
+            if (gSavedSettings.getS32(told_setting()) >= sOffer.mRevision) return;
+            gSavedSettings.setS32(told_setting(), sOffer.mRevision);
             LLNotificationsUtil::add("WolfUpdatePackaged", release_args());
             return;
         case Install::MANUAL:
         {
-            if (gSavedSettings.getS32(TOLD_SETTING) >= sOffer.mRevision) return;
-            gSavedSettings.setS32(TOLD_SETTING, sOffer.mRevision);
+            if (gSavedSettings.getS32(told_setting()) >= sOffer.mRevision) return;
+            gSavedSettings.setS32(told_setting(), sOffer.mRevision);
             LLSD args = release_args();
             args["DIR"] = sKindWhere;
             LLNotificationsUtil::add("WolfUpdateManual", args, LLSD(), [](const LLSD& n, const LLSD& r)
             {
                 const S32 opt = LLNotificationsUtil::getSelectedOption(n, r);
                 if (opt == 0) LLWeb::loadURLExternal(DOWNLOAD_PAGE_URL);
-                else if (opt == 2) gSavedSettings.setS32(SKIPPED_SETTING, sOffer.mRevision);
+                else if (opt == 2) gSavedSettings.setS32(skip_setting(), sOffer.mRevision);
             });
             return;
         }
@@ -725,48 +927,79 @@ void WolfUpdate::loggedIn()
     sLoggedIn = true;
     checkOnce();           // the login screen may have been skipped (no connect box)
     present_in_world();    // no-op until the check has answered; checkCoro calls it then
+    // [BETA CHANNEL 2026-11-12] the version record, once per run, under the same switch as the update check
+    static bool seen_sent = false;
+    if (!seen_sent && gSavedSettings.getBOOL(CHECK_SETTING) && WolfGrid::isWolfTerritories())
+    {
+        seen_sent = true;
+        LLCoros::instance().launch("WolfUpdate seen", []() { seen_coro(); });
+    }
 }
 
 // static
 void WolfUpdate::checkCoro()
 {
-    std::string manifest, signature;
-    if (!fetch_small(MANIFEST_URL, manifest) || !fetch_small(SIGNATURE_URL, signature)) return;
-    if (!verify_signature(manifest, signature))
-    {
-        // Not ours, or tampered with. Said in the log, never acted on.
-        LL_WARNS("WolfUpdate") << "update check: latest.json signature does not verify; ignored" << LL_ENDL;
-        return;
-    }
-    boost::system::error_code ec;
-    const boost::json::value v = boost::json::parse(manifest, ec);
-    if (ec) { LL_WARNS("WolfUpdate") << "update check: unreadable latest.json" << LL_ENDL; return; }
-    const LLSD m = LlsdFromJson(v);
-    const LLSD file = m["files"][platform_key()];
-    Offer o;
-    o.mRevision = m["revision"].asInteger();
-    o.mName = m["release_name"].asString();
-    o.mUrl = file["url"].asString();
-    o.mSha256 = file["sha256"].asString();
-    o.mSize = (U64)file["size"].asReal();
-    LLStringUtil::toLower(o.mSha256);
+    using namespace WolfUpdateChannel;
+    // The release feed, exactly as W104 asked for it: the same two files, first, whatever the beta setting.
+    const Entry stable = verified_manifest(MANIFEST_URL, SIGNATURE_URL, "latest.json");
+    if (!stable.mVerified) return;
     const S32 mine = currentRevision();
-    LL_INFOS("WolfUpdate") << "this build is w" << mine << ", latest release is w" << o.mRevision
-                           << " \"" << o.mName << "\" (" << platform_key() << ")" << LL_ENDL;
-    if (o.mRevision <= mine)
+    LL_INFOS("WolfUpdate") << "this build is w" << mine << ", latest release is w" << stable.mRevision
+                           << " \"" << stable.mName << "\" (" << platform_key() << ")" << LL_ENDL;
+    if (channelMatches(stable, Feed::STABLE)) note_stable_revision(stable.mRevision);
+
+    // [BETA CHANNEL 2026-11-12] The beta feed, only for a resident who ticked "Get beta versions", and never
+    // for a copy from the Linux package repositories (they carry releases only; the Preferences box is greyed
+    // out there, but the setting is shared with any other copy on this computer).
+    Entry beta;
+    bool follow_beta = false;
+    if (gSavedSettings.getBOOL(BETA_SETTING))
     {
+        std::string where;
+        follow_beta = install_kind(where) != Install::PACKAGED;
+    }
+    if (follow_beta)
+    {
+        beta = verified_manifest(BETA_MANIFEST_URL, BETA_SIGNATURE_URL, "beta/latest.json");
+        if (beta.mVerified)
+        {
+            LL_INFOS("WolfUpdate") << "beta feed: w" << beta.mRevision << " \"" << beta.mName << "\" channel \""
+                                   << beta.mChannel << "\"" << LL_ENDL;
+        }
+    }
+
+    const Choice choice = choose(mine, gSavedSettings.getS32(SKIPPED_SETTING), gSavedSettings.getS32(SKIPPED_BETA_SETTING),
+                                 stable, follow_beta ? &beta : nullptr);
+    switch (choice.mVerdict)
+    {
+    case Verdict::REFUSED:
+        LL_WARNS("WolfUpdate") << "update check: latest.json is not a release manifest (channel \"" << stable.mChannel
+                               << "\"); ignored" << LL_ENDL;
+        return;
+    case Verdict::UP_TO_DATE:
         clean_updates("");   // anything downloaded before is this build or older
         return;
-    }
-    if (download_file_name(o.mUrl).empty() || o.mSha256.size() != 64 || o.mSize == 0)
-    {
+    case Verdict::UNUSABLE:
         LL_WARNS("WolfUpdate") << "update check: latest.json entry for " << platform_key() << " is not usable" << LL_ENDL;
         return;
+    case Verdict::SKIPPED:
+        return;
+    case Verdict::OFFER:
+        break;
     }
-    if (gSavedSettings.getS32(SKIPPED_SETTING) >= o.mRevision) return;
+    const bool from_beta = choice.mFeed == Feed::BETA;
+    const Entry& e = from_beta ? beta : stable;
+    Offer o;
+    o.mRevision = e.mRevision;
+    o.mName = e.mName;
+    o.mUrl = e.mUrl;
+    o.mSha256 = e.mSha256;
+    o.mSize = e.mSize;
+    o.mBeta = from_beta;
     sOffer = o;
     sKind = install_kind(sKindWhere);
     sHaveOffer = true;
+    LL_INFOS("WolfUpdate") << "offering w" << o.mRevision << (from_beta ? " from the beta feed" : " from the release feed") << LL_ENDL;
     // Where the resident is now decides how they are told: still on the login screen, the band;
     // already in-world (a quick or automatic login beat this answer), the in-world notices.
     if (sLoggedIn) present_in_world();
@@ -790,7 +1023,7 @@ void WolfUpdate::downloadCoro()
     job->mUrl = sOffer.mUrl;
     job->mSha256 = sOffer.mSha256;
     job->mSize = sOffer.mSize;
-    job->mPath = dir + gDirUtilp->getDirDelimiter() + llformat("w%d-", sOffer.mRevision) + download_file_name(sOffer.mUrl);
+    job->mPath = dir + gDirUtilp->getDirDelimiter() + llformat("w%d-", sOffer.mRevision) + offer_file_name(sOffer);
     job->mPartPath = job->mPath + ".part";
     job->mCaFile = gDirUtilp->getCAFile();
     job->mUserAgent = LLVersionInfo::instance().getChannelAndVersion();

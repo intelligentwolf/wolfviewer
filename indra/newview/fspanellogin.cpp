@@ -346,12 +346,9 @@ FSPanelLogin::FSPanelLogin(const LLRect &rect,
     // build, the same compiled-in flag as About's SIMD field. findChild, as patreon_text above.
     if (LLTextBox* release_text = findChild<LLTextBox>("wolf_release_text"))
     {
-        const std::string release_name = LLVersionInfo::getInstance()->getReleaseName();
-        std::string label = release_name.empty() ? version : release_name;
-#ifdef USE_AVX2_OPTIMIZATION
-        label += " \xC2\xB7 AVX2";   // U+00B7 middle dot
-#endif
-        release_text->setText(label);
+        // [BETA CHANNEL 2026-11-12] The label is now built by WolfUpdate::releaseLabel (the same name-or-version and
+        // " · AVX2" as before, plus " (Beta)" for a beta), which writes it again if the update check changes the answer.
+        release_text->setText(WolfUpdate::releaseLabel(version));
     }
     // </WolfViewer>
 

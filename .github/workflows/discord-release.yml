@@ -18,12 +18,24 @@ on:
       tag:
         description: "Tag of an existing release to announce"
         required: true
+      # [BETA CHANNEL 2026-11-12] "beta": a short post for volunteers that says Beta and links to the Beta section
+      # of the download page (publish_beta.sh). "release": the full notes, as always (promote_beta.sh starts it,
+      # because turning a pre-release into the release does not publish it a second time).
+      kind:
+        description: "release = the full announcement; beta = a short beta post"
+        type: choice
+        default: release
+        options: [release, beta]
 
 permissions:
   contents: read
 
 jobs:
   announce:
+    # [BETA CHANNEL 2026-11-12] A beta is a GitHub PRE-release (publish_beta.sh). Publishing one must never post the
+    # release announcement: only a full release does that by itself. Betas and promotions are started by hand
+    # (workflow_dispatch) with the kind they are.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
       - name: Post release notes to Discord
@@ -34,6 +46,7 @@ jobs:
           TAG:      ${{ github.event.release.tag_name || inputs.tag }}
           GET_IT:   "https://wolf-grid.com/viewers.php"
           WHO:      "WolfViewer"
+          KIND:     ${{ inputs.kind || 'release' }}
         run: |
           set -euo pipefail
           if [ -z "${WEBHOOK:-}" ]; then
@@ -43,6 +56,16 @@ jobs:
           rel=$(gh api "repos/$REPO/releases/tags/$TAG")
           title=$(printf '%s' "$rel" | jq -r '.name // .tag_name')
           body=$(printf '%s' "$rel"  | jq -r '.body // ""')
+          # [BETA CHANNEL 2026-11-12] A beta post: short, says what it is, and points at the Beta section.
+          if [ "$KIND" = "beta" ]; then
+            GET_IT="https://wolf-grid.com/viewers.php#beta"
+            WHO="WolfViewer Beta"
+            title="Beta: $title"
+            if [ "${#body}" -gt 900 ]; then
+              body="$(printf '%s' "$body" | head -c 900)"$'\n\n…'
+            fi
+            body="$body"$'\n\n'"This is a beta for volunteers: tested, but it may have faults. Get it from the Beta section of the download page, or tick \"Get beta versions\" in Preferences > WolfViewer > Extras. Everyone else: no action needed, the full release follows."
+          fi
           # Discord caps an embed description at 4096 characters.
           if [ "${#body}" -gt 3800 ]; then
             body="$(printf '%s' "$body" | head -c 3800)"$'\n\n…'

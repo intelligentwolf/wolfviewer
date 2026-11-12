@@ -39,6 +39,7 @@
 #include "llsys.h"
 #include "llversioninfo.h"
 #include "llviewercontrol.h"   // gSavedSettings
+#include "wolfupdate.h"         // [BETA CHANNEL 2026-11-12/] WolfUpdate::channelWord
 #include "workqueue.h"
 #include "wolfgrid.h"
 #include "wolflogscrub.h"
@@ -772,6 +773,7 @@ namespace
             { "OSInfo", "" }, { "GraphicsCard", "" }, { "GridName", "" }, { "StartupState", "" }, { "CurrentRegion", "" },
             { "CurrentSimHost", "" }, { "MainloopTimeoutState", "" }, { "FirstLogin", "" }, { "FirstRunThisInstall", "" },
             { "FoundOtherInstanceAtStartup", "" }, { "FatalMessage", "" },
+            { "WolfReleaseChannel", "" },   // [BETA CHANNEL 2026-11-12/] llappviewer.cpp wolf_write_client_info
         };
         std::string text = "WolfViewer crash: from static_debug_info.log\n";
         for (const auto& k : KEYS)
@@ -787,6 +789,8 @@ namespace
         {
             fields.emplace_back("crashed_viewer", one_line(info["ClientInfo"]["Name"].asString() + " " + info["ClientInfo"]["Version"].asString(), 120));
         }
+        // [BETA CHANNEL 2026-11-12] whether the crashed run was a beta (viewercrashreport.php also works it out from its own feeds)
+        if (info.has("WolfReleaseChannel")) fields.emplace_back("crashed_channel", one_line(info["WolfReleaseChannel"].asString(), 16));
         if (info.has("CurrentRegion")) fields.emplace_back("crashed_region", one_line(info["CurrentRegion"].asString(), 128));
         if (info.has("StartupState")) fields.emplace_back("startup_state", one_line(info["StartupState"].asString(), 64));
         if (info.has("GraphicsCard")) fields.emplace_back("crashed_gpu", one_line(info["GraphicsCard"].asString(), 200));
@@ -976,6 +980,9 @@ void WolfCrashReport::sendPendingOnce()
 
     std::vector<std::pair<std::string, std::string>> common;
     common.emplace_back("viewer", LLVersionInfo::instance().getChannelAndVersion());
+    // [BETA CHANNEL 2026-11-12] the viewer sending the report: its channel, and whether "Get beta versions" is ticked
+    common.emplace_back("release_channel", WolfUpdate::channelWord());
+    common.emplace_back("beta_optin", gSavedSettings.getBOOL("WolfViewerGetBetaVersions") ? "1" : "0");
     common.emplace_back("os", LLOSInfo::instance().getOSString());
     common.emplace_back("gpu", gGLManager.getRawGLString());
     {   // [VULKAN BACKEND 2026-11-08] the renderer now, and the Vulkan device of this PC

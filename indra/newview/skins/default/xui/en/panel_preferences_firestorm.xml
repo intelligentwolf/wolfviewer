@@ -13,6 +13,21 @@
 <panel.string name="BeamsOffLabel">
 	=== OFF ===
 </panel.string>
+	<!-- [BETA CHANNEL 2026-11-12] The sentence under "Get beta versions" on the Extras tab (wolfupdate.cpp
+	     refresh_beta_preference picks one). English only, like every WolfViewer addition: the other languages'
+	     files name neither the box nor these strings, so they fall back to this file. -->
+	<string name="wolf_beta_text_off">
+		Try new features early. Betas are tested but may have faults; you can switch back at any time.
+	</string>
+	<string name="wolf_beta_text_on">
+		Try new features early. Betas are tested but may have faults; you can switch back at any time. WolfViewer looks for a beta each time it starts.
+	</string>
+	<string name="wolf_beta_text_off_on_beta">
+		You are running a beta. You will stay on it until the next full release, which WolfViewer will offer as usual. To go back sooner, install the current release from the download page.
+	</string>
+	<string name="wolf_beta_text_packaged">
+		This copy was installed from the Linux package repository, which carries full releases only. To try betas, install the download from the website instead.
+	</string>
 	<string name="EmbeddedItemNotSet">
 		Not set
 	</string>
@@ -238,6 +253,31 @@
          left="10"
          width="500"
          tool_tip="Causes repeated keybinds (e.g. ctrl+shift+y) to alternate between the requested preset &amp; shared environment"/>
+        <!-- [BETA CHANNEL 2026-11-12] Paul: "a beta download and updater feed get beta versions". Off by default.
+             The text below is set by wolfupdate.cpp (WolfUpdate::setupPreferences) from the wolf_beta_text_* strings. -->
+        <check_box
+         top_pad="14"
+         control_name="WolfViewerGetBetaVersions"
+         follows="left|top"
+         layout="topleft"
+         height="16"
+         name="wolf_get_beta_versions"
+         label="Get beta versions"
+         left="10"
+         width="500"
+         tool_tip="When ticked, WolfViewer also offers beta versions as they come out. It never puts an older version back, and it takes effect the next time WolfViewer starts."/>
+        <text
+         type="string"
+         follows="left|top"
+         layout="topleft"
+         top_pad="4"
+         left="30"
+         height="44"
+         width="500"
+         word_wrap="true"
+         name="wolf_get_beta_versions_text">
+            Try new features early. Betas are tested but may have faults; you can switch back at any time.
+        </text>
     </panel>
 
 

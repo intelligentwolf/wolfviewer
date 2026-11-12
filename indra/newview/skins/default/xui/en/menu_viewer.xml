@@ -3753,6 +3753,13 @@
              name="wolf_support_url"
              parameter="WebLaunchExternalTarget,https://discord.gg/S3wj882aQH" />
         </menu_item_call>
+        <!-- [STAGED ROLLOUT 2026-11-12] Asking by hand is never staged: the current release is offered at once -->
+        <menu_item_call
+         label="Check for WolfViewer Updates"
+         name="WolfCheckForUpdates">
+            <menu_item_call.on_click
+             function="Wolf.CheckForUpdates" />
+        </menu_item_call>
 
         <!-- <WolfViewer 2026-09-12> Firestorm's Classes Schedule and Events Calendar are gone:
              they are another project's timetable and another project's shared calendar, and

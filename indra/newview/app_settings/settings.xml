@@ -20122,6 +20122,61 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>0</integer>
 		</map>
+		<key>WolfViewerRolloutSeed</key>
+		<map>
+			<key>Comment</key>
+			<string>A random number this copy of WolfViewer made once (0: not made yet). Mixed with a release number it gives this computer's place in the queue when a new release is offered to a share of residents first. Derived from nothing, sent nowhere; deleting it only changes the place in the queue.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerManifestRevisionSeen</key>
+		<map>
+			<key>Comment</key>
+			<string>The newest release revision whose signed update manifest this viewer has verified (with WolfViewerManifestSequenceSeen).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerManifestSequenceSeen</key>
+		<map>
+			<key>Comment</key>
+			<string>The highest sequence (signing time) verified for WolfViewerManifestRevisionSeen. An older signed manifest for the same release is not acted on, so a replayed one cannot undo a paused rollout.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>U32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerBetaCrashNoticeTime</key>
+		<map>
+			<key>Comment</key>
+			<string>The time of the newest crash of a beta build that the login screen has already spoken about (This beta version of WolfViewer closed unexpectedly last time), so each crash is mentioned once.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>U32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerBetaCrashNoticeMuted</key>
+		<map>
+			<key>Comment</key>
+			<string>The beta revision for which Don't show this again for this beta was ticked on the crash notice. The next beta starts afresh.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfViewerDryHulls</key>
 		<map>
 			<key>Comment</key>

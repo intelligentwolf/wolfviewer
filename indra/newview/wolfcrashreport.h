@@ -63,6 +63,13 @@ namespace WolfCrashReport
     /// (no handler ran) leaves none.
     bool runLeftCrashStack(const std::string& folder);
 
+    /// [BETA CRASH NOTICE 2026-11-12] The time of the newest crash stack (crash_stack.txt, written only by this file's
+    /// crash handler) that an earlier run of THIS build left after `after`, sent or not, within the 30 days a crash
+    /// folder is kept; 0 when there is none. "This build": the folder's static_debug_info.log names `revision` as
+    /// ClientInfo.BuildVersion; a crash too early to have recorded any version counts when it is newer than this
+    /// copy's program file. Reads only; deletes and marks nothing.
+    time_t newestCrashOfThisBuild(S32 revision, time_t after);
+
     /// From llstartup.cpp at STATE_STARTED: send any crash left by an earlier run. Only the first call does anything.
     void sendPendingOnce();
 

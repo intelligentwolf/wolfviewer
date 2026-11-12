@@ -1144,6 +1144,44 @@ bool WolfCrashReport::runLeftCrashStack(const std::string& folder)
     return file_time(stack) != 0;
 }
 
+time_t WolfCrashReport::newestCrashOfThisBuild(S32 revision, time_t after)
+{
+    // The folders checkDriverCrash looks at (sent or not), as it finds them.
+    const std::string logdir = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "");
+    const std::string sep = gDirUtilp->getDirDelimiter();
+    const std::string this_run = gDirUtilp->dumpDirExists() ? gDirUtilp->getBaseFileName(gDirUtilp->getDumpDir()) : std::string();
+    const time_t now = time(nullptr);
+    const time_t program_time = file_time(gDirUtilp->getExecutablePathAndName());
+    const std::string mine = std::to_string(revision);   // llappviewer.cpp wolf_write_client_info: BuildVersion = std::to_string(getBuild())
+    std::vector<std::string> names;
+    {
+        LLDirIterator it(logdir, "dump-*");
+        std::string name;
+        while (it.next(name)) names.push_back(name);
+    }
+    time_t newest = 0;
+    for (const std::string& name : names)
+    {
+        if (name == this_run || name.size() != 41 || name.compare(0, 5, "dump-") != 0 || !LLUUID::validate(name.substr(5))) continue;
+        const std::string dir = logdir + name;
+        const time_t when = file_time(dir + sep + STACK_FILE);
+        if (when == 0 || when <= after || when <= newest || now - when > KEEP_FOLDER_AGE) continue;
+        std::string build;
+        std::string raw;
+        if (read_file(dir + sep + "static_debug_info.log", 1024 * 1024, raw))
+        {
+            LLSD info;
+            std::istringstream in(raw);
+            if (LLSDSerialize::fromXML(info, in, false) > 0 && info.isMap() && info.has("ClientInfo"))
+            {
+                build = info["ClientInfo"]["BuildVersion"].asString();
+            }
+        }
+        if (build.empty() ? (program_time != 0 && when > program_time) : build == mine) newest = when;
+    }
+    return newest;
+}
+
 void WolfCrashReport::checkDriverCrash()
 {
     static bool done = false;

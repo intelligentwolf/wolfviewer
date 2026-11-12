@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [BETA CRASH NOTICE 2026-11-12] Paul: "if it crashes recommend them to take the normal version". A band across the
+     top of the login screen, built and placed by wolfupdate.cpp (beta_crash_notice_once) exactly where the update band
+     goes (panel_wolf_update_notice.xml, whose colours, fonts and edges it copies); the update band replaces it when a
+     newer build is on offer. Shown only on a beta build, once per crash, and it does not stop anyone logging in.
+     Only in the default skin and only in English on purpose: every skin and language falls back to this file.
+     Tab order: the tick, Keep testing the beta, Go back to the normal version. -->
+<panel
+  name="wolf_beta_crash_notice"
+  follows="left|top|right"
+  layout="topleft"
+  height="132"
+  width="1024"
+  background_visible="true"
+  background_opaque="true"
+  bg_opaque_color="WolfUpdateNoticeBackground"
+  bg_alpha_color="WolfUpdateNoticeBackground"
+  mouse_opaque="true">
+  <panel.string name="title_crashed">This beta version of WolfViewer closed unexpectedly last time.</panel.string>
+  <panel.string name="body_crashed_sent">Thank you for testing it. The report is sent to us when you next log in. If it keeps happening, we recommend going back to the normal version.</panel.string>
+  <panel.string name="body_crashed">Thank you for testing it. If it keeps happening, we recommend going back to the normal version.</panel.string>
+  <panel.string name="title_going_back">The download page has opened in your web browser.</panel.string>
+  <panel.string name="body_going_back">Install the current release from that page; your settings and saved logins are kept. On Windows, if the installer says a newer version is already on this computer, choose Yes. "Get beta versions" is now turned off.</panel.string>
+  <panel.string name="button_close">Close</panel.string>
+  <text
+    name="notice_title"
+    follows="left|top|right"
+    font="SansSerifHugeBold"
+    text_color="WolfUpdateNoticeTitle"
+    use_ellipses="true"
+    left="20"
+    top="10"
+    height="24"
+    width="984" />
+  <text
+    name="notice_body"
+    follows="left|top|right"
+    font="SansSerifLarge"
+    text_color="WolfUpdateNoticeText"
+    word_wrap="true"
+    left="20"
+    top="38"
+    height="62"
+    width="520" />
+  <check_box
+    name="mute_check"
+    follows="left|top"
+    font="SansSerifLarge"
+    text_enabled_color="WolfUpdateNoticeText"
+    label="Don't show this again for this beta"
+    tool_tip="You will still be told if a later beta closes unexpectedly."
+    left="20"
+    top="102"
+    height="20"
+    width="420" />
+  <button
+    name="keep_btn"
+    follows="right|top"
+    font="SansSerifLarge"
+    label="Keep testing the beta"
+    left="556"
+    top="42"
+    height="48"
+    width="200" />
+  <button
+    name="go_back_btn"
+    follows="right|top"
+    font="SansSerifLarge"
+    label="Go back to the normal version"
+    tool_tip="Turns off Get beta versions and opens the download page in your web browser. Nothing is installed until you install it."
+    left_pad="12"
+    top="42"
+    height="48"
+    width="244" />
+</panel>

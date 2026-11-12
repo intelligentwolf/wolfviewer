@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -66,6 +67,7 @@ extern char** environ;
 #include "wolfgrid.h"
 #include "wolfterrainpaint.h"
 #include "wolfupdatechannel.h"
+#include "wolfcrashreport.h"
 #include "wolfvkbridge.h"
 
 extern std::string gWindowTitle;   // llappviewer.cpp
@@ -112,6 +114,13 @@ namespace
     /// The release revision in the last release manifest that verified: this build is a beta while its own
     /// revision is above it (wolfupdatechannel.h isBetaBuild). Labels only, never an update decision.
     const char* const STABLE_SEEN_SETTING = "WolfViewerStableRevisionSeen";
+    // [STAGED ROLLOUT 2026-11-12] wolfupdatechannel.h Rollout / rolloutBucket / sequenceAcceptable
+    const char* const SEED_SETTING = "WolfViewerRolloutSeed";
+    const char* const MANIFEST_REVISION_SETTING = "WolfViewerManifestRevisionSeen";
+    const char* const MANIFEST_SEQUENCE_SETTING = "WolfViewerManifestSequenceSeen";
+    // [BETA CRASH NOTICE 2026-11-12] wolfupdatechannel.h betaCrashNotice
+    const char* const CRASH_SPOKEN_SETTING = "WolfViewerBetaCrashNoticeTime";
+    const char* const CRASH_MUTED_SETTING = "WolfViewerBetaCrashNoticeMuted";
     /// What the title bar, the login screen and About add to the release name of a beta.
     const char* const BETA_SUFFIX = " (Beta)";
 
@@ -159,6 +168,12 @@ namespace
     /// [BETA CHANNEL 2026-11-12] What the login screen shows for a build with no release name (fspanellogin.cpp
     /// passes it to releaseLabel), kept so refresh_channel_labels can write that text again.
     std::string sLoginFallback;
+    // [STAGED ROLLOUT 2026-11-12] Help > Check for WolfViewer Updates
+    bool sCheckRunning = false;      // a check coroutine is between its start and its answer
+    bool sByHand = false;            // the check about to run was asked for by hand: not staged, skips forgotten, always answers
+    // [BETA CRASH NOTICE 2026-11-12] the band "This beta version of WolfViewer closed unexpectedly last time"
+    LLHandle<LLPanel> sCrashNotice;
+    time_t sCrashNoticeTime = 0;     // the crash it is about (stored as spoken about once the resident answers)
 
     // ── the band on the login screen ─────────────────────────────────────────────────────────
     enum class Stage { OFFER, DOWNLOADING, INSTALLING, MAC_OPENED };
@@ -584,6 +599,16 @@ void WolfUpdate::checkOnce()
 }
 
 // static
+void WolfUpdate::checkByHand()
+{
+    // Help > Check for WolfViewer Updates. Works with WolfViewerCheckForUpdates off (the resident is asking now).
+    if (sCheckRunning) return;   // the answer of the check under way is about to arrive
+    sChecked = true;
+    sByHand = true;
+    LLCoros::instance().launch("WolfUpdate", []() { WolfUpdate::checkCoro(); });
+}
+
+// static
 void WolfUpdate::shutdown()
 {
     std::lock_guard<std::mutex> lock(sThreadMutex);
@@ -644,8 +669,72 @@ namespace
         e.mSha256 = file["sha256"].asString();
         e.mSize = (U64)file["size"].asReal();
         LLStringUtil::toLower(e.mSha256);
+        // [STAGED ROLLOUT 2026-11-12] "sequence" and "rollout" (wolfupdatechannel.h Rollout). asReal: UTC seconds pass S32 in 2038.
+        e.mSequence = (long long)m["sequence"].asReal();
+        if (m.has("rollout"))
+        {
+            const LLSD r = m["rollout"];
+            e.mRollout.mPresent = true;
+            if (!r.isMap() || !r["steps"].isArray())
+            {
+                e.mRollout.mMalformed = true;
+            }
+            else
+            {
+                e.mRollout.mPaused = r["paused"].asBoolean();
+                e.mRollout.mStarted = (long long)r["started"].asReal();
+                for (LLSD::array_const_iterator it = r["steps"].beginArray(); it != r["steps"].endArray(); ++it)
+                {
+                    if (!it->isArray() || it->size() != 2) { e.mRollout.mMalformed = true; break; }
+                    e.mRollout.mSteps.emplace_back((int)(*it)[0].asInteger(), (int)(*it)[1].asInteger());
+                }
+            }
+        }
         e.mVerified = true;
         return e;
+    }
+
+    /// [STAGED ROLLOUT 2026-11-12] This install's random seed for rolloutBucket: made once with the system's random
+    /// source (not from the computer, the account or the avatar), kept in the viewer's settings, sent nowhere.
+    U32 rollout_seed()
+    {
+        S32 seed = gSavedSettings.getS32(SEED_SETTING);
+        if (seed <= 0)
+        {
+            std::random_device rd;
+            seed = (S32)(rd() & 0x7fffffffu);
+            if (seed == 0) seed = 1;
+            gSavedSettings.setS32(SEED_SETTING, seed);
+        }
+        return (U32)seed;
+    }
+
+    /// The Windows / Linux / macOS "it is downloaded, install it?" question (moved here unchanged from downloadCoro so
+    /// that a check asked for by hand can show it again).
+    void notify_ready()
+    {
+#if LL_DARWIN
+        LLNotificationsUtil::add("WolfUpdateReadyMac", release_args(), LLSD(), [](const LLSD& n, const LLSD& r)
+        {
+            if (LLNotificationsUtil::getSelectedOption(n, r) == 0) WolfUpdate::startInstall();
+            else on_ready(n, r);
+        });
+#else
+        LLNotificationsUtil::add("WolfUpdateReady", release_args(), LLSD(), [](const LLSD& n, const LLSD& r)
+        {
+            if (LLNotificationsUtil::getSelectedOption(n, r) == 0) WolfUpdate::startInstall();
+            else on_ready(n, r);
+        });
+#endif
+    }
+
+    /// A check asked for by hand could not get an answer: say so (it must always say something).
+    void notify_check_failed()
+    {
+        LLNotificationsUtil::add("WolfUpdateCheckFailed", LLSD(), LLSD(), [](const LLSD& n, const LLSD& r)
+        {
+            if (LLNotificationsUtil::getSelectedOption(n, r) == 1) LLWeb::loadURLExternal(DOWNLOAD_PAGE_URL);
+        });
     }
 
     /// [BETA CHANNEL 2026-11-12] The title bar and the login screen's release text follow isBetaBuild(), which
@@ -826,23 +915,15 @@ namespace
         WolfUpdate::startDownload();
     }
 
-    /// The band, on the login panel, once per release until Not now. Not used once logged in.
-    void show_login_notice()
+    /// A band across the top of the login panel, directly under the menu strip, built from `xml`; nullptr when there
+    /// is no login panel. (show_login_notice's own placement code, 2026-11-05, shared with the beta crash band.)
+    LLPanel* add_login_band(const char* xml)
     {
-        if (!sHaveOffer || !at_login_screen()) return;
-        if (!sNotice.isDead())
-        {
-            refresh_notice();
-            return;
-        }
         LLPanel* login = sLoginPanel.get();
-        if (!login) return;
-        if (gSavedSettings.getS32(skip_setting()) >= sOffer.mRevision) return;   // Not now, this run
-
+        if (!login) return nullptr;
         // Built with no parent and added below, as llconversationview.cpp:214 builds its item panel.
-        LLPanel* p = LLUICtrlFactory::getInstance()->createFromFile<LLPanel>(
-            "panel_wolf_update_notice.xml", nullptr, LLPanel::child_registry_t::instance());
-        if (!p) return;
+        LLPanel* p = LLUICtrlFactory::getInstance()->createFromFile<LLPanel>(xml, nullptr, LLPanel::child_registry_t::instance());
+        if (!p) return nullptr;
         // Directly under the menu strip: the top of the login page (login_html), which every login
         // panel has (panel_fs_login.xml and panel_fs_nui_login.xml, all skins, top="18"). Full width,
         // following the top, left and right edges, so a resized window keeps it in place.
@@ -856,9 +937,108 @@ namespace
         const S32 height = p->getRect().getHeight();
         p->reshape(login->getRect().getWidth(), height);
         p->setOrigin(0, top - height);
+        login->addChild(p);   // in front of the login page, so it draws over it and gets the clicks
+        return p;
+    }
+
+    // ── [BETA CRASH NOTICE 2026-11-12] "This beta version of WolfViewer closed unexpectedly last time" ──────────
+    /// The resident has answered: that crash has been spoken about; the tick mutes the notice for this beta.
+    void crash_notice_answered()
+    {
+        if (sCrashNoticeTime > 0) gSavedSettings.setU32(CRASH_SPOKEN_SETTING, (U32)sCrashNoticeTime);
+        if (LLPanel* p = sCrashNotice.get())
+        {
+            if (p->getChild<LLCheckBoxCtrl>("mute_check")->get()) gSavedSettings.setS32(CRASH_MUTED_SETTING, WolfUpdate::currentRevision());
+        }
+    }
+
+    void on_crash_keep()
+    {
+        crash_notice_answered();
+        // Hidden, not deleted: this runs inside the band's own button. It goes with the login panel.
+        if (LLPanel* p = sCrashNotice.get()) p->setVisible(false);
+    }
+
+    /// "Go back to the normal version": the ONE thing it does to the program is untick "Get beta versions". The release
+    /// is an OLDER revision than this beta and the updater never installs downwards, by design and without exception
+    /// (wolfupdatechannel.h choose), so the going back is the resident's own install from the download page, which this
+    /// opens in their browser; the band then says what to do there.
+    void on_crash_go_back()
+    {
+        crash_notice_answered();
+        gSavedSettings.setBOOL(BETA_SETTING, false);
+        LLWeb::loadURLExternal(DOWNLOAD_PAGE_URL);
+        LL_INFOS("WolfUpdate") << "beta crash notice: Get beta versions turned off, download page opened" << LL_ENDL;
+        if (LLPanel* p = sCrashNotice.get())
+        {
+            p->getChild<LLTextBox>("notice_title")->setText(p->getString("title_going_back"));
+            p->getChild<LLTextBox>("notice_body")->setText(p->getString("body_going_back"));
+            p->getChild<LLButton>("go_back_btn")->setVisible(false);
+            p->getChild<LLCheckBoxCtrl>("mute_check")->setVisible(false);
+            p->getChild<LLButton>("keep_btn")->setLabel(p->getString("button_close"));
+        }
+    }
+
+    /// From loginScreenShown, once per run: decide (wolfupdatechannel.h betaCrashNotice) and show the band.
+    void beta_crash_notice_once()
+    {
+        static bool decided = false;
+        if (decided || !sLoginPanel.get()) return;
+        decided = true;
+        const bool is_beta = WolfUpdate::isBetaBuild();
+        if (!is_beta) return;   // never on a release build (nor before any release manifest has been verified)
+        LLAppViewer* app = LLAppViewer::instance();
+        const bool second = !app || app->isSecondInstance();
+        const time_t spoken = (time_t)gSavedSettings.getU32(CRASH_SPOKEN_SETTING);
+        const time_t newest = second ? 0 : WolfCrashReport::newestCrashOfThisBuild(WolfUpdate::currentRevision(), spoken);
+        // W104's Vulkan notices about a crash of the last run (wolfvkbridge.cpp rememberNotice): that crash has its
+        // explanation, and WolfViewer has already acted on it; this band is not stacked on top.
+        const std::string& vk = WolfVkBridge::pendingNoticeName();
+        const bool vulkan_notice = vk == "WolfVulkanCrashedTwice" || vk == "WolfVulkanFellBackLastStart";
+        switch (WolfUpdateChannel::betaCrashNotice(is_beta, second, (long long)newest, (long long)spoken,
+                                                   gSavedSettings.getS32(CRASH_MUTED_SETTING), WolfUpdate::currentRevision(), vulkan_notice))
+        {
+        case WolfUpdateChannel::CrashNotice::NO:
+            return;
+        case WolfUpdateChannel::CrashNotice::MARK:
+            gSavedSettings.setU32(CRASH_SPOKEN_SETTING, (U32)newest);
+            LL_INFOS("WolfUpdate") << "beta crash notice not shown (" << (vulkan_notice ? "a Vulkan notice covers that crash" : "turned off for this beta") << ")" << LL_ENDL;
+            return;
+        case WolfUpdateChannel::CrashNotice::SHOW:
+            break;
+        }
+        if (!sNotice.isDead()) return;   // the update band is already up: it is the better advice (not marked; may show next time)
+        LLPanel* p = add_login_band("panel_wolf_beta_crash_notice.xml");
+        if (!p) return;
+        sCrashNotice = p->getHandle();
+        sCrashNoticeTime = newest;
+        p->getChild<LLTextBox>("notice_title")->setText(p->getString("title_crashed"));
+        p->getChild<LLTextBox>("notice_body")->setText(p->getString(gSavedSettings.getBOOL("WolfCrashReportsAuto") ? "body_crashed_sent" : "body_crashed"));
+        p->getChild<LLButton>("keep_btn")->setClickedCallback(boost::bind(&on_crash_keep));
+        p->getChild<LLButton>("go_back_btn")->setClickedCallback(boost::bind(&on_crash_go_back));
+        LL_INFOS("WolfUpdate") << "beta crash notice shown on the login screen" << LL_ENDL;
+    }
+
+    /// The band, on the login panel, once per release until Not now. Not used once logged in.
+    void show_login_notice()
+    {
+        if (!sHaveOffer || !at_login_screen()) return;
+        if (!sNotice.isDead())
+        {
+            refresh_notice();
+            return;
+        }
+        LLPanel* login = sLoginPanel.get();
+        if (!login) return;
+        if (gSavedSettings.getS32(skip_setting()) >= sOffer.mRevision) return;   // Not now, this run
+
+        LLPanel* p = add_login_band("panel_wolf_update_notice.xml");
+        if (!p) return;
+        // [BETA CRASH NOTICE 2026-11-12] A newer build is the better advice: the update band takes the crash band's
+        // place. The crash is not marked as spoken about, so the crash band can return if this offer is declined.
+        if (LLPanel* crash = sCrashNotice.get()) crash->setVisible(false);
         p->getChild<LLButton>("update_btn")->setClickedCallback(boost::bind(&on_notice_button));
         p->getChild<LLButton>("not_now_btn")->setClickedCallback(boost::bind(&on_notice_not_now));
-        login->addChild(p);   // in front of the login page, so it draws over it and gets the clicks
         sNotice = p->getHandle();
         sStage = Stage::OFFER;
 
@@ -919,6 +1099,7 @@ void WolfUpdate::loginScreenShown(LLPanel* login_panel)
     if (login_panel) sLoginPanel = login_panel->getHandle();
     checkOnce();
     show_login_notice();   // no-op until the check has answered; checkCoro calls it then
+    beta_crash_notice_once();   // [BETA CRASH NOTICE 2026-11-12] before the check answers; an update band replaces it
 }
 
 // static
@@ -940,9 +1121,36 @@ void WolfUpdate::loggedIn()
 void WolfUpdate::checkCoro()
 {
     using namespace WolfUpdateChannel;
+    // [STAGED ROLLOUT 2026-11-12] one check at a time; asked by hand = not staged, earlier "Not now" forgotten, always answers
+    struct Running { Running() { sCheckRunning = true; } ~Running() { sCheckRunning = false; } } running;
+    const bool by_hand = sByHand;
+    sByHand = false;
     // The release feed, exactly as W104 asked for it: the same two files, first, whatever the beta setting.
     const Entry stable = verified_manifest(MANIFEST_URL, SIGNATURE_URL, "latest.json");
-    if (!stable.mVerified) return;
+    if (!stable.mVerified)
+    {
+        if (by_hand) notify_check_failed();
+        return;
+    }
+    // [STAGED ROLLOUT 2026-11-12] An older signed state of the SAME release is not acted on (a replay must not undo a
+    // pause); a newer state, or a higher release, is remembered (wolfupdatechannel.h sequenceAcceptable).
+    {
+        const S32 seen_revision = gSavedSettings.getS32(MANIFEST_REVISION_SETTING);
+        const long long seen_sequence = (long long)gSavedSettings.getU32(MANIFEST_SEQUENCE_SETTING);
+        if (!sequenceAcceptable(stable.mRevision, stable.mSequence, seen_revision, seen_sequence))
+        {
+            LL_WARNS("WolfUpdate") << "update check: latest.json for w" << stable.mRevision << " has sequence " << stable.mSequence
+                                   << ", older than the " << seen_sequence << " already seen for that release; ignored" << LL_ENDL;
+            if (by_hand) notify_check_failed();
+            return;
+        }
+        if (channelMatches(stable, Feed::STABLE) && stable.mSequence >= 0 && stable.mSequence <= 0xffffffffLL
+            && (stable.mRevision > seen_revision || (stable.mRevision == seen_revision && stable.mSequence > seen_sequence)))
+        {
+            gSavedSettings.setS32(MANIFEST_REVISION_SETTING, stable.mRevision);
+            gSavedSettings.setU32(MANIFEST_SEQUENCE_SETTING, (U32)stable.mSequence);
+        }
+    }
     const S32 mine = currentRevision();
     LL_INFOS("WolfUpdate") << "this build is w" << mine << ", latest release is w" << stable.mRevision
                            << " \"" << stable.mName << "\" (" << platform_key() << ")" << LL_ENDL;
@@ -968,21 +1176,46 @@ void WolfUpdate::checkCoro()
         }
     }
 
-    const Choice choice = choose(mine, gSavedSettings.getS32(SKIPPED_SETTING), gSavedSettings.getS32(SKIPPED_BETA_SETTING),
-                                 stable, follow_beta ? &beta : nullptr);
+    // [STAGED ROLLOUT 2026-11-12] A release is offered by itself only to this install's share (the signed "rollout").
+    // Not staged: a resident who ticked "Get beta versions" (they are on those files already, or ahead), and a check
+    // asked for by hand. A paused release is offered to nobody.
+    Staging staging;
+    staging.mNow = (long long)time(nullptr);
+    staging.mBucket = rolloutBucket(rollout_seed(), stable.mRevision);
+    staging.mBypass = by_hand || gSavedSettings.getBOOL(BETA_SETTING);
+    if (stable.mRollout.mPresent)
+    {
+        LL_INFOS("WolfUpdate") << "release rollout: " << rolloutPercent(stable.mRollout, staging.mNow) << "% now"
+                               << (stable.mRollout.mPaused ? " (paused)" : "") << "; this install's place is " << staging.mBucket
+                               << (staging.mBypass ? " (not staged: asked by hand or beta versions on)" : "") << LL_ENDL;
+    }
+    const Choice choice = choose(mine, by_hand ? 0 : gSavedSettings.getS32(SKIPPED_SETTING),
+                                 by_hand ? 0 : gSavedSettings.getS32(SKIPPED_BETA_SETTING),
+                                 stable, follow_beta ? &beta : nullptr, &staging);
     switch (choice.mVerdict)
     {
     case Verdict::REFUSED:
         LL_WARNS("WolfUpdate") << "update check: latest.json is not a release manifest (channel \"" << stable.mChannel
                                << "\"); ignored" << LL_ENDL;
+        if (by_hand) notify_check_failed();
         return;
     case Verdict::UP_TO_DATE:
         clean_updates("");   // anything downloaded before is this build or older
+        if (by_hand) LLNotificationsUtil::add("WolfUpdateNone");
         return;
     case Verdict::UNUSABLE:
         LL_WARNS("WolfUpdate") << "update check: latest.json entry for " << platform_key() << " is not usable" << LL_ENDL;
+        if (by_hand) notify_check_failed();
         return;
     case Verdict::SKIPPED:
+        return;
+    case Verdict::PAUSED:
+        LL_INFOS("WolfUpdate") << "w" << stable.mRevision << " is paused: not offered" << LL_ENDL;
+        if (by_hand) LLNotificationsUtil::add("WolfUpdatePaused");
+        return;
+    case Verdict::HELD:
+        LL_INFOS("WolfUpdate") << "w" << stable.mRevision << " is not yet offered to this install's share; Help > Check for "
+                                  "WolfViewer Updates offers it at once" << LL_ENDL;
         return;
     case Verdict::OFFER:
         break;
@@ -996,9 +1229,26 @@ void WolfUpdate::checkCoro()
     o.mSha256 = e.mSha256;
     o.mSize = e.mSize;
     o.mBeta = from_beta;
+    if (by_hand && sHaveOffer && sOffer.mRevision == o.mRevision && (sBusy || !sReadyPath.empty()))
+    {
+        // Asked by hand while this very release is already downloading or downloaded: say where it stands.
+        if (sBusy) LLNotificationsUtil::add("WolfUpdateDownloading", release_args());
+        else notify_ready();
+        return;
+    }
     sOffer = o;
     sKind = install_kind(sKindWhere);
     sHaveOffer = true;
+    if (by_hand)
+    {
+        // Asked by hand: an earlier "Not now" / "told once" for this release no longer applies, and the in-world
+        // notice may be shown again this run.
+        if (gSavedSettings.getS32(skip_setting()) >= o.mRevision) gSavedSettings.setS32(skip_setting(), o.mRevision - 1);
+        if (gSavedSettings.getS32(told_setting()) >= o.mRevision) gSavedSettings.setS32(told_setting(), o.mRevision - 1);
+        sInWorldDone = false;
+        sActedAtLogin = false;
+        if (LLPanel* band = sNotice.get()) band->setVisible(true);
+    }
     LL_INFOS("WolfUpdate") << "offering w" << o.mRevision << (from_beta ? " from the beta feed" : " from the release feed") << LL_ENDL;
     // Where the resident is now decides how they are told: still on the login screen, the band;
     // already in-world (a quick or automatic login beat this answer), the in-world notices.
@@ -1072,19 +1322,7 @@ void WolfUpdate::downloadCoro()
         // the progress screen if a login is under way) offers Update now again.
         notice_back_to_offer();
     }
-#if LL_DARWIN
-    LLNotificationsUtil::add("WolfUpdateReadyMac", release_args(), LLSD(), [](const LLSD& n, const LLSD& r)
-    {
-        if (LLNotificationsUtil::getSelectedOption(n, r) == 0) WolfUpdate::startInstall();
-        else on_ready(n, r);
-    });
-#else
-    LLNotificationsUtil::add("WolfUpdateReady", release_args(), LLSD(), [](const LLSD& n, const LLSD& r)
-    {
-        if (LLNotificationsUtil::getSelectedOption(n, r) == 0) WolfUpdate::startInstall();
-        else on_ready(n, r);
-    });
-#endif
+    notify_ready();
 }
 
 // static

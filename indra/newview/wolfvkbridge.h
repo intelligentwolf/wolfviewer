@@ -101,6 +101,10 @@ namespace WolfVkBridge
     std::string statusLine();
     // The reason the last Vulkan start failed (empty when none).
     const std::string& lastError();
+    // [BETA CRASH NOTICE 2026-11-12] The fall-back notice waiting for the login screen ("WolfVulkanCrashedTwice", ...),
+    // empty when none or once onLoginScreenShown has shown it. Read-only: wolfupdate.cpp asks so that its "this beta
+    // closed unexpectedly" band is not stacked on a Vulkan notice about the same crash. Nothing here depends on it.
+    const std::string& pendingNoticeName();
     // Frame timing for the floater/log: milliseconds spent in present() averaged over the last second.
     F32 presentMillis();
     // How many batches the Vulkan pass drew last frame, and the validation layer's message count this session.

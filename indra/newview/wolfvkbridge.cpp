@@ -2417,6 +2417,11 @@ const std::string& lastError()
     return sLastError;
 }
 
+const std::string& pendingNoticeName()   // [BETA CRASH NOTICE 2026-11-12] see wolfvkbridge.h
+{
+    return sPendingNotice;
+}
+
 F32 presentMillis()
 {
     return sPresentMillis;

@@ -7086,6 +7086,38 @@ Wolf Chat - [COUNT] new messages in [WHERE]. The newest, from [FROM]:
 
   <!-- [UPDATER 2026-10-02] wolfupdate.cpp. One release offered per run; "Skip this version"
        stores WolfViewerUpdateSkipped. Failures are alertmodal and stay until dismissed. -->
+  <!-- [STAGED ROLLOUT 2026-11-12] Answers to Help > Check for WolfViewer Updates (wolfupdate.cpp checkByHand):
+       it always says something. -->
+  <notification
+   icon="notifytip.tga"
+   name="WolfUpdateNone"
+   type="notifytip">
+You have the newest WolfViewer.
+  </notification>
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdatePaused"
+   type="alertmodal">
+A newer WolfViewer has been published, but it is paused while we look into a problem with it.
+
+You do not need to do anything. WolfViewer will offer it when it is ready.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateCheckFailed"
+   type="alertmodal">
+WolfViewer could not check for updates just now. Please check your internet connection and try again in a few minutes.
+
+You can also get the current version from the download page.
+    <usetemplate
+     name="okcancelbuttons"
+     yestext="OK"
+     notext="Open download page"/>
+  </notification>
+
   <notification
    icon="alertmodal.tga"
    name="WolfUpdateAvailable"

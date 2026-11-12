@@ -330,9 +330,64 @@ void WolfSplashRenderer::init(const WolfSplashConfig& cfg, int w, int h, float s
             }
     }
 
-    // ---- type ----
+    // ---- the Wolf Territories Grid badge, top left (Paul 2026-11-12: the viewers use the new grid logo) ----
+    // Two JPEGs beside the photograph (this file decodes JPEG only): wolfsplash_badge.jpg is the badge's colour
+    // premultiplied over black, wolfsplash_badge_alpha.jpg its coverage. Built from the logo set's
+    // 1-logo/wolf-territories-grid-logo-on-dark-2048.png at 330 px tall: drawn 104 px tall x the display scale, so it
+    // is scaled down up to 3x (312 px) - each screen pixel averages the source pixels under it (a box filter, so the
+    // fine lettering does not alias at 1x) - and only stretched above that. Missing files: the old "WOLF TERRITORIES"
+    // line is drawn instead, as before.
     const float L = 36.f * s;
-    drawText(mStatic, mTitle, 11.f * s, L, 46.f * s, "WOLF TERRITORIES", GOLD, GOLD, 0.80f, 3.2f * s, false);
+    bool drewBadge = false;
+    {
+        const size_t slash = cfg.art_path.find_last_of("/\\");
+        const std::string dir = slash == std::string::npos ? std::string() : cfg.art_path.substr(0, slash + 1);
+        std::vector<uint8_t> brgb, bmask;
+        int bw = 0, bh = 0, mw = 0, mh = 0;
+        if (!dir.empty() && loadJpeg(dir + "wolfsplash_badge.jpg", brgb, bw, bh)
+            && loadJpeg(dir + "wolfsplash_badge_alpha.jpg", bmask, mw, mh) && mw == bw && mh == bh)
+        {
+            const float dh = 104.f * s;                       // ends 11 px (x scale) above the name's capitals
+            const float dw = dh * float(bw) / float(bh);
+            const float ox = L - 4.f * s, oy = 20.f * s;      // the badge's own transparent edge sits inside L
+            const float k = float(bh) / dh;                   // source pixels per destination pixel
+            for (int y = std::max(0, int(oy)); y < std::min(mH, int(std::ceil(oy + dh))); ++y)
+            {
+                // the source rows under this screen row (at least one: above 3x the source is stretched)
+                const int sy0 = std::min(bh - 1, std::max(0, int((y - oy) * k)));
+                const int sy1 = std::min(bh, std::max(sy0 + 1, int(std::ceil((y + 1 - oy) * k))));
+                for (int x = std::max(0, int(ox)); x < std::min(mW, int(std::ceil(ox + dw))); ++x)
+                {
+                    const int sx0 = std::min(bw - 1, std::max(0, int((x - ox) * k)));
+                    const int sx1 = std::min(bw, std::max(sx0 + 1, int(std::ceil((x + 1 - ox) * k))));
+                    // both images come out of loadJpeg as RGB (out_color_space JCS_RGB): 3 bytes a pixel
+                    float sum[4] = { 0.f, 0.f, 0.f, 0.f };
+                    for (int sy = sy0; sy < sy1; ++sy)
+                        for (int sx = sx0; sx < sx1; ++sx)
+                        {
+                            const size_t i = (size_t(sy) * bw + sx) * 3;
+                            sum[0] += brgb[i]; sum[1] += brgb[i + 1]; sum[2] += brgb[i + 2]; sum[3] += bmask[i];
+                        }
+                    const float n = float((sy1 - sy0) * (sx1 - sx0));
+                    const float a = clamp01(sum[3] / n / 255.f);
+                    if (a <= 0.004f) continue;
+                    // premultiplied source over the frame: out = src + dst * (1 - a)
+                    uint32_t& d = mStatic[size_t(y) * mW + x];
+                    const float ia = 1.f - a;
+                    const float r = std::min(255.f, sum[0] / n + float((d >> 16) & 255) * ia);
+                    const float g = std::min(255.f, sum[1] / n + float((d >> 8) & 255) * ia);
+                    const float b = std::min(255.f, sum[2] / n + float(d & 255) * ia);
+                    const float al = std::min(255.f, 255.f * a + float(d >> 24) * ia);
+                    d = (uint32_t(al + 0.5f) << 24) | (uint32_t(r + 0.5f) << 16) | (uint32_t(g + 0.5f) << 8) | uint32_t(b + 0.5f);
+                }
+            }
+            drewBadge = true;
+        }
+    }
+
+    // ---- type ----
+    if (!drewBadge)
+        drawText(mStatic, mTitle, 11.f * s, L, 46.f * s, "WOLF TERRITORIES", GOLD, GOLD, 0.80f, 3.2f * s, false);
     drawText(mStatic, mTitle, 42.f * s, L - 2.f * s, 168.f * s, cfg.title.empty() ? std::string("WOLFVIEWER") : cfg.title,
              GOLD_TOP, GOLD_BOTTOM, 1.f, 4.f * s, true);
     // ornament: a fine rule with a diamond, under the name
@@ -356,6 +411,9 @@ void WolfSplashRenderer::init(const WolfSplashConfig& cfg, int w, int h, float s
     drawText(mStatic, mItalic, 24.f * s, L, 222.f * s, cfg.subtitle.empty() ? std::string("Local build") : cfg.subtitle,
              CREAM, CREAM, 1.f, 0.4f * s, true);
     drawText(mStatic, mUI, 11.5f * s, L, 246.f * s, cfg.version, MUTED, MUTED, 0.9f, 0.6f * s, false);
+    // Paul 2026-11-12: "In Memory of Luna Lunaria" on the splash - the same words as WolfStorm's loading screen
+    // (wolfstorm/index.php .splash-memorial; css/login.css: small, italic, muted grey)
+    drawText(mStatic, mItalic, 13.f * s, L, 276.f * s, "In Memory of Luna Lunaria", MUTED, MUTED, 0.95f, 0.3f * s, true);
 
     // ---- the window's rounded corners (coverage, applied to every frame) ----
     mMask.clear();

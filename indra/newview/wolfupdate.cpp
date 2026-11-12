@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <memory>
 #include <mutex>
+#include <chrono>
 #include <random>
 #include <thread>
 #include <vector>
@@ -116,9 +117,12 @@ namespace
     const char* const SEED_SETTING = "WolfViewerRolloutSeed";
     const char* const MANIFEST_REVISION_SETTING = "WolfViewerManifestRevisionSeen";
     const char* const MANIFEST_SEQUENCE_SETTING = "WolfViewerManifestSequenceSeen";
+    const char* const ROLLOUT_SEEN_REVISION_SETTING = "WolfViewerRolloutFirstSeenRevision";
+    const char* const ROLLOUT_SEEN_TIME_SETTING = "WolfViewerRolloutFirstSeenTime";
     // [BETA CRASH NOTICE 2026-11-12] wolfupdatechannel.h betaCrashNotice
     const char* const CRASH_SPOKEN_SETTING = "WolfViewerBetaCrashNoticeTime";
     const char* const CRASH_MUTED_SETTING = "WolfViewerBetaCrashNoticeMuted";
+    const F32 CRASH_BAND_WAIT_S = 8.f;   // how long the crash band waits for the update check's answer
     /// [review 2026-11-12] The highest sequence verified on the beta feed (wolfupdatechannel.h feedSequenceAcceptable).
     const char* const BETA_SEQUENCE_SETTING = "WolfViewerBetaSequenceSeen";
     /// [review 2026-11-12] Preferences > Privacy "Tell Wolf Territories which WolfViewer version I use" (on by default):
@@ -174,6 +178,8 @@ namespace
     // [STAGED ROLLOUT 2026-11-12] Help > Check for WolfViewer Updates
     bool sCheckRunning = false;      // a check coroutine is between its start and its answer
     bool sByHand = false;            // the check about to run was asked for by hand: not staged, skips forgotten, always answers
+    bool sManualPending = false;     // asked by hand while a check was already under way: a by-hand check follows it at once
+    bool sCheckAnswered = false;     // a check has run to its answer (or there will be none): the beta crash band waits for it
     // [BETA CRASH NOTICE 2026-11-12] the band "This beta version of WolfViewer closed unexpectedly last time"
     LLHandle<LLPanel> sCrashNotice;
     time_t sCrashNoticeTime = 0;     // the crash it is about (stored as spoken about once the resident answers)
@@ -596,7 +602,14 @@ void WolfUpdate::checkOnce()
 void WolfUpdate::checkByHand()
 {
     // Help > Check for WolfViewer Updates. Works with WolfViewerCheckForUpdates off (the resident is asking now).
-    if (sCheckRunning) return;   // the answer of the check under way is about to arrive
+    if (sCheckRunning)
+    {
+        // A check is under way (most likely the automatic one, a second after the login screen appeared). A click
+        // must always be answered: say so now, and run a by-hand check the moment that one ends (checkCoro's Running).
+        if (!sManualPending) LLNotificationsUtil::add("WolfUpdateChecking");
+        sManualPending = true;
+        return;
+    }
     sChecked = true;
     sByHand = true;
     LLCoros::instance().launch("WolfUpdate", []() { WolfUpdate::checkCoro(); });
@@ -649,8 +662,17 @@ namespace
         S32 seed = gSavedSettings.getS32(SEED_SETTING);
         if (seed <= 0)
         {
+            // std::random_device is the system's random source in the libraries CI builds with (MSVC: the CRT's
+            // rand_s / RtlGenRandom; libstdc++ and libc++: getrandom / /dev/urandom / arc4random). The standard does not
+            // promise that, so two things no two computers share are mixed in: the clock to its finest tick and where
+            // this run's stack happens to be. Even a random_device that returned the same number everywhere would then
+            // still give installs different seeds.
             std::random_device rd;
-            seed = (S32)(rd() & 0x7fffffffu);
+            U32 mixed = (U32)rd();
+            const U64 ticks = (U64)std::chrono::high_resolution_clock::now().time_since_epoch().count();
+            mixed ^= WolfUpdateChannel::fmix32((U32)(ticks ^ (ticks >> 32)));
+            mixed ^= WolfUpdateChannel::fmix32((U32)((uintptr_t)&rd >> 4) + (U32)((U64)(uintptr_t)&rd >> 32));
+            seed = (S32)(WolfUpdateChannel::fmix32(mixed) & 0x7fffffffu);
             if (seed == 0) seed = 1;
             gSavedSettings.setS32(SEED_SETTING, seed);
         }
@@ -934,7 +956,7 @@ namespace
     void beta_crash_notice_once()
     {
         static bool decided = false;
-        if (decided || !sLoginPanel.get()) return;
+        if (decided || !sLoginPanel.get() || !at_login_screen()) return;
         decided = true;
         const bool is_beta = WolfUpdate::isBetaBuild();
         if (!is_beta) return;   // never on a release build (nor before any release manifest has been verified)
@@ -1050,7 +1072,27 @@ void WolfUpdate::loginScreenShown(LLPanel* login_panel)
     if (login_panel) sLoginPanel = login_panel->getHandle();
     checkOnce();
     show_login_notice();   // no-op until the check has answered; checkCoro calls it then
-    beta_crash_notice_once();   // [BETA CRASH NOTICE 2026-11-12] before the check answers; an update band replaces it
+    // [BETA CRASH NOTICE 2026-11-12] The crash band is decided once the update check has answered (checkCoro's
+    // Running), because that answer is what says whether this build is still a beta: straight after a promotion the
+    // first start would otherwise call the release "this beta". With no check coming (turned off, or already
+    // answered before this panel existed) it is decided now; if the check has not answered within CRASH_BAND_WAIT_S
+    // (no network) it is decided on what was known before.
+    if (sCheckAnswered || !gSavedSettings.getBOOL(CHECK_SETTING))
+    {
+        beta_crash_notice_once();
+    }
+    else
+    {
+        LLCoros::instance().launch("WolfUpdate crash band", []()
+        {
+            for (F32 waited = 0.f; waited < CRASH_BAND_WAIT_S && !sCheckAnswered; waited += 0.5f)
+            {
+                llcoro::suspendUntilTimeout(0.5f);
+                if (LLApp::isExiting()) return;
+            }
+            beta_crash_notice_once();   // a no-op if the check's answer already decided it
+        });
+    }
 }
 
 // static
@@ -1061,7 +1103,8 @@ void WolfUpdate::loggedIn()
     present_in_world();    // no-op until the check has answered; checkCoro calls it then
     // [BETA CHANNEL 2026-11-12] the version record, once per run; its own switch in Preferences > Privacy [review]
     static bool seen_sent = false;
-    if (!seen_sent && gSavedSettings.getBOOL(REPORT_VERSION_SETTING) && WolfGrid::isWolfTerritories())
+    // Sent only with BOTH switches on: someone who turned the update check off is not newly reported [review 2].
+    if (!seen_sent && gSavedSettings.getBOOL(CHECK_SETTING) && gSavedSettings.getBOOL(REPORT_VERSION_SETTING) && WolfGrid::isWolfTerritories())
     {
         seen_sent = true;
         LLCoros::instance().launch("WolfUpdate seen", []() { seen_coro(); });
@@ -1073,7 +1116,27 @@ void WolfUpdate::checkCoro()
 {
     using namespace WolfUpdateChannel;
     // [STAGED ROLLOUT 2026-11-12] one check at a time; asked by hand = not staged, earlier "Not now" forgotten, always answers
-    struct Running { Running() { sCheckRunning = true; } ~Running() { sCheckRunning = false; } } running;
+    struct Running
+    {
+        Running() { sCheckRunning = true; }
+        ~Running()
+        {
+            sCheckRunning = false;
+            sCheckAnswered = true;
+            // Help > Check for WolfViewer Updates was chosen while this check was under way: it gets its own answer
+            // now (a by-hand check: not staged, earlier "Not now" forgotten; pause, signature and "never downwards"
+            // apply as always). The second pair of small fetches is the price of always answering a click.
+            if (sManualPending)
+            {
+                sManualPending = false;
+                WolfUpdate::checkByHand();
+            }
+            else
+            {
+                beta_crash_notice_once();   // the crash band waits for the check, so a build promoted since is not called a beta
+            }
+        }
+    } running;
     const bool by_hand = sByHand;
     sByHand = false;
 
@@ -1106,6 +1169,8 @@ void WolfUpdate::checkCoro()
     in.mManifestRevisionSeen = gSavedSettings.getS32(MANIFEST_REVISION_SETTING);
     in.mManifestSequenceSeen = (long long)gSavedSettings.getU32(MANIFEST_SEQUENCE_SETTING);
     in.mBetaSequenceSeen = (long long)gSavedSettings.getU32(BETA_SEQUENCE_SETTING);
+    in.mRolloutFirstSeenRevision = gSavedSettings.getS32(ROLLOUT_SEEN_REVISION_SETTING);
+    in.mRolloutFirstSeenTime = (long long)gSavedSettings.getU32(ROLLOUT_SEEN_TIME_SETTING);
     in.mSeed = rollout_seed();
     in.mNow = (long long)time(nullptr);
 
@@ -1118,6 +1183,11 @@ void WolfUpdate::checkCoro()
         gSavedSettings.setU32(MANIFEST_SEQUENCE_SETTING, (U32)out.mManifestSequenceSeen);
     }
     if (out.mBetaSequenceSeen != in.mBetaSequenceSeen) gSavedSettings.setU32(BETA_SEQUENCE_SETTING, (U32)out.mBetaSequenceSeen);
+    if (out.mRolloutFirstSeenRevision != in.mRolloutFirstSeenRevision || out.mRolloutFirstSeenTime != in.mRolloutFirstSeenTime)
+    {
+        gSavedSettings.setS32(ROLLOUT_SEEN_REVISION_SETTING, out.mRolloutFirstSeenRevision);
+        gSavedSettings.setU32(ROLLOUT_SEEN_TIME_SETTING, (U32)out.mRolloutFirstSeenTime);
+    }
     if (out.mStable.mVerified)
     {
         LL_INFOS("WolfUpdate") << "this build is w" << in.mMine << ", latest release is w" << out.mStable.mRevision
@@ -1154,7 +1224,9 @@ void WolfUpdate::checkCoro()
     case Verdict::STALE:
         LL_WARNS("WolfUpdate") << "update check: latest.json for w" << out.mStable.mRevision << " has sequence " << out.mStable.mSequence
                                << ", older than the " << in.mManifestSequenceSeen << " already seen for that release; ignored" << LL_ENDL;
-        if (by_hand) notify_check_failed();
+        // By hand: what is true here is that the server answered with an OLDER notice about a release this viewer
+        // already knows more recently, so nothing is on offer from it. Not "check your internet connection".
+        if (by_hand) LLNotificationsUtil::add(out.mStaleButCurrent ? "WolfUpdateNone" : "WolfUpdateNotOffered");
         return;
     case Verdict::REFUSED:
         LL_WARNS("WolfUpdate") << "update check: latest.json is not a release manifest (channel \"" << out.mStable.mChannel

@@ -70,6 +70,20 @@ namespace WolfUpdateManifest
         return 0;
     }
 
+    /// A JSON number as an int, 0 when it is absent, not a number, or outside `lo`..`hi` (never a wrapped cast).
+    inline int jsonInt(const boost::json::value* v, long long lo, long long hi, bool* in_range = nullptr)
+    {
+        const bool is_number = v && (v->is_int64() || v->is_uint64() || v->is_double());
+        long long n = 0;
+        bool ok = is_number;
+        if (is_number && v->is_uint64() && v->as_uint64() > 0x7fffffffffffffffULL) ok = false;
+        else if (is_number && v->is_double() && !(v->as_double() >= -9.0e18 && v->as_double() <= 9.0e18)) ok = false;
+        else if (is_number) n = jsonNumber(v);
+        if (ok && (n < lo || n > hi)) ok = false;
+        if (in_range) *in_range = ok;
+        return ok ? (int)n : 0;
+    }
+
     inline std::string jsonString(const boost::json::value* v)
     {
         return v && v->is_string() ? std::string(v->as_string().c_str()) : std::string();
@@ -84,7 +98,7 @@ namespace WolfUpdateManifest
         const boost::json::value v = boost::json::parse(manifest, ec);
         if (ec || !v.is_object()) return e;
         const boost::json::object& m = v.as_object();
-        e.mRevision = (int)jsonNumber(m.if_contains("revision"));
+        e.mRevision = jsonInt(m.if_contains("revision"), 0, 999999);   // out of range reads as 0: nothing newer
         e.mName = jsonString(m.if_contains("release_name"));
         e.mChannel = jsonString(m.if_contains("channel"));
         e.mSequence = jsonNumber(m.if_contains("sequence"));
@@ -109,6 +123,13 @@ namespace WolfUpdateManifest
         if (const boost::json::value* r = m.if_contains("rollout"))
         {
             e.mRollout.mPresent = true;
+            // "paused" is read on its own: a pause must win even when the rest of the field is missing or wrong.
+            if (r->is_object())
+            {
+                const boost::json::value* paused = r->as_object().if_contains("paused");
+                e.mRollout.mPaused = paused && paused->is_bool() && paused->as_bool();
+                e.mRollout.mStarted = jsonNumber(r->as_object().if_contains("started"));
+            }
             const boost::json::value* steps = r->is_object() ? r->as_object().if_contains("steps") : nullptr;
             if (!steps || !steps->is_array())
             {
@@ -116,14 +137,14 @@ namespace WolfUpdateManifest
             }
             else
             {
-                const boost::json::object& ro = r->as_object();
-                const boost::json::value* paused = ro.if_contains("paused");
-                e.mRollout.mPaused = paused && paused->is_bool() && paused->as_bool();
-                e.mRollout.mStarted = jsonNumber(ro.if_contains("started"));
                 for (const boost::json::value& step : steps->as_array())
                 {
+                    bool hour_ok = false, percent_ok = false;
                     if (!step.is_array() || step.as_array().size() != 2) { e.mRollout.mMalformed = true; break; }
-                    e.mRollout.mSteps.emplace_back((int)jsonNumber(&step.as_array()[0]), (int)jsonNumber(&step.as_array()[1]));
+                    const int hour = jsonInt(&step.as_array()[0], 0, 24 * 365, &hour_ok);
+                    const int percent = jsonInt(&step.as_array()[1], 0, 100, &percent_ok);
+                    if (!hour_ok || !percent_ok || e.mRollout.mSteps.size() >= 16) { e.mRollout.mMalformed = true; break; }
+                    e.mRollout.mSteps.emplace_back(hour, percent);
                 }
             }
         }
@@ -157,6 +178,8 @@ namespace WolfUpdateManifest
         int mManifestRevisionSeen = 0;                    // WolfViewerManifestRevisionSeen
         long long mManifestSequenceSeen = 0;              // WolfViewerManifestSequenceSeen
         long long mBetaSequenceSeen = 0;                  // WolfViewerBetaSequenceSeen
+        int mRolloutFirstSeenRevision = 0;                // WolfViewerRolloutFirstSeenRevision
+        long long mRolloutFirstSeenTime = 0;              // WolfViewerRolloutFirstSeenTime
         uint32_t mSeed = 0;                               // WolfViewerRolloutSeed
         long long mNow = 0;                               // UTC seconds
     };
@@ -175,6 +198,9 @@ namespace WolfUpdateManifest
         int mManifestRevisionSeen = 0;
         long long mManifestSequenceSeen = 0;
         long long mBetaSequenceSeen = 0;
+        int mRolloutFirstSeenRevision = 0;  // when this viewer first verified a manifest for the release (rolloutPercent's
+        long long mRolloutFirstSeenTime = 0; // second clock); equal to the inputs when unchanged
+        bool mStaleButCurrent = false;      // STALE, and this build is at or above the release that manifest names
         int mPercent = 100;                 // the release's rollout percent now (for the log)
         int mBucket = 0;                    // this install's place for this release (for the log)
     };
@@ -187,6 +213,8 @@ namespace WolfUpdateManifest
         o.mManifestRevisionSeen = in.mManifestRevisionSeen;
         o.mManifestSequenceSeen = in.mManifestSequenceSeen;
         o.mBetaSequenceSeen = in.mBetaSequenceSeen;
+        o.mRolloutFirstSeenRevision = in.mRolloutFirstSeenRevision;
+        o.mRolloutFirstSeenTime = in.mRolloutFirstSeenTime;
 
         // The release feed first, as W104: no verified release manifest, no action at all.
         if (in.mStableFetched) o.mStable = accept(in.mStableManifest, in.mStableSignature, in.mPubkey, in.mPlatform);
@@ -199,6 +227,7 @@ namespace WolfUpdateManifest
         if (!sequenceAcceptable(o.mStable.mRevision, o.mStable.mSequence, in.mManifestRevisionSeen, in.mManifestSequenceSeen))
         {
             o.mVerdict = Verdict::STALE;
+            o.mStaleButCurrent = in.mMine >= o.mStable.mRevision;
             return o;
         }
         if (channelMatches(o.mStable, Feed::STABLE))
@@ -236,12 +265,24 @@ namespace WolfUpdateManifest
             o.mBetaFeedFailed = !o.mBeta.mVerified;
         }
 
+        // The rollout's second clock: when this viewer first verified a manifest for THIS release. A new release
+        // starts it; a wall clock that has gone back before it restarts it (so "since first seen" is never negative).
+        if (channelMatches(o.mStable, Feed::STABLE))
+        {
+            if (o.mStable.mRevision != in.mRolloutFirstSeenRevision || in.mRolloutFirstSeenTime <= 0 || in.mNow < in.mRolloutFirstSeenTime)
+            {
+                o.mRolloutFirstSeenRevision = o.mStable.mRevision;
+                o.mRolloutFirstSeenTime = in.mNow;
+            }
+        }
+
         Staging staging;
         staging.mNow = in.mNow;
+        staging.mFirstSeen = o.mRolloutFirstSeenRevision == o.mStable.mRevision ? o.mRolloutFirstSeenTime : 0;
         staging.mBucket = rolloutBucket(in.mSeed, o.mStable.mRevision);
         staging.mBypass = in.mByHand || in.mBetaOptIn;
         o.mBucket = staging.mBucket;
-        o.mPercent = rolloutPercent(o.mStable.mRollout, in.mNow);
+        o.mPercent = rolloutPercent(o.mStable.mRollout, in.mNow, staging.mFirstSeen);
 
         const Choice c = choose(in.mMine, in.mByHand ? 0 : in.mSkippedStable, in.mByHand ? 0 : in.mSkippedBeta,
                                 o.mStable, in.mFollowBeta ? &o.mBeta : nullptr, &staging);

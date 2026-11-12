@@ -7095,6 +7095,18 @@ Wolf Chat - [COUNT] new messages in [WHERE]. The newest, from [FROM]:
 You have the newest WolfViewer.
   </notification>
   <notification
+   icon="notifytip.tga"
+   name="WolfUpdateChecking"
+   type="notifytip">
+Checking for a newer WolfViewer...
+  </notification>
+  <notification
+   icon="notifytip.tga"
+   name="WolfUpdateNotOffered"
+   type="notifytip">
+No newer WolfViewer is on offer at the moment. WolfViewer will check again the next time it starts.
+  </notification>
+  <notification
    icon="alertmodal.tga"
    name="WolfUpdatePaused"
    type="alertmodal">

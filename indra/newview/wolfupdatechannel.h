@@ -83,52 +83,74 @@ namespace WolfUpdateChannel
     };
 
     /**
-     * The percent of installs a release is offered to now. 0 when paused. 100 when there is no rollout, or it is
-     * malformed or empty (a mistake of ours in a field only we can sign must not strand anyone). Otherwise the
-     * percent of the latest step whose hour has come; before the first step's hour, 0; with a clock that is behind
-     * `started`, the earliest step's percent.
+     * Is the plan one we would sign? Hours strictly increasing as listed, percents never decreasing, both in range,
+     * 1..16 steps. write_manifest.py refuses to sign anything else, so a plan that fails here is a mistake of ours in
+     * a field only we can sign; rolloutPercent then treats it as "everyone" (the same side as any other malformed
+     * rollout: such a mistake must not strand anyone; a PAUSE is honoured first, whatever the steps look like).
      */
-    inline int rolloutPercent(const Rollout& r, long long now)
+    inline bool rolloutPlanValid(const Rollout& r)
     {
-        if (!r.mPresent) return 100;
-        if (r.mPaused) return 0;
-        if (r.mMalformed || r.mSteps.empty() || r.mSteps.size() > 16) return 100;
+        if (r.mMalformed || r.mSteps.empty() || r.mSteps.size() > 16) return false;
+        int last_hour = -1, last_percent = 0;
         for (const auto& step : r.mSteps)
         {
-            if (step.first < 0 || step.first > 24 * 365 || step.second < 0 || step.second > 100) return 100;
+            if (step.first <= last_hour || step.first > 24 * 365 || step.second < last_percent || step.second > 100) return false;
+            last_hour = step.first;
+            last_percent = step.second;
         }
-        const long long elapsed = now - r.mStarted;
-        int percent = 0;
-        long long best_hour = -1;
-        long long earliest_hour = -1;
-        int earliest_percent = 0;
-        for (const auto& step : r.mSteps)
-        {
-            if (earliest_hour < 0 || step.first < earliest_hour) { earliest_hour = step.first; earliest_percent = step.second; }
-            if ((long long)step.first * 3600 <= elapsed && step.first > best_hour) { best_hour = step.first; percent = step.second; }
-        }
-        if (elapsed < 0) return earliest_percent;
-        return percent;
+        return true;
     }
 
     /**
-     * This install's place in the queue for one release, 0..99: FNV-1a (32-bit) over the install's random seed
-     * (WolfViewerRolloutSeed, made once on this computer, derived from nothing, sent nowhere) and the revision, so
-     * a different tenth of installs goes first each release. In the share when rolloutBucket() < rolloutPercent().
+     * The percent of installs a release is offered to now.
+     *  - no rollout: 100 (today's manifests, the emergency path);
+     *  - paused: 0, ALWAYS, whatever else the field holds;
+     *  - a plan that is not valid (rolloutPlanValid): 100;
+     *  - otherwise the percent of the latest step whose hour has come, 0 before the first step's hour.
+     * Elapsed time is the LARGER of two clocks, so staging can never hold an install for ever:
+     *    now - started        the signed start, by this computer's wall clock;
+     *    now - first_seen     since this viewer first verified a manifest for this release (kept locally:
+     *                         WolfViewerRolloutFirstSeenRevision / ...Time; 0 = not known).
+     * A clock that is behind the signed start therefore still moves through the plan from the day the viewer first
+     * saw the release (it reaches each step at most "its own delay" late); a clock that is ahead moves early, which
+     * is harmless (the same signed files). Without first_seen and with a clock behind the start: the first step.
+     */
+    inline int rolloutPercent(const Rollout& r, long long now, long long first_seen = 0)
+    {
+        if (!r.mPresent) return 100;
+        if (r.mPaused) return 0;
+        if (!rolloutPlanValid(r)) return 100;
+        long long elapsed = now - r.mStarted;
+        if (first_seen > 0 && now - first_seen > elapsed) elapsed = now - first_seen;
+        if (elapsed < 0) return r.mSteps.front().second;   // valid plans are in hour order: the earliest step
+        int percent = 0;
+        for (const auto& step : r.mSteps)
+        {
+            if ((long long)step.first * 3600 <= elapsed) percent = step.second;
+        }
+        return percent;
+    }
+
+    /// murmur3's 32-bit finaliser: every input bit affects every output bit.
+    inline uint32_t fmix32(uint32_t h)
+    {
+        h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13; h *= 0xc2b2ae35u; h ^= h >> 16;
+        return h;
+    }
+
+    /**
+     * This install's place in the queue for one release, 0..99, from the install's random seed (WolfViewerRolloutSeed,
+     * made once on this computer, derived from nothing, sent nowhere) and the revision. Two rounds of fmix32 (the
+     * revision is mixed, combined with the seed, and mixed again), so the place in release N says nothing about the
+     * place in release N+1: a different tenth of installs goes first each time (measured in the harness: uniform per
+     * release, and independent between consecutive releases). The first version of this used FNV-1a and "% 100",
+     * which moved a bucket by one of a few fixed offsets from one release to the next (review, 2026-11-12).
+     * Scaled with a multiply and shift, not "%", so no place is favoured. In the share when it is < rolloutPercent().
      */
     inline int rolloutBucket(uint32_t seed, int revision)
     {
-        uint32_t h = 2166136261u;
-        const uint32_t words[2] = { seed, (uint32_t)revision };
-        for (uint32_t w : words)
-        {
-            for (int i = 0; i < 4; ++i)
-            {
-                h ^= (w >> (8 * i)) & 0xffu;
-                h *= 16777619u;
-            }
-        }
-        return (int)(h % 100u);
+        const uint32_t h = fmix32(seed ^ fmix32((uint32_t)revision * 0x9e3779b9u + 0x7f4a7c15u));
+        return (int)(((uint64_t)h * 100u) >> 32);
     }
 
     /**
@@ -158,6 +180,7 @@ namespace WolfUpdateChannel
     struct Staging
     {
         long long mNow = 0;         // UTC seconds
+        long long mFirstSeen = 0;   // when this viewer first verified a manifest for this release (0: not known)
         int mBucket = 0;            // rolloutBucket(seed, the release's revision)
         bool mBypass = false;       // "Get beta versions" is ticked, or the resident asked by hand: not staged
     };
@@ -274,7 +297,7 @@ namespace WolfUpdateChannel
         else if (!usable(stable, Feed::STABLE)) c.mVerdict = Verdict::UNUSABLE;
         else if (staging && stable.mRollout.mPresent && stable.mRollout.mPaused) c.mVerdict = Verdict::PAUSED;
         else if (skipped_stable >= stable.mRevision) c.mVerdict = Verdict::SKIPPED;
-        else if (staging && !staging->mBypass && staging->mBucket >= rolloutPercent(stable.mRollout, staging->mNow)) c.mVerdict = Verdict::HELD;
+        else if (staging && !staging->mBypass && staging->mBucket >= rolloutPercent(stable.mRollout, staging->mNow, staging->mFirstSeen)) c.mVerdict = Verdict::HELD;
         else c.mVerdict = Verdict::OFFER;
         return c;
     }

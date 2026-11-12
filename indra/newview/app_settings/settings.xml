@@ -20191,13 +20191,35 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerReportVersion</key>
 		<map>
 			<key>Comment</key>
-			<string>Once per login to Wolf Territories, tell the grid which WolfViewer version this is: the version, Windows / Mac / Linux, Vulkan or OpenGL, and whether Get beta versions is ticked. Kept against the account as one line that each login replaces, and deleted 90 days after the last login. It shows how many residents run each version before a beta becomes the release. Preferences, Privacy.</string>
+			<string>Once per login to Wolf Territories (and only while WolfViewerCheckForUpdates is also on), tell the grid which WolfViewer version this is: the version, Windows / Mac / Linux, Vulkan or OpenGL, and whether Get beta versions is ticked. Kept against the account as one line that each login replaces, and deleted 90 days after the last login. It shows how many residents run each version before a beta becomes the release. Preferences, Privacy.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
 			<integer>1</integer>
+		</map>
+		<key>WolfViewerRolloutFirstSeenRevision</key>
+		<map>
+			<key>Comment</key>
+			<string>The release revision whose signed manifest this viewer first verified at WolfViewerRolloutFirstSeenTime.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerRolloutFirstSeenTime</key>
+		<map>
+			<key>Comment</key>
+			<string>When this viewer first verified a manifest for WolfViewerRolloutFirstSeenRevision (this computer's clock). A staged rollout counts its hours from the signed start or from this, whichever gives more, so a wrong clock cannot hold an update back for ever.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>U32</string>
+			<key>Value</key>
+			<integer>0</integer>
 		</map>
 		<key>WolfViewerDryHulls</key>
 		<map>

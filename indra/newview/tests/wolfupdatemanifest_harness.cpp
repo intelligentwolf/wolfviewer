@@ -168,6 +168,29 @@ int main(int argc, char** argv)
     { Inputs in = base(105); in.mSeed = seed_out; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T + 60; stable(in, manifest(107, false, 0)); const Outcome o = decide(in); check("decide: an unsequenced HIGHER release (emergency fix by fast_release.sh) is accepted and offered to all", o.mVerdict == Verdict::OFFER && o.mManifestRevisionSeen == 107 && o.mManifestSequenceSeen == 0); }
     { Inputs in = base(105); in.mSeed = seed_in; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T; stable(in, manifest(106, false, T + 60, paused)); const Outcome o = decide(in); check("decide: the pause itself (a newer state) is accepted and remembered", o.mVerdict == Verdict::PAUSED && o.mManifestSequenceSeen == T + 60); }
 
+    // ── [review 2] pause always wins; huge numbers; the second clock; an honest STALE ─────────
+    { Inputs in = base(105); in.mSeed = seed_in; stable(in, manifest(106, false, T, "{\"paused\": true}")); check("decide: paused with NO steps at all: PAUSED (not 'everyone')", decide(in).mVerdict == Verdict::PAUSED); }
+    { Inputs in = base(105); in.mSeed = seed_in; stable(in, manifest(106, false, T, "{\"paused\": true, \"steps\": \"soon\"}")); check("decide: paused with malformed steps: PAUSED", decide(in).mVerdict == Verdict::PAUSED); }
+    { Inputs in = base(105); in.mSeed = seed_out; stable(in, manifest(106, false, T, "{\"started\": 1794480000, \"steps\": [[0, 50], [24, 10]], \"paused\": false}")); const Outcome o = decide(in); check("decide: a plan whose percent goes down (never signed by the tools): everyone, documented side", o.mVerdict == Verdict::OFFER && o.mPercent == 100); }
+    { Inputs in = base(105); in.mSeed = seed_out; stable(in, manifest(106, false, T, "{\"started\": 1794480000, \"steps\": [[0, 99999999999999999999], [24, 50]], \"paused\": false}")); const Outcome o = decide(in); check("decide: a huge number in a step is not cast, the plan is malformed", o.mStable.mRollout.mMalformed && o.mPercent == 100); }
+    { Inputs in = base(105); std::string m = manifest(106, false, 0); m.replace(m.find("\"revision\": 106"), 15, "\"revision\": 99999999999999999999"); stable(in, m); const Outcome o = decide(in); check("decide: a huge revision is read as 0 (nothing newer), never a wrapped number", o.mStable.mRevision == 0 && o.mVerdict == Verdict::UP_TO_DATE); }
+    {   // a wall clock one year behind the signed start
+        const long long behind = T - 365LL * 86400;
+        Inputs in = base(105); in.mSeed = seed_out; in.mNow = behind; stable(in, manifest(106, false, T, plan));
+        const Outcome first = decide(in);
+        check("decide: clock a year behind, first sight of the release: HELD, and the first-seen time is remembered", first.mVerdict == Verdict::HELD && first.mRolloutFirstSeenRevision == 106 && first.mRolloutFirstSeenTime == behind);
+        in.mRolloutFirstSeenRevision = first.mRolloutFirstSeenRevision; in.mRolloutFirstSeenTime = first.mRolloutFirstSeenTime; in.mNow = behind + 49 * 3600;
+        const Outcome later = decide(in);
+        check("decide: the same viewer 49 hours later by its own (wrong) clock: OFFER - staging cannot hold it for ever", later.mVerdict == Verdict::OFFER && later.mPercent == 100 && later.mRolloutFirstSeenTime == behind);
+        in.mNow = behind - 5 * 86400;
+        const Outcome back = decide(in);
+        check("decide: the clock put further back still: the first-seen time restarts (never negative)", back.mRolloutFirstSeenTime == in.mNow && back.mVerdict == Verdict::HELD);
+        Inputs next = base(106); next.mSeed = seed_out; next.mRolloutFirstSeenRevision = 106; next.mRolloutFirstSeenTime = behind; stable(next, manifest(107, false, T, plan));
+        check("decide: a new release starts its own first-seen clock", decide(next).mRolloutFirstSeenRevision == 107 && decide(next).mRolloutFirstSeenTime == next.mNow);
+    }
+    { Inputs in = base(106); in.mByHand = true; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T + 60; stable(in, manifest(106, false, T, plan)); const Outcome o = decide(in); check("decide: STALE while already on that release: the true answer is 'you have the newest'", o.mVerdict == Verdict::STALE && o.mStaleButCurrent); }
+    { Inputs in = base(105); in.mByHand = true; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T + 60; stable(in, manifest(106, false, T, plan)); const Outcome o = decide(in); check("decide: STALE while behind it: 'nothing on offer at the moment' (not 'check your connection')", o.mVerdict == Verdict::STALE && !o.mStaleButCurrent); }
+
     // ── optional: a real served manifest against the production key ──────────────────────────
     if (argc == 3)
     {

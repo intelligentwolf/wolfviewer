@@ -30,5 +30,9 @@ wolfgame_raven.jpg  (the Raven pet card)
   https://commons.wikimedia.org/wiki/File:Corvus_corax_head_profile.jpg
   Licence: CC BY 2.0  https://creativecommons.org/licenses/by/2.0
 
+wolfsplash_badge.jpg, wolfsplash_badge_alpha.jpg  (the start-up splash's logo, 2026-11-12)
+  The Wolf Territories Grid logo (Wolf Territories' own artwork), from the logo set's
+  1-logo/wolf-territories-grid-logo-on-dark-2048.png: its colour over black and its coverage.
+
 The display lettering is Cinzel Bold, Copyright 2020 The Cinzel Project Authors
 (https://github.com/NDISCOVER/Cinzel), SIL Open Font License 1.1 (fonts/Cinzel-OFL.txt).

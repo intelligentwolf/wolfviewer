@@ -1,7 +1,7 @@
 /**
  * @file wolfupdatemanifest_harness.cpp
  * @brief Stand-alone test of wolfupdatemanifest.h: the update check's real acceptance and decision code
- *        (signature, JSON, feed and sequence rules, staged rollout, what is remembered), driven with manifests
+ *        (signature, JSON, feed rules, the beta feed's replay rule, what is remembered), driven with manifests
  *        signed here by a key made for the run.
  *
  * Not part of the CMake test set. Build and run from the repository root (boost comes from the build's packages):
@@ -24,7 +24,6 @@
 #include <sstream>
 
 using namespace WolfUpdateManifest;
-using WolfUpdateChannel::rolloutBucket;
 
 namespace
 {
@@ -52,14 +51,13 @@ namespace
     const char* const SHA = "bf152acdd44cbdf4254a272d51ad8e619f4a2bd14f8fa7a3ac65b394b43dd9b3";
 
     /// A manifest as the release tools write it (sorted keys do not matter to the viewer).
-    std::string manifest(int rev, bool beta, long long sequence, const std::string& rollout = "", bool with_files = true)
+    std::string manifest(int rev, bool beta, long long sequence, bool with_files = true)
     {
         std::ostringstream s;
         const std::string folder = std::string(beta ? "beta/" : "") + "w" + std::to_string(rev);
         s << "{\n  \"schema\": 1,\n";
         if (beta) s << "  \"channel\": \"beta\",\n";
         if (sequence > 0) s << "  \"sequence\": " << sequence << ",\n";
-        if (!rollout.empty()) s << "  \"rollout\": " << rollout << ",\n";
         s << "  \"revision\": " << rev << ",\n  \"release_name\": \"Name " << rev << "\",\n  \"files\": {";
         if (with_files)
         {
@@ -76,13 +74,11 @@ namespace
         in.mPubkey = sPub;
         in.mPlatform = "linux64";
         in.mMine = mine;
-        in.mNow = 1794480000 + 3600;
-        in.mSeed = 1;
         return in;
     }
 
     void stable(Inputs& in, const std::string& m) { in.mStableFetched = true; in.mStableManifest = m; in.mStableSignature = sign(m); }
-    void beta(Inputs& in, const std::string& m) { in.mFollowBeta = true; in.mBetaOptIn = true; in.mBetaFetched = true; in.mBetaManifest = m; in.mBetaSignature = sign(m); }
+    void beta(Inputs& in, const std::string& m) { in.mFollowBeta = true; in.mBetaFetched = true; in.mBetaManifest = m; in.mBetaSignature = sign(m); }
 
     std::string slurp(const char* path)
     {
@@ -116,15 +112,14 @@ int main(int argc, char** argv)
         check("accept: signed JSON that is not an object is refused", !accept(arr, sign(arr), sPub, "linux64").mVerified);
         const Entry e = accept(m, sign(m), sPub, "linux64");
         check("parse: revision, name, url, sha, size", e.mRevision == 105 && e.mName == "Name 105" && e.mSha256 == SHA && e.mSize == 274339244
-              && e.mUrl == "https://wolf-grid.com/downloads/wolfviewer/w105/WolfViewer-7.2.4-linux64-OpenSim.tar.xz" && e.mChannel.empty() && !e.mRollout.mPresent);
+              && e.mUrl == "https://wolf-grid.com/downloads/wolfviewer/w105/WolfViewer-7.2.4-linux64-OpenSim.tar.xz" && e.mChannel.empty() && e.mSequence == 0);
         const Entry w = accept(m, sign(m), sPub, "windows64");
         check("parse: a platform the manifest does not have gives an unusable entry", w.mVerified && w.mUrl.empty() && w.mSize == 0);
-        const std::string r = manifest(106, false, T, "{\"started\": 1794480000, \"steps\": [[0, 10], [24, 50], [48, 100]], \"paused\": false}");
-        const Entry re = accept(r, sign(r), sPub, "linux64");
-        check("parse: sequence and rollout", re.mSequence == T && re.mRollout.mPresent && !re.mRollout.mPaused && re.mRollout.mStarted == T
-              && re.mRollout.mSteps.size() == 3 && re.mRollout.mSteps[1].first == 24 && re.mRollout.mSteps[1].second == 50);
-        const std::string bad = manifest(106, false, T, "\"soon\"");
-        check("parse: a rollout of the wrong shape is marked malformed (treated as everyone)", accept(bad, sign(bad), sPub, "linux64").mRollout.mMalformed);
+        const std::string r = manifest(106, false, T);
+        check("parse: sequence", accept(r, sign(r), sPub, "linux64").mSequence == T);
+        std::string old = manifest(106, false, 0); old.replace(old.find("\"schema\": 1"), 11, "\"schema\": 1, \"rollout\": {\"paused\": true}");
+        const Entry oe = accept(old, sign(old), sPub, "linux64");
+        check("parse: a \"rollout\" field (from the abandoned staged-rollout design) is ignored: a normal release", oe.mVerified && oe.mRevision == 106);
     }
 
     // ── decide(): the release feed, W104's behaviour ─────────────────────────────────────────
@@ -134,7 +129,7 @@ int main(int argc, char** argv)
     { Inputs in = base(104); stable(in, manifest(105, false, 0)); const Outcome o = decide(in); check("decide: new release: OFFER from the release feed", o.mVerdict == Verdict::OFFER && o.mFeed == Feed::STABLE && o.mOffer.mRevision == 105 && o.mOffer.mSha256 == SHA); }
     { Inputs in = base(104); stable(in, manifest(105, false, 0)); in.mSkippedStable = 105; check("decide: skipped", decide(in).mVerdict == Verdict::SKIPPED); }
     { Inputs in = base(104); stable(in, manifest(105, false, 0)); in.mSkippedStable = 105; in.mByHand = true; check("decide: asked by hand forgets the skip", decide(in).mVerdict == Verdict::OFFER); }
-    { Inputs in = base(104); stable(in, manifest(105, true, T)); const Outcome o = decide(in); check("decide: a BETA manifest served as the release feed: REFUSED, and not remembered as the release", o.mVerdict == Verdict::REFUSED && o.mStableSeen == 0 && o.mManifestRevisionSeen == 0); }
+    { Inputs in = base(104); stable(in, manifest(105, true, T)); const Outcome o = decide(in); check("decide: a BETA manifest served as the release feed: REFUSED, and not remembered as the release", o.mVerdict == Verdict::REFUSED && o.mStableSeen == 0); }
 
     // ── the label's memory only goes up ──────────────────────────────────────────────────────
     { Inputs in = base(106); in.mStableSeen = 106; stable(in, manifest(104, false, 0)); const Outcome o = decide(in); check("decide: a replayed older release manifest does not lower the release remembered (no false Beta label)", o.mStableSeen == 106 && o.mVerdict == Verdict::UP_TO_DATE); }
@@ -143,53 +138,19 @@ int main(int argc, char** argv)
     { Inputs in = base(104); stable(in, manifest(104, false, 0)); beta(in, manifest(105, true, T)); const Outcome o = decide(in); check("decide: box ticked, beta newer: OFFER from the beta feed; its sequence remembered", o.mVerdict == Verdict::OFFER && o.mFeed == Feed::BETA && o.mOffer.mRevision == 105 && o.mBetaSequenceSeen == T); }
     { Inputs in = base(104); stable(in, manifest(104, false, 0)); beta(in, manifest(105, true, T)); in.mFollowBeta = false; const Outcome o = decide(in); check("decide: beta bytes present but the feed not followed: ignored", o.mVerdict == Verdict::UP_TO_DATE); }
     { Inputs in = base(104); stable(in, manifest(104, false, 0)); beta(in, manifest(105, true, T)); in.mBetaSignature[5] ^= 1; const Outcome o = decide(in); check("decide: bad beta signature: release answer stands, downloads KEPT", o.mVerdict == Verdict::UP_TO_DATE && o.mBetaFeedFailed && !o.mCleanUpdates); }
-    { Inputs in = base(105); stable(in, manifest(104, false, 0)); in.mFollowBeta = true; in.mBetaOptIn = true; const Outcome o = decide(in); check("decide: beta feed not reached while on a beta: downloads KEPT", o.mVerdict == Verdict::UP_TO_DATE && !o.mCleanUpdates); }
+    { Inputs in = base(105); stable(in, manifest(104, false, 0)); in.mFollowBeta = true; const Outcome o = decide(in); check("decide: beta feed not reached while on a beta: downloads KEPT", o.mVerdict == Verdict::UP_TO_DATE && !o.mCleanUpdates); }
     { Inputs in = base(105); stable(in, manifest(104, false, 0)); beta(in, manifest(105, true, T)); const Outcome o = decide(in); check("decide: on the beta, both feeds answered: downloads cleared", o.mVerdict == Verdict::UP_TO_DATE && o.mCleanUpdates); }
     { Inputs in = base(104); stable(in, manifest(104, false, 0)); beta(in, manifest(105, false, T)); const Outcome o = decide(in); check("decide: a RELEASE manifest served as the beta feed: ignored", o.mVerdict == Verdict::UP_TO_DATE && o.mBetaFeedFailed); }
-    { Inputs in = base(104); stable(in, manifest(104, false, 0)); beta(in, manifest(0, true, T + 500, "", false)); const Outcome o = decide(in); check("decide: withdrawn beta feed: nothing offered; its sequence remembered; a complete answer", o.mVerdict == Verdict::UP_TO_DATE && o.mBetaSequenceSeen == T + 500 && o.mCleanUpdates); }
+    { Inputs in = base(104); stable(in, manifest(104, false, 0)); beta(in, manifest(0, true, T + 500, false)); const Outcome o = decide(in); check("decide: withdrawn beta feed: nothing offered; its sequence remembered; a complete answer", o.mVerdict == Verdict::UP_TO_DATE && o.mBetaSequenceSeen == T + 500 && o.mCleanUpdates); }
     { Inputs in = base(104); stable(in, manifest(104, false, 0)); beta(in, manifest(105, true, T)); in.mBetaSequenceSeen = T + 500; const Outcome o = decide(in); check("decide: the withdrawn beta's old manifest REPLAYED after the withdrawal was seen: not acted on", o.mVerdict == Verdict::UP_TO_DATE && o.mBetaStale && !o.mCleanUpdates && o.mBetaSequenceSeen == T + 500); }
     { Inputs in = base(104); stable(in, manifest(104, false, 0)); beta(in, manifest(106, true, T + 900)); in.mBetaSequenceSeen = T + 500; const Outcome o = decide(in); check("decide: the next beta after a withdrawal is offered", o.mVerdict == Verdict::OFFER && o.mOffer.mRevision == 106 && o.mBetaSequenceSeen == T + 900); }
 
-    // ── staged rollout through the real parse ────────────────────────────────────────────────
-    const std::string plan = "{\"started\": 1794480000, \"steps\": [[0, 10], [24, 50], [48, 100]], \"paused\": false}";
-    const std::string paused = "{\"started\": 1794480000, \"steps\": [[0, 10], [24, 50], [48, 100]], \"paused\": true}";
-    uint32_t seed_in = 0, seed_out = 0;
-    for (uint32_t s = 1; s < 5000 && (!seed_in || !seed_out); ++s) { const int b = rolloutBucket(s, 106); if (b < 10 && !seed_in) seed_in = s; if (b >= 50 && !seed_out) seed_out = s; }
-    { Inputs in = base(105); in.mSeed = seed_in; stable(in, manifest(106, false, T, plan)); const Outcome o = decide(in); check("decide: 10% rollout, install in the first tenth: OFFER", o.mVerdict == Verdict::OFFER && o.mPercent == 10 && o.mBucket < 10); }
-    { Inputs in = base(105); in.mSeed = seed_out; stable(in, manifest(106, false, T, plan)); const Outcome o = decide(in); check("decide: 10% rollout, install outside it: HELD, sequence remembered, nothing cleared", o.mVerdict == Verdict::HELD && o.mManifestRevisionSeen == 106 && o.mManifestSequenceSeen == T && !o.mCleanUpdates); }
-    { Inputs in = base(105); in.mSeed = seed_out; in.mNow = T + 49 * 3600; stable(in, manifest(106, false, T, plan)); check("decide: the same install two days later: OFFER", decide(in).mVerdict == Verdict::OFFER); }
-    { Inputs in = base(105); in.mSeed = seed_out; in.mByHand = true; stable(in, manifest(106, false, T, plan)); check("decide: outside the share but asked by hand: OFFER", decide(in).mVerdict == Verdict::OFFER); }
-    { Inputs in = base(105); in.mSeed = seed_out; in.mBetaOptIn = true; stable(in, manifest(106, false, T, plan)); check("decide: outside the share but Get beta versions ticked (repository install too): OFFER", decide(in).mVerdict == Verdict::OFFER); }
-    { Inputs in = base(105); in.mSeed = seed_in; in.mByHand = true; stable(in, manifest(106, false, T + 60, paused)); check("decide: paused: PAUSED even by hand", decide(in).mVerdict == Verdict::PAUSED); }
-    { Inputs in = base(105); in.mSeed = seed_out; stable(in, manifest(106, false, 0)); check("decide: no rollout field (emergency / fast_release.sh): everyone at once", decide(in).mVerdict == Verdict::OFFER); }
-    // replay
-    { Inputs in = base(105); in.mSeed = seed_in; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T + 60; stable(in, manifest(106, false, T, plan)); const Outcome o = decide(in); check("decide: after seeing the pause, the earlier 10% manifest replayed: STALE, not offered", o.mVerdict == Verdict::STALE && o.mManifestSequenceSeen == T + 60); }
-    { Inputs in = base(105); in.mSeed = seed_in; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T + 60; stable(in, manifest(106, false, 0)); check("decide: an unsequenced manifest for the same release after a staged one: STALE", decide(in).mVerdict == Verdict::STALE); }
-    { Inputs in = base(105); in.mSeed = seed_out; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T + 60; stable(in, manifest(107, false, 0)); const Outcome o = decide(in); check("decide: an unsequenced HIGHER release (emergency fix by fast_release.sh) is accepted and offered to all", o.mVerdict == Verdict::OFFER && o.mManifestRevisionSeen == 107 && o.mManifestSequenceSeen == 0); }
-    { Inputs in = base(105); in.mSeed = seed_in; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T; stable(in, manifest(106, false, T + 60, paused)); const Outcome o = decide(in); check("decide: the pause itself (a newer state) is accepted and remembered", o.mVerdict == Verdict::PAUSED && o.mManifestSequenceSeen == T + 60); }
-
-    // ── [review 2] pause always wins; huge numbers; the second clock; an honest STALE ─────────
-    { Inputs in = base(105); in.mSeed = seed_in; stable(in, manifest(106, false, T, "{\"paused\": true}")); check("decide: paused with NO steps at all: PAUSED (not 'everyone')", decide(in).mVerdict == Verdict::PAUSED); }
-    { Inputs in = base(105); in.mSeed = seed_in; stable(in, manifest(106, false, T, "{\"paused\": true, \"steps\": \"soon\"}")); check("decide: paused with malformed steps: PAUSED", decide(in).mVerdict == Verdict::PAUSED); }
-    { Inputs in = base(105); in.mSeed = seed_out; stable(in, manifest(106, false, T, "{\"started\": 1794480000, \"steps\": [[0, 50], [24, 10]], \"paused\": false}")); const Outcome o = decide(in); check("decide: a plan whose percent goes down (never signed by the tools): everyone, documented side", o.mVerdict == Verdict::OFFER && o.mPercent == 100); }
-    { Inputs in = base(105); in.mSeed = seed_out; stable(in, manifest(106, false, T, "{\"started\": 1794480000, \"steps\": [[0, 99999999999999999999], [24, 50]], \"paused\": false}")); const Outcome o = decide(in); check("decide: a huge number in a step is not cast, the plan is malformed", o.mStable.mRollout.mMalformed && o.mPercent == 100); }
-    { Inputs in = base(105); std::string m = manifest(106, false, 0); m.replace(m.find("\"revision\": 106"), 15, "\"revision\": 99999999999999999999"); stable(in, m); const Outcome o = decide(in); check("decide: a huge revision is read as 0 (nothing newer), never a wrapped number", o.mStable.mRevision == 0 && o.mVerdict == Verdict::UP_TO_DATE); }
-    {   // a wall clock one year behind the signed start
-        const long long behind = T - 365LL * 86400;
-        Inputs in = base(105); in.mSeed = seed_out; in.mNow = behind; stable(in, manifest(106, false, T, plan));
-        const Outcome first = decide(in);
-        check("decide: clock a year behind, first sight of the release: HELD, and the first-seen time is remembered", first.mVerdict == Verdict::HELD && first.mRolloutFirstSeenRevision == 106 && first.mRolloutFirstSeenTime == behind);
-        in.mRolloutFirstSeenRevision = first.mRolloutFirstSeenRevision; in.mRolloutFirstSeenTime = first.mRolloutFirstSeenTime; in.mNow = behind + 49 * 3600;
-        const Outcome later = decide(in);
-        check("decide: the same viewer 49 hours later by its own (wrong) clock: OFFER - staging cannot hold it for ever", later.mVerdict == Verdict::OFFER && later.mPercent == 100 && later.mRolloutFirstSeenTime == behind);
-        in.mNow = behind - 5 * 86400;
-        const Outcome back = decide(in);
-        check("decide: the clock put further back still: the first-seen time restarts (never negative)", back.mRolloutFirstSeenTime == in.mNow && back.mVerdict == Verdict::HELD);
-        Inputs next = base(106); next.mSeed = seed_out; next.mRolloutFirstSeenRevision = 106; next.mRolloutFirstSeenTime = behind; stable(next, manifest(107, false, T, plan));
-        check("decide: a new release starts its own first-seen clock", decide(next).mRolloutFirstSeenRevision == 107 && decide(next).mRolloutFirstSeenTime == next.mNow);
-    }
-    { Inputs in = base(106); in.mByHand = true; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T + 60; stable(in, manifest(106, false, T, plan)); const Outcome o = decide(in); check("decide: STALE while already on that release: the true answer is 'you have the newest'", o.mVerdict == Verdict::STALE && o.mStaleButCurrent); }
-    { Inputs in = base(105); in.mByHand = true; in.mManifestRevisionSeen = 106; in.mManifestSequenceSeen = T + 60; stable(in, manifest(106, false, T, plan)); const Outcome o = decide(in); check("decide: STALE while behind it: 'nothing on offer at the moment' (not 'check your connection')", o.mVerdict == Verdict::STALE && !o.mStaleButCurrent); }
+    // ── the release feed carries no replay memory (DESIGN.md section 20) ─────────────────────
+    { Inputs in = base(105); stable(in, manifest(106, false, T + 60)); Outcome o = decide(in); stable(in, manifest(106, false, 0)); const Outcome again = decide(in);
+      check("decide: the same release with or without a sequence gives the same offer (no stale state on the release feed)", o.mVerdict == Verdict::OFFER && again.mVerdict == Verdict::OFFER && again.mOffer.mRevision == 106); }
+    { Inputs in = base(106); stable(in, manifest(105, false, 0)); check("decide: a replayed OLDER release manifest offers nothing to a viewer above it", decide(in).mVerdict == Verdict::UP_TO_DATE); }
+    { Inputs in = base(104); in.mByHand = true; in.mSkippedStable = 105; stable(in, manifest(105, false, 0)); check("decide: by hand, a declined release is offered again", decide(in).mVerdict == Verdict::OFFER); }
+    { Inputs in = base(104); std::string m = manifest(106, false, 0); m.replace(m.find("\"revision\": 106"), 15, "\"revision\": 99999999999999999999"); stable(in, m); const Outcome o = decide(in); check("decide: a huge revision is read as 0 (nothing newer), never a wrapped number", o.mStable.mRevision == 0 && o.mVerdict == Verdict::UP_TO_DATE); }
 
     // ── optional: a real served manifest against the production key ──────────────────────────
     if (argc == 3)
@@ -197,10 +158,10 @@ int main(int argc, char** argv)
         const std::string m = slurp(argv[1]), s = slurp(argv[2]);
         const Entry e = accept(m, s, MANIFEST_PUBKEY, "linux64");
         check("LIVE: the served release manifest verifies with the key compiled into the viewer", e.mVerified && e.mRevision > 0);
-        std::printf("      (revision %d \"%s\", sequence %lld, rollout %s)\n", e.mRevision, e.mName.c_str(), e.mSequence, e.mRollout.mPresent ? "present" : "none");
+        std::printf("      (revision %d \"%s\", sequence %lld)\n", e.mRevision, e.mName.c_str(), e.mSequence);
         std::string changed = m; if (!changed.empty()) changed[changed.size() / 2] ^= 1;
         check("LIVE: with one bit changed it does not", !accept(changed, s, MANIFEST_PUBKEY, "linux64").mVerified);
-        Inputs in; in.mPlatform = "linux64"; in.mMine = e.mRevision; in.mStableFetched = true; in.mStableManifest = m; in.mStableSignature = s; in.mNow = T;
+        Inputs in; in.mPlatform = "linux64"; in.mMine = e.mRevision; in.mStableFetched = true; in.mStableManifest = m; in.mStableSignature = s;
         check("LIVE: a viewer on that revision is up to date", decide(in).mVerdict == Verdict::UP_TO_DATE);
         in.mMine = e.mRevision - 1;
         check("LIVE: a viewer one revision behind is offered it", decide(in).mVerdict == Verdict::OFFER);

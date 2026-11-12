@@ -7086,7 +7086,7 @@ Wolf Chat - [COUNT] new messages in [WHERE]. The newest, from [FROM]:
 
   <!-- [UPDATER 2026-10-02] wolfupdate.cpp. One release offered per run; "Skip this version"
        stores WolfViewerUpdateSkipped. Failures are alertmodal and stay until dismissed. -->
-  <!-- [STAGED ROLLOUT 2026-11-12] Answers to Help > Check for WolfViewer Updates (wolfupdate.cpp checkByHand):
+  <!-- [BETA CHANNEL 2026-11-12] Answers to Help > Check for WolfViewer Updates (wolfupdate.cpp checkByHand):
        it always says something. -->
   <notification
    icon="notifytip.tga"
@@ -7094,7 +7094,7 @@ Wolf Chat - [COUNT] new messages in [WHERE]. The newest, from [FROM]:
    type="notifytip">
 You have the newest WolfViewer.
   </notification>
-  <!-- [test build 2026-11-12] The same two answers on the LOGIN SCREEN, where a tip is not shown (llscreenchannel.cpp
+  <!-- [test build 2026-11-12] The same answer on the LOGIN SCREEN, where a tip is not shown (llscreenchannel.cpp
        shows toasts only after login): a small window with OK instead (wolfupdate.cpp answer_by_hand). -->
   <notification
    icon="alertmodal.tga"
@@ -7106,36 +7106,10 @@ You have the newest WolfViewer.
      yestext="OK"/>
   </notification>
   <notification
-   icon="alertmodal.tga"
-   name="WolfUpdateNotOfferedLogin"
-   type="alertmodal">
-No newer WolfViewer is on offer at the moment. WolfViewer will check again the next time it starts.
-    <usetemplate
-     name="okbutton"
-     yestext="OK"/>
-  </notification>
-  <notification
    icon="notifytip.tga"
    name="WolfUpdateChecking"
    type="notifytip">
 Checking for a newer WolfViewer...
-  </notification>
-  <notification
-   icon="notifytip.tga"
-   name="WolfUpdateNotOffered"
-   type="notifytip">
-No newer WolfViewer is on offer at the moment. WolfViewer will check again the next time it starts.
-  </notification>
-  <notification
-   icon="alertmodal.tga"
-   name="WolfUpdatePaused"
-   type="alertmodal">
-A newer WolfViewer has been published, but it is paused while we look into a problem with it.
-
-You do not need to do anything. WolfViewer will offer it when it is ready.
-    <usetemplate
-     name="okbutton"
-     yestext="OK"/>
   </notification>
   <notification
    icon="alertmodal.tga"

@@ -20,7 +20,7 @@
 		Try new features early. Betas are tested but may have faults; you can switch back at any time.
 	</string>
 	<string name="wolf_beta_text_on">
-		Try new features early. Betas are tested but may have faults; you can switch back at any time. WolfViewer looks for a beta each time it starts. (Which version you run is told to the grid at login: see Privacy.)
+		Try new features early. Betas are tested but may have faults; you can switch back at any time. WolfViewer looks for a beta each time it starts.
 	</string>
 	<string name="wolf_beta_text_off_on_beta">
 		You are running a beta. You will stay on it until the next full release, which WolfViewer will offer as usual. To go back sooner, install the current release from the download page.

@@ -21,8 +21,6 @@
 #include <cstdio>
 #include <memory>
 #include <mutex>
-#include <chrono>
-#include <random>
 #include <thread>
 #include <vector>
 
@@ -55,7 +53,6 @@ extern char** environ;
 #include "llproxy.h"
 #include "llpanel.h"
 #include "llsdjson.h"
-#include "lluri.h"
 #include "llstartup.h"
 #include "lltextbox.h"
 #include "lluictrlfactory.h"
@@ -64,8 +61,6 @@ extern char** environ;
 #include "llviewerwindow.h"
 #include "llweb.h"
 #include "llcheckboxctrl.h"
-#include "llagent.h"
-#include "wolfgrid.h"
 #include "wolfterrainpaint.h"
 #include "wolfupdatechannel.h"
 #include "wolfupdatemanifest.h"
@@ -88,9 +83,6 @@ namespace
     /// Every download must live under WolfUpdateChannel::DOWNLOAD_PREFIX (wolfupdatechannel.h): the website
     /// serves the installers (viewers.php reads them from /downloads/wolfviewer/), and a manifest naming
     /// anywhere else is refused.
-    /// [BETA CHANNEL 2026-11-12] gridmanager/viewerseen.php: which version this resident last logged in with,
-    /// for the beta gate report's "how many people ran it" (DESIGN.md decision 4).
-    const char* const SEEN_URL = "https://www.wolf-grid.com/viewerseen.php";
     /// f=osv, NOT f=viewers: index.php routes "osv" to viewers.php (2026-09-12 fix).
     const char* const DOWNLOAD_PAGE_URL = "https://www.wolf-grid.com/index.php?f=osv";
     // The manifest signing key's public half and the signature check are in wolfupdatemanifest.h (MANIFEST_PUBKEY,
@@ -113,21 +105,12 @@ namespace
     /// The release revision in the last release manifest that verified: this build is a beta while its own
     /// revision is above it (wolfupdatechannel.h isBetaBuild). Labels only, never an update decision.
     const char* const STABLE_SEEN_SETTING = "WolfViewerStableRevisionSeen";
-    // [STAGED ROLLOUT 2026-11-12] wolfupdatechannel.h Rollout / rolloutBucket / sequenceAcceptable
-    const char* const SEED_SETTING = "WolfViewerRolloutSeed";
-    const char* const MANIFEST_REVISION_SETTING = "WolfViewerManifestRevisionSeen";
-    const char* const MANIFEST_SEQUENCE_SETTING = "WolfViewerManifestSequenceSeen";
-    const char* const ROLLOUT_SEEN_REVISION_SETTING = "WolfViewerRolloutFirstSeenRevision";
-    const char* const ROLLOUT_SEEN_TIME_SETTING = "WolfViewerRolloutFirstSeenTime";
     // [BETA CRASH NOTICE 2026-11-12] wolfupdatechannel.h betaCrashNotice
     const char* const CRASH_SPOKEN_SETTING = "WolfViewerBetaCrashNoticeTime";
     const char* const CRASH_MUTED_SETTING = "WolfViewerBetaCrashNoticeMuted";
     const F32 CRASH_BAND_WAIT_S = 8.f;   // how long the crash band waits for the update check's answer
     /// [review 2026-11-12] The highest sequence verified on the beta feed (wolfupdatechannel.h feedSequenceAcceptable).
     const char* const BETA_SEQUENCE_SETTING = "WolfViewerBetaSequenceSeen";
-    /// [review 2026-11-12] Preferences > Privacy "Tell Wolf Territories which WolfViewer version I use" (on by default):
-    /// the once-per-login version record (seen_coro). Its own switch, not the update check's.
-    const char* const REPORT_VERSION_SETTING = "WolfViewerReportVersion";
     /// What the title bar, the login screen and About add to the release name of a beta.
     const char* const BETA_SUFFIX = " (Beta)";
 
@@ -175,9 +158,9 @@ namespace
     /// [BETA CHANNEL 2026-11-12] What the login screen shows for a build with no release name (fspanellogin.cpp
     /// passes it to releaseLabel), kept so refresh_channel_labels can write that text again.
     std::string sLoginFallback;
-    // [STAGED ROLLOUT 2026-11-12] Help > Check for WolfViewer Updates
+    // [BETA CHANNEL 2026-11-12] Help > Check for WolfViewer Updates
     bool sCheckRunning = false;      // a check coroutine is between its start and its answer
-    bool sByHand = false;            // the check about to run was asked for by hand: not staged, skips forgotten, always answers
+    bool sByHand = false;            // the check about to run was asked for by hand: earlier "Not now" forgotten, always answers
     bool sManualPending = false;     // asked by hand while a check was already under way: a by-hand check follows it at once
     bool sCheckAnswered = false;     // a check has run to its answer (or there will be none): the beta crash band waits for it
     // [BETA CRASH NOTICE 2026-11-12] the band "This beta version of WolfViewer closed unexpectedly last time"
@@ -208,7 +191,7 @@ namespace
     }
 
 #if LL_WINDOWS
-    const char* const PLATFORM_WORDS = "windows";   // panel_wolf_update_notice.xml body_*_windows; viewerseen.php platform
+    const char* const PLATFORM_WORDS = "windows";   // panel_wolf_update_notice.xml body_*_windows
 #elif LL_DARWIN
     const char* const PLATFORM_WORDS = "mac";
 #else
@@ -539,35 +522,6 @@ namespace
         text->setText(panel->getString(key));
     }
 
-    /// [BETA CHANNEL 2026-11-12] Once per login to Wolf Territories: this resident's version, platform, renderer
-    /// and channel to gridmanager/viewerseen.php (one row per resident), so the beta gate report can say how many
-    /// people ran a build, not only how many crashed. Signed-in residents only, as wolffloaterdob.cpp post_dob:
-    /// verified TLS, no redirects, this login's agent and session in the headers. A failure (or a server without
-    /// the endpoint) is logged and nothing else: nobody asked for this.
-    void seen_coro()
-    {
-        LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
-            std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfUpdateSeen", LLCore::HttpRequest::DEFAULT_POLICY_ID);
-        LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-        LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
-        options->setTimeout(30);
-        LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
-        headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
-        headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/x-www-form-urlencoded");
-        headers->append("X-Wolf-Agent", gAgentID.asString());
-        headers->append("X-Wolf-Session", gAgentSessionID.asString());
-        const std::string body = "viewer=" + LLURI::escape(LLVersionInfo::instance().getChannelAndVersion())
-            + "&platform=" + PLATFORM_WORDS
-            + "&renderer=" + LLURI::escape(WolfVkBridge::reportFields()["renderer"].asString())
-            + "&channel=" + WolfUpdate::channelWord()
-            + "&beta_optin=" + (gSavedSettings.getBOOL(BETA_SETTING) ? "1" : "0");
-        LLCore::BufferArray::ptr_t raw(new LLCore::BufferArray());
-        raw->append(body.data(), body.size());
-        LLSD result = adapter->postRawAndSuspend(request, SEEN_URL, raw, options, headers);
-        const LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(
-            result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
-        LL_INFOS("WolfUpdate") << "version record: " << status.toString() << LL_ENDL;
-    }
 }
 
 // static
@@ -655,30 +609,6 @@ namespace
     bool fetch_feed(const char* manifest_url, const char* signature_url, std::string& manifest, std::string& signature)
     {
         return fetch_small(manifest_url, manifest) && fetch_small(signature_url, signature);
-    }
-
-    /// [STAGED ROLLOUT 2026-11-12] This install's random seed for rolloutBucket: made once with the system's random
-    /// source (not from the computer, the account or the avatar), kept in the viewer's settings, sent nowhere.
-    U32 rollout_seed()
-    {
-        S32 seed = gSavedSettings.getS32(SEED_SETTING);
-        if (seed <= 0)
-        {
-            // std::random_device is the system's random source in the libraries CI builds with (MSVC: the CRT's
-            // rand_s / RtlGenRandom; libstdc++ and libc++: getrandom / /dev/urandom / arc4random). The standard does not
-            // promise that, so two things no two computers share are mixed in: the clock to its finest tick and where
-            // this run's stack happens to be. Even a random_device that returned the same number everywhere would then
-            // still give installs different seeds.
-            std::random_device rd;
-            U32 mixed = (U32)rd();
-            const U64 ticks = (U64)std::chrono::high_resolution_clock::now().time_since_epoch().count();
-            mixed ^= WolfUpdateChannel::fmix32((U32)(ticks ^ (ticks >> 32)));
-            mixed ^= WolfUpdateChannel::fmix32((U32)((uintptr_t)&rd >> 4) + (U32)((U64)(uintptr_t)&rd >> 32));
-            seed = (S32)(WolfUpdateChannel::fmix32(mixed) & 0x7fffffffu);
-            if (seed == 0) seed = 1;
-            gSavedSettings.setS32(SEED_SETTING, seed);
-        }
-        return (U32)seed;
     }
 
     /// The Windows / Linux / macOS "it is downloaded, install it?" question (moved here unchanged from downloadCoro so
@@ -1115,21 +1045,13 @@ void WolfUpdate::loggedIn()
     sLoggedIn = true;
     checkOnce();           // the login screen may have been skipped (no connect box)
     present_in_world();    // no-op until the check has answered; checkCoro calls it then
-    // [BETA CHANNEL 2026-11-12] the version record, once per run; its own switch in Preferences > Privacy [review]
-    static bool seen_sent = false;
-    // Sent only with BOTH switches on: someone who turned the update check off is not newly reported [review 2].
-    if (!seen_sent && gSavedSettings.getBOOL(CHECK_SETTING) && gSavedSettings.getBOOL(REPORT_VERSION_SETTING) && WolfGrid::isWolfTerritories())
-    {
-        seen_sent = true;
-        LLCoros::instance().launch("WolfUpdate seen", []() { seen_coro(); });
-    }
 }
 
 // static
 void WolfUpdate::checkCoro()
 {
     using namespace WolfUpdateChannel;
-    // [STAGED ROLLOUT 2026-11-12] one check at a time; asked by hand = not staged, earlier "Not now" forgotten, always answers
+    // one check at a time; asked by hand = earlier "Not now" forgotten, always answers
     struct Running
     {
         Running() { sCheckRunning = true; }
@@ -1138,7 +1060,7 @@ void WolfUpdate::checkCoro()
             sCheckRunning = false;
             sCheckAnswered = true;
             // Help > Check for WolfViewer Updates was chosen while this check was under way: it gets its own answer
-            // now (a by-hand check: not staged, earlier "Not now" forgotten; pause, signature and "never downwards"
+            // now (a by-hand check: earlier "Not now" forgotten; signature and "never downwards"
             // apply as always). The second pair of small fetches is the price of always answering a click.
             if (sManualPending)
             {
@@ -1154,8 +1076,8 @@ void WolfUpdate::checkCoro()
     const bool by_hand = sByHand;
     sByHand = false;
 
-    // What this file does: fetch, read the settings, apply the answer. The thinking - signature, JSON, feed and
-    // sequence rules, staged rollout, what to remember - is WolfUpdateManifest::decide (wolfupdatemanifest.h), which
+    // What this file does: fetch, read the settings, apply the answer. The thinking - signature, JSON, feed rules,
+    // the beta feed's replay rule, what to remember - is WolfUpdateManifest::decide (wolfupdatemanifest.h), which
     // tests/wolfupdatemanifest_harness.cpp drives with real signed manifests.
     WolfUpdateManifest::Inputs in;
     in.mPlatform = platform_key();
@@ -1167,8 +1089,7 @@ void WolfUpdate::checkCoro()
     // for a copy from the Linux package repositories (they carry releases only; the Preferences box is greyed
     // out there, but the setting is shared with any other copy on this computer). Not asked for at all when the
     // release feed gave nothing: without a release answer nothing is acted on.
-    in.mBetaOptIn = gSavedSettings.getBOOL(BETA_SETTING);
-    if (in.mBetaOptIn && in.mStableFetched)
+    if (gSavedSettings.getBOOL(BETA_SETTING) && in.mStableFetched)
     {
         std::string where;
         in.mFollowBeta = install_kind(where) != Install::PACKAGED;
@@ -1180,39 +1101,17 @@ void WolfUpdate::checkCoro()
     in.mSkippedStable = gSavedSettings.getS32(SKIPPED_SETTING);
     in.mSkippedBeta = gSavedSettings.getS32(SKIPPED_BETA_SETTING);
     in.mStableSeen = gSavedSettings.getS32(STABLE_SEEN_SETTING);
-    in.mManifestRevisionSeen = gSavedSettings.getS32(MANIFEST_REVISION_SETTING);
-    in.mManifestSequenceSeen = (long long)gSavedSettings.getU32(MANIFEST_SEQUENCE_SETTING);
     in.mBetaSequenceSeen = (long long)gSavedSettings.getU32(BETA_SEQUENCE_SETTING);
-    in.mRolloutFirstSeenRevision = gSavedSettings.getS32(ROLLOUT_SEEN_REVISION_SETTING);
-    in.mRolloutFirstSeenTime = (long long)gSavedSettings.getU32(ROLLOUT_SEEN_TIME_SETTING);
-    in.mSeed = rollout_seed();
-    in.mNow = (long long)time(nullptr);
 
     const WolfUpdateManifest::Outcome out = WolfUpdateManifest::decide(in);
 
     // What to remember.
-    if (out.mManifestRevisionSeen != in.mManifestRevisionSeen || out.mManifestSequenceSeen != in.mManifestSequenceSeen)
-    {
-        gSavedSettings.setS32(MANIFEST_REVISION_SETTING, out.mManifestRevisionSeen);
-        gSavedSettings.setU32(MANIFEST_SEQUENCE_SETTING, (U32)out.mManifestSequenceSeen);
-    }
     if (out.mBetaSequenceSeen != in.mBetaSequenceSeen) gSavedSettings.setU32(BETA_SEQUENCE_SETTING, (U32)out.mBetaSequenceSeen);
-    if (out.mRolloutFirstSeenRevision != in.mRolloutFirstSeenRevision || out.mRolloutFirstSeenTime != in.mRolloutFirstSeenTime)
-    {
-        gSavedSettings.setS32(ROLLOUT_SEEN_REVISION_SETTING, out.mRolloutFirstSeenRevision);
-        gSavedSettings.setU32(ROLLOUT_SEEN_TIME_SETTING, (U32)out.mRolloutFirstSeenTime);
-    }
     if (out.mStable.mVerified)
     {
         LL_INFOS("WolfUpdate") << "this build is w" << in.mMine << ", latest release is w" << out.mStable.mRevision
                                << " \"" << out.mStable.mName << "\" (" << platform_key() << ")" << LL_ENDL;
         note_stable_revision(out.mStableSeen);   // the labels follow the release (only ever upwards)
-        if (out.mStable.mRollout.mPresent)
-        {
-            LL_INFOS("WolfUpdate") << "release rollout: " << out.mPercent << "% now" << (out.mStable.mRollout.mPaused ? " (paused)" : "")
-                                   << "; this install's place is " << out.mBucket
-                                   << ((by_hand || in.mBetaOptIn) ? " (not staged: asked by hand or beta versions on)" : "") << LL_ENDL;
-        }
     }
     if (in.mFollowBeta)
     {
@@ -1235,13 +1134,6 @@ void WolfUpdate::checkCoro()
         if (in.mStableFetched) LL_WARNS("WolfUpdate") << "update check: latest.json signature does not verify or it is unreadable; ignored" << LL_ENDL;
         if (by_hand) notify_check_failed();
         return;
-    case Verdict::STALE:
-        LL_WARNS("WolfUpdate") << "update check: latest.json for w" << out.mStable.mRevision << " has sequence " << out.mStable.mSequence
-                               << ", older than the " << in.mManifestSequenceSeen << " already seen for that release; ignored" << LL_ENDL;
-        // By hand: what is true here is that the server answered with an OLDER notice about a release this viewer
-        // already knows more recently, so nothing is on offer from it. Not "check your internet connection".
-        if (by_hand) answer_by_hand(out.mStaleButCurrent ? "WolfUpdateNone" : "WolfUpdateNotOffered");
-        return;
     case Verdict::REFUSED:
         LL_WARNS("WolfUpdate") << "update check: latest.json is not a release manifest (channel \"" << out.mStable.mChannel
                                << "\"); ignored" << LL_ENDL;
@@ -1256,14 +1148,6 @@ void WolfUpdate::checkCoro()
         if (by_hand) notify_check_failed();
         return;
     case Verdict::SKIPPED:
-        return;
-    case Verdict::PAUSED:
-        LL_INFOS("WolfUpdate") << "w" << out.mStable.mRevision << " is paused: not offered" << LL_ENDL;
-        if (by_hand) LLNotificationsUtil::add("WolfUpdatePaused");
-        return;
-    case Verdict::HELD:
-        LL_INFOS("WolfUpdate") << "w" << out.mStable.mRevision << " is not yet offered to this install's share; Help > Check for "
-                                  "WolfViewer Updates offers it at once" << LL_ENDL;
         return;
     case Verdict::OFFER:
         break;

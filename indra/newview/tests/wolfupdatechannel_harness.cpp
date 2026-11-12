@@ -56,10 +56,7 @@ namespace
         case Verdict::UNUSABLE: return "UNUSABLE";
         case Verdict::SKIPPED: return "SKIPPED";
         case Verdict::OFFER: return "OFFER";
-        case Verdict::PAUSED: return "PAUSED";
-        case Verdict::HELD: return "HELD";
         case Verdict::FAILED: return "FAILED";
-        case Verdict::STALE: return "STALE";
         }
         return "?";
     }
@@ -165,146 +162,6 @@ int main()
     expect_true("label: nothing verified yet is not known, so not a beta", !isBetaBuild(105, 0));
 
 
-    // ── [STAGED ROLLOUT] percent by time ─────────────────────────────────────────────────────
-    {
-        const long long T = 1794480000;
-        Rollout r; r.mPresent = true; r.mStarted = T; r.mSteps = { { 0, 10 }, { 24, 50 }, { 48, 100 } };
-        expect_true("rollout: at the start 10%", rolloutPercent(r, T) == 10);
-        expect_true("rollout: 23 h 59 min still 10%", rolloutPercent(r, T + 24 * 3600 - 60) == 10);
-        expect_true("rollout: 24 h is 50%", rolloutPercent(r, T + 24 * 3600) == 50);
-        expect_true("rollout: 48 h is 100%", rolloutPercent(r, T + 48 * 3600) == 100);
-        expect_true("rollout: a year later still 100%", rolloutPercent(r, T + 365LL * 86400) == 100);
-        expect_true("rollout: clock behind the start: the first step (10%)", rolloutPercent(r, T - 86400) == 10);
-        Rollout shuffled = r; shuffled.mSteps = { { 48, 100 }, { 0, 10 }, { 24, 50 } };
-        expect_true("rollout: steps out of hour order are not a plan we sign: everyone", rolloutPercent(shuffled, T + 30 * 3600) == 100);
-        Rollout paused = r; paused.mPaused = true;
-        expect_true("rollout: paused is 0% whatever the time", rolloutPercent(paused, T + 100 * 3600) == 0);
-        Rollout none;
-        expect_true("rollout: no field is everyone", rolloutPercent(none, T) == 100);
-        Rollout empty = r; empty.mSteps.clear();
-        expect_true("rollout: no steps is everyone", rolloutPercent(empty, T) == 100);
-        Rollout bad = r; bad.mSteps = { { 0, 150 } };
-        expect_true("rollout: a percent over 100 is treated as everyone", rolloutPercent(bad, T) == 100);
-        Rollout mal = r; mal.mMalformed = true;
-        expect_true("rollout: a malformed field is everyone", rolloutPercent(mal, T) == 100);
-        Rollout late = r; late.mSteps = { { 6, 25 } };
-        expect_true("rollout: before a delayed first step, nobody", rolloutPercent(late, T + 3600) == 0);
-        Rollout fixed = r; fixed.mSteps = { { 0, 100 } };
-        expect_true("rollout: 'everyone now' is 100% at once", rolloutPercent(fixed, T) == 100);
-
-        // buckets: in range, stable, spread, and different per release
-        int counts[100] = { 0 }; bool in_range = true; int moved = 0;
-        for (uint32_t seed = 1; seed <= 20000; ++seed)
-        {
-            const int b = rolloutBucket(seed * 2654435761u, 105);
-            if (b < 0 || b > 99) in_range = false; else ++counts[b];
-            if (b != rolloutBucket(seed * 2654435761u, 106)) ++moved;
-        }
-        int lo = 1 << 30, hi = 0, first_ten = 0;
-        for (int i = 0; i < 100; ++i) { if (counts[i] < lo) lo = counts[i]; if (counts[i] > hi) hi = counts[i]; if (i < 10) first_ten += counts[i]; }
-        expect_true("bucket: always 0..99", in_range);
-        expect_true("bucket: the same seed and release give the same bucket", rolloutBucket(12345u, 105) == rolloutBucket(12345u, 105));
-        expect_true("bucket: 20,000 installs spread evenly (each bucket 140..260)", lo >= 140 && hi <= 260);
-        expect_true("bucket: about a tenth are below 10 (1,800..2,200)", first_ten >= 1800 && first_ten <= 2200);
-        expect_true("bucket: a different group goes first next release (over 95% change bucket)", moved > 19000);
-
-        // [review 2] plans we would not sign are "everyone"; a pause wins over anything; the second clock
-        Rollout down = r; down.mSteps = { { 0, 50 }, { 24, 10 } };
-        expect_true("rollout: a plan whose percent goes DOWN is not valid (treated as everyone)", !rolloutPlanValid(down) && rolloutPercent(down, T) == 100);
-        Rollout same_hour = r; same_hour.mSteps = { { 0, 10 }, { 0, 50 } };
-        expect_true("rollout: a plan with a repeated hour is not valid", !rolloutPlanValid(same_hour));
-        expect_true("rollout: hours out of order are not valid (the tools sign them in order)", !rolloutPlanValid(shuffled));
-        Rollout paused_bad = bad; paused_bad.mPaused = true;
-        Rollout paused_mal = mal; paused_mal.mPaused = true;
-        Rollout paused_empty = empty; paused_empty.mPaused = true;
-        expect_true("rollout: PAUSED wins over a bad plan, a malformed field and no steps", rolloutPercent(paused_bad, T) == 0 && rolloutPercent(paused_mal, T) == 0 && rolloutPercent(paused_empty, T) == 0);
-        // a wall clock a year behind the signed start: by the first clock alone it would sit at 10% for ever
-        const long long behind = T - 365LL * 86400;
-        expect_true("clock behind, first seen just now: the first step (10%)", rolloutPercent(r, behind, behind) == 10);
-        expect_true("clock behind, 25 hours after this viewer first saw the release: 50%", rolloutPercent(r, behind + 25 * 3600, behind) == 50);
-        expect_true("clock behind, 49 hours after first seen: everyone", rolloutPercent(r, behind + 49 * 3600, behind) == 100);
-        expect_true("clock right, first seen a day late: the signed start still decides (the larger elapsed time wins)", rolloutPercent(r, T + 49 * 3600, T + 24 * 3600) == 100);
-        expect_true("first seen unknown and clock behind: the first step", rolloutPercent(r, behind) == 10);
-
-        // [review 2] bucket quality: uniform within a release, and INDEPENDENT between consecutive releases.
-        // Seeds as the viewer makes them (31 random bits; here a 64-bit LCG's high bits), 1,000,000 installs.
-        {
-            const int N = 1000000;
-            static int one[100]; static int joint[100][100]; static int diff[100];
-            for (int i = 0; i < 100; ++i) { one[i] = 0; diff[i] = 0; for (int j = 0; j < 100; ++j) joint[i][j] = 0; }
-            unsigned long long x = 0x9E3779B97F4A7C15ULL; int same = 0;
-            for (int i = 0; i < N; ++i)
-            {
-                x = x * 6364136223846793005ULL + 1442695040888963407ULL;
-                const uint32_t seed = (uint32_t)(x >> 33);
-                const int a = rolloutBucket(seed, 105), b = rolloutBucket(seed, 106);
-                ++one[a]; ++joint[a][b]; ++diff[(b - a + 100) % 100];
-                if (a == b) ++same;
-            }
-            double chi_one = 0, chi_joint = 0, chi_diff = 0;
-            for (int i = 0; i < 100; ++i)
-            {
-                chi_one += (one[i] - N / 100.0) * (one[i] - N / 100.0) / (N / 100.0);
-                chi_diff += (diff[i] - N / 100.0) * (diff[i] - N / 100.0) / (N / 100.0);
-                for (int j = 0; j < 100; ++j) chi_joint += (joint[i][j] - N / 10000.0) * (joint[i][j] - N / 10000.0) / (N / 10000.0);
-            }
-            // of the installs in the first tenth for 105, how many are in the first tenth for 106 (independent: 10%)
-            int first = 0, both = 0;
-            for (int a = 0; a < 10; ++a) for (int b = 0; b < 100; ++b) { first += joint[a][b]; if (b < 10) both += joint[a][b]; }
-            std::printf("      per release: chi-square %.1f (99 degrees of freedom; 0.1%% point 148.2)\n", chi_one);
-            std::printf("      105 against 106, 100 x 100 cells: chi-square %.1f (9,999 d.o.f.; mean 9,999, 0.1%% point about 10,440)\n", chi_joint);
-            std::printf("      shift between releases (b - a mod 100): chi-square %.1f (99 d.o.f.; 0.1%% point 148.2)\n", chi_diff);
-            std::printf("      first tenth of 105 that is also first tenth of 106: %.2f%% (independent = 10%%); same place in both: %.2f%% (independent = 1%%)\n",
-                        100.0 * both / first, 100.0 * same / N);
-            expect_true("bucket: uniform within a release (chi-square below the 0.1% point)", chi_one < 148.2);
-            expect_true("bucket: consecutive releases are independent (joint chi-square below the 0.1% point)", chi_joint < 10440.0);
-            expect_true("bucket: the shift from one release to the next is uniform (no fixed offsets)", chi_diff < 148.2);
-            expect_true("bucket: being first this time does not make you first next time (9..11%)", 100.0 * both / first > 9.0 && 100.0 * both / first < 11.0);
-            // sequential seeds too (the worst case for a weak mixer)
-            int seq[100] = { 0 }; int seq_diff[100] = { 0 };
-            for (uint32_t sd = 1; sd <= 200000; ++sd) { const int a = rolloutBucket(sd, 105), b = rolloutBucket(sd, 106); ++seq[a]; ++seq_diff[(b - a + 100) % 100]; }
-            double chi_seq = 0, chi_seq_diff = 0;
-            for (int i = 0; i < 100; ++i) { chi_seq += (seq[i] - 2000.0) * (seq[i] - 2000.0) / 2000.0; chi_seq_diff += (seq_diff[i] - 2000.0) * (seq_diff[i] - 2000.0) / 2000.0; }
-            std::printf("      sequential seeds 1..200,000: chi-square %.1f within a release, %.1f for the shift (99 d.o.f.)\n", chi_seq, chi_seq_diff);
-            expect_true("bucket: sequential seeds are spread and shifted uniformly too", chi_seq < 148.2 && chi_seq_diff < 148.2);
-        }
-
-        // choose() with staging
-        Entry s = stable(106); s.mRollout = r; s.mSequence = T;
-        Staging in; in.mNow = T; in.mBucket = 9;
-        Staging out; out.mNow = T; out.mBucket = 10;
-        expect("staged: bucket 9 at 10% is offered", choose(105, 0, 0, s, nullptr, &in), Verdict::OFFER, Feed::STABLE);
-        expect("staged: bucket 10 at 10% is held", choose(105, 0, 0, s, nullptr, &out), Verdict::HELD);
-        Staging day2 = out; day2.mNow = T + 24 * 3600;
-        expect("staged: bucket 10 a day later (50%) is offered", choose(105, 0, 0, s, nullptr, &day2), Verdict::OFFER, Feed::STABLE);
-        Staging last; last.mNow = T + 48 * 3600; last.mBucket = 99;
-        expect("staged: bucket 99 after two days is offered", choose(105, 0, 0, s, nullptr, &last), Verdict::OFFER, Feed::STABLE);
-        Staging hand = out; hand.mBypass = true;
-        expect("staged: asked by hand / beta box ticked: offered at once", choose(105, 0, 0, s, nullptr, &hand), Verdict::OFFER, Feed::STABLE);
-        expect("staged: W104-style caller (no staging) is offered at once", choose(105, 0, 0, s, nullptr), Verdict::OFFER, Feed::STABLE);
-        expect("staged: already on it: nothing", choose(106, 0, 0, s, nullptr, &out), Verdict::UP_TO_DATE);
-        Entry p = s; p.mRollout.mPaused = true;
-        expect("paused: in the share: not offered", choose(105, 0, 0, p, nullptr, &in), Verdict::PAUSED);
-        expect("paused: asked by hand: still not offered", choose(105, 0, 0, p, nullptr, &hand), Verdict::PAUSED);
-        expect("paused: already on it: nothing to say", choose(106, 0, 0, p, nullptr, &in), Verdict::UP_TO_DATE);
-        Entry b107 = beta(107);
-        expect("paused release, newer beta, box ticked: the beta is still offered", choose(105, 0, 0, p, &b107, &hand), Verdict::OFFER, Feed::BETA);
-        Entry plain = stable(106);
-        expect("no rollout field (emergency / old tooling): everyone at once", choose(105, 0, 0, plain, nullptr, &out), Verdict::OFFER, Feed::STABLE);
-        expect("staged: a skipped release stays skipped", choose(105, 106, 0, s, nullptr, &in), Verdict::SKIPPED);
-        Entry promoted_beta = beta(106);
-        expect("staged: beta tester on 105, 106 promoted at 10%: offered at once from the release feed", choose(105, 0, 0, s, &promoted_beta, &hand), Verdict::OFFER, Feed::STABLE);
-
-        // sequence memory (replay of an older state of the same release)
-        expect_true("sequence: first manifest ever", sequenceAcceptable(106, T, 0, 0));
-        expect_true("sequence: the same manifest again", sequenceAcceptable(106, T, 106, T));
-        expect_true("sequence: a newer state of the same release", sequenceAcceptable(106, T + 60, 106, T));
-        expect_true("sequence: an OLDER state of the same release is refused (replay cannot undo a pause)", !sequenceAcceptable(106, T, 106, T + 60));
-        expect_true("sequence: an unsequenced manifest for the same release after a staged one is refused", !sequenceAcceptable(106, 0, 106, T));
-        expect_true("sequence: a higher release is accepted whatever its sequence", sequenceAcceptable(107, 0, 106, T));
-        expect_true("sequence: a lower release (our own undo) is accepted", sequenceAcceptable(105, 0, 106, T));
-    }
-
     // ── [BETA CRASH NOTICE] ──────────────────────────────────────────────────────────────────
     expect_true("crash notice: beta, new crash: shown", betaCrashNotice(true, false, 2000, 1000, 0, 105, false) == CrashNotice::SHOW);
     expect_true("crash notice: release build: never", betaCrashNotice(false, false, 2000, 1000, 0, 104, false) == CrashNotice::NO);
@@ -322,13 +179,11 @@ int main()
         for (int mine = 100; mine <= 110; ++mine)
             for (int srev = 100; srev <= 110; ++srev)
                 for (int brev = 0; brev <= 110; brev += (brev == 0 ? 100 : 1))
-                    for (int flags = 0; flags < 16; ++flags)
+                    for (int flags = 0; flags < 8; ++flags)
                     {
                         Entry s = stable(srev); Entry b = beta(brev);
-                        if (flags & 1) { s.mRollout.mPresent = true; s.mRollout.mStarted = 1000; s.mRollout.mSteps = { { 0, 10 } }; }
-                        if (flags & 2) s.mRollout.mPaused = s.mRollout.mPresent;
-                        Staging st; st.mNow = 2000; st.mBucket = (flags & 4) ? 5 : 50; st.mBypass = (flags & 8) != 0;
-                        const Choice c = choose(mine, 0, 0, s, (flags & 8) ? &b : nullptr, &st);
+                        const int skip_s = (flags & 1) ? srev : 0, skip_b = (flags & 2) ? brev : 0;
+                        const Choice c = choose(mine, skip_s, skip_b, s, (flags & 4) ? &b : nullptr);
                         ++tried;
                         if (c.mVerdict == Verdict::OFFER && (c.mFeed == Feed::BETA ? b.mRevision : s.mRevision) <= mine) never_down = false;
                     }

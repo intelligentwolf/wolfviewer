@@ -26,7 +26,7 @@
 /**
  * [BETA CHANNEL review 2026-11-12] The independent review asked whether wolfupdate.cpp's glue behaves as the tested
  * header logic does. So the glue's thinking lives here: everything checkCoro does between "the bytes arrived" and
- * "tell the resident" - the signature check, the JSON, the feed and sequence rules, the staged rollout, what to
+ * "tell the resident" - the signature check, the JSON, the feed rules, the beta feed's replay rule, what to
  * remember - is decide(), which uses only the standard library, boost::json and OpenSSL, and is driven with real
  * signed manifests by indra/newview/tests/wolfupdatemanifest_harness.cpp. What is left in wolfupdate.cpp is the two
  * HTTP GETs per feed, reading and writing the settings named below, and the notices.
@@ -120,34 +120,6 @@ namespace WolfUpdateManifest
                 }
             }
         }
-        if (const boost::json::value* r = m.if_contains("rollout"))
-        {
-            e.mRollout.mPresent = true;
-            // "paused" is read on its own: a pause must win even when the rest of the field is missing or wrong.
-            if (r->is_object())
-            {
-                const boost::json::value* paused = r->as_object().if_contains("paused");
-                e.mRollout.mPaused = paused && paused->is_bool() && paused->as_bool();
-                e.mRollout.mStarted = jsonNumber(r->as_object().if_contains("started"));
-            }
-            const boost::json::value* steps = r->is_object() ? r->as_object().if_contains("steps") : nullptr;
-            if (!steps || !steps->is_array())
-            {
-                e.mRollout.mMalformed = true;
-            }
-            else
-            {
-                for (const boost::json::value& step : steps->as_array())
-                {
-                    bool hour_ok = false, percent_ok = false;
-                    if (!step.is_array() || step.as_array().size() != 2) { e.mRollout.mMalformed = true; break; }
-                    const int hour = jsonInt(&step.as_array()[0], 0, 24 * 365, &hour_ok);
-                    const int percent = jsonInt(&step.as_array()[1], 0, 100, &percent_ok);
-                    if (!hour_ok || !percent_ok || e.mRollout.mSteps.size() >= 16) { e.mRollout.mMalformed = true; break; }
-                    e.mRollout.mSteps.emplace_back(hour, percent);
-                }
-            }
-        }
         e.mVerified = true;
         return e;
     }
@@ -171,17 +143,10 @@ namespace WolfUpdateManifest
         bool mFollowBeta = false;           // "Get beta versions" ticked and not a package-repository install
         bool mBetaFetched = false;          // both beta files arrived
         std::string mBetaManifest, mBetaSignature;
-        bool mBetaOptIn = false;            // "Get beta versions" ticked (a package-repository install is still not staged)
-        bool mByHand = false;               // Help > Check for WolfViewer Updates
+        bool mByHand = false;               // Help > Check for WolfViewer Updates: an earlier "Not now" no longer applies
         int mSkippedStable = 0, mSkippedBeta = 0;         // WolfViewerUpdateSkipped / ...SkippedBeta
         int mStableSeen = 0;                              // WolfViewerStableRevisionSeen
-        int mManifestRevisionSeen = 0;                    // WolfViewerManifestRevisionSeen
-        long long mManifestSequenceSeen = 0;              // WolfViewerManifestSequenceSeen
         long long mBetaSequenceSeen = 0;                  // WolfViewerBetaSequenceSeen
-        int mRolloutFirstSeenRevision = 0;                // WolfViewerRolloutFirstSeenRevision
-        long long mRolloutFirstSeenTime = 0;              // WolfViewerRolloutFirstSeenTime
-        uint32_t mSeed = 0;                               // WolfViewerRolloutSeed
-        long long mNow = 0;                               // UTC seconds
     };
 
     /// What decide() hands back: the verdict, the offer, and what to remember. Nothing here touches a setting or a file.
@@ -194,15 +159,8 @@ namespace WolfUpdateManifest
         bool mBetaFeedFailed = false;       // the beta feed was wanted and gave no usable answer this time
         bool mBetaStale = false;            // the beta manifest was an older one than already seen: not acted on
         bool mCleanUpdates = false;         // nothing newer, on a COMPLETE answer: old downloads may go
-        int mStableSeen = 0;                // new values for the three memories (equal to the inputs when unchanged)
-        int mManifestRevisionSeen = 0;
-        long long mManifestSequenceSeen = 0;
+        int mStableSeen = 0;                // new values for the two memories (equal to the inputs when unchanged)
         long long mBetaSequenceSeen = 0;
-        int mRolloutFirstSeenRevision = 0;  // when this viewer first verified a manifest for the release (rolloutPercent's
-        long long mRolloutFirstSeenTime = 0; // second clock); equal to the inputs when unchanged
-        bool mStaleButCurrent = false;      // STALE, and this build is at or above the release that manifest names
-        int mPercent = 100;                 // the release's rollout percent now (for the log)
-        int mBucket = 0;                    // this install's place for this release (for the log)
     };
 
     inline Outcome decide(const Inputs& in)
@@ -210,24 +168,13 @@ namespace WolfUpdateManifest
         using namespace WolfUpdateChannel;
         Outcome o;
         o.mStableSeen = in.mStableSeen;
-        o.mManifestRevisionSeen = in.mManifestRevisionSeen;
-        o.mManifestSequenceSeen = in.mManifestSequenceSeen;
         o.mBetaSequenceSeen = in.mBetaSequenceSeen;
-        o.mRolloutFirstSeenRevision = in.mRolloutFirstSeenRevision;
-        o.mRolloutFirstSeenTime = in.mRolloutFirstSeenTime;
 
         // The release feed first, as W104: no verified release manifest, no action at all.
         if (in.mStableFetched) o.mStable = accept(in.mStableManifest, in.mStableSignature, in.mPubkey, in.mPlatform);
         if (!o.mStable.mVerified)
         {
             o.mVerdict = Verdict::FAILED;
-            return o;
-        }
-        // An older signed state of the SAME release is not acted on (a replay must not undo a pause).
-        if (!sequenceAcceptable(o.mStable.mRevision, o.mStable.mSequence, in.mManifestRevisionSeen, in.mManifestSequenceSeen))
-        {
-            o.mVerdict = Verdict::STALE;
-            o.mStaleButCurrent = in.mMine >= o.mStable.mRevision;
             return o;
         }
         if (channelMatches(o.mStable, Feed::STABLE))
@@ -237,18 +184,13 @@ namespace WolfUpdateManifest
             // number after a higher one as "the release": an undo re-serves the previous manifest for a while, and
             // builds of the withdrawn number are then, correctly, still not betas.)
             if (o.mStable.mRevision > o.mStableSeen) o.mStableSeen = o.mStable.mRevision;
-            if (o.mStable.mSequence >= 0 && o.mStable.mSequence <= 0xffffffffLL
-                && (o.mStable.mRevision > in.mManifestRevisionSeen
-                    || (o.mStable.mRevision == in.mManifestRevisionSeen && o.mStable.mSequence > in.mManifestSequenceSeen)))
-            {
-                o.mManifestRevisionSeen = o.mStable.mRevision;
-                o.mManifestSequenceSeen = o.mStable.mSequence;
-            }
         }
 
-        // The beta feed. It never legitimately goes back in time, so its rule is stricter than the release's: a
-        // manifest with a lower sequence than one already verified is not acted on, whatever its revision (an old beta
-        // manifest replayed after a withdrawal is refused by every viewer that saw the withdrawal).
+        // The beta feed. It never legitimately goes back in time: a manifest with a lower sequence than one already
+        // verified is not acted on, whatever its revision (an old beta manifest replayed after a withdrawal is refused
+        // by every viewer that saw the withdrawal). The release feed needs no such rule: it carries no state that a
+        // replay of an older manifest for the same release could undo, and an older release offers nothing to anyone
+        // at or above it (DESIGN.md section 20).
         if (in.mFollowBeta)
         {
             if (in.mBetaFetched) o.mBeta = accept(in.mBetaManifest, in.mBetaSignature, in.mPubkey, in.mPlatform);
@@ -265,27 +207,8 @@ namespace WolfUpdateManifest
             o.mBetaFeedFailed = !o.mBeta.mVerified;
         }
 
-        // The rollout's second clock: when this viewer first verified a manifest for THIS release. A new release
-        // starts it; a wall clock that has gone back before it restarts it (so "since first seen" is never negative).
-        if (channelMatches(o.mStable, Feed::STABLE))
-        {
-            if (o.mStable.mRevision != in.mRolloutFirstSeenRevision || in.mRolloutFirstSeenTime <= 0 || in.mNow < in.mRolloutFirstSeenTime)
-            {
-                o.mRolloutFirstSeenRevision = o.mStable.mRevision;
-                o.mRolloutFirstSeenTime = in.mNow;
-            }
-        }
-
-        Staging staging;
-        staging.mNow = in.mNow;
-        staging.mFirstSeen = o.mRolloutFirstSeenRevision == o.mStable.mRevision ? o.mRolloutFirstSeenTime : 0;
-        staging.mBucket = rolloutBucket(in.mSeed, o.mStable.mRevision);
-        staging.mBypass = in.mByHand || in.mBetaOptIn;
-        o.mBucket = staging.mBucket;
-        o.mPercent = rolloutPercent(o.mStable.mRollout, in.mNow, staging.mFirstSeen);
-
         const Choice c = choose(in.mMine, in.mByHand ? 0 : in.mSkippedStable, in.mByHand ? 0 : in.mSkippedBeta,
-                                o.mStable, in.mFollowBeta ? &o.mBeta : nullptr, &staging);
+                                o.mStable, in.mFollowBeta ? &o.mBeta : nullptr);
         o.mVerdict = c.mVerdict;
         o.mFeed = c.mFeed;
         if (c.mVerdict == Verdict::OFFER) o.mOffer = c.mFeed == Feed::BETA ? o.mBeta : o.mStable;

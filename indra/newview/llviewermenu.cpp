@@ -45,7 +45,7 @@
 #include "wolfspeech.h"
 #include "wolfscreenshare.h"
 #include "wolfweather.h"  // <WolfViewer> World > Weather
-#include "wolfupdate.h"       // [STAGED ROLLOUT 2026-11-12/] Help > Check for WolfViewer Updates
+#include "wolfupdate.h"       // [BETA CHANNEL 2026-11-12/] Help > Check for WolfViewer Updates
 #include "wolfspanscreens.h"  // <WolfViewer 2026-10-10/> Wolf World > Spread Across All Screens
 #include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] Wolf World > Teleport Across the Border Ahead
 #include "wolfradiostations.h"   // [WOLF STATIONS 2026-10-25/] Wolf World > Music & Radio > Add Your Radio Station...
@@ -13079,8 +13079,8 @@ void initialize_menus()
     });
     // [SPAN SCREENS 2026-10-10] Wolf World > Spread Across All Screens (wolfspanscreens.cpp)
     commit.add("Wolf.SpanScreensToggle", [](LLUICtrl*, const LLSD&) { WolfSpanScreens::toggle(); });
-    // [STAGED ROLLOUT 2026-11-12] Help > Check for WolfViewer Updates (menu_viewer.xml and menu_login.xml): asking by
-    // hand is never staged (wolfupdate.h checkByHand).
+    // [BETA CHANNEL 2026-11-12] Help > Check for WolfViewer Updates (menu_viewer.xml and menu_login.xml): an answer every
+    // time, an earlier "Not now" forgotten (wolfupdate.h checkByHand).
     commit.add("Wolf.CheckForUpdates", [](LLUICtrl*, const LLSD&) { WolfUpdate::checkByHand(); });
     enable.add("Wolf.SpanScreensOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfSpanScreens::isOn(); });
     // [FORCED 2026-10-09] The switch may be flipped: on Wolf Territories, and not on a region

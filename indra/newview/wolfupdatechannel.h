@@ -19,8 +19,6 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
-#include <utility>
-#include <vector>
 
 /**
  * [BETA CHANNEL 2026-11-12] Paul: "a beta download and updater feed get beta versions".
@@ -52,22 +50,6 @@ namespace WolfUpdateChannel
     /// Every download must live here: the website serves the installers from /downloads/wolfviewer/.
     constexpr const char* DOWNLOAD_PREFIX = "https://wolf-grid.com/downloads/wolfviewer/";
 
-    /**
-     * [STAGED ROLLOUT 2026-11-12] Paul: "i want a slower rollout". The release manifest's signed "rollout":
-     *   "rollout": { "started": <UTC seconds>, "steps": [[<hours after started>, <percent>], ...], "paused": false }
-     * A release is offered by itself only to installs whose bucket (rolloutBucket) is below the percent that applies
-     * now (rolloutPercent). No "rollout" at all is everyone at once: today's manifests, and the emergency path.
-     * W104 and older do not read the field and update at once; staging works for updates FROM a build that has this.
-     */
-    struct Rollout
-    {
-        bool mPresent = false;
-        bool mPaused = false;
-        long long mStarted = 0;                       // UTC seconds
-        std::vector<std::pair<int, int>> mSteps;      // (hours after mStarted, percent)
-        bool mMalformed = false;                      // the field was there but not of the shape above
-    };
-
     /// One feed's manifest entry for this platform, after its signature verified and it parsed.
     struct Entry
     {
@@ -78,95 +60,11 @@ namespace WolfUpdateChannel
         std::string mUrl;
         std::string mSha256;        // lower-case hex
         uint64_t mSize = 0;
-        long long mSequence = 0;    // [STAGED ROLLOUT] the manifest's "sequence" (UTC seconds it was signed), 0 when it has none
-        Rollout mRollout;           // [STAGED ROLLOUT] release feed only
+        long long mSequence = 0;    // the manifest's "sequence" (UTC seconds it was signed; beta feed), 0 when it has none
     };
 
     /**
-     * Is the plan one we would sign? Hours strictly increasing as listed, percents never decreasing, both in range,
-     * 1..16 steps. write_manifest.py refuses to sign anything else, so a plan that fails here is a mistake of ours in
-     * a field only we can sign; rolloutPercent then treats it as "everyone" (the same side as any other malformed
-     * rollout: such a mistake must not strand anyone; a PAUSE is honoured first, whatever the steps look like).
-     */
-    inline bool rolloutPlanValid(const Rollout& r)
-    {
-        if (r.mMalformed || r.mSteps.empty() || r.mSteps.size() > 16) return false;
-        int last_hour = -1, last_percent = 0;
-        for (const auto& step : r.mSteps)
-        {
-            if (step.first <= last_hour || step.first > 24 * 365 || step.second < last_percent || step.second > 100) return false;
-            last_hour = step.first;
-            last_percent = step.second;
-        }
-        return true;
-    }
-
-    /**
-     * The percent of installs a release is offered to now.
-     *  - no rollout: 100 (today's manifests, the emergency path);
-     *  - paused: 0, ALWAYS, whatever else the field holds;
-     *  - a plan that is not valid (rolloutPlanValid): 100;
-     *  - otherwise the percent of the latest step whose hour has come, 0 before the first step's hour.
-     * Elapsed time is the LARGER of two clocks, so staging can never hold an install for ever:
-     *    now - started        the signed start, by this computer's wall clock;
-     *    now - first_seen     since this viewer first verified a manifest for this release (kept locally:
-     *                         WolfViewerRolloutFirstSeenRevision / ...Time; 0 = not known).
-     * A clock that is behind the signed start therefore still moves through the plan from the day the viewer first
-     * saw the release (it reaches each step at most "its own delay" late); a clock that is ahead moves early, which
-     * is harmless (the same signed files). Without first_seen and with a clock behind the start: the first step.
-     */
-    inline int rolloutPercent(const Rollout& r, long long now, long long first_seen = 0)
-    {
-        if (!r.mPresent) return 100;
-        if (r.mPaused) return 0;
-        if (!rolloutPlanValid(r)) return 100;
-        long long elapsed = now - r.mStarted;
-        if (first_seen > 0 && now - first_seen > elapsed) elapsed = now - first_seen;
-        if (elapsed < 0) return r.mSteps.front().second;   // valid plans are in hour order: the earliest step
-        int percent = 0;
-        for (const auto& step : r.mSteps)
-        {
-            if ((long long)step.first * 3600 <= elapsed) percent = step.second;
-        }
-        return percent;
-    }
-
-    /// murmur3's 32-bit finaliser: every input bit affects every output bit.
-    inline uint32_t fmix32(uint32_t h)
-    {
-        h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13; h *= 0xc2b2ae35u; h ^= h >> 16;
-        return h;
-    }
-
-    /**
-     * This install's place in the queue for one release, 0..99, from the install's random seed (WolfViewerRolloutSeed,
-     * made once on this computer, derived from nothing, sent nowhere) and the revision. Two rounds of fmix32 (the
-     * revision is mixed, combined with the seed, and mixed again), so the place in release N says nothing about the
-     * place in release N+1: a different tenth of installs goes first each time (measured in the harness: uniform per
-     * release, and independent between consecutive releases). The first version of this used FNV-1a and "% 100",
-     * which moved a bucket by one of a few fixed offsets from one release to the next (review, 2026-11-12).
-     * Scaled with a multiply and shift, not "%", so no place is favoured. In the share when it is < rolloutPercent().
-     */
-    inline int rolloutBucket(uint32_t seed, int revision)
-    {
-        const uint32_t h = fmix32(seed ^ fmix32((uint32_t)revision * 0x9e3779b9u + 0x7f4a7c15u));
-        return (int)(((uint64_t)h * 100u) >> 32);
-    }
-
-    /**
-     * May a verified release manifest be acted on, given the newest one this viewer has verified before
-     * (WolfViewerManifestRevisionSeen / WolfViewerManifestSequenceSeen)? Only a manifest for the SAME revision with
-     * a LOWER sequence is refused: that is an older state of the same release (a replay could otherwise undo a
-     * pause). A higher revision is its own order; a lower revision is our own release undo and offers nothing to
-     * anyone at or above it anyway.
-     */
-    inline bool sequenceAcceptable(int revision, long long sequence, int seen_revision, long long seen_sequence)
-    {
-        return !(revision == seen_revision && sequence < seen_sequence);
-    }
-
-    /**
-     * The BETA feed's rule, stricter: that feed never legitimately goes back in time (a new beta, a withdrawal and a
+     * [review 2026-11-12] The BETA feed's replay rule: that feed never legitimately goes back in time (a new beta, a withdrawal and a
      * re-publish each carry a later signing time), so a manifest with a lower sequence than the highest one already
      * verified (WolfViewerBetaSequenceSeen) is not acted on, whatever revision it names. This is what stops an old,
      * genuinely signed beta manifest being replayed to a viewer that has seen it withdrawn or replaced.
@@ -175,15 +73,6 @@ namespace WolfUpdateChannel
     {
         return sequence >= seen_sequence;
     }
-
-    /// What the caller knows about this install and this check, for the staged rollout. See choose().
-    struct Staging
-    {
-        long long mNow = 0;         // UTC seconds
-        long long mFirstSeen = 0;   // when this viewer first verified a manifest for this release (0: not known)
-        int mBucket = 0;            // rolloutBucket(seed, the release's revision)
-        bool mBypass = false;       // "Get beta versions" is ticked, or the resident asked by hand: not staged
-    };
 
     /// A plain file name only: the URL's last part, which becomes a path on disk.
     inline bool safeFileName(const std::string& name)
@@ -250,10 +139,7 @@ namespace WolfUpdateChannel
         UNUSABLE,       // a newer release, but its entry for this platform cannot be used
         SKIPPED,        // a newer release the resident said "Not now" / "Skip this version" to
         OFFER,
-        PAUSED,         // [STAGED ROLLOUT] a newer release whose rollout we paused: offered to nobody, asked or not
-        HELD,           // [STAGED ROLLOUT] a newer release not yet offered to this install's share; ask again next start
-        FAILED,         // (wolfupdatemanifest.h decide) no verified release manifest this time: act on nothing
-        STALE           // (wolfupdatemanifest.h decide) an older signed state of the same release than already seen
+        FAILED          // (wolfupdatemanifest.h decide) no verified release manifest this time: act on nothing
     };
 
     struct Choice
@@ -269,14 +155,12 @@ namespace WolfUpdateChannel
      * @param skipped_beta    WolfViewerUpdateSkippedBeta
      * @param stable          the release feed's entry; the caller has checked mVerified
      * @param beta            the beta feed's entry, or nullptr when that feed is not followed
-     * @param staging         [STAGED ROLLOUT] nullptr: the release's "rollout" is not looked at (W104's behaviour)
      *
      * The beta is taken only when it is above BOTH this build and the release (so a release that
      * has overtaken, or is, the beta always wins and a promoted beta is fetched from the release
      * feed), usable, and not declined. Declining a beta never hides a release, and the other way round.
      */
-    inline Choice choose(int mine, int skipped_stable, int skipped_beta, const Entry& stable, const Entry* beta,
-                         const Staging* staging = nullptr)
+    inline Choice choose(int mine, int skipped_stable, int skipped_beta, const Entry& stable, const Entry* beta)
     {
         Choice c;
         if (!channelMatches(stable, Feed::STABLE))
@@ -295,9 +179,7 @@ namespace WolfUpdateChannel
         // From here: W104's checkCoro, in its order.
         if (stable.mRevision <= mine) c.mVerdict = Verdict::UP_TO_DATE;
         else if (!usable(stable, Feed::STABLE)) c.mVerdict = Verdict::UNUSABLE;
-        else if (staging && stable.mRollout.mPresent && stable.mRollout.mPaused) c.mVerdict = Verdict::PAUSED;
         else if (skipped_stable >= stable.mRevision) c.mVerdict = Verdict::SKIPPED;
-        else if (staging && !staging->mBypass && staging->mBucket >= rolloutPercent(stable.mRollout, staging->mNow, staging->mFirstSeen)) c.mVerdict = Verdict::HELD;
         else c.mVerdict = Verdict::OFFER;
         return c;
     }

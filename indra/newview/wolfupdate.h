@@ -88,9 +88,8 @@ public:
     /// The login screen's release text: the release name (or `unnamed_fallback` for a build with none), " (Beta)"
     /// for a beta, " · AVX2" on the AVX2 build. Written again by the check when the answer changes it.
     static std::string releaseLabel(const std::string& unnamed_fallback);
-    /// [STAGED ROLLOUT 2026-11-12] Help > Check for WolfViewer Updates: check now. A release that is being offered to
-    /// a share of installs first (the manifest's signed "rollout") is offered at once to someone who asks, an earlier
-    /// "Not now" is forgotten, and there is always an answer (an offer, "you have the newest", "paused", "could not check").
+    /// [BETA CHANNEL 2026-11-12] Help > Check for WolfViewer Updates: check now. An earlier "Not now" is forgotten, and
+    /// there is always an answer (an offer, "you have the newest", or "could not check").
     static void checkByHand();
     /// From FSPanelPrefs::postBuild: the "Get beta versions" box and the sentence under it (which says what
     /// unticking does while a beta is running, and why the box is greyed out on a package-repository install).

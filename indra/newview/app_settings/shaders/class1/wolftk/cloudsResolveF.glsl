@@ -474,7 +474,9 @@ void main() {
   #else // TEMPORAL_UPSCALE
   temporalAntialiasing(coord, outputColor, outputShadowLength);
   #endif // TEMPORAL_UPSCALE
-  outputSurfaceDepth = wolfSceneDepth(coord);   // [WolfViewer 2026-11-11] finite and 0..cameraFar by construction
+  // [WolfViewer 2026-11-11] finite and 0..cameraFar by construction; fp16 holds 65504 (as the colour below): a far clip
+  // beyond that would store +inf, which wolfSameSurface never matches - those pixels would lose their history every frame
+  outputSurfaceDepth = min(wolfSceneDepth(coord), 65504.0);
   // [WolfViewer 2026-10-21] this pass's output is next frame's history: one NaN here would spread through the clipping
   // (mean / variance of the neighbourhood) frame after frame - the black blotches. fp16 holds 65504.
   outputColor = clamp(wolfFiniteOrZero(outputColor), vec4(-65504.0), vec4(65504.0));

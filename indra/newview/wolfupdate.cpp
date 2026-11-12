@@ -606,7 +606,9 @@ void WolfUpdate::checkByHand()
     {
         // A check is under way (most likely the automatic one, a second after the login screen appeared). A click
         // must always be answered: say so now, and run a by-hand check the moment that one ends (checkCoro's Running).
-        if (!sManualPending) LLNotificationsUtil::add("WolfUpdateChecking");
+        // In-world a tip says it is under way; on the login screen a tip would not be shown (answer_by_hand), and the
+        // answer itself, a few seconds later, comes as a window there: nothing more is needed in between.
+        if (!sManualPending && sLoggedIn) LLNotificationsUtil::add("WolfUpdateChecking");
         sManualPending = true;
         return;
     }
@@ -696,6 +698,15 @@ namespace
             else on_ready(n, r);
         });
 #endif
+    }
+
+    /// [test build 2026-11-12] The quiet answers to Help > Check for WolfViewer Updates ("you have the newest", "nothing
+    /// on offer") are tips in-world. Before login a tip is not shown at all (llscreenchannel.cpp: toasts wait for the
+    /// start-up toast, which comes after login), so on the login screen the same words come as a small window with OK:
+    /// the resident asked, and must see the answer. In-world nothing changes.
+    void answer_by_hand(const char* name)
+    {
+        LLNotificationsUtil::add(sLoggedIn ? std::string(name) : std::string(name) + "Login");
     }
 
     /// A check asked for by hand could not get an answer: say so (it must always say something).
@@ -928,6 +939,9 @@ namespace
     void on_crash_keep()
     {
         crash_notice_answered();
+        LL_INFOS("WolfUpdate") << "beta crash notice: Keep testing the beta"
+                               << (gSavedSettings.getS32(CRASH_MUTED_SETTING) == WolfUpdate::currentRevision() ? " (not shown again for this beta)" : "")
+                               << LL_ENDL;
         // Hidden, not deleted: this runs inside the band's own button. It goes with the login panel.
         if (LLPanel* p = sCrashNotice.get()) p->setVisible(false);
     }
@@ -1226,7 +1240,7 @@ void WolfUpdate::checkCoro()
                                << ", older than the " << in.mManifestSequenceSeen << " already seen for that release; ignored" << LL_ENDL;
         // By hand: what is true here is that the server answered with an OLDER notice about a release this viewer
         // already knows more recently, so nothing is on offer from it. Not "check your internet connection".
-        if (by_hand) LLNotificationsUtil::add(out.mStaleButCurrent ? "WolfUpdateNone" : "WolfUpdateNotOffered");
+        if (by_hand) answer_by_hand(out.mStaleButCurrent ? "WolfUpdateNone" : "WolfUpdateNotOffered");
         return;
     case Verdict::REFUSED:
         LL_WARNS("WolfUpdate") << "update check: latest.json is not a release manifest (channel \"" << out.mStable.mChannel
@@ -1235,7 +1249,7 @@ void WolfUpdate::checkCoro()
         return;
     case Verdict::UP_TO_DATE:
         if (out.mCleanUpdates) clean_updates("");   // anything downloaded before is this build or older
-        if (by_hand) LLNotificationsUtil::add("WolfUpdateNone");
+        if (by_hand) answer_by_hand("WolfUpdateNone");
         return;
     case Verdict::UNUSABLE:
         LL_WARNS("WolfUpdate") << "update check: latest.json entry for " << platform_key() << " is not usable" << LL_ENDL;
@@ -1264,8 +1278,10 @@ void WolfUpdate::checkCoro()
     o.mBeta = from_beta;
     if (by_hand && sHaveOffer && sOffer.mRevision == o.mRevision && (sBusy || !sReadyPath.empty()))
     {
-        // Asked by hand while this very release is already downloading or downloaded: say where it stands.
-        if (sBusy) LLNotificationsUtil::add("WolfUpdateDownloading", release_args());
+        // Asked by hand while this very release is already downloading or downloaded: say where it stands. (On the login
+        // screen a download is one started from the band, which shows its progress: the band is the answer there.)
+        if (sBusy && !sLoggedIn) { if (LLPanel* band = sNotice.get()) band->setVisible(true); }
+        else if (sBusy) LLNotificationsUtil::add("WolfUpdateDownloading", release_args());
         else notify_ready();
         return;
     }

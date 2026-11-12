@@ -7094,6 +7094,26 @@ Wolf Chat - [COUNT] new messages in [WHERE]. The newest, from [FROM]:
    type="notifytip">
 You have the newest WolfViewer.
   </notification>
+  <!-- [test build 2026-11-12] The same two answers on the LOGIN SCREEN, where a tip is not shown (llscreenchannel.cpp
+       shows toasts only after login): a small window with OK instead (wolfupdate.cpp answer_by_hand). -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateNoneLogin"
+   type="alertmodal">
+You have the newest WolfViewer.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateNotOfferedLogin"
+   type="alertmodal">
+No newer WolfViewer is on offer at the moment. WolfViewer will check again the next time it starts.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
   <notification
    icon="notifytip.tga"
    name="WolfUpdateChecking"

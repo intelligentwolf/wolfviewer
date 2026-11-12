@@ -23,10 +23,13 @@
       label="Info"
       help_topic="about_support_tab"
       name="support_panel">
+      <!-- [test build 2026-11-12] height 48, not 30: at width 434 the sentence wraps to two lines and the address is a
+           third, so 30 px (two lines) drew the address over the version line below (test build screenshot). The editor
+           below follows by top_pad and is 18 px shorter, so the floater keeps its size. -->
       <text
         follows="top|left|right"
         font="SansSerif"
-        height="30"
+        height="48"
         layout="topleft"
         left="11"
         name="support_intro"
@@ -40,7 +43,7 @@ https://www.wolf-grid.com
         parse_urls="true"
         follows="top|left"
         font="SansSerif"
-        height="468"
+        height="450"
         bg_readonly_color="Transparent"
         left="5"
         max_length="65536"

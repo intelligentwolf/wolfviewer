@@ -4,7 +4,9 @@
      goes (panel_wolf_update_notice.xml, whose colours, fonts and edges it copies); the update band replaces it when a
      newer build is on offer. Shown only on a beta build, once per crash, and it does not stop anyone logging in.
      Only in the default skin and only in English on purpose: every skin and language falls back to this file.
-     Tab order: the tick, Keep testing the beta, Go back to the normal version. -->
+     Layout [test build 2026-11-12]: words on the left (they wrap as the window narrows); on the right the two buttons
+     with the tick directly under them, right-aligned with them, so nothing is left floating under short text in a wide
+     window. Tab order: the tick, Keep testing the beta, Go back to the normal version. -->
 <panel
   name="wolf_beta_crash_notice"
   follows="left|top|right"
@@ -40,19 +42,23 @@
     word_wrap="true"
     left="20"
     top="38"
-    height="62"
+    height="86"
     width="520" />
+  <!-- font= on the check_box itself: widgets/check_box.xml gives every check box font="SansSerifSmall", which counts as
+       provided and so wins over label_text.font (llcheckboxctrl.cpp). check_button.bottom raises the 13 px box towards
+       the middle of the larger line, as panel_login.xml does for its SansSerifMedium boxes. -->
   <check_box
     name="mute_check"
-    follows="left|top"
-    label_text.font="SansSerifLarge"
+    follows="right|top"
+    font="SansSerifLarge"
     label_text.text_color="WolfUpdateNoticeText"
+    check_button.bottom="4"
     label="Don't show this again for this beta"
     tool_tip="You will still be told if a later beta closes unexpectedly."
-    left="20"
-    top="102"
-    height="20"
-    width="420" />
+    left="556"
+    top="98"
+    height="22"
+    width="456" />
   <button
     name="keep_btn"
     follows="right|top"

@@ -558,6 +558,10 @@ struct Clouds::Impl
     // clouds pass targets (CloudsPass.ts:134-157)
     Tex cColor, cDepthVelocity, cShadowLength;           // current (low resolution)
     Tex rColor[2], rShadowLength[2];                     // resolve / history, swapped by `resolveIndex`
+    // [GHOST 2026-11-11] the view depth of the surface each pixel of rColor showed (0 = the sky), written by the resolve
+    // beside the colour and swapped with it: the next frame's resolve drops history that belonged to another surface
+    // (cloudsResolveF.glsl wolfHistoryOtherSurface)
+    Tex rSurface[2];
     S32 resolveIndex = 0;                                 // rColor[resolveIndex] = resolve target, the other = history
     S32 cWidth = 0, cHeight = 0;
     bool cLightShafts = false;
@@ -585,7 +589,7 @@ struct Clouds::Impl
     // `other` holds the other eye's, swapped in by useEye. The desktop (CloudsFrame::eye -1) is eye 0.
     struct EyeHistory
     {
-        Tex rColor[2], rShadowLength[2];
+        Tex rColor[2], rShadowLength[2], rSurface[2];
         S32 resolveIndex = 0;
         bool havePrev = false;
         glm::mat4 prevProj, prevView;
@@ -595,7 +599,7 @@ struct Clouds::Impl
     void useEye(S32 e)
     {
         if (e == activeEye) return;
-        for (S32 i = 0; i < 2; ++i) { std::swap(rColor[i], other.rColor[i]); std::swap(rShadowLength[i], other.rShadowLength[i]); }
+        for (S32 i = 0; i < 2; ++i) { std::swap(rColor[i], other.rColor[i]); std::swap(rShadowLength[i], other.rShadowLength[i]); std::swap(rSurface[i], other.rSurface[i]); }
         std::swap(resolveIndex, other.resolveIndex);
         std::swap(havePrev, other.havePrev);
         std::swap(prevProj, other.prevProj);
@@ -1325,17 +1329,19 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         for (S32 i = 0; i < 2; ++i)
         {
             alloc(m.rColor[i], GL_TEXTURE_2D, GL_RGBA16F, f.width, f.height);
+            alloc(m.rSurface[i], GL_TEXTURE_2D, GL_R16F, f.width, f.height);   // [GHOST 2026-11-11]
             if (p.lightShafts) alloc(m.rShadowLength[i], GL_TEXTURE_2D, GL_R16F, f.width, f.height); else m.rShadowLength[i].release();
         }
         // CloudsMaterial.setSize (:400-422): invalidates the reprojection
         m.havePrev = false;
     }
     // [VR CLOUDS 2026-11-05] the other eye's resolve / history targets were not resized above while it was swapped out
-    if (m.rColor[0].w != (S32)f.width || m.rColor[0].h != (S32)f.height || (p.lightShafts ? m.rShadowLength[0].w != (S32)f.width : m.rShadowLength[0].id != 0))
+    if (m.rColor[0].w != (S32)f.width || m.rColor[0].h != (S32)f.height || m.rSurface[0].w != (S32)f.width || m.rSurface[0].h != (S32)f.height || (p.lightShafts ? m.rShadowLength[0].w != (S32)f.width : m.rShadowLength[0].id != 0))
     {
         for (S32 i = 0; i < 2; ++i)
         {
             alloc(m.rColor[i], GL_TEXTURE_2D, GL_RGBA16F, f.width, f.height);
+            alloc(m.rSurface[i], GL_TEXTURE_2D, GL_R16F, f.width, f.height);   // [GHOST 2026-11-11]
             if (p.lightShafts) alloc(m.rShadowLength[i], GL_TEXTURE_2D, GL_R16F, f.width, f.height); else m.rShadowLength[i].release();
         }
         m.havePrev = false;
@@ -1521,12 +1527,15 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         WolfTk::bindNamed(sh, "depthBuffer", 13, GL_TEXTURE_2D, f.depth_tex);
         u1f(sh, "cameraNear", f.near_clip);
         u1f(sh, "cameraFar", f.far_clip);
+        // [GHOST 2026-11-11] the surface each pixel of the history showed (cloudsResolveF.glsl wolfHistoryOtherSurface)
+        WolfTk::bindNamed(sh, "surfaceHistoryBuffer", 14, GL_TEXTURE_2D, m.rSurface[hi].id);
         std::vector<Att> atts = { { &m.rColor[ri], 0 } };
         if (p.lightShafts) atts.push_back({ &m.rShadowLength[ri], 0 });
+        atts.push_back({ &m.rSurface[ri], 0 });   // [GHOST 2026-11-11] the last attachment: cloudsResolveF.glsl outputSurfaceDepth
         if (!m.fbo.bind(atts)) { sh.unbind(); return m.incomplete(vp); }
         drawScreen((S32)f.width, (S32)f.height);
         sh.unbind();
-        for (S32 u = 8; u <= 13; ++u) WolfTk::unbindUnit(u, GL_TEXTURE_2D);
+        for (S32 u = 8; u <= 14; ++u) WolfTk::unbindUnit(u, GL_TEXTURE_2D);
     }
     // copyReprojection (CloudsMaterial.ts:393-398), then swapBuffers (CloudsPass.ts:174-183): the history is the
     // texture just resolved, the output (outputBuffer :239-242) that history
@@ -1613,6 +1622,7 @@ void Clouds::release()
     Impl& m = *mImpl;
     for (Tex* t : { &m.shapeTex, &m.shapeDetailTex, &m.blueNoiseTex, &m.localWeatherTex, &m.turbulenceTex, &m.shadowCurrentTex, &m.shadowResolveTex, &m.shadowHistoryTex,
                     &m.cColor, &m.cDepthVelocity, &m.cShadowLength, &m.rColor[0], &m.rColor[1], &m.rShadowLength[0], &m.rShadowLength[1],
+                    &m.rSurface[0], &m.rSurface[1], &m.other.rSurface[0], &m.other.rSurface[1],   // [GHOST 2026-11-11]
                     &m.other.rColor[0], &m.other.rColor[1], &m.other.rShadowLength[0], &m.other.rShadowLength[1],
                     &m.pColor, &m.pDepthVelocity, &m.pShadowLength })
     {

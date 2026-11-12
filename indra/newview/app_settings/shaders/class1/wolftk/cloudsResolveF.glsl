@@ -95,11 +95,61 @@ bool wolfSameSurface(const float a, const float b) {
   return max(a, b) <= 2.0 * min(a, b);
 }
 
+// [WolfViewer 2026-11-11] THE GHOST OF A BUILDING IN THE NIGHT SKY (Paul, W104 test build, WT Atlantic 131: "look at this
+// building when i move there is a shadowing behind it" - a larger, offset, dotted outline of a cottage in the sky behind it;
+// reproduced there on W103 and W104, Vulkan and OpenGL: runs g1-g3 of ~/.cache/ghost). A pixel that showed the building in
+// the last frame and shows the sky in this one (the camera pulled back, or moved sideways) is in the middle of the sky as
+// far as the edge rule above can tell: all 9 of its low-res texels saw the sky, so takram's resolve runs as it is. Its
+// velocity is the cloud front's (kilometres away: next to none for a camera that moves a few metres), so its history is
+// what this place on the screen held - the building's overlay: no cloud, colour ~0, alpha ~0. takram's clip does not
+// remove that at night: clipAABB (varianceClipping.glsl) tests the colour only and, where the history's colour is inside
+// the neighbourhood's box, returns the history whole, alpha included; a night cloud's colour is ~0 as well, so the
+// building's alpha 0 stays and the pixel shows the stars through a cloud. It is then replaced a quarter at a time
+// (WOLF_SLOT_ALPHA) when its own Bayer slot comes round, one frame in 16 - the dot pattern, and 2-3 seconds to fade
+// (measured, run g1). By day the cloud's colour is far from 0, the clip pulls the history in and the ghost is faint.
+//
+// The fix is the standard disocclusion test of temporal reprojection: history is only valid where it belonged to the
+// surface the pixel shows now. The resolve writes, beside the colour, the view depth of the surface each pixel showed
+// (0 = the sky: wolfSceneDepth, the same test and the same depth read as everything above); the next frame reads it at the
+// place the history comes from and, where that was another surface (wolfSameSurface, the edge rule's own test), treats the
+// history as it already treats history from off the screen: dropped, the pixel takes this frame's value. Every other pixel
+// - all of a still picture, and all of the sky that was sky - resolves exactly as before.
+uniform sampler2D surfaceHistoryBuffer;
+// whether the history at prevUv belonged, in any part that shows, to another surface than the one this pixel shows (view
+// depth sceneDepth, 0 = sky). The history is fetched bilinearly (texture(colorHistoryBuffer, prevUv)), so it is a blend of up
+// to 4 pixels: each of them that has a share of at least WOLF_HISTORY_SHARE is tested. At rest prevUv is this very pixel's
+// centre and the other 3 have no share, so a pixel on a silhouette never loses its history to its neighbour's surface; in
+// motion a neighbour of the other surface with a real share would leave a thin line of the ghost along every outline the
+// building had on the way (run g4: the first form of this test, nearest pixel only, left those lines).
+// WOLF_HISTORY_SHARE is a design value: 2% of a building's alpha 0 in a cloud is far below what shows.
+const float WOLF_HISTORY_SHARE = 0.02;
+bool wolfHistoryOtherSurface(const vec2 prevUv, const float sceneDepth) {
+  ivec2 size = textureSize(surfaceHistoryBuffer, 0);
+  vec2 texel = prevUv * vec2(size) - 0.5;   // bilinear filtering: the 4 pixels round prevUv and their shares
+  ivec2 base = ivec2(floor(texel));
+  vec2 f = texel - floor(texel);
+  for (int i = 0; i < 4; ++i) {
+    ivec2 o = ivec2(i & 1, i >> 1);
+    float share = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+    if (share < WOLF_HISTORY_SHARE) continue;
+    float historyDepth = texelFetch(surfaceHistoryBuffer, clamp(base + o, ivec2(0), size - ivec2(1)), 0).r;
+    if (!wolfSameSurface(historyDepth, sceneDepth)) return true;
+  }
+  return false;
+}
+
 in vec2 vUv;
 
 layout(location = 0) out vec4 outputColor;
 #ifdef SHADOW_LENGTH
 layout(location = 1) out float outputShadowLength;
+#endif // SHADOW_LENGTH
+// [WolfViewer 2026-11-11] the surface this pixel shows, for the next frame's wolfHistoryOtherSurface: the attachment after
+// the last of takram's (wolftkclouds.cpp, the resolve's atts)
+#ifdef SHADOW_LENGTH
+layout(location = 2) out float outputSurfaceDepth;
+#else // SHADOW_LENGTH
+layout(location = 1) out float outputSurfaceDepth;
 #endif // SHADOW_LENGTH
 
 // Source: three-geospatial packages/clouds/src/shaders/cloudsResolve.frag:30-40 neighborOffsets
@@ -241,6 +291,8 @@ void temporalUpscale(
   if (currentFrame) {
     vec2 slotPrevUv = vUv - texelFetch(depthVelocityBuffer, lowResCoord, 0).gb;
     bool slotHistory = sameCount == 9 && slotPrevUv.x >= 0.0 && slotPrevUv.x <= 1.0 && slotPrevUv.y >= 0.0 && slotPrevUv.y <= 1.0;
+    // [WolfViewer 2026-11-11] nor is history of another surface blended in (the ghost, the note above wolfHistoryOtherSurface)
+    slotHistory = slotHistory && !wolfHistoryOtherSurface(slotPrevUv, sceneDepth);
     if (slotHistory) {
       vec4 slotHistoryColor = varianceClipping(colorBuffer, vUv, currentColor, texture(colorHistoryBuffer, slotPrevUv), varianceGamma);
       outputColor = mix(slotHistoryColor, currentColor, WOLF_SLOT_ALPHA);
@@ -312,7 +364,9 @@ void temporalUpscale(
   vec4 depthVelocity = edge ? closestSame : closestAll;
   vec2 velocity = depthVelocity.gb;
   vec2 prevUv = vUv - velocity;
-  if (prevUv.x < 0.0 || prevUv.x > 1.0 || prevUv.y < 0.0 || prevUv.y > 1.0) {
+  // [WolfViewer 2026-11-11] history that belonged to another surface is rejected as history from off the screen is (the
+  // ghost, the note above wolfHistoryOtherSurface)
+  if (prevUv.x < 0.0 || prevUv.x > 1.0 || prevUv.y < 0.0 || prevUv.y > 1.0 || wolfHistoryOtherSurface(prevUv, sceneDepth)) {
     outputColor = edge ? sameMean : currentColor;
     #ifdef SHADOW_LENGTH
     outputShadowLength = edge ? sameShadowMean.r : currentShadowLength.r;
@@ -420,6 +474,9 @@ void main() {
   #else // TEMPORAL_UPSCALE
   temporalAntialiasing(coord, outputColor, outputShadowLength);
   #endif // TEMPORAL_UPSCALE
+  // [WolfViewer 2026-11-11] finite and 0..cameraFar by construction; fp16 holds 65504 (as the colour below): a far clip
+  // beyond that would store +inf, which wolfSameSurface never matches - those pixels would lose their history every frame
+  outputSurfaceDepth = min(wolfSceneDepth(coord), 65504.0);
   // [WolfViewer 2026-10-21] this pass's output is next frame's history: one NaN here would spread through the clipping
   // (mean / variance of the neighbourhood) frame after frame - the black blotches. fp16 holds 65504.
   outputColor = clamp(wolfFiniteOrZero(outputColor), vec4(-65504.0), vec4(65504.0));

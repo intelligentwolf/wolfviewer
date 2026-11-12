@@ -1283,6 +1283,13 @@ bool LLAppViewer::init()
     //
     gGLActive = true;
     wolf_write_client_info();   // [T676 2026-11-08] before initWindow: a start-up fatal in it must still name this version
+    // [T805 2026-11-12] ...and on disk now: T676 covered an LLError fatal, whose errorCallback writes the file, but a
+    // hard crash inside initWindow (an access violation in a graphics driver: tickets 763 and 805) writes nothing, so
+    // its report came without a version. The file is this run's own (the dump folder, setDebugFileNames in the
+    // constructor), holds what a fatal at this point would have written, and every later writeDebugInfo() replaces it
+    // whole (writeSystemInfo after the window, the login, each region change), so a normal run ends with the same file.
+    // The next start reads it back for the report (wolfcrashreport.cpp debug_info_text: ClientInfo -> crashed_viewer).
+    writeDebugInfo();
     initWindow();
     LL_INFOS("InitInfo") << "Window is initialized." << LL_ENDL ;
     WolfSpanScreens::startup();    // <WolfViewer 2026-10-10/> spread across all screens again if it was

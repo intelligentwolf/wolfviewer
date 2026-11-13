@@ -56,6 +56,14 @@ public:
         S32  mRev = 0;
         F32  mStopM = -1.f, mAhead = 0.f;
         bool mProtect = false;
+        // [wolf-rail 1.2] backing (back=1: "ahead" is then the line behind); the next signal (sig=aspect|metres) and the
+        // next points (pts=name|setting|metres|driver) on the line laid (RailEngine.SendCab)
+        bool mBack = false;
+        std::string mSig;               // "red", "yellow", "green", or empty: none in sight
+        F32  mSigM = -1.f;
+        std::string mPts, mPtsSet;      // the points' name and setting ("left", "right", "auto" = as laid)
+        F32  mPtsM = -1.f;
+        bool mPtsDriver = false;        // a driver may change them from the cab ("points <name> driver")
     };
 
     void receive(const LLUUID& invoice, const std::vector<std::string>& strings);
@@ -87,6 +95,14 @@ public:
     /** [wolf-rail 1.2] Auto: shown and sent while the region says mode=auto, or the driver has just asked for it. */
     bool autoOn() const { return mAutoWant; }
     void pressAuto();
+    /** [wolf-rail 1.2] The POINTS button: the next points ahead that drivers may change, within the region's reach
+     *  (RailEngine.DRIVER_POINTS_M). Pressing it asks first ("Set points P1 to the right?"); yes sends the press. */
+    bool canChangePoints() const;
+    bool pointsAsking() const { return mPointsAsk; }
+    void askPoints();
+    void answerPoints(bool yes);
+    /** The setting the next press gives (the region's toggle: left -> right, anything else -> left). */
+    static std::string nextSetting(const std::string& now);
     bool horn() const { return mHornHeld; }
     bool mph() const;
     void setMph(bool on);
@@ -100,7 +116,8 @@ public:
     /** The cab's keys, while driving() (wolfdrive.cpp noteScanKey: unmodified keys only, never one the UI took - so typing
      *  in chat never reaches them, llviewerinput.cpp mKeyHandledByUI). Watch-only like every Wolf HUD key: the key's own
      *  binding still runs. Up / W one step more, Down / S one step less; F5 the reverser (forward, neutral, reverse in turn);
-     *  F2 Easy / driver's mode; F3 mph / km/h; F4 show / hide the cab; [1.2] F8 AUTO. F2-F9 have no binding in any mode
+     *  F2 Easy / driver's mode; F3 mph / km/h; F4 show / hide the cab; [1.2] F8 AUTO, F9 POINTS (asks; F9 again says yes).
+     *  F2-F9 have no binding in any mode
      *  (key_bindings.xml first_person / third_person / sitting) and are no menu's shortcut unmodified (only F1 is,
      *  menu_viewer.xml; F2-F9 appear there only with control|alt); every free letter is a driving action's default key
      *  (wolfdrive.cpp ACTION_DEFAULT_KEYS) or a movement key. */
@@ -132,6 +149,10 @@ private:
     F64  mAutoChosenAt = -1.0e9;
     F64  mAutoPulseUntil = -1.0;
     void takeBack();
+    // [wolf-rail 1.2] the POINTS question open (for the points named mPointsAskName), and the press on the wire (STAGE)
+    bool mPointsAsk = false;
+    std::string mPointsAskName;
+    F64  mPointsPulseUntil = -1.0;
 };
 
 /** The Train Cab across the bottom of the screen (main_view.xml wolf_train_cab), in the dashboards' family: all drawn
@@ -163,7 +184,7 @@ public:
         H_POWER, H_BRAKE,
         H_REV_FWD, H_REV_N, H_REV_REV,
         H_HORN, H_MODE, H_UNITS, H_HELP, H_HELP_BACK, H_HELP_NEXT, H_HELP_CLOSE, H_CLOSE, H_SHOW_TAB,
-        H_AUTO,
+        H_AUTO, H_POINTS, H_POINTS_YES, H_POINTS_NO,
     };
 
 private:
@@ -177,6 +198,7 @@ private:
     F32 mLeverB = 0.f, mLeverT = 1.f;   // the levers' slot this frame, picture units (for dragging)
     F32 mHelpL = 0.f, mHelpB = 0.f, mHelpR = 0.f, mHelpT = 0.f;   // the guide card this frame, view units (its clicks are ours)
     F32 mTabL = 0.f, mTabB = 0.f, mTabR = 0.f, mTabT = 0.f;       // the "Train Cab" tab while hidden by the driver, view units
+    F32 mAskL = 0.f, mAskB = 0.f, mAskR = 0.f, mAskT = 0.f;       // [1.2] the POINTS question card this frame, view units
     bool mShowHelp = false;
     S32 mHelpPage = 0;
 
@@ -186,6 +208,7 @@ private:
     void press(EHit id, S32 y);
     void dragLever(S32 y);
     void drawHelp(F32 top, F32 W);
+    void drawPointsAsk(F32 top, F32 W);
 };
 
 #endif // WOLF_TRAINCAB_H

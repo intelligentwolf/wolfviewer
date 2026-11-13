@@ -71,6 +71,10 @@ namespace
     // A choice the driver made here (AUTO pressed, a lever taken) wins over the region's mode for this long: its answer to
     // that press takes a plan and the way back, and the cab messages sent meanwhile still carry the old mode (four a second).
     const F64 AUTO_GRACE_S = 1.5;
+    // [wolf-rail 1.2] the points a driver may change from the cab lie this close ahead (wolf-rail RailEngine.DRIVER_POINTS_M)
+    const F32 DRIVER_POINTS_M = 200.f;
+    // a points or signal name: one word of at most 32 characters (wolf-rail GuideSet.Markers)
+    const size_t MAX_MARK_NAME = 32;
     // 1 m/s = 3.6 km/h; 1 mile = 1609.344 m exactly (the international yard and pound agreement, 1959), so 1 m/s =
     // 3600 / 1609.344 mph.
     const F32 MS_TO_KMH = 3.6f, MS_TO_MPH = 3600.f / 1609.344f;
@@ -182,6 +186,38 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         else if (k == "stop") { if (v.empty() || v == "station" || v == "stop") c.mStop = v; }
         else if (k == "region") c.mRegion = utf8Cut(v, 254);
         else if (k == "note") c.mNote = utf8Cut(v, 254);
+        else if (k == "sig")
+        {
+            // [wolf-rail 1.2] "aspect|metres", or empty: no signal on the line laid
+            c.mSig.clear(); c.mSigM = -1.f;
+            const size_t bar = v.find('|');
+            F32 m = 0.f;
+            if (bar != std::string::npos && parseF(v.substr(bar + 1), m))
+            {
+                const std::string a = v.substr(0, bar);
+                if (a == "red" || a == "yellow" || a == "green") { c.mSig = a; c.mSigM = llclamp(m, 0.f, 100000.f); }
+            }
+        }
+        else if (k == "pts")
+        {
+            // [wolf-rail 1.2] "name|setting|metres|driver", or empty: no points on the line laid
+            c.mPts.clear(); c.mPtsSet.clear(); c.mPtsM = -1.f; c.mPtsDriver = false;
+            std::vector<std::string> f;
+            size_t from = 0;
+            while (f.size() < 5)
+            {
+                const size_t bar = v.find('|', from);
+                f.push_back(v.substr(from, bar == std::string::npos ? std::string::npos : bar - from));
+                if (bar == std::string::npos) break;
+                from = bar + 1;
+            }
+            F32 m = 0.f;
+            if (f.size() == 4 && !f[0].empty() && utf8str_to_wstring(f[0]).size() <= MAX_MARK_NAME && (f[1] == "left" || f[1] == "right" || f[1] == "auto")
+                && parseF(f[2], m) && (f[3] == "0" || f[3] == "1"))
+            {
+                c.mPts = f[0]; c.mPtsSet = f[1]; c.mPtsM = llclamp(m, 0.f, 100000.f); c.mPtsDriver = f[3] == "1";
+            }
+        }
         else if (!parseF(v, n)) continue;
         else if (k == "speed")   c.mSpeed = llclamp(n, 0.f, 100.f);
         else if (k == "line")    c.mLine = llclamp(n, 0.f, 100.f);
@@ -191,6 +227,7 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         else if (k == "stopm")   c.mStopM = llclamp(n, -1.f, 100000.f);
         else if (k == "ahead")   c.mAhead = llclamp(n, 0.f, 100000.f);
         else if (k == "protect") c.mProtect = n >= 0.5f;
+        else if (k == "back")    c.mBack = n >= 0.5f;   // [wolf-rail 1.2]
     }
     if (off)
     {
@@ -205,6 +242,8 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     // [wolf-rail 1.2] the region's word on Auto (its own, or a script's train.control [train, "auto"]) - unless the driver
     // has just chosen here (AUTO_GRACE_S)
     if (fresh || now() - mAutoChosenAt > AUTO_GRACE_S) mAutoWant = c.mMode == "auto";
+    // the POINTS question is about the points named in it: other points ahead now (or none a driver may change), it goes
+    if (mPointsAsk && (!canChangePoints() || mCab.mPts != mPointsAskName)) mPointsAsk = false;
     if (fresh)
     {
         mOpen = true;
@@ -244,6 +283,8 @@ void WolfTrain::close()
     mHornHeld = false;
     mAutoWant = false;
     mAutoPulseUntil = -1.0;
+    mPointsAsk = false;
+    mPointsPulseUntil = -1.0;
 }
 
 void WolfTrain::claimBottom()
@@ -398,6 +439,34 @@ void WolfTrain::pressAuto()
     mNotch = NOTCH_STOP;
 }
 
+bool WolfTrain::canChangePoints() const
+{
+    return driving() && !mCab.mPts.empty() && mCab.mPtsDriver && mCab.mPtsM >= 0.f && mCab.mPtsM <= DRIVER_POINTS_M && !mCab.mBack;
+}
+
+// static
+std::string WolfTrain::nextSetting(const std::string& now)
+{
+    // Source: wolf-rail RailEngine.SetPoints "toggle": Left -> Right, anything else (Right, Auto) -> Left
+    return now == "left" ? "right" : "left";
+}
+
+void WolfTrain::askPoints()
+{
+    if (!canChangePoints()) return;
+    mPointsAsk = true;
+    mPointsAskName = mCab.mPts;
+}
+
+void WolfTrain::answerPoints(bool yes)
+{
+    if (!mPointsAsk) return;
+    mPointsAsk = false;
+    // the press: STAGE held as AUTO's is (wolf-rail Cab.cs BTN_POINTS 512; the region changes the next points a driver may
+    // set on the bit coming on, EngineDriver.ReadDriver), and says so in the cab's note
+    if (yes && canChangePoints() && mCab.mPts == mPointsAskName) mPointsPulseUntil = now() + AUTO_PULSE_S;
+}
+
 void WolfTrain::setReverser(S32 r)
 {
     mRev = llclamp(r, -1, 1);
@@ -439,6 +508,7 @@ U32 WolfTrain::sendButtons() const
     if (mHornHeld) b |= WolfDrive::BTN_HORN;
     if (easy()) b |= WolfDrive::BTN_ASSIST;   // the plugin's Easy driving (Cab.cs BTN_ASSIST, held while it is on)
     if (now() < mAutoPulseUntil) b |= WolfDrive::BTN_CRUISE;   // [wolf-rail 1.2] AUTO pressed (Cab.cs BTN_AUTO 256)
+    if (now() < mPointsPulseUntil) b |= WolfDrive::BTN_STAGE;  // [wolf-rail 1.2] POINTS, said yes to (Cab.cs BTN_POINTS 512)
     return b;
 }
 
@@ -446,16 +516,17 @@ U32 WolfTrain::sendButtons() const
 bool WolfTrain::isCabKey(KEY key)
 {
     return key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S' || key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4
-        || key == KEY_F8;   // [wolf-rail 1.2] AUTO
+        || key == KEY_F8 || key == KEY_F9;   // [wolf-rail 1.2] AUTO, POINTS
 }
 
 void WolfTrain::noteKey(KEY key, bool key_down, bool repeat)
 {
     if (!key_down || !driving()) return;
-    if (key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4 || key == KEY_F8)
+    if (key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4 || key == KEY_F8 || key == KEY_F9)
     {
         if (repeat) return;   // one press, one step
         if (key == KEY_F8) pressAuto();
+        else if (key == KEY_F9) { if (mPointsAsk) answerPoints(true); else askPoints(); }   // F9 asks, F9 again says yes
         else if (key == KEY_F5) setReverser(mRev > 0 ? 0 : mRev == 0 ? -1 : 1);   // forward -> neutral -> reverse -> forward
         else if (key == KEY_F2) setEasy(!easy());
         else if (key == KEY_F3) setMph(!mph());
@@ -641,6 +712,12 @@ namespace
         return llformat("%d m", (S32)llround(m));
     }
 
+    // [wolf-rail 1.2] a points setting in words: the branch to that side of the line, or as the points were laid
+    std::string settingWords(const std::string& s)
+    {
+        return s == "left" ? "to the left" : s == "right" ? "to the right" : "as laid";
+    }
+
     // The guide (Paul 2026-11-11, paul-games-must-look-fun: cards with Back / Next and dots, not "page 1 of 9").
     struct Card { const char* title; const char* l1; const char* l2; const char* l3; };
     const Card CARDS[] = {
@@ -649,17 +726,21 @@ namespace
         { "Easy driving", "One lever: STOP, SLOW and GO. Click a notch, or press Up and Down.",
           "GO runs at the line's speed, SLOW at a third of it, STOP brakes to a stand.", "The train stops at stations by itself and waits while people board." },
         { "Driver's mode", "The REGULATOR (or POWER) lever pulls, the BRAKE lever slows the train. Drag them, or press Up / Down.",
-          "With neither, the train keeps its speed. The reverser sets FORWARD or NEUTRAL.", "Stations are yours to stop at. The red lamp lights when the line makes the train brake." },
+          "With neither, the train keeps its speed. The reverser: FORWARD, NEUTRAL, or REVERSE to back it from a stand.", "Stations are yours to stop at. The red lamp lights when the line makes the train brake." },
         { "The horn and the dial", "WHISTLE (or HORN) sounds the engine's own - everyone near hears it. The horn key works too.",
           "The dial shows the speed and, in red, the fastest this line allows. Click it for mph or km/h.", "THE LINE AHEAD shows the next station and how much track is in front of you." },
         // [wolf-rail 1.2] Auto (Paul 13 Nov: "trains should have an auto mode as well btw so they can just run")
         { "Auto", "Press AUTO and the train drives itself: the line's speed, the stations and the signals.",
           "Take any lever, or press AUTO again, and you are driving once more.", "Stand up in Auto and the train goes on to the next station and stops there." },
+        // [wolf-rail 1.2] signals, points and backing
+        { "Signals and points", "SIGNAL shows the next signal: STOP (red) - the train waits; CAUTION (yellow) - the next is red; CLEAR (green).",
+          "POINTS shows the next points. Where drivers may change them, press POINTS and say yes: they change once no train is on them.",
+          "To back out of a platform, stop, set the reverser to REVERSE in driver's mode and take power. The train stops before the buffers." },
         { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power). F5 sets the reverser:",
-          "forward, neutral, reverse in turn. F2 switches Easy driving and driver's mode, F3 mph and km/h, F8 AUTO.", "F4 hides or shows the cab. Your horn key (H unless you changed it) sounds the horn." },
+          "forward, neutral, reverse in turn. F2 switches Easy driving and driver's mode, F3 mph and km/h, F8 AUTO, F9 POINTS.", "F4 hides or shows the cab. Your horn key (H unless you changed it) sounds the horn." },
         // [client review 13 Nov, W7] a gesture's own key is not taken from it: LLGestureMgr::triggerGesture(key, mask)
         // (llgesturemgr.cpp:761) plays it from the same key press
-        { "Your gestures", "A gesture you have put on F2, F3, F4, F5 or F8 still plays while you drive, as well as the cab's key.",
+        { "Your gestures", "A gesture you have put on F2, F3, F4, F5, F8 or F9 still plays while you drive, as well as the cab's key.",
           "If you would rather it did not, give the gesture another key in the Gestures window.", "Standing up gives every key back as it was." },
     };
     const S32 CARD_COUNT = (S32)(sizeof(CARDS) / sizeof(CARDS[0]));
@@ -695,6 +776,7 @@ bool WolfTrainCabView::onPanel(S32 x, S32 y) const
     if (hitAt(x, y)) return true;
     // the guide card (above the panel) and the tab are ours too: a click on them never reaches the world (review W11)
     if (mShowHelp && (F32)x >= mHelpL && (F32)x <= mHelpR && (F32)y >= mHelpB && (F32)y <= mHelpT) return true;
+    if (WolfTrain::instance().pointsAsking() && (F32)x >= mAskL && (F32)x <= mAskR && (F32)y >= mAskB && (F32)y <= mAskT) return true;
     return (F32)y >= mPanelB && (F32)y <= mPanelT;
 }
 
@@ -881,7 +963,7 @@ void WolfTrainCabView::draw()
             const bool sel = tr.reverser() == RV[i];
             rectF(X(300.f), b, X(500.f), t, sel ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
             T(X(400.f), (b + t) * 0.5f, RN[i], 12.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
-            addHit(X(300.f), b, X(500.f), t, RH[i], i == 2 ? std::string("Reverse: the train does not run backwards yet on Wolf Rail - it stays where it is")
+            addHit(X(300.f), b, X(500.f), t, RH[i], i == 2 ? std::string("Reverse: with the train standing, power backs it along its line (F5)")
                                                           : std::string(i == 0 ? "Forward (F5: forward, neutral, reverse in turn)" : "Neutral: no power reaches the wheels (F5)"));
         }
         T(X(400.f), Y(212.f), "REVERSER", 10.f, C_WHITE, true);
@@ -901,6 +983,26 @@ void WolfTrainCabView::draw()
     T(X(608.f), Y(182.f), "AUTO", 18.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : th.accent, true);
     T(X(608.f), Y(152.f), autoOn ? "ON" : "OFF", 11.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_GREY, true);
     addHit(X(536.f), Y(130.f), X(680.f), Y(214.f), H_AUTO, autoOn ? "Drive yourself again (F8)" : "Auto: the train drives itself - the line's speed, stations and signals (F8)");
+
+    // [wolf-rail 1.2] the POINTS button (F9): the next points ahead, and - when drivers may set them - the change, asked first
+    const bool canPts = tr.canChangePoints();
+    rectF(X(536.f), Y(14.f), X(680.f), Y(118.f), canPts ? LLColor4(0.f, 0.f, 0.f, 0.55f) : LLColor4(0.f, 0.f, 0.f, 0.3f));
+    frameW(X(536.f), Y(14.f), X(680.f), Y(118.f), S(2.f), canPts ? th.accent : th.accentLo);
+    T(X(608.f), Y(100.f), "POINTS", 14.f, canPts ? th.accent : C_DIM, true);
+    if (c.mPts.empty())
+    {
+        T(X(608.f), Y(70.f), "None ahead", 10.f, C_GREY);
+    }
+    else
+    {
+        T(X(608.f), Y(76.f), fitW(c.mPts, 11.f, true, S(136.f)), 11.f, C_WHITE, true);
+        T(X(608.f), Y(56.f), fitW(settingWords(c.mPtsSet) + ", " + distance(c.mPtsM), 9.f, false, S(136.f)), 9.f, C_GREY);
+        T(X(608.f), Y(34.f), canPts ? "Change them" : c.mPtsDriver ? "Too far to change" : "Set by the line", 9.f, canPts ? th.accent : C_DIM, true);
+    }
+    addHit(X(536.f), Y(14.f), X(680.f), Y(118.f), H_POINTS, canPts ? std::string("Change the points ahead - the cab asks first (F9)")
+           : c.mPts.empty() ? std::string("No points ahead on the line")
+           : c.mPtsDriver ? "These points can be changed from " + distance(DRIVER_POINTS_M) + " away"
+           : std::string("These points are set by the line's owner, not from the cab"));
 
     // ── centre: the speed dial ────────────────────────────────────────────────────────────────────
     const bool mph = tr.mph();
@@ -935,16 +1037,37 @@ void WolfTrainCabView::draw()
     T(cx, cy - S(44.f), llformat("%d", (S32)llround(c.mSpeed * k)), 24.f, C_WHITE, true);
     T(cx, cy - S(70.f), mph ? "mph" : "km/h", 10.f, C_GREY);
     addHit(cx - r, cy - r, cx + r, cy + r, H_UNITS, mph ? "Click for km/h (F3)" : "Click for mph (F3)");
-    T(cx, Y(266.f), autoOn ? "AUTO" : c.mMode == "easy" ? "EASY DRIVING" : "YOU ARE DRIVING", 11.f, th.accent, true);
+    T(cx, Y(266.f), autoOn ? "AUTO" : c.mBack ? "BACKING" : c.mMode == "easy" ? "EASY DRIVING" : "YOU ARE DRIVING", 11.f, th.accent, true);
+
+    // ── [wolf-rail 1.2] the signal ahead: its lamp, its word (never the colour alone) and how far ──────────────────────
+    rectF(X(922.f), Y(14.f), X(1040.f), Y(226.f), th.inset);
+    frameW(X(922.f), Y(14.f), X(1040.f), Y(226.f), S(2.f), th.accentLo);
+    T(X(981.f), Y(208.f), "SIGNAL", 10.f, th.accent, true);
+    const bool sig = !c.mSig.empty() && !c.mBack;
+    const LLColor4 sigCol = !sig ? C_DIM : c.mSig == "red" ? C_RED : c.mSig == "yellow" ? C_AMBER : C_GREEN;
+    circleF(X(981.f), Y(152.f), S(30.f), LLColor4(0.f, 0.f, 0.f, 0.8f));
+    circleF(X(981.f), Y(152.f), S(24.f), sig ? sigCol : LLColor4(0.12f, 0.12f, 0.12f, 1.f));
+    if (sig)
+    {
+        T(X(981.f), Y(104.f), c.mSig == "red" ? "STOP" : c.mSig == "yellow" ? "CAUTION" : "CLEAR", 13.f, sigCol, true);
+        T(X(981.f), Y(80.f), "in " + distance(c.mSigM), 10.f, C_GREY);
+        T(X(981.f), Y(52.f), c.mSig == "red" ? "The train waits" : c.mSig == "yellow" ? "Next one red" : "Line clear", 9.f, C_GREY);
+    }
+    else
+    {
+        T(X(981.f), Y(104.f), "None", 12.f, C_GREY, true);
+        T(X(981.f), Y(80.f), "in sight", 10.f, C_GREY);
+    }
 
     // ── right: the line ahead, the lamp, the horn ─────────────────────────────────────────────────
     rectF(X(1050.f), Y(14.f), X(1592.f), Y(226.f), th.inset);
     frameW(X(1050.f), Y(14.f), X(1592.f), Y(226.f), S(2.f), th.accentLo);
-    T(X(1070.f), Y(208.f), "THE LINE AHEAD", 10.f, th.accent, true, LLFontGL::LEFT);
+    T(X(1070.f), Y(208.f), c.mBack ? "THE LINE BEHIND" : "THE LINE AHEAD", 10.f, th.accent, true, LLFontGL::LEFT);
     std::string stop_line = "No station in sight";
-    if (c.mStopM >= 0.f) stop_line = (c.mStop == "stop" ? "End of the run in " : "Station in ") + distance(c.mStopM);
+    if (c.mBack) stop_line = "Backing";   // [wolf-rail 1.2] ("ahead" is the line behind while it backs)
+    else if (c.mStopM >= 0.f) stop_line = (c.mStop == "stop" ? "End of the run in " : "Station in ") + distance(c.mStopM);
     T(X(1070.f), Y(180.f), stop_line, 14.f, C_WHITE, true, LLFontGL::LEFT);
-    T(X(1070.f), Y(152.f), "Track in front of you: " + distance(c.mAhead), 11.f, C_GREY, false, LLFontGL::LEFT);
+    T(X(1070.f), Y(152.f), (c.mBack ? "Track behind you: " : "Track in front of you: ") + distance(c.mAhead), 11.f, C_GREY, false, LLFontGL::LEFT);
     // the track strip: the engine on the left, the stop and the end of the line it can see
     const F32 sl = X(1070.f), sr = X(1380.f), sy = Y(124.f);
     lineW(sl, sy, sr, sy, S(3.f), C_GREY);
@@ -971,9 +1094,31 @@ void WolfTrainCabView::draw()
     T(X(1450.f), Y(50.f), easy ? "SWITCH TO DRIVER'S MODE" : "SWITCH TO EASY DRIVING", 10.f, th.accent, true);
     addHit(X(1320.f), Y(26.f), X(1580.f), Y(74.f), H_MODE, easy ? "Switch to the driver's own levers - F2 (the train stops first)" : "Switch to the one-lever Easy driving - F2 (the train stops first)");
 
-    if (mShowHelp) drawHelp(top, W);
+    if (tr.pointsAsking()) drawPointsAsk(top, W);
+    else if (mShowHelp) drawHelp(top, W);
     zoomed.reset();
     mResize.draw();
+}
+
+// [wolf-rail 1.2] "Change the points?" - asked before the press goes (the lead's brief; seen in the cab, no timer: it stays
+// until answered, or the points ahead are no longer these)
+void WolfTrainCabView::drawPointsAsk(F32 top, F32 W)
+{
+    const WolfTrain::Cab& c = WolfTrain::instance().cab();
+    const F32 l = W * 0.5f - S(360.f), r = W * 0.5f + S(360.f), b = top + S(16.f), t = b + S(170.f);
+    mAskL = l * mHitScale; mAskR = r * mHitScale; mAskB = b * mHitScale; mAskT = t * mHitScale;
+    rectF(l, b, r, t, LLColor4(0.02f, 0.03f, 0.02f, 0.95f));
+    frameW(l, b, r, t, S(2.f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+    const F32 cx = (l + r) * 0.5f;
+    T(cx, t - S(30.f), "Change the points?", 18.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f), true);
+    T(cx, t - S(70.f), fitW("Points " + c.mPts + " are set " + settingWords(c.mPtsSet) + ". Set them " + settingWords(WolfTrain::nextSetting(c.mPtsSet)) + "?", 12.f, false, r - l - S(40.f)), 12.f, C_WHITE);
+    T(cx, t - S(96.f), "They change only when no train is on them. F9 again says yes.", 10.f, C_GREY);
+    rectF(l + S(40.f), b + S(16.f), cx - S(20.f), b + S(56.f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+    T((l + S(40.f) + cx - S(20.f)) * 0.5f, b + S(36.f), "Yes, change them", 13.f, LLColor4(0.f, 0.f, 0.f, 1.f), true);
+    addHit(l + S(40.f), b + S(16.f), cx - S(20.f), b + S(56.f), H_POINTS_YES, "Change the points (F9)");
+    rectF(cx + S(20.f), b + S(16.f), r - S(40.f), b + S(56.f), LLColor4(0.f, 0.f, 0.f, 0.6f));
+    T((cx + S(20.f) + r - S(40.f)) * 0.5f, b + S(36.f), "No, leave them", 13.f, C_WHITE, true);
+    addHit(cx + S(20.f), b + S(16.f), r - S(40.f), b + S(56.f), H_POINTS_NO, "Leave the points as they are");
 }
 
 void WolfTrainCabView::drawHelp(F32 top, F32 W)
@@ -1020,6 +1165,9 @@ void WolfTrainCabView::press(EHit id, S32 y)
     case H_REV_REV:    tr.setReverser(-1); break;
     case H_HORN:       tr.setHorn(true); break;
     case H_AUTO:       tr.pressAuto(); break;
+    case H_POINTS:     tr.askPoints(); break;
+    case H_POINTS_YES: tr.answerPoints(true); break;
+    case H_POINTS_NO:  tr.answerPoints(false); break;
     case H_MODE:       tr.setEasy(!tr.easy()); break;
     case H_UNITS:      tr.setMph(!tr.mph()); break;
     case H_HELP:       mShowHelp = !mShowHelp; mHelpPage = 0; break;

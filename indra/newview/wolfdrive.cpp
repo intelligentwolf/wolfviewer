@@ -45,6 +45,7 @@
 #include "wolfflight.h"
 #include "wolfgrid.h"
 #include "wolfobjectprops.h"
+#include "wolftraincab.h"   // [TRAIN CAB 2026-11-13] the Train Cab sends its levers through sendAnalogue
 #include "wolfskis.h"   // [SKIS 2026-11-06/]
 
 // ════════════════════════════════════════════════════════════════════════════════════════
@@ -654,6 +655,13 @@ void WolfDrive::noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool
             mKeySeen[a] = t;
         }
     }
+    // [TRAIN CAB 2026-11-13] driving a train: the cab's keys (WolfTrain::isCabKey - Up / Down the levers, F5 the reverser,
+    // F2 the mode, F3 the units, F4 show / hide); the car's pedals are not pressed by them
+    if (WolfTrain::instance().driving() && WolfTrain::isCabKey(key))
+    {
+        WolfTrain::instance().noteKey(key, key_down, repeat);
+        return;
+    }
     if (key == KEY_UP || key == 'W')
     {
         mKbdAccel = held;
@@ -898,6 +906,10 @@ void WolfDrive::doAction(S32 action)
         return;   // nothing to send: the commands are for the vehicle sat on
     }
     const ActionCfg c = actionCfg(action);
+    if (action == ACT_HORN && c.mOut == OUT_NONE && WolfTrain::instance().driving())
+    {
+        return;   // [TRAIN CAB 2026-11-13] a train's horn is its own sound, played by the region from the HORN bit (wolf-rail)
+    }
     if (action == ACT_HORN && c.mOut == OUT_NONE)
     {
         // No horn of their own set: the built-in horn for this design, played by the region from
@@ -1076,7 +1088,9 @@ void WolfDrive::applyControlFlags()
 
 void WolfDrive::sendAnalogue()
 {
-    const bool active = mSeated && gAgent.getRegion() && canSend() && (mHardwareDriving || mDashOn);
+    // [TRAIN CAB 2026-11-13] driving a Wolf Rail train (wolftraincab.h): its levers go out as the "in" message too
+    const bool train = WolfTrain::instance().driving();
+    const bool active = mSeated && gAgent.getRegion() && canSend() && (mHardwareDriving || mDashOn || train);
     if (!active)
     {
         if (mWasSending && mSeated && gAgent.getRegion() && canSend())
@@ -1084,28 +1098,52 @@ void WolfDrive::sendAnalogue()
             // Let go: one last message with nothing pressed, so a script stops at once.
             // [WOLF RETARDER 2026-10-12] the stalk and switches stay where they were set (levers, not presses);
             // only the downhill + / - (held) let go
-            send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "0.000", "0.000",
-                                                  llformat("%d", mSelector), "0",
-                                                  llformat("%u", retarderWord() & ~(RETARDER_W_DSC_UP | RETARDER_W_DSC_DOWN)) });
+            // [TRAIN CAB 2026-11-13] a train's let-go is full brake, neutral, nothing held (review 13 Nov, W10): the region
+            // stops the train when the driver leaves anyway, this makes the last word say the same
+            if (mWasTrain)
+            {
+                send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "1.000", "0.000", llformat("%d", GEAR_N), "0", "0" });
+            }
+            else
+            {
+                send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "0.000", "0.000",
+                                                      llformat("%d", mSelector), "0",
+                                                      llformat("%u", retarderWord() & ~(RETARDER_W_DSC_UP | RETARDER_W_DSC_DOWN)) });
+            }
         }
+        mWasTrain = false;
         mWasSending = false;
         mLastSentKey.clear();
         return;
     }
     S32 gear = mSelector;   // R, N or the gear held (gearSequence)
     if (mSelector == GEAR_D && mManualGear > 0) gear = llmin(mManualGear, spec(mType).mGears);   // AUTO's M: the gear held
+    // [TRAIN CAB 2026-11-13] a train: the cab's power, brake, reverser and buttons (WolfTrain::send*); the horn key the
+    // driver set (Driving Controls) sounds the train's horn too. No steering, no clutch.
+    F32 steer = mSteer, throttle = mThrottle, brake = mBrake, clutch = mClutch;
+    U32 buttons = mButtons & BUTTON_MASK;
+    if (train)
+    {
+        const WolfTrain& tr = WolfTrain::instance();
+        steer = 0.f;
+        throttle = tr.sendPower();
+        brake = tr.sendBrake();
+        clutch = 0.f;
+        gear = tr.sendGear();
+        buttons = (tr.sendButtons() | (mButtons & BTN_HORN)) & BUTTON_MASK;
+    }
     const std::vector<std::string> params =
     {
         "in",
-        llformat("%.3f", llclamp(mSteer, -1.f, 1.f)),
-        llformat("%.3f", llclamp(mThrottle, 0.f, 1.f)),
-        llformat("%.3f", llclamp(mBrake, 0.f, 1.f)),
-        llformat("%.3f", llclamp(mClutch, 0.f, 1.f)),
+        llformat("%.3f", llclamp(steer, -1.f, 1.f)),
+        llformat("%.3f", llclamp(throttle, 0.f, 1.f)),
+        llformat("%.3f", llclamp(brake, 0.f, 1.f)),
+        llformat("%.3f", llclamp(clutch, 0.f, 1.f)),
         llformat("%d", gear),
-        llformat("%u", mButtons & BUTTON_MASK),
+        llformat("%u", buttons),
         // [WOLF RETARDER 2026-10-12] the 8th (WolfDriveModule.cs RETARDER_*): a region from before it reads only
         // the first 7 (it returned on args.Length < 7 and parsed args[1..6])
-        llformat("%u", retarderWord()),
+        llformat("%u", train ? 0u : retarderWord()),
     };
     std::string key;
     for (const std::string& p : params) key += p + "|";
@@ -1116,6 +1154,7 @@ void WolfDrive::sendAnalogue()
         // Source: llviewergenericmessage.cpp send_generic_message - each parameter goes out with
         // its NUL, which WolfDriveModule.ParseNumber strips.
         send_generic_message(METHOD_TO_SIM, params);
+        mWasTrain = train;
         mLastSent = t;
         mLastSentKey = key;
         mWasSending = true;
@@ -1254,7 +1293,7 @@ void WolfDrive::receiveDashboard(const LLUUID& invoice, const std::vector<std::s
     // seat unless the driver closed it (World > Car Dashboard brings it back).
     // [SKIS 2026-11-06] never for skis / a snowboard: theirs is the Ski HUD (wolfskis.h)
     if (!mDashOn && !mAutoDone && gSavedSettings.getBOOL("WolfDashboardAuto") && !WolfFlight::instance().active()
-        && !WolfSkis::seatIsSkis(mScript.mVehicle))
+        && !WolfSkis::seatIsSkis(mScript.mVehicle) && !WolfTrain::instance().driving())   // [TRAIN CAB 2026-11-13] the cab has the bottom
     {
         mAutoDone = true;
         mAutoOpened = true;
@@ -1507,7 +1546,7 @@ void WolfDrive::refreshDashGate()
         {
             // back home: the dashboard that was up when Wolf was left comes back
             mReopenOnWolf = false;
-            if (!WolfFlight::instance().active()) requestDashboard(true);   // the flight deck keeps the bottom
+            if (!WolfFlight::instance().active() && !WolfTrain::instance().driving()) requestDashboard(true);   // the flight deck / train cab keeps the bottom
         }
         if (!wolf)
         {
@@ -1649,7 +1688,7 @@ void WolfDrive::watchSeat()
     // [SKIS 2026-11-06] skis and a snowboard go physical too, but theirs is the Ski HUD (wolfskis.h): never the dashboard
     if (!mDashOn && !mAutoDone && onWolf() && root->flagUsePhysics()
         && gSavedSettings.getBOOL("WolfDashboardAuto") && !WolfFlight::instance().active()
-        && !WolfSkis::seatIsSkis(root->getID()))
+        && !WolfSkis::seatIsSkis(root->getID()) && !WolfTrain::instance().driving())   // [TRAIN CAB 2026-11-13]
     {
         mAutoDone = true;
         mAutoOpened = true;

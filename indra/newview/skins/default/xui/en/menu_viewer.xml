@@ -2166,6 +2166,14 @@
                 <menu_item_check.on_click function="WolfHelm.Toggle" />
                 <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_check>
+            <!-- [TRAIN CAB 2026-11-13] wolftraincab.cpp: Paul, "make them drivable with a train driving hud" - the Train Cab
+             of a Wolf Rail train (the wolf-rail plugin's train.driver). Opens by itself in an engine's cab; this shows /
+             hides it, or opens its guide. Wolf Territories only. -->
+            <menu_item_check label="Train Cab (Wolf Rail)" name="WolfTrainCab">
+                <menu_item_check.on_check function="WolfTrain.IsShown" />
+                <menu_item_check.on_click function="WolfTrain.Toggle" />
+                <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_check>
             <!-- [SPACESHIP HUD 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, "spaceships are basically
              aircraft" - the dashboard in its spaceship / rocket design, beside Flight Mode. Wolf Territories
              only, gone (not greyed) elsewhere, like the Car Dashboard. -->

@@ -113,6 +113,16 @@
                      mouse_opaque="false"
                      tab_stop="false"
                      name="wolf_helm_hud"/>
+      <!-- [TRAIN CAB 2026-11-13] wolftraincab.cpp: the Train Cab of a Wolf Rail train, in the dashboard family. Draws nothing and
+           takes no clicks until a Wolf Rail engine makes this avatar its driver, or Wolf World > Train Cab. Wolf Territories only. -->
+      <wolf_train_cab follows="all"
+                      left="0"
+                      top="0"
+                      height="500"
+                      width="1024"
+                      mouse_opaque="false"
+                      tab_stop="false"
+                      name="wolf_train_cab"/>
       <!-- [SKIS 2026-11-06] wolfskihud.cpp: the Ski HUD (speed, steepness, the run's clock, air time, style score), in the
            dashboard family. Draws nothing and takes no clicks unless riding Wolf skis or a snowboard; Wolf Territories only. -->
       <wolf_ski_hud follows="all"

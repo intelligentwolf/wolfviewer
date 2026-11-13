@@ -1091,6 +1091,7 @@ set(viewer_SOURCE_FILES
     wolfair.cpp
     wolfhelm.cpp
     wolfhelmhud.cpp
+    wolftraincab.cpp
     wolfhudscale.cpp
     wolfvehiclerez.cpp
     wolffloaterdrivecontrols.cpp
@@ -2144,6 +2145,7 @@ set(viewer_HEADER_FILES
     wolfair.h
     wolfhelm.h
     wolfhelmhud.h
+    wolftraincab.h
     wolfhudscale.h
     wolfvehiclerez.h
     wolffloaterdrivecontrols.h

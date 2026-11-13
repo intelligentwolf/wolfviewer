@@ -60,17 +60,19 @@ async function exitVR(tag) {
 }
 
 const grab = async (file) => { const d = await evalJs('window.__wolfvr.grab()'); if (d) writeFileSync(resolve(OUT, file), Buffer.from(d.split(',')[1], 'base64')); return !!d; };
-// the largest change of any 32x16 block of two received pictures (scaled to 512x256), mean absolute difference 0..255:
-// a name tag is small, so a whole-picture mean would hide it; the busiest block shows it
-async function pictureDiff(a, b) {
+// per 32x16 block of the pictures (scaled to 512x256) the mean absolute difference (0..255) of a/b, less that of the
+// same block between n1/n2 (two pictures with nothing changed: the sea, the sky and the avatar's idle move by
+// themselves); the largest such excess. A name tag is small, so a whole-picture mean would hide it.
+async function tagBlockChange(n1, n2, a, b) {
     return evalJs(`(async () => { const L = async (s) => { const i = new Image(); i.src = s; await i.decode(); const c = document.createElement('canvas');
         c.width = 512; c.height = 256; const x = c.getContext('2d'); x.drawImage(i, 0, 0, 512, 256); return x.getImageData(0, 0, 512, 256).data; };
-        const p = await L(${JSON.stringify(a)}), q = await L(${JSON.stringify(b)}); let best = 0;
-        for (let by = 0; by < 256; by += 16) for (let bx = 0; bx < 512; bx += 32) { let s = 0;
-            for (let y = by; y < by + 16; y++) for (let x = bx; x < bx + 32; x++) { const k = (y * 512 + x) * 4;
-                s += Math.abs(p[k] - q[k]) + Math.abs(p[k + 1] - q[k + 1]) + Math.abs(p[k + 2] - q[k + 2]); }
-            best = Math.max(best, s / (32 * 16 * 3)); }
-        return +best.toFixed(2); })()`);
+        const P = [await L(${JSON.stringify(n1)}), await L(${JSON.stringify(n2)}), await L(${JSON.stringify(a)}), await L(${JSON.stringify(b)})];
+        const blk = (p, q, bx, by) => { let s = 0; for (let y = by; y < by + 16; y++) for (let x = bx; x < bx + 32; x++) { const k = (y * 512 + x) * 4;
+            s += Math.abs(p[k] - q[k]) + Math.abs(p[k + 1] - q[k + 1]) + Math.abs(p[k + 2] - q[k + 2]); } return s / (32 * 16 * 3); };
+        let best = -1e9, noise = 0;
+        for (let by = 0; by < 256; by += 16) for (let bx = 0; bx < 512; bx += 32) {
+            const n = blk(P[0], P[1], bx, by); noise = Math.max(noise, n); best = Math.max(best, blk(P[2], P[3], bx, by) - n); }
+        return { excess: +best.toFixed(2), noise: +noise.toFixed(2) }; })()`);
 }
 function hudLine(since) {
     const l = after(since, 'VR 3D: name tags, hover text and voice dots drawn in the').pop();
@@ -105,9 +107,9 @@ await sleep(2500);
 const b = await evalJs('window.__wolfvr.grab()');
 await grab('eyes_no_own_tag.jpg');
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'RenderNameShowSelf','value':true}");
-const noise = a1 && a2 ? await pictureDiff(a1, a2) : -1, tagged = a2 && b ? await pictureDiff(a2, b) : -1;
-console.log(`   busiest block change: with the tag twice ${noise}, tag on -> off ${tagged}`);
-check(noise >= 0 && tagged > 2 * noise + 2, `1: switching the own tag off changes the headset picture (${tagged} against ${noise} by itself)`);
+const r = a1 && a2 && b ? await tagBlockChange(a1, a2, a2, b) : null;
+console.log(`   tag on -> off: largest block change beyond its own noise ${r && r.excess} (largest noise ${r && r.noise})`);
+check(!!r && r.excess > 6, `1: switching the own tag off changes the headset picture where the tag was (${r && r.excess} beyond noise)`);
 await sleep(2500);
 await exitVR('1');
 await sleep(3500);

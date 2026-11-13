@@ -581,14 +581,22 @@ void LLHUDNameTag::updateVisibility()
         return;
     }
 
-    if (vec_from_camera * LLViewerCamera::getInstance()->getAtAxis() <= LLViewerCamera::getInstance()->getNear() + 0.1f + mSourceObject->getVObjRadius())
+    // <WolfViewer 2026-11-13> [VR NAME TAGS] In VR 3D Mode the tag stays where LLVOAvatar::idleCalcNameTagPosition put it
+    // (above the head, already clear of the body). The push towards the camera by the avatar's whole radius is for a flat
+    // screen, where it cannot be seen; in a headset each eye sees the tag at its real depth, and pushed by the avatar's
+    // bounding radius it floated towards the viewer: measured 2026-11-13 in the e2e pictures - the own tag 52 px apart
+    // between the eyes against the head's 15 px, as if 0.5 m away for a head about 1.8 m away. Only the near-plane
+    // rule stays (never closer than the near plane + 0.1 m).
+    const F32 push_radius = WolfVRScreen::headCamera() ? 0.f : mSourceObject->getVObjRadius();
+    if (vec_from_camera * LLViewerCamera::getInstance()->getAtAxis() <= LLViewerCamera::getInstance()->getNear() + 0.1f + push_radius)
     {
         mPositionAgent = LLViewerCamera::getInstance()->getOrigin() + vec_from_camera * ((LLViewerCamera::getInstance()->getNear() + 0.1f) / (vec_from_camera * LLViewerCamera::getInstance()->getAtAxis()));
     }
     else
     {
-        mPositionAgent -= dir_from_camera * mSourceObject->getVObjRadius();
+        mPositionAgent -= dir_from_camera * push_radius;
     }
+    // </WolfViewer>
 
     mLastDistance = (mPositionAgent - LLViewerCamera::getInstance()->getOrigin()).magVec();
 

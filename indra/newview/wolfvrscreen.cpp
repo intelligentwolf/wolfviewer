@@ -1742,16 +1742,16 @@ bool drawHudObjectsInEye()
     if (!gHudLogged && LLTimer::getTotalSeconds() - gHudSince >= 5.0)
     {
         gHudLogged = true;
-        S32 tags = 0, own = 0;
+        S32 shown = 0, own = 0;   // (not `tags`: LL_INFOS declares its own `tags` array, llerror.h:400)
         for (LLCharacter* c : LLCharacter::sInstances)
         {
             LLVOAvatar* av = dynamic_cast<LLVOAvatar*>(c);
             if (!av || av->isDead() || av->mNameText.isNull() || !av->mNameText->isVisible() || av->mNameText->getHidden()) continue;
-            ++tags;
+            ++shown;
             if (av->isSelf()) ++own;
         }
         LL_INFOS("WolfVR") << "VR 3D: name tags, hover text and voice dots drawn in the " << (gEye >= 0 ? "eyes" : "view")
-                           << ": " << tags << " name tags shown (own " << own << ")" << (firstPerson() ? ", first person" : "")
+                           << ": " << shown << " name tags shown (own " << own << ")" << (firstPerson() ? ", first person" : "")
                            << LL_ENDL;
     }
     return true;

@@ -9,7 +9,7 @@
 //      moves the headset's view (reset once, not locked); exit VR: the desktop camera is back in mode 0, focus on avatar
 //   3. out and straight back in: the logged gap decides - under 2 s the grace line and no reset, else a reset
 //   4. Hide my avatar (WolfVRHideAvatar) -> enter VR: the head at the avatar's eyes
-//   5. build mode (Build.Toggle "build": the Build window and the create tool, LLToolMgr::enterBuildMode, which with
+//   5. build mode (Build.Toggle: the Build window and the create tool, LLToolMgr::enterBuildMode, which with
 //      EditCameraMovement also takes the focus off the avatar) -> enter VR: focus back, zoom reset, build tools still on
 //      (Paul: "camera only"), the Build window still open
 //   6. the flycam (JoystickFlycamEnabled on, View.JoystickFlycam) -> enter VR: flycam 1 -> 0
@@ -221,27 +221,31 @@ leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRHideAvatar','
 await sleep(3500);
 
 // ---- 5. build mode: entering VR resets the camera only ----
-// Build.Toggle does nothing until the Build window exists (LLToolMgr::toggleBuildMode: gFloaterTools), so it is made
-// first (shown and hidden), then Build.Toggle "build" opens it in build mode (enterBuildMode)
+// Build.Toggle (LLToolMgr::toggleBuildMode) does nothing until the Build window exists (gFloaterTools), and with the
+// parameter "build" it stops after opening the window where the parcel does not allow building (enterBuildMode
+// verify_canedit: seen at Sandbox 2's centre in the 09:59Z run - the window opened, no build tools). So the window is
+// made first (shown, hidden) and then toggled with no parameter: the window and the create tool, whatever the parcel.
+// Whether build mode is really on is read from the reset line (build tools before -> after).
 leap('UI', "{'op':'call','function':'Floater.Show','parameter':'build'}");
-await sleep(2000);
+await sleep(2500);
 leap('UI', "{'op':'call','function':'Floater.Hide','parameter':'build'}");
-await sleep(1500);
-leap('UI', "{'op':'call','function':'Build.Toggle','parameter':'build'}");
+await sleep(2000);
+leap('UI', "{'op':'call','function':'Build.Toggle','parameter':''}");
 await sleep(3000);
 const b0 = await floaterVisible('build', 'b5a');
-check(!!b0 && b0.visible, '5: build mode on (the Build window open) before VR');
+console.log(`   the Build window before VR: ${b0 && b0.visible ? 'open' : 'not reported open'}`);
 since = await enterVR('5');
 r = await waitFor(() => resetLine(since), 10000);
 console.log('  ', r && r.line);
+check(!!r && r.build0 === 1, `5: build mode was on as 3D Mode began (build tools ${r && r.build0})`);
 check(!!r && r.build0 === 1 && r.build1 === 1, `5: the build tools are still on after the reset (${r && r.build0} -> ${r && r.build1})`);
 check(!!r && r.focus1 === 1 && Math.abs(r.zoom1 - 1) < 1e-3 && r.mode1 === r.mode0,
       `5: the camera is back on the avatar, zoom reset, camera mode kept (focus ${r && r.focus0} -> ${r && r.focus1}, zoom ${r && r.zoom0} -> ${r && r.zoom1}, mode ${r && r.mode0} -> ${r && r.mode1})`);
 await sleep(2000);
 const b1 = await floaterVisible('build', 'b5b');
-check(!!b1 && b1.visible, '5: the Build window is still open in VR 3D Mode');
+check(!!b1 && b1.visible === !!(b0 && b0.visible), `5: the Build window is as it was before VR (${b1 && b1.visible})`);
 await exitVR('5');
-leap('UI', "{'op':'call','function':'Build.Toggle','parameter':'build'}");   // out of build mode (LLToolMgr::leaveBuildMode)
+leap('UI', "{'op':'call','function':'Build.Toggle','parameter':''}");   // out of build mode (LLToolMgr::leaveBuildMode)
 await sleep(3500);
 
 // ---- 6. the flycam on entry ----

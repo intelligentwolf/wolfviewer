@@ -301,21 +301,35 @@ namespace
     // take the loader lock, which a thread that died inside LoadLibrary, FreeLibrary or a DllMain still holds: the
     // writer then waited out WRITE_WAIT_MS and the report was lost. So the names are gathered OUTSIDE the crash: once at
     // install (EnumProcessModules), then kept up to date by the loader itself (LdrRegisterDllNotification,
-    // learn.microsoft.com devnotes: "Registers for notification when a DLL is first loaded"; reason 1 LOADED, 2 UNLOADED;
+    // learn.microsoft.com devnotes: "Registers for notification when a DLL is first loaded. This notification occurs
+    // before dynamic linking takes place."; LdrDllNotification: "The loader calls this function when a DLL is first
+    // loaded", Remarks "called before dynamic linking takes place" - the page says nothing more about when, so all this
+    // relies on is that a module is in the table from about the time it is mapped; reason 1 LOADED, 2 UNLOADED;
     // LDR_DLL_LOADED_NOTIFICATION_DATA { Flags, FullDllName, BaseDllName, DllBase, SizeOfImage }; no header or import
     // library - GetProcAddress on ntdll.dll; "may be changed or removed", so when it is missing the table is gathered
     // again from WolfMemoryLog's minute line instead, refreshModuleNames). At the crash: VirtualQuery(pc).AllocationBase
     // is the module's base (an image is mapped as one allocation; MEMORY_BASIC_INFORMATION AllocationBase "a pointer to
     // the base address of a range of pages allocated"), looked up here without any lock.
+    //
+    // 64-bit Windows only (the release workflow builds windows64 and windows64-avx2 only: .github/workflows/
+    // wolfviewer.yml:72-73); a 32-bit build names no modules ("?+0x<address>").
+    //
+    // Each slot is a sequence lock: mSeq is odd while one writer (who took it with a compare-exchange from even to odd)
+    // changes mBase / mName, even when they are stable. A reader copies both between two reads of mSeq and keeps the copy
+    // only when mSeq was even and unchanged, so a slot reused while the crash writer waits cannot give it a torn name.
+    bool sDllNotifications = false;
+#if defined(_WIN64)
     struct ModuleName
     {
-        volatile LONG64 mBase;   // 0 = free slot, 1 = being filled, else the module's base address
+        volatile LONG mSeq;
+        volatile LONG64 mBase;   // 0 = free slot, else the module's base address
         char mName[64];          // the file name only (no folder: it holds the Windows user name), ASCII
     };
     const LONG MAX_MODULES = 1024;
     ModuleName sModules[MAX_MODULES];
-    volatile LONG sModuleSlots = 0;   // slots ever used (an upper bound for the scan)
-    bool sDllNotifications = false;
+    volatile LONG sModuleSlots = 0;    // slots ever handed out (an upper bound for the scan)
+    volatile LONG sModuleFull = 0;     // set when a module found no slot (logged once, outside the loader's callback)
+    bool sModuleFullLogged = false;
 
     // UNICODE_STRING (learn.microsoft.com ntdef.h UNICODE_STRING: Length "in bytes", MaximumLength, Buffer)
     struct WolfUnicodeString
@@ -356,43 +370,97 @@ namespace
         dst[n] = '\0';
     }
 
-    bool module_known(ULONG_PTR base)
+    LONG slots_in_use()
     {
-        const LONG used = sModuleSlots < MAX_MODULES ? sModuleSlots : MAX_MODULES;
-        for (LONG i = 0; i < used; ++i)
-        {
-            if (static_cast<ULONG_PTR>(sModules[i].mBase) == base) return true;
-        }
-        return false;
+        const LONG used = sModuleSlots;
+        return used < MAX_MODULES ? used : MAX_MODULES;
     }
 
-    // Claim a free slot (or a new one), fill the name, then publish the base. Lock-free; intrinsics only.
+    // Take slot i for writing: its sequence from even to odd. False when another writer has it.
+    bool slot_lock(LONG i)
+    {
+        const LONG seq = sModules[i].mSeq;
+        return (seq & 1) == 0 && _InterlockedCompareExchange(&sModules[i].mSeq, seq + 1, seq) == seq;
+    }
+
+    void slot_unlock(LONG i)
+    {
+        _InterlockedIncrement(&sModules[i].mSeq);   // odd -> even, a full barrier: the writes above are visible first
+    }
+
+    // A stable copy of slot i (false while it is being written or if it changed under the copy).
+    bool slot_read(LONG i, LONG64& base, char* name, size_t cap)
+    {
+        const LONG seq = sModules[i].mSeq;
+        _ReadWriteBarrier();
+        if (seq & 1) return false;
+        base = sModules[i].mBase;
+        size_t n = 0;
+        for (; n + 1 < cap && n < sizeof(sModules[i].mName) && sModules[i].mName[n]; ++n) name[n] = sModules[i].mName[n];
+        if (cap > 0) name[n] = '\0';
+        _ReadWriteBarrier();
+        return _InterlockedCompareExchange(&sModules[i].mSeq, seq, seq) == seq;   // a locked read: acquire
+    }
+
+    // Lock-free; intrinsics only (the loader's callback calls it). A slot that already has this base is rewritten (a new
+    // module mapped where an old one was), else a free slot is taken, else a new one; a claim lost to another writer is
+    // tried again.
     void module_add(ULONG_PTR base, const wchar_t* name, size_t chars)
     {
-        if (base <= 1) return;
-        LONG slot = -1;
-        const LONG used = sModuleSlots < MAX_MODULES ? sModuleSlots : MAX_MODULES;
-        for (LONG i = 0; i < used && slot < 0; ++i)
+        if (base == 0) return;
+        for (int attempt = 0; attempt < 16; ++attempt)
         {
-            if (_InterlockedCompareExchange64(&sModules[i].mBase, 1, 0) == 0) slot = i;
+            LONG target = -1;
+            const LONG used = slots_in_use();
+            for (LONG i = 0; i < used && target < 0; ++i)
+            {
+                if (static_cast<ULONG_PTR>(sModules[i].mBase) == base) target = i;
+            }
+            for (LONG i = 0; i < used && target < 0; ++i)
+            {
+                if (sModules[i].mBase == 0) target = i;
+            }
+            if (target < 0)
+            {
+                if (sModuleSlots >= MAX_MODULES)
+                {
+                    _InterlockedExchange(&sModuleFull, 1);
+                    return;
+                }
+                _InterlockedIncrement(&sModuleSlots);   // a new free slot; claimed below like any other
+                continue;
+            }
+            if (!slot_lock(target)) continue;
+            const LONG64 now = sModules[target].mBase;
+            if (now != 0 && static_cast<ULONG_PTR>(now) != base)
+            {
+                slot_unlock(target);   // taken for another module meanwhile: look again
+                continue;
+            }
+            copy_base_name(sModules[target].mName, sizeof(sModules[target].mName), name, chars);
+            sModules[target].mBase = static_cast<LONG64>(base);
+            slot_unlock(target);
+            return;
         }
-        if (slot < 0)
-        {
-            const LONG next = _InterlockedIncrement(&sModuleSlots) - 1;
-            if (next >= MAX_MODULES) return;
-            slot = next;
-            if (_InterlockedCompareExchange64(&sModules[slot].mBase, 1, 0) != 0) return;
-        }
-        copy_base_name(sModules[slot].mName, sizeof(sModules[slot].mName), name, chars);
-        _InterlockedExchange64(&sModules[slot].mBase, static_cast<LONG64>(base));
     }
 
     void module_remove(ULONG_PTR base)
     {
-        const LONG used = sModuleSlots < MAX_MODULES ? sModuleSlots : MAX_MODULES;
+        const LONG used = slots_in_use();
         for (LONG i = 0; i < used; ++i)
         {
-            _InterlockedCompareExchange64(&sModules[i].mBase, 0, static_cast<LONG64>(base));
+            if (static_cast<ULONG_PTR>(sModules[i].mBase) != base) continue;
+            for (int attempt = 0; attempt < 16; ++attempt)
+            {
+                if (!slot_lock(i)) continue;
+                if (static_cast<ULONG_PTR>(sModules[i].mBase) == base)
+                {
+                    sModules[i].mBase = 0;
+                    sModules[i].mName[0] = '\0';
+                }
+                slot_unlock(i);
+                break;
+            }
         }
     }
 
@@ -411,27 +479,53 @@ namespace
         }
     }
 
-    // The modules loaded now (outside a crash: this takes the loader lock). Adds the ones not yet in the table.
-    void snapshot_modules()
+    // The modules loaded now (outside a crash: this takes the loader lock). With prune (the fallback, no loader notices)
+    // entries no longer in the list are dropped, so a module that went away cannot name a later one at its address.
+    void snapshot_modules(bool prune)
     {
-        HMODULE mods[MAX_MODULES];
+        static HMODULE mods[MAX_MODULES];   // main thread only (install, then WolfMemoryLog's minute line)
         DWORD needed = 0;
-        if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed)) return;
+        BOOL ok = EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed);
+        if (!ok) ok = EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed);   // once more: a module may have come or gone mid-list
+        if (!ok)
+        {
+            LL_WARNS("WolfCrashReport") << "EnumProcessModules failed (" << GetLastError() << "): crash frames may name no module" << LL_ENDL;
+            return;
+        }
         const DWORD count = needed / sizeof(HMODULE) < static_cast<DWORD>(MAX_MODULES) ? needed / sizeof(HMODULE) : static_cast<DWORD>(MAX_MODULES);
+        if (prune)
+        {
+            const LONG used = slots_in_use();
+            for (LONG i = 0; i < used; ++i)
+            {
+                const ULONG_PTR base = static_cast<ULONG_PTR>(sModules[i].mBase);
+                if (base == 0) continue;
+                bool present = false;
+                for (DWORD k = 0; k < count && !present; ++k) present = reinterpret_cast<ULONG_PTR>(mods[k]) == base;
+                if (!present) module_remove(base);
+            }
+        }
         for (DWORD i = 0; i < count; ++i)
         {
-            const ULONG_PTR base = reinterpret_cast<ULONG_PTR>(mods[i]);
-            if (module_known(base)) continue;
             wchar_t path[1024] = {};
             const DWORD len = GetModuleFileNameW(mods[i], path, 1024);
-            if (len > 0) module_add(base, path, len);
+            if (len > 0) module_add(reinterpret_cast<ULONG_PTR>(mods[i]), path, len);
+        }
+    }
+
+    void log_table_full_once()
+    {
+        if (sModuleFull && !sModuleFullLogged)
+        {
+            sModuleFullLogged = true;
+            LL_WARNS("WolfCrashReport") << "Crash handler's module table is full (" << MAX_MODULES << "): later modules are named \"?\" in a crash" << LL_ENDL;
         }
     }
 
     void install_module_names()
     {
-        // first the loader's own notices, then the list: a module loaded in between is in one or the other (or both,
-        // which module_known keeps to one entry from the list's side)
+        // first the loader's own notices, then the list: a module loaded in between is in one or the other (or both:
+        // module_add keeps one slot per base)
         if (HMODULE ntdll = GetModuleHandleW(L"ntdll.dll"))
         {
             const WolfLdrRegisterDllNotificationFn reg = reinterpret_cast<WolfLdrRegisterDllNotificationFn>(
@@ -439,25 +533,39 @@ namespace
             PVOID cookie = nullptr;
             sDllNotifications = reg && reg(0, on_dll_notification, nullptr, &cookie) == 0;   // 0 = STATUS_SUCCESS
         }
-        snapshot_modules();
+        if (!sDllNotifications)
+        {
+            LL_WARNS("WolfCrashReport") << "No loader notices (LdrRegisterDllNotification): the module list is gathered again once a minute" << LL_ENDL;
+        }
+        snapshot_modules(false);
+        log_table_full_once();
     }
+#else
+    void install_module_names() {}
+    void log_table_full_once() {}
+    void snapshot_modules(bool) {}
+#endif
 
     // "<module file name>+0x<offset>": the file name only, never its folder (which holds the Windows user name). The
     // same shape as before (crashlib.php crParseStack: "[^\\s+]{1,128}\\+0x[0-9a-f]{1,16}"), so signatures do not change.
     // A module the table does not know: "?+0x<offset from its base>"; no module at all: "?+0x<address>", as before.
     void out_location(CrashText& o, DWORD64 pc)
     {
+#if defined(_WIN64)
         MEMORY_BASIC_INFORMATION mbi;
         if (VirtualQuery(reinterpret_cast<LPCVOID>(static_cast<ULONG_PTR>(pc)), &mbi, sizeof(mbi)) == sizeof(mbi)
             && mbi.State == MEM_COMMIT && mbi.Type == MEM_IMAGE && mbi.AllocationBase)
         {
             const ULONG_PTR base = reinterpret_cast<ULONG_PTR>(mbi.AllocationBase);
-            const LONG used = sModuleSlots < MAX_MODULES ? sModuleSlots : MAX_MODULES;
+            const LONG used = slots_in_use();
             for (LONG i = 0; i < used; ++i)
             {
-                if (static_cast<ULONG_PTR>(sModules[i].mBase) == base && sModules[i].mName[0])
+                LONG64 slot_base = 0;
+                char name[sizeof(sModules[0].mName)];
+                if (static_cast<ULONG_PTR>(sModules[i].mBase) != base) continue;
+                if (slot_read(i, slot_base, name, sizeof(name)) && static_cast<ULONG_PTR>(slot_base) == base && name[0])
                 {
-                    out_str(o, sModules[i].mName);
+                    out_str(o, name);
                     out_str(o, "+");
                     out_hex(o, pc - static_cast<DWORD64>(base));
                     return;
@@ -467,6 +575,7 @@ namespace
             out_hex(o, pc - static_cast<DWORD64>(base));
             return;
         }
+#endif
         out_str(o, "?+");
         out_hex(o, pc);
     }
@@ -814,8 +923,10 @@ namespace
 
 void WolfCrashReport::refreshModuleNames()
 {
-    // [W106 MEMLOG 2026-11-13] only needed when the loader's notices are not available (see install_module_names)
-    if (sRequest && !sDllNotifications) snapshot_modules();
+    // [W106 MEMLOG 2026-11-13] the list again only when the loader's notices are not available (see install_module_names)
+    if (!sRequest) return;
+    if (!sDllNotifications) snapshot_modules(true);
+    log_table_full_once();
 }
 
 bool WolfCrashReport::writeForException(void* exception_pointers)

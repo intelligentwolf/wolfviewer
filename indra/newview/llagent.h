@@ -584,6 +584,13 @@ public:
     void            resetControlFlags();
     bool            anyControlGrabbed() const;      // True iff a script has taken over a control
     bool            isControlGrabbed(S32 control_index) const;
+    // [SWIM HEAD 2026-11-13] A script has taken this control, passing it on or not: either way the region sends the
+    // script that control's presses (WolfSim ScenePresence.SendControlsToScripts). wolfswim.cpp: no made-up up / down
+    // presses then.
+    bool            isControlTaken(S32 control_index) const
+    {
+        return mControlsTakenCount[control_index] > 0 || mControlsTakenPassedOnCount[control_index] > 0;
+    }
     // Send message to simulator to force grabbed controls to be
     // released, in case of a poorly written script.
     void            forceReleaseControls();

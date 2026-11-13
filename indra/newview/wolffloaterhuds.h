@@ -38,6 +38,7 @@ public:
     enum ETile { T_GAME = 0, T_CAR, T_SKIS, T_PLANE, T_SPACESHIP, T_BOAT, T_SHIP, T_SPEEDBOAT, T_SUBMARINE,
                  T_GREEDY, T_ROLEPLAY, T_COMPASS, T_SPEED,
                  T_FISHING,   // [FISHING HUD 2026-11-11] Paul: the HUDs window lists every on-screen HUD ([W104 MERGE 2026-11-11] after featfix's tiles)
+                 T_TRAIN,     // [HUDS TRAIN 2026-11-13] Paul (W106 test build): "the train hud is not on the huds menu?" - the Train Cab (wolftraincab.h)
                  T_COUNT };
 
     /** Lit as its old icon was (the HUD shows). */

@@ -22,6 +22,7 @@
 #include "wolfgrid.h"
 #include "wolfhelm.h"
 #include "wolfskis.h"
+#include "wolftraincab.h"   // [HUDS TRAIN 2026-11-13/] WolfTrain: the Train Cab
 #include "wolffloatergreedy.h"   // [W104 FEATFIX 2026-11-11/] WolfGreedyGame: the Greedy HUD
 
 namespace
@@ -31,7 +32,8 @@ namespace
     {
         "game", "car", "skis", "plane", "spaceship", "boat", "ship", "speedboat", "submarine",
         "greedy", "roleplay", "compass", "speed",   // [W104 FEATFIX 2026-11-11]
-        "fishing"   // [FISHING HUD 2026-11-11/]
+        "fishing",   // [FISHING HUD 2026-11-11/]
+        "train"   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml tile_train / state_train
     };
 
     // [W104 FEATFIX 2026-11-11 A7] each tile's name as floater_wolf_huds.xml name_<id> shows it, for the status line
@@ -40,7 +42,8 @@ namespace
         "Game Mode", "The Car Dashboard", "Winter Fun", "The Flight Deck", "The Spaceship HUD", "The Sailing Deck",
         "The Captain's Helm", "The Speedboat helm", "The Submarine helm",
         "Greedy", "The Roleplay console", "Tessa's Compass", "Xenon's WolfSpeed",
-        "Fishing"   // [W104 MERGE 2026-11-11] floater_wolf_huds.xml name_fishing
+        "Fishing",   // [W104 MERGE 2026-11-11] floater_wolf_huds.xml name_fishing
+        "The Train Cab"   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml name_train
     };
 
     // [W104 FEATFIX 2026-11-11] Wolf Territories only, as their menu items (menu_viewer.xml on_visible WolfGrid.IsOnWolfTerritories);
@@ -49,7 +52,8 @@ namespace
     {
         true, true, true, true, true, true, true, true, true,
         true, true, false, true,
-        true   // [W104 MERGE 2026-11-11] Fishing: Wolf Territories only, as its menu item (menu_viewer.xml WolfWorldFishing on_visible WolfGrid.IsOnWolfTerritories)
+        true,   // [W104 MERGE 2026-11-11] Fishing: Wolf Territories only, as its menu item (menu_viewer.xml WolfWorldFishing on_visible WolfGrid.IsOnWolfTerritories)
+        true   // [HUDS TRAIN 2026-11-13] the Train Cab: Wolf Territories only, as its menu item (menu_viewer.xml WolfTrainCab on_visible WolfGrid.IsOnWolfTerritories) and WolfTrain::onWolf (wolftraincab.cpp)
     };
 
     // [W104 FEATFIX 2026-11-11] the windows these tiles show and hide (menu_viewer.xml WolfRoleplay / WolfCompass / WolfSpeed:
@@ -145,6 +149,9 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_SPEED:     return LLFloaterReg::instanceVisible(floaterOf(t));   // as their menu ticks (Floater.Visible)
         // [FISHING HUD 2026-11-11] on while the Fishing HUD shows (wolffishingoverlay.cpp)
         case T_FISHING:   return WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudWanted();   // (on, or waiting for a vehicle panel)
+        // [HUDS TRAIN 2026-11-13] on while the Train Cab shows, as its menu tick (llviewermenu.cpp WolfTrain.IsShown ->
+        // wolftraincab.cpp WolfTrain::shown: driving and not hidden, or opened by hand to read the guide)
+        case T_TRAIN:     return WolfTrain::instance().shown();
         default:          return false;
     }
 }
@@ -186,6 +193,10 @@ void WolfFloaterHuds::onTile(ETile t)
         case T_SPEED:     LLFloaterReg::toggleInstance(floaterOf(t)); break;   // Floater.Toggle, as the menu
         // [FISHING HUD 2026-11-11] the same as Wolf World > Fishing (on) and the HUD's CLOSE (off: the rod's touch menu)
         case T_FISHING:   WolfFishingSession::toggleHud(); break;   // on; off; or, while waiting, cancel the wait
+        // [HUDS TRAIN 2026-11-13] the same as Wolf World > Vehicles & Travel > Train Cab (llviewermenu.cpp WolfTrain.Toggle ->
+        // wolftraincab.cpp WolfTrain::toggleShown). Not in an engine's cab the Train Cab still opens, and says in its own
+        // panel "Sit in the cab of a Wolf Rail engine to drive it." with the guide behind its ? (WolfTrainCabView::draw).
+        case T_TRAIN:     WolfTrain::instance().toggleShown(); break;
         default:          return;
     }
     if (was_on)
@@ -244,6 +255,13 @@ void WolfFloaterHuds::refreshTiles()
             const WolfFlight& wf = WolfFlight::instance();
             const bool mine = wf.active() && (t == T_BOAT) == wf.sailing();
             if (mine && wf.deckHidden()) { state = (t == T_BOAT) ? "Sailing - deck hidden" : "Flying - deck hidden"; running = true; }
+        }
+        else if (wolf && t == T_TRAIN)
+        {
+            // [HUDS TRAIN 2026-11-13] still the driver with the cab not showing (wolftraincab.cpp WolfTrain::toggleShown /
+            // idle: hidden with its X or F4, or given way to another bottom panel): say so rather than a bare OFF
+            const WolfTrain& tr = WolfTrain::instance();
+            if (tr.driving() && !on) { state = "Driving - cab hidden"; running = true; }
         }
         // In the WolfViewer skins a lit (selected) button is only a lighter grey, so the state line says it plainly: a filled
         // dot and light green words when on, a hollow dot and the label colour when off. LtGreen (colors.xml, 0.79 1 0.79)

@@ -47,7 +47,8 @@
 #include "llviewercontrol.h"
 #include "llviewerdisplay.h"
 #include "llviewerjoystick.h"   // [VR CAMERA ON ENTRY 2026-11-13] resetCameraForVR: the flycam
-#include "llfloatercamera.h"    // [VR CAMERA ON ENTRY 2026-11-13] resetCameraForVR: the free camera, for the log
+#include "llfloatercamera.h"    // [VR CAMERA ON ENTRY 2026-11-13] resetCameraForVR: the free camera
+#include "llcriticaldamp.h"     // [VR CAMERA ON ENTRY 2026-11-13] resetCameraForVR: LLSmoothInterpolation, as resetView
 #include "llvoavatarself.h"
 #include "llviewerwindow.h"
 #include "llwindow.h"
@@ -2524,13 +2525,16 @@ namespace
 // (LLAgent::needsRenderAvatar, llagent.cpp:2634); with the Camera Controls window's free camera (activate_camera_tool:
 // LLToolCamera) every click on the world orbits the desktop camera instead of touching or sitting; a flycam (joystick)
 // keeps the camera off the avatar; an Alt-zoom keeps the focus on an object. So on the way into 3D Mode the desktop
-// camera gets what the viewer's own Reset View gives it - the Escape key (menu_viewer.xml "Reset View", shortcut="Esc",
-// View.ResetView -> llviewermenu.cpp:6058 handle_reset_view()): the focus back on the avatar, mouselook / flycam / free
-// camera / Alt-zoom left, the pan and orbit cleared, the default (third-person or a script's follow) camera
-// (LLAgentCamera::resetView(true, true) -> changeCameraToDefault, llagentcamera.cpp:316 / :2588) - once, on entry
-// only, so the camera controls still move the view afterwards (cameraKeys) and leaving 3D Mode finds a normal desktop
-// camera (LLAgentCamera::updateCamera places it from that state every frame; applyHeadCamera gives back only the
-// field of view, which updateCamera sets again too, llagentcamera.cpp:1636).
+// camera gets the CAMERA steps of the viewer's own Reset View - the Escape key (menu_viewer.xml "Reset View",
+// shortcut="Esc", View.ResetView -> llviewermenu.cpp:6058 handle_reset_view -> reset_view_final -> LLAgentCamera::
+// resetView(true, true), llagentcamera.cpp:316) - and only those (Paul 2026-11-13, "camera only"): mouselook and the
+// flycam left, the focus back on the avatar (Alt-zoom), the free camera off in every camera window, pan, orbit, roll
+// and zoom cleared, the default (third-person, or a script's follow) camera. NOT the rest of Reset View: it would stop
+// a walk-to (stopAutoPilot), close the Build window and its tools (hideInstance("build"), gBasicToolset), leave
+// appearance editing (showPanel "my_outfits", and changeCameraToDefault leaves the customise camera), hide menus and
+// unhighlight or deselect. Once, on entry only, so the camera controls still move the view afterwards (cameraKeys),
+// and leaving 3D Mode finds a normal desktop camera (LLAgentCamera::updateCamera places it from that state every
+// frame; applyHeadCamera gives back only the field of view, which updateCamera sets again too, llagentcamera.cpp:1636).
 // A seat's own camera (the sit's CameraEyeOffset / CameraAtOffset, llviewermessage.cpp:5608 -> LLAgentCamera::
 // setSitCamera, mSitCameraEnabled) is kept, as Reset View keeps it: resetView never clears it, only standing up
 // (llvoavatar.cpp:9118) or the seat going (llagentcamera.cpp:1348) does - so the desktop shows the seat's camera after VR.
@@ -2539,21 +2543,66 @@ namespace
 void resetCameraForVR()
 {
     LLViewerJoystick* joy = LLViewerJoystick::getInstance();
+    LLToolMgr* tools = LLToolMgr::getInstance();
     const bool flycam = joy->getOverrideCamera();
     const S32 mode_before = (S32)gAgentCamera.getCameraMode();
     const bool focus_before = gAgentCamera.getFocusOnAvatar();
     const F32 dist_before = (F32)(gAgentCamera.getCameraPositionGlobal() - gAgent.getPositionGlobal()).magVec();
     const bool free_before = LLFloaterCamera::inFreeCameraMode();
-    handle_reset_view();   // Source: llviewermenu.cpp:6058 handle_reset_view() - Reset View, as the Escape key
+    const bool building = tools->inBuildMode();
+    if (gAgentCamera.cameraCustomizeAvatar())
+    {
+        // appearance editing owns the camera (LLAgentCamera::changeCameraToCustomizeAvatar); leaving it is not a
+        // camera step (Reset View saves the wearable and opens My Outfits for it, llviewermenu.cpp:6060-6064). The
+        // headset's head is placed from the avatar whatever the desktop camera does (buildMap).
+        LL_INFOS("WolfVR") << "VR 3D: entering 3D Mode while editing appearance - the desktop camera is left to it" << LL_ENDL;
+        gViewLog = "entering VR 3D Mode";
+        return;
+    }
+    // Source: llviewermenu.cpp:6066-6073 handle_reset_view() - unless ResetViewTurnsAvatar, the focus goes back on the
+    // avatar WITHOUT turning it (reset_axes false), so resetView's own setFocusOnAvatar below changes nothing more
+    if (!gSavedSettings.getBOOL("ResetViewTurnsAvatar")) gAgentCamera.setFocusOnAvatar(true, false, false);
+    // Source: llagentcamera.cpp:353, :381 resetView() - with FreezeTime on, the camera mode and position are left
+    if (!gSavedSettings.getBOOL("FreezeTime"))
+    {
+        // Source: llagentcamera.cpp:355-360 resetView() - changeCameraToDefault, and the flycam toggled off. Here the
+        // flycam goes first: changeCameraToDefault returns at once while it is on (llagentcamera.cpp:2590)
+        if (flycam) handle_toggle_flycam();
+        // Source: llagentcamera.cpp:2588 changeCameraToDefault() -> changeCameraToFollow / changeCameraToThirdPerson:
+        // out of mouselook, the zoom back to INITIAL_ZOOM_FRACTION (:2680), the avatar's pitch removed (:2719-2726).
+        // Both switch to gBasicToolset when the mode changes (:2638-2641, :2700-2703), which ends the build tools, so
+        // while building (LLToolMgr::inBuildMode, never true in mouselook, lltoolmgr.cpp:400) only the zoom is reset.
+        if (!building) gAgentCamera.changeCameraToDefault();
+        else gAgentCamera.resetCameraZoomFraction();   // Source: llagentcamera.cpp:3324 (= :2680)
+        // Source: llagentcamera.cpp:383-397 resetView() reset_camera - leaving mouse-steer, the focus on the avatar,
+        // the roll cleared (mCameraFOVZoomFactor is set again from the focus every frame, llagentcamera.cpp:1507, and
+        // setFocusOnAvatar clears it when the focus comes back, :3128)
+        if (!gViewerWindow->getLeftMouseDown() && gAgentCamera.cameraThirdPerson())
+        {
+            LLVector3 agent_at_axis = gAgent.getAtAxis();
+            agent_at_axis -= projected_vec(agent_at_axis, gAgent.getReferenceUpVector());
+            agent_at_axis.normalize();
+            gAgent.resetAxes(lerp(gAgent.getAtAxis(), agent_at_axis, LLSmoothInterpolation::getInterpolant(0.3f)));
+        }
+        gAgentCamera.setFocusOnAvatar(true, ANIMATE);
+        gAgentCamera.resetCameraRoll();
+    }
+    // Source: llagentcamera.cpp:399-400 resetView() - the pan and orbit cleared
+    gAgentCamera.resetPanDiff();
+    gAgentCamera.resetOrbitDiff();
+    // Source: llviewermenu.cpp:6077 handle_reset_view() - the camera windows out of free camera (and its LLToolCamera,
+    // a transient tool only: clear_camera_tool, llfloatercamera.cpp:725, leaves the build tools as they are)
+    LLFloaterCamera::resetCameraMode();
     // Source: llviewerjoystick.cpp:1419-1422 toggleFlycam() - leaving the flycam keeps its view "until the avatar moves"
     // (setCameraNeedsUpdate(false), read by LLViewerCamera::updateCameraLocation, llviewercamera.cpp:95); here the camera
     // must really come back, as llagentcamera.cpp:3436-3442 loadCameraPosition() does after the same handle_toggle_flycam
     if (flycam && !joy->getOverrideCamera()) joy->setCameraNeedsUpdate(true);
-    LL_INFOS("WolfVR") << "VR 3D: camera reset on entering 3D Mode (Reset View): desktop camera mode " << mode_before
+    LL_INFOS("WolfVR") << "VR 3D: camera reset on entering 3D Mode (camera only): desktop camera mode " << mode_before
                        << " -> " << (S32)gAgentCamera.getCameraMode() << ", focus on the avatar " << focus_before << " -> "
                        << gAgentCamera.getFocusOnAvatar() << ", flycam " << flycam << " -> " << joy->getOverrideCamera()
                        << ", free camera " << free_before << " -> " << LLFloaterCamera::inFreeCameraMode() << ", camera "
-                       << dist_before << " m from the avatar before" << LL_ENDL;
+                       << dist_before << " m from the avatar before, build tools " << building << " -> "
+                       << tools->inBuildMode() << LL_ENDL;
     gViewLog = "entering VR 3D Mode";   // where the head is placed, against the avatar's eyes, once it is (buildMap)
 }
 }
@@ -2568,7 +2617,7 @@ void pumpInput()
         // [VR CAMERA ON ENTRY] when 3D Mode last ended (-1: not yet). worldWanted needs a head pose in the last second
         // (Service::immersive, wolfvrpipe.cpp:2130), so a moment's Wi-Fi gap ends and restarts it; a return within the
         // same 2 s of grace the desktop gets (wolfvrstream.cpp:318 reconcileDesktop) is not a new entry and does not
-        // reset the camera again (Reset View also closes menus and the build tools).
+        // reset the camera again (a moment's gap is not the resident coming into 3D Mode).
         static F64 s_world_ended = -1.0;
         const bool world = WolfVRStream::worldWanted();
         if (world != s_world)

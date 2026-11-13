@@ -1,6 +1,6 @@
 // [VR CAMERA ON ENTRY 2026-11-13] Paul (11-12): he had moved the camera somewhere odd, went into VR 3D Mode and was stuck
-// getting it back. Every entry into 3D Mode now gives the desktop camera the viewer's Reset View (wolfvrscreen.cpp
-// resetCameraForVR). Against the REAL viewer (logged in as Shadow Testwolf, WolfVR3DMode on, WolfVRStreamMode "world"),
+// getting it back. Every entry into 3D Mode now gives the desktop camera the camera steps of the viewer's Reset View,
+// and only those (wolfvrscreen.cpp resetCameraForVR). Against the REAL viewer (logged in as Shadow Testwolf, WolfVR3DMode on, WolfVRStreamMode "world"),
 // in headless Chromium (muted) with WolfStorm's fake WebXR device and Touch Plus controllers, the LEAP relay FIFO in
 // $RIG (default ~/.cache/skyband):
 //   1. free camera on the SMALL camera window only (the main one never opened: the stock resetCameraMode early return)
@@ -9,6 +9,7 @@
 //      moves the headset's view (reset once, not locked); exit VR: the desktop camera is back in mode 0, focus on avatar
 //   3. out and straight back in (inside the 2 s grace): no second reset
 //   4. Hide my avatar (WolfVRHideAvatar) -> enter VR: the head at the avatar's eyes
+//   5. the Build window open (Paul: "camera only") -> enter VR: the camera reset, the Build window and tools still there
 //   node e2e_vrcamentry.mjs <url> <out_dir> <fake_xr.js> <fake_xr_controllers.js>
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, appendFileSync } from 'node:fs';
@@ -40,11 +41,20 @@ function viewLine(since, why) {
     const m = l.match(/VR camera controls \((.*?)\): view moved forward (-?[\d.]+) m, left (-?[\d.]+) m, up (-?[\d.]+) m, zoom x(-?[\d.]+), looking (-?\d+) degrees left of the (.*?); head (-?[\d.]+) m above the avatar's eyes, (-?[\d.]+) m from them/);
     return m ? { why: m[1], up: +m[4], zoom: +m[5], headUp: +m[8], headDist: +m[9], line: l.replace(/^.*VR camera/, 'VR camera') } : null;
 }
+// LLFloaterReg instanceVisible (llfloaterreglistener.cpp:110), its reply found by its reqid in the relay's log
+async function floaterVisible(name, tag) {
+    leap('LLFloaterReg', `{'op':'instanceVisible','name':'${name}','reply':'@@REPLY@@','reqid':'${tag}'}`);
+    return waitFor(() => {
+        const l = readFileSync(resolve(H, 'leap.log'), 'utf8').split('\n').filter((x) => x.startsWith('IN ') && x.includes(`"reqid": "${tag}"`)).pop();
+        if (!l) return null;
+        try { const j = JSON.parse(l.replace(/^IN \S+ /, '')); return { visible: !!(j.data || j).visible }; } catch (e) { return null; }
+    }, 5000);
+}
 function resetLine(since) {
     const l = after(since, 'VR 3D: camera reset on entering 3D Mode').pop();
     if (!l) return null;
-    const m = l.match(/desktop camera mode (\d+) -> (\d+), focus on the avatar (\d) -> (\d), flycam (\d) -> (\d), free camera (\d) -> (\d), camera ([\d.e+-]+) m/);
-    return m ? { mode0: +m[1], mode1: +m[2], focus0: +m[3], focus1: +m[4], fly0: +m[5], fly1: +m[6], free0: +m[7], free1: +m[8], dist: +m[9], line: l.replace(/^.*VR 3D:/, 'VR 3D:') } : null;
+    const m = l.match(/desktop camera mode (\d+) -> (\d+), focus on the avatar (\d) -> (\d), flycam (\d) -> (\d), free camera (\d) -> (\d), camera ([\d.e+-]+) m from the avatar before, build tools (\d) -> (\d)/);
+    return m ? { mode0: +m[1], mode1: +m[2], focus0: +m[3], focus1: +m[4], fly0: +m[5], fly1: +m[6], free0: +m[7], free1: +m[8], dist: +m[9], build0: +m[10], build1: +m[11], line: l.replace(/^.*VR 3D:/, 'VR 3D:') } : null;
 }
 
 const chrome = spawn('chromium', ['--headless=new', '--no-sandbox', '--use-angle=vulkan', '--enable-unsafe-swiftshader', '--mute-audio',
@@ -176,5 +186,21 @@ console.log('  ', v && v.line);
 check(!!v && Math.abs(v.headUp) < 0.15 && v.headDist < 0.2, `4: hidden avatar - the head is at the avatar's eyes (${v && v.headUp} m above, ${v && v.headDist} m from them)`);
 await exitVR('4');
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRHideAvatar','value':false}");
+await sleep(3500);
+
+// ---- 5. the Build window open: entering VR resets the camera only ----
+leap('UI', "{'op':'call','function':'Floater.Show','parameter':'build'}");
+await sleep(3000);
+const b0 = await floaterVisible('build', 'b5a');
+check(!!b0 && b0.visible, '5: the Build window is open before VR');
+since = await enterVR('5');
+r = await waitFor(() => resetLine(since), 10000);
+console.log('  ', r && r.line);
+check(!!r && r.build0 === 1 && r.build1 === 1, `5: entering 3D Mode reset the camera and left the build tools on (${r && r.build0} -> ${r && r.build1})`);
+await sleep(2000);
+const b1 = await floaterVisible('build', 'b5b');
+check(!!b1 && b1.visible, '5: the Build window is still open in VR 3D Mode');
+await exitVR('5');
+leap('UI', "{'op':'call','function':'Floater.Hide','parameter':'build'}");
 console.log(`RESULT failures ${failures}`);
 process.exit(failures ? 1 : 0);

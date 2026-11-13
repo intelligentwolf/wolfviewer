@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfmemorylog.h"
+#include "wolfcrashreport.h"       // [W106 MEMLOG 2026-11-13/] refreshModuleNames (Windows)
 
 #include <cstring>               // memset
 
@@ -520,6 +521,9 @@ void WolfMemoryLog::idle()
     s_started = true;
     s_since_line.reset();
     s_last = now;
+#if LL_WINDOWS
+    WolfCrashReport::refreshModuleNames();
+#endif
 
     ViewerFigures v;
     v.mValid = true;

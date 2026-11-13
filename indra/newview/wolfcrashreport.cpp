@@ -58,6 +58,7 @@
 #if LL_WINDOWS
 #include "llwin32headers.h"
 #include <dbghelp.h>     // MiniDumpWriteDump (dbghelp is linked for every Windows target: cmake/Linking.cmake)
+#include <psapi.h>       // EnumProcessModules ([W106 MEMLOG 2026-11-13] the module table; psapi: cmake/Linking.cmake:60)
 #include <intrin.h>      // _ReturnAddress
 #include <signal.h>
 #else
@@ -296,29 +297,175 @@ namespace
         out_str(o, s);
     }
 
-    // "<module file name>+0x<offset>": the file name only, never its folder (which holds the Windows user name).
+    // [W106 MEMLOG 2026-11-13] The module table out_location reads at a crash. GetModuleHandleExW / GetModuleFileNameW
+    // take the loader lock, which a thread that died inside LoadLibrary, FreeLibrary or a DllMain still holds: the
+    // writer then waited out WRITE_WAIT_MS and the report was lost. So the names are gathered OUTSIDE the crash: once at
+    // install (EnumProcessModules), then kept up to date by the loader itself (LdrRegisterDllNotification,
+    // learn.microsoft.com devnotes: "Registers for notification when a DLL is first loaded"; reason 1 LOADED, 2 UNLOADED;
+    // LDR_DLL_LOADED_NOTIFICATION_DATA { Flags, FullDllName, BaseDllName, DllBase, SizeOfImage }; no header or import
+    // library - GetProcAddress on ntdll.dll; "may be changed or removed", so when it is missing the table is gathered
+    // again from WolfMemoryLog's minute line instead, refreshModuleNames). At the crash: VirtualQuery(pc).AllocationBase
+    // is the module's base (an image is mapped as one allocation; MEMORY_BASIC_INFORMATION AllocationBase "a pointer to
+    // the base address of a range of pages allocated"), looked up here without any lock.
+    struct ModuleName
+    {
+        volatile LONG64 mBase;   // 0 = free slot, 1 = being filled, else the module's base address
+        char mName[64];          // the file name only (no folder: it holds the Windows user name), ASCII
+    };
+    const LONG MAX_MODULES = 1024;
+    ModuleName sModules[MAX_MODULES];
+    volatile LONG sModuleSlots = 0;   // slots ever used (an upper bound for the scan)
+    bool sDllNotifications = false;
+
+    // UNICODE_STRING (learn.microsoft.com ntdef.h UNICODE_STRING: Length "in bytes", MaximumLength, Buffer)
+    struct WolfUnicodeString
+    {
+        USHORT Length;
+        USHORT MaximumLength;
+        PWSTR Buffer;
+    };
+    struct WolfDllNotificationData   // LDR_DLL_LOADED_NOTIFICATION_DATA = LDR_DLL_UNLOADED_NOTIFICATION_DATA
+    {
+        ULONG Flags;
+        const WolfUnicodeString* FullDllName;
+        const WolfUnicodeString* BaseDllName;
+        PVOID DllBase;
+        ULONG SizeOfImage;
+    };
+    const ULONG LDR_DLL_NOTIFICATION_REASON_LOADED = 1;
+    const ULONG LDR_DLL_NOTIFICATION_REASON_UNLOADED = 2;
+    typedef VOID (CALLBACK* WolfDllNotificationFn)(ULONG reason, const WolfDllNotificationData* data, PVOID context);
+    typedef LONG (NTAPI* WolfLdrRegisterDllNotificationFn)(ULONG flags, WolfDllNotificationFn fn, PVOID context, PVOID* cookie);
+
+    // The last path component of a wide string, ASCII (anything else as '?') into dst. No calls into other modules:
+    // the loader's callback may not make any ("It is unsafe for the notification callback to call functions in ANY
+    // other module other than itself", learn.microsoft.com LdrDllNotification).
+    void copy_base_name(char* dst, size_t cap, const wchar_t* src, size_t chars)
+    {
+        size_t from = 0;
+        for (size_t i = 0; i < chars; ++i)
+        {
+            if (src[i] == L'\\' || src[i] == L'/') from = i + 1;
+        }
+        size_t n = 0;
+        for (size_t i = from; i < chars && src[i] && n + 1 < cap; ++i)
+        {
+            const wchar_t c = src[i];
+            dst[n++] = (c > 0x20 && c < 0x7f && c != L'+') ? static_cast<char>(c) : '?';   // no space or '+': crashlib.php's frame pattern
+        }
+        dst[n] = '\0';
+    }
+
+    bool module_known(ULONG_PTR base)
+    {
+        const LONG used = sModuleSlots < MAX_MODULES ? sModuleSlots : MAX_MODULES;
+        for (LONG i = 0; i < used; ++i)
+        {
+            if (static_cast<ULONG_PTR>(sModules[i].mBase) == base) return true;
+        }
+        return false;
+    }
+
+    // Claim a free slot (or a new one), fill the name, then publish the base. Lock-free; intrinsics only.
+    void module_add(ULONG_PTR base, const wchar_t* name, size_t chars)
+    {
+        if (base <= 1) return;
+        LONG slot = -1;
+        const LONG used = sModuleSlots < MAX_MODULES ? sModuleSlots : MAX_MODULES;
+        for (LONG i = 0; i < used && slot < 0; ++i)
+        {
+            if (_InterlockedCompareExchange64(&sModules[i].mBase, 1, 0) == 0) slot = i;
+        }
+        if (slot < 0)
+        {
+            const LONG next = _InterlockedIncrement(&sModuleSlots) - 1;
+            if (next >= MAX_MODULES) return;
+            slot = next;
+            if (_InterlockedCompareExchange64(&sModules[slot].mBase, 1, 0) != 0) return;
+        }
+        copy_base_name(sModules[slot].mName, sizeof(sModules[slot].mName), name, chars);
+        _InterlockedExchange64(&sModules[slot].mBase, static_cast<LONG64>(base));
+    }
+
+    void module_remove(ULONG_PTR base)
+    {
+        const LONG used = sModuleSlots < MAX_MODULES ? sModuleSlots : MAX_MODULES;
+        for (LONG i = 0; i < used; ++i)
+        {
+            _InterlockedCompareExchange64(&sModules[i].mBase, 0, static_cast<LONG64>(base));
+        }
+    }
+
+    VOID CALLBACK on_dll_notification(ULONG reason, const WolfDllNotificationData* data, PVOID)
+    {
+        if (!data || !data->DllBase) return;
+        const ULONG_PTR base = reinterpret_cast<ULONG_PTR>(data->DllBase);
+        if (reason == LDR_DLL_NOTIFICATION_REASON_LOADED)
+        {
+            const WolfUnicodeString* n = data->BaseDllName ? data->BaseDllName : data->FullDllName;
+            if (n && n->Buffer) module_add(base, n->Buffer, n->Length / sizeof(wchar_t));
+        }
+        else if (reason == LDR_DLL_NOTIFICATION_REASON_UNLOADED)
+        {
+            module_remove(base);
+        }
+    }
+
+    // The modules loaded now (outside a crash: this takes the loader lock). Adds the ones not yet in the table.
+    void snapshot_modules()
+    {
+        HMODULE mods[MAX_MODULES];
+        DWORD needed = 0;
+        if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed)) return;
+        const DWORD count = needed / sizeof(HMODULE) < static_cast<DWORD>(MAX_MODULES) ? needed / sizeof(HMODULE) : static_cast<DWORD>(MAX_MODULES);
+        for (DWORD i = 0; i < count; ++i)
+        {
+            const ULONG_PTR base = reinterpret_cast<ULONG_PTR>(mods[i]);
+            if (module_known(base)) continue;
+            wchar_t path[1024] = {};
+            const DWORD len = GetModuleFileNameW(mods[i], path, 1024);
+            if (len > 0) module_add(base, path, len);
+        }
+    }
+
+    void install_module_names()
+    {
+        // first the loader's own notices, then the list: a module loaded in between is in one or the other (or both,
+        // which module_known keeps to one entry from the list's side)
+        if (HMODULE ntdll = GetModuleHandleW(L"ntdll.dll"))
+        {
+            const WolfLdrRegisterDllNotificationFn reg = reinterpret_cast<WolfLdrRegisterDllNotificationFn>(
+                reinterpret_cast<void*>(GetProcAddress(ntdll, "LdrRegisterDllNotification")));
+            PVOID cookie = nullptr;
+            sDllNotifications = reg && reg(0, on_dll_notification, nullptr, &cookie) == 0;   // 0 = STATUS_SUCCESS
+        }
+        snapshot_modules();
+    }
+
+    // "<module file name>+0x<offset>": the file name only, never its folder (which holds the Windows user name). The
+    // same shape as before (crashlib.php crParseStack: "[^\\s+]{1,128}\\+0x[0-9a-f]{1,16}"), so signatures do not change.
+    // A module the table does not know: "?+0x<offset from its base>"; no module at all: "?+0x<address>", as before.
     void out_location(CrashText& o, DWORD64 pc)
     {
-        HMODULE mod = nullptr;
-        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               reinterpret_cast<LPCWSTR>(static_cast<ULONG_PTR>(pc)), &mod) && mod)
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(static_cast<ULONG_PTR>(pc)), &mbi, sizeof(mbi)) == sizeof(mbi)
+            && mbi.State == MEM_COMMIT && mbi.Type == MEM_IMAGE && mbi.AllocationBase)
         {
-            wchar_t wpath[1024] = {};
-            const DWORD len = GetModuleFileNameW(mod, wpath, 1024);
-            const wchar_t* base = wpath;
-            for (DWORD i = 0; i < len && i < 1024; ++i)
+            const ULONG_PTR base = reinterpret_cast<ULONG_PTR>(mbi.AllocationBase);
+            const LONG used = sModuleSlots < MAX_MODULES ? sModuleSlots : MAX_MODULES;
+            for (LONG i = 0; i < used; ++i)
             {
-                if (wpath[i] == L'\\' || wpath[i] == L'/') base = wpath + i + 1;
+                if (static_cast<ULONG_PTR>(sModules[i].mBase) == base && sModules[i].mName[0])
+                {
+                    out_str(o, sModules[i].mName);
+                    out_str(o, "+");
+                    out_hex(o, pc - static_cast<DWORD64>(base));
+                    return;
+                }
             }
-            char name[1024] = {};
-            const int n = WideCharToMultiByte(CP_UTF8, 0, base, -1, name, static_cast<int>(sizeof(name)), nullptr, nullptr);
-            if (n > 1)
-            {
-                out_str(o, name);
-                out_str(o, "+");
-                out_hex(o, pc - static_cast<DWORD64>(reinterpret_cast<ULONG_PTR>(mod)));
-                return;
-            }
+            out_str(o, "?+");
+            out_hex(o, pc - static_cast<DWORD64>(base));
+            return;
         }
         out_str(o, "?+");
         out_hex(o, pc);
@@ -643,6 +790,7 @@ namespace
                           const std::string& log_out, bool copy_log)
     {
         if (!copy_path(sStackPath, PATH_CHARS, stack) || !copy_path(sDumpPath, PATH_CHARS, dump)) return false;
+        install_module_names();   // [W106 MEMLOG 2026-11-13] for out_location, without the loader lock at the crash
         sCopyLog = copy_log && copy_path(sLogIn, PATH_CHARS, log_in) && copy_path(sLogOut, PATH_CHARS, log_out);
         sRequest = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         sDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -662,6 +810,12 @@ namespace
         sPrevTerminate = std::set_terminate(on_terminate);
         return true;
     }
+}
+
+void WolfCrashReport::refreshModuleNames()
+{
+    // [W106 MEMLOG 2026-11-13] only needed when the loader's notices are not available (see install_module_names)
+    if (sRequest && !sDllNotifications) snapshot_modules();
 }
 
 bool WolfCrashReport::writeForException(void* exception_pointers)

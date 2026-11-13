@@ -54,6 +54,10 @@ namespace WolfCrashReport
     /// filter then lets the exception carry on to end the process, as it does in a BugSplat build); returns false
     /// for a C++ exception (left to its own handling, as before) or when the handler is not installed.
     bool writeForException(void* exception_pointers);
+
+    /// [W106 MEMLOG 2026-11-13] From WolfMemoryLog's minute line: gather the crash handler's module names again, only
+    /// when Windows' loader notices (LdrRegisterDllNotification) could not be had. Main thread; takes the loader lock.
+    void refreshModuleNames();
 #endif
 
     /// [VULKAN round 4 2026-11-11] This run's dump folder name ("dump-<uuid>"), empty when there is none.

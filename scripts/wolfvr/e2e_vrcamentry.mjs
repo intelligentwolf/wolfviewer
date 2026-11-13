@@ -65,6 +65,13 @@ async function controlValue(key, tag) {
     }, 5000);
     return r ? r.v : null;
 }
+const setControl = (key, v) => leap('LLViewerControl', `{'op':'set','group':'Global','key':'${key}','value':${v === true}}`);
+// the settings a run changes, read first and given back at the end (as round 6 does for the joystick)
+const SAVED = {};
+// a Boolean setting may come back as 0/1 (as seen in the 2026-11-13 runs: "JoystickEnabled 0") or as true/false
+const asBool = (v) => (v === true || v === 1) ? true : (v === false || v === 0) ? false : null;
+async function saveControls(keys) { for (const k of keys) SAVED[k] = asBool(await controlValue(k, `save_${k}`)); console.log('   settings before:', JSON.stringify(SAVED)); }
+function restoreControls() { for (const [k, v] of Object.entries(SAVED)) if (typeof v === 'boolean') setControl(k, v); else console.log(`   ${k} was not read, left as the run set it`); }
 function resetLine(since) {
     const l = after(since, 'VR 3D: camera reset on entering 3D Mode').pop();
     if (!l) return null;
@@ -127,7 +134,8 @@ await send('Page.enable'); await send('Runtime.enable');
 await send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(FAKE, 'utf8') + '\n' + readFileSync(CTL, 'utf8') });
 // the headset service starts when VR is switched on in this session (Wolf World > VR: WolfVRStreamEnabled, as the
 // rig's campaign_vr.py does); WolfVRStreamMode only says where it starts
-leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRStreamEnabled','value':true}");
+await saveControls(['WolfVRStreamEnabled', 'WolfVRHideAvatar']);
+setControl('WolfVRStreamEnabled', true);
 await sleep(4000);
 await send('Page.navigate', { url: URL_ });
 check(await waitFor(() => evalJs('!!(window.__wolfvr && window.__wolfvr.xr && window.__wolfvr.xr().said === false)'), 30000), 'connected to the real viewer');
@@ -251,7 +259,7 @@ await sleep(3500);
 // ---- 6. the flycam on entry ----
 // LLViewerJoystick::toggleFlycam needs JoystickEnabled and JoystickFlycamEnabled (llviewerjoystick.cpp:1390); both are
 // read first and given back after
-const joy0 = await controlValue('JoystickEnabled', 'j6a'), fly0 = await controlValue('JoystickFlycamEnabled', 'j6b');
+const joy0 = asBool(await controlValue('JoystickEnabled', 'j6a')), fly0 = asBool(await controlValue('JoystickFlycamEnabled', 'j6b'));
 console.log(`   JoystickEnabled ${joy0}, JoystickFlycamEnabled ${fly0} before`);
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'JoystickEnabled','value':true}");
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'JoystickFlycamEnabled','value':true}");
@@ -279,4 +287,6 @@ await exitVR('7');
 leap('UI', "{'op':'call','function':'View.ResetView'}");   // Escape: ends the editing, as a resident would
 await sleep(2000);
 console.log(`RESULT failures ${failures}`);
+restoreControls();
+await sleep(500);
 process.exit(failures ? 1 : 0);

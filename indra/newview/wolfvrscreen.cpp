@@ -2725,8 +2725,15 @@ void pumpInput()
         if (world != s_world)
         {
             s_world = world;
+            // [VR CAMERA ON EXIT] why it ended, as far as can be told here: switched to Big Screen (still in VR), the
+            // headset gone (no longer sent pictures), or the headset out of VR or its view paused - worldWanted needs a
+            // head pose in the last second (Service::immersive, wolfvrpipe.cpp:2130), which a resident leaving VR and a
+            // moment's Wi-Fi gap both stop, so those two are not told apart (the gap is the grace on the way back in)
+            const char* why = world ? "" : WolfVRStream::bigScreenWanted() ? " (switched to Big Screen)"
+                                         : !WolfVRStream::headsetActive() ? " (the headset is gone)"
+                                         : " (the headset left VR, or its view paused: no head pose for a second)";
             LL_INFOS("WolfVR") << (world ? "VR 3D: drawing both eyes for the headset"
-                                         : "VR 3D: stopped drawing the eyes, the desktop is itself again") << LL_ENDL;
+                                         : "VR 3D: stopped drawing the eyes, the desktop is itself again") << why << LL_ENDL;
             const F64 now = LLTimer::getTotalSeconds();
             if (!world)
             {
@@ -2734,14 +2741,16 @@ void pumpInput()
                 // [VR CAMERA ON EXIT] the desktop camera's focus back on the avatar if the headset's camera controls
                 // unlocked it (gViewMovedThisSession); as Reset View does it (llviewermenu.cpp:6072, no turn of the avatar),
                 // with the pan and orbit the same presses may have left (llagentcamera.cpp:399-400)
+                // (not while building: the Build window's own camera - EditCameraMovement - is the resident's choice)
                 if (gViewMovedThisSession && LLStartUp::getStartupState() == STATE_STARTED && isAgentAvatarValid() &&
-                    !gAgentCamera.cameraCustomizeAvatar() && !gAgentCamera.getFocusOnAvatar())
+                    !gAgentCamera.cameraCustomizeAvatar() && !LLToolMgr::getInstance()->inBuildMode() &&
+                    !gAgentCamera.getFocusOnAvatar())
                 {
                     gAgentCamera.setFocusOnAvatar(true, false, false);
                     gAgentCamera.resetPanDiff();
                     gAgentCamera.resetOrbitDiff();
                     LL_INFOS("WolfVR") << "VR 3D: the camera controls used in the headset had unlocked the desktop camera; "
-                                          "its focus is back on the avatar" << LL_ENDL;
+                                          "its focus is back on the avatar" << why << LL_ENDL;
                 }
                 gViewMovedThisSession = false;
                 // [VR CAMERA ON ENTRY] the state the desktop camera goes back to, so a "my camera is still odd after VR"
@@ -2753,6 +2762,9 @@ void pumpInput()
             }
             else
             {
+                // [VR CAMERA ON EXIT] a session's camera-controls use counts from its own entry: the exit branch clears it
+                // too, but whatever a session cut short (logging out, disconnected) left behind is not carried in
+                gViewMovedThisSession = false;
                 const F64 gap = s_world_ended < 0.0 ? -1.0 : now - s_world_ended;
                 if (gap >= 0.0 && gap < 2.0)
                     LL_INFOS("WolfVR") << llformat("VR 3D: back in 3D Mode after %.1f s - inside the 2 s grace, not a new "

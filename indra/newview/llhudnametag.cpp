@@ -34,6 +34,7 @@
 
 #include "llagent.h"
 #include "wolfvrscreen.h"   // <WolfViewer 2026-11-13/> [VR NAME TAGS] headCamera: the push-apart test in VR
+#include "llvoavatarself.h" // <WolfViewer 2026-11-13/> [VR NAME TAGS] the seat's speed in VR
 #include "llviewercontrol.h"
 #include "llcriticaldamp.h"
 #include "lldrawable.h"
@@ -781,8 +782,16 @@ void LLHUDNameTag::updateAll()
     // from where the headset's head left the camera (wolfvrscreen.cpp setPickCamera) - placed from the avatar by buildMap,
     // not where LLAgentCamera puts the desktop camera - so the jump between the two counted as camera movement every
     // frame and the overlapping tags were not pushed apart. The headset view goes with the avatar, so its speed
-    // (the body's, not the head's turning) decides, against the same MAX_STABLE_CAMERA_VELOCITY (m/s)
-    if (WolfVRScreen::headCamera()) camera_vel = gAgent.getVelocity().magVec();
+    // (the body's, not the head's turning) decides, against the same MAX_STABLE_CAMERA_VELOCITY (m/s). Seated, the
+    // headset view rides with the seat (wolfvrscreen.cpp buildMap: the rig on the vehicle), so the seat's object (its
+    // root) gives the speed: tags are not pushed apart while the vehicle moves, as on the desktop, whose camera moves
+    // with the vehicle too
+    if (WolfVRScreen::headCamera())
+    {
+        const LLViewerObject* seat = isAgentAvatarValid() && gAgentAvatarp->isSitting() && gAgentAvatarp->getParent()
+                                         ? ((LLViewerObject*)gAgentAvatarp->getParent())->getRootEdit() : nullptr;
+        camera_vel = (seat ? seat->getVelocity() : gAgent.getVelocity()).magVec();
+    }
     // </WolfViewer>
     if (camera_vel > MAX_STABLE_CAMERA_VELOCITY)
     {

@@ -5,8 +5,8 @@
 // AvatarNameTagMode 1, so the own tag is shown), headless Chromium (muted) with the fake headset, LEAP FIFO in $RIG:
 //   1. shown (WolfVRHideAvatar off): the one-per-session log line says the eyes draw the HUD objects, own tag shown
 //      (1); the headset's picture is saved (eyes_shown.jpg) to look at the tag above the avatar's head in both halves;
-//      and in pixels: the picture changes when the own tag is switched off (RenderNameShowSelf) by clearly more than
-//      between two pictures with it on (the sea and sky move a little by themselves)
+//      and in pixels: switching the own tag off (RenderNameShowSelf) takes its white text out of the pictures (the
+//      near-white pixel count drops by far more than it differs between two pictures with the tag on)
 //   2. first person (WolfVRHideAvatar on): the same line says own 0, "first person"
 // What it cannot check: the tag's look and its stereo depth (look at the saved pictures: the tag must be above the
 // head in both halves, shifted between them by the head's own disparity), and voice dots (no voice in the rig).
@@ -60,20 +60,32 @@ async function exitVR(tag) {
 }
 
 const grab = async (file) => { const d = await evalJs('window.__wolfvr.grab()'); if (d) writeFileSync(resolve(OUT, file), Buffer.from(d.split(',')[1], 'base64')); return !!d; };
-// per 32x16 block of the pictures (scaled to 512x256) the mean absolute difference (0..255) of a/b, less that of the
-// same block between n1/n2 (two pictures with nothing changed: the sea, the sky and the avatar's idle move by
-// themselves); the largest such excess. A name tag is small, so a whole-picture mean would hide it.
-async function tagBlockChange(n1, n2, a, b) {
-    return evalJs(`(async () => { const L = async (s) => { const i = new Image(); i.src = s; await i.decode(); const c = document.createElement('canvas');
-        c.width = 512; c.height = 256; const x = c.getContext('2d'); x.drawImage(i, 0, 0, 512, 256); return x.getImageData(0, 0, 512, 256).data; };
-        const P = [await L(${JSON.stringify(n1)}), await L(${JSON.stringify(n2)}), await L(${JSON.stringify(a)}), await L(${JSON.stringify(b)})];
-        const blk = (p, q, bx, by) => { let s = 0; for (let y = by; y < by + 16; y++) for (let x = bx; x < bx + 32; x++) { const k = (y * 512 + x) * 4;
-            s += Math.abs(p[k] - q[k]) + Math.abs(p[k + 1] - q[k + 1]) + Math.abs(p[k + 2] - q[k + 2]); } return s / (32 * 16 * 3); };
-        let best = -1e9, noise = 0;
-        for (let by = 0; by < 256; by += 16) for (let bx = 0; bx < 512; bx += 32) {
-            const n = blk(P[0], P[1], bx, by); noise = Math.max(noise, n); best = Math.max(best, blk(P[2], P[3], bx, by) - n); }
-        return { excess: +best.toFixed(2), noise: +noise.toFixed(2) }; })()`);
+// the number of near-white pixels (all channels > 215) in a received picture at full size: the name tag's text is
+// white (the default name tag colour) and small, so its pixels are counted rather than looked for in blocks - the
+// 11:30Z run showed block differences drowned by the scene moving between two pictures (the avatar's idle turn)
+async function whitePixels(pic) {
+    return evalJs(`(async () => { const i = new Image(); i.src = ${JSON.stringify(pic)}; await i.decode();
+        const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const x = c.getContext('2d');
+        x.drawImage(i, 0, 0); const d = x.getImageData(0, 0, i.width, i.height).data; let n = 0;
+        for (let k = 0; k < d.length; k += 4) if (d[k] > 215 && d[k + 1] > 215 && d[k + 2] > 215) n++; return n; })()`);
 }
+// LLViewerControl get (llviewercontrollistener.cpp:72), its reply found by its reqid in the relay's log
+async function controlValue(key, tag) {
+    leap('LLViewerControl', `{'op':'get','group':'Global','key':'${key}','reply':'@@REPLY@@','reqid':'${tag}'}`);
+    const r = await waitFor(() => {
+        const l = readFileSync(resolve(H, 'leap.log'), 'utf8').split('\n').filter((x) => x.startsWith('IN ') && x.includes(`"reqid": "${tag}"`)).pop();
+        if (!l) return null;
+        try { const j = JSON.parse(l.replace(/^IN \S+ /, '')); return { v: (j.data || j).value }; } catch (e) { return null; }
+    }, 5000);
+    return r ? r.v : null;
+}
+const setControl = (key, v) => leap('LLViewerControl', `{'op':'set','group':'Global','key':'${key}','value':${v === true}}`);
+// the settings a run changes, read first and given back at the end (as round 6 does for the joystick)
+const SAVED = {};
+// a Boolean setting may come back as 0/1 (as seen in the 2026-11-13 runs: "JoystickEnabled 0") or as true/false
+const asBool = (v) => (v === true || v === 1) ? true : (v === false || v === 0) ? false : null;
+async function saveControls(keys) { for (const k of keys) SAVED[k] = asBool(await controlValue(k, `save_${k}`)); console.log('   settings before:', JSON.stringify(SAVED)); }
+function restoreControls() { for (const [k, v] of Object.entries(SAVED)) if (typeof v === 'boolean') setControl(k, v); else console.log(`   ${k} was not read, left as the run set it`); }
 function hudLine(since) {
     const l = after(since, 'VR 3D: name tags, hover text and voice dots drawn in the').pop();
     if (!l) return null;
@@ -84,7 +96,8 @@ await send('Page.enable'); await send('Runtime.enable');
 await send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(FAKE, 'utf8') + '\n' + readFileSync(CTL, 'utf8') });
 // the headset service starts when VR is switched on in this session (Wolf World > VR: WolfVRStreamEnabled, as the
 // rig's campaign_vr.py does); WolfVRStreamMode only says where it starts
-leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRStreamEnabled','value':true}");
+await saveControls(['WolfVRStreamEnabled', 'WolfVRHideAvatar', 'RenderNameShowSelf']);
+setControl('WolfVRStreamEnabled', true);
 await sleep(4000);
 await send('Page.navigate', { url: URL_ });
 check(await waitFor(() => evalJs('!!(window.__wolfvr && window.__wolfvr.xr && window.__wolfvr.xr().said === false)'), 30000), 'connected to the real viewer');
@@ -106,10 +119,11 @@ leap('LLViewerControl', "{'op':'set','group':'Global','key':'RenderNameShowSelf'
 await sleep(2500);
 const b = await evalJs('window.__wolfvr.grab()');
 await grab('eyes_no_own_tag.jpg');
-leap('LLViewerControl', "{'op':'set','group':'Global','key':'RenderNameShowSelf','value':true}");
-const r = a1 && a2 && b ? await tagBlockChange(a1, a2, a2, b) : null;
-console.log(`   tag on -> off: largest block change beyond its own noise ${r && r.excess} (largest noise ${r && r.noise})`);
-check(!!r && r.excess > 6, `1: switching the own tag off changes the headset picture where the tag was (${r && r.excess} beyond noise)`);
+setControl('RenderNameShowSelf', typeof SAVED.RenderNameShowSelf === 'boolean' ? SAVED.RenderNameShowSelf : true);
+const w1 = a1 ? await whitePixels(a1) : -1, w2 = a2 ? await whitePixels(a2) : -1, wb = b ? await whitePixels(b) : -1;
+console.log(`   near-white pixels: tag on ${w1}, ${w2}; tag off ${wb}`);
+check(w1 >= 0 && w2 >= 0 && wb >= 0 && Math.min(w1, w2) - wb > 100 && Math.abs(w1 - w2) < 0.25 * (Math.min(w1, w2) - wb),
+      `1: switching the own tag off takes its white text out of both eyes' pictures (${Math.min(w1, w2) - wb} pixels; ${Math.abs(w1 - w2)} between two pictures with it)`);
 await sleep(2500);
 await exitVR('1');
 await sleep(3500);
@@ -124,4 +138,6 @@ await grab('eyes_first_person.jpg');
 await exitVR('2');
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRHideAvatar','value':false}");
 console.log(`RESULT failures ${failures}`);
+restoreControls();
+await sleep(500);
 process.exit(failures ? 1 : 0);

@@ -49,6 +49,16 @@ namespace
     // anything, the avatar is nudged down (a pitched mouselook swimmer can still climb with forward alone: WolfSim
     // AddNewMovement keeps the body's pitch while Flying).
     const F32 ENTER_BELOW = 0.10f, EXIT_ABOVE = 0.35f, TOP_STOP_BELOW = 0.05f, PUSH_DOWN_ABOVE = 0.12f;
+    // [SWIM HEAD 2026-11-13] A swimmer touching nothing ends the swim only this far up (design value). Live test run 2
+    // (09:48:38Z, Sandbox 2): up pressed while moving across at the surface carried the top 0.2-0.4 m past the point
+    // where steer takes up away (the region's move arrives 0.2-0.35 s late, at up to 1.63 m/s), past EXIT_ABOVE: the
+    // swim ended in mid-air, flying went off and the avatar fell ~3 m into the water. In the air steer's push-down
+    // brings it back instead; past this the avatar is really out (thrown up by something), and the swim ends.
+    const F32 EXIT_ABOVE_IN_AIR = 1.0f;
+    // [SWIM HEAD 2026-11-13] MEASURED, live test run 4 (10:32:53Z, Sandbox 2): swimming off from a held head, steer's
+    // push-down (pressed until the top is back under PUSH_DOWN_ABOVE) sank the top to 1.16 m under that line at
+    // 1.64 m/s: ~0.6 s of the move still arriving after the release. The push is judged that far ahead.
+    const F32 PUSH_LEAD_S = 0.6f;
 
     // From the head joint to the top of the head. Source: wolfstorm/python/charbuilder std_male.npz (the standard
     // shape's body mesh) highest vertex z 1.946 against sl_skeleton.json (avatar_skeleton.xml) mSkull z 1.762.
@@ -651,14 +661,15 @@ namespace
     }
 
     // end_fly: switch flying off again if we switched it on (not when the person sat down: sitting did that already).
-    void stopSwimming(bool end_fly)
+    // why: for the WolfSwim debug line.
+    void stopSwimming(bool end_fly, const char* why)
     {
         State& s = st();
         if (!s.mSwimming)
         {
             return;
         }
-        LL_DEBUGS("WolfSwim") << "swim stop" << LL_ENDL;   // [SWIM HEAD 2026-11-13/] for the live test's timeline
+        LL_DEBUGS("WolfSwim") << "swim stop: " << why << LL_ENDL;   // [SWIM HEAD 2026-11-13/] for the live test's timeline
         setMode(EMode::NONE);
         stopPlaying();
         s.mSwimming = false;
@@ -682,7 +693,9 @@ namespace
         {
             gAgent.clearControlFlags(AGENT_CONTROL_UP_POS | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_FAST_UP);
         }
-        if (top > water + PUSH_DOWN_ABOVE && av->mInAir)
+        // [SWIM HEAD 2026-11-13] judged PUSH_LEAD_S ahead at the present vertical speed, so the push ends before it has
+        // overshot (the region's move arrives late - see PUSH_LEAD_S)
+        if (top + av->getVelocity().mV[VZ] * PUSH_LEAD_S > water + PUSH_DOWN_ABOVE && av->mInAir)
         {
             // climbing with forward alone (a pitched body): forward goes too until it is back under
             gAgent.clearControlFlags(AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG);
@@ -816,7 +829,7 @@ namespace WolfSwim
         const bool teleporting = gAgent.getTeleportState() != LLAgent::TELEPORT_NONE;
         if (!enabled || !wolf || teleporting || av->isSitting() || !av->mRoot)
         {
-            stopSwimming(!av->isSitting());
+            stopSwimming(!av->isSitting(), "off, not a Wolf region, teleport or sat");
             s.mSuppressed = false;
             return;
         }
@@ -826,7 +839,7 @@ namespace WolfSwim
         F32 water = 0.f;
         if (!waterHeight(gAgent.getPosGlobalFromAgent(LLVector3(root.mV[VX], root.mV[VY], top)), water))
         {
-            stopSwimming(true);
+            stopSwimming(true, "no water height");
             return;
         }
 
@@ -849,15 +862,20 @@ namespace WolfSwim
         {
             s.mHeadUp = false;
         }
-        // Out of the water: the top past the band - or, while the head is held up (its top is then ~0.33 m over the
-        // water on the standard shape, by design), the chin past the same band over the drawn surface.
-        const bool out = s.mHeadUp ? chin_z > surface + EXIT_ABOVE : top > water + EXIT_ABOVE;
+        // Out of the water: the top past the band (EXIT_ABOVE_IN_AIR for a swimmer touching nothing) - or, while the head
+        // is held up (its top is then ~0.33 m over the water on the standard shape, by design), the chin past the band
+        // over the drawn surface.
+        const F32 exit_above = (s.mSwimming && av->mInAir) ? EXIT_ABOVE_IN_AIR : EXIT_ABOVE;
+        // (Run 4, 10:30:40Z: a hold pulse that overshot to the chin 0.33 m over the surface ended the swim in mid-air
+        // with the plain band - the in-air band for the chin too.)
+        const bool out = s.mHeadUp ? chin_z > surface + exit_above : top > water + exit_above;
 
         // [WOLF SEA TUNNEL 2026-10-28] a head inside an air-filled volume (a sea tunnel, wolfdryvolumes.h) is out of the
         // water: walk, as on land
-        if (out || WolfDryVolumes::instance().contains(LLVector3(root.mV[VX], root.mV[VY], top)))
+        const bool dry = !out && WolfDryVolumes::instance().contains(LLVector3(root.mV[VX], root.mV[VY], top));
+        if (out || dry)
         {
-            stopSwimming(true);
+            stopSwimming(true, dry ? "in a dry volume" : "out of the water");
             s.mSuppressed = false;     // out of the water: the next dip swims again
             return;
         }
@@ -866,7 +884,7 @@ namespace WolfSwim
         {
             // The person switched flying off (Fly button, the Home key ...): walk on the bottom until out of the water
             // or flying again.
-            stopSwimming(false);
+            stopSwimming(false, "flying switched off");
             s.mSuppressed = true;
             return;
         }

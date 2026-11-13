@@ -17,6 +17,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "wolfvkshare.h"
+#include "wolfvkbridge.h"   // [W106 VKRETRY 2026-11-13] noteLayerSelfTestStarting
 #include "llgl.h"
 #include "llglheaders.h"
 #include "vk/wolfvkbuffer.h"   // [IMPORT SELF-TEST 2026-11-10] the host buffer of the round trip
@@ -288,6 +289,7 @@ bool WolfVkShare::init(WolfVkDevice& device, uint32_t width, uint32_t height, bo
     if (self_test)
     {
         std::string result;
+        WolfVkBridge::noteLayerSelfTestStarting();   // [W106 VKRETRY 2026-11-13] a start that ends in the test is told apart
         if (!selfTest(result, error)) { destroy(); return false; }
     }
     else

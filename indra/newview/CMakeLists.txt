@@ -1993,6 +1993,7 @@ set(viewer_HEADER_FILES
     wolfvrstream.h   # [VR PIPE 2026-11-03]
     wolfvrscreen.h   # [VR BIG SCREEN 2026-11-03]
     wolfvkbridge.h   # [VULKAN BACKEND 2026-11-08]
+    wolfvkretryrule.h   # [W106 VKRETRY 2026-11-13] when an automatic OpenGL switch is retried (pure functions)
     wolfvkscene.h    # [VULKAN BACKEND 2026-11-08]
     wolfvkmirror.h   # [VULKAN BACKEND 2026-11-08]
     wolfvkshare.h    # [SHARED IMAGES 2026-11-08]

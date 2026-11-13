@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfcrashreport.h"   // [CRASH REPORTS 2026-10-28/]
+#include "wolfmemorylog.h"     // [W106 MEMLOG 2026-11-13/] WolfMemoryLog::anotherCopyStillOpen, defined here
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
 #include "wolfviewerkey.h"  // [COPYBOT EXEMPT 2026-10-19/] the per-login key for the regions' copybot guard
@@ -5065,6 +5066,36 @@ void LLAppViewer::processMarkerFiles()
 //    }
 //#endif
     // </FS:Ansariel>
+}
+
+// [W106 MEMLOG 2026-11-13] processMarkerFiles' test again, for wolfmemorylog.cpp's second-copy notice: the copy that
+// owns the exec marker holds an exclusive lock on it while it runs and deletes it on a clean quit (removeMarkerFiles).
+// No file = it has gone. Otherwise try the same lock (APR_FLOCK_NONBLOCK | APR_FLOCK_EXCLUSIVE): taken = nobody holds
+// it (the other copy has gone, or crashed), so it is let go at once; refused, or the file cannot be opened, = still
+// running, as processMarkerFiles assumes. Opened read/write WITHOUT truncating (LL_APR_RPB, not processMarkerFiles'
+// LL_APR_WB), so a running copy's marker keeps its version line.
+bool WolfMemoryLog::anotherCopyStillOpen()
+{
+    const std::string marker = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, MARKER_FILE_NAME);
+    if (!LLAPRFile::isExist(marker, NULL, LL_APR_RB))
+    {
+        return false;
+    }
+    LLAPRFile file;
+    file.open(marker, LL_APR_RPB);
+    apr_file_t* handle = file.getFileHandle();
+    if (!handle)
+    {
+        return true;
+    }
+    if (apr_file_lock(handle, APR_FLOCK_NONBLOCK | APR_FLOCK_EXCLUSIVE) != APR_SUCCESS)
+    {
+        file.close();
+        return true;
+    }
+    apr_file_unlock(handle);
+    file.close();
+    return false;
 }
 
 void LLAppViewer::removeMarkerFiles()

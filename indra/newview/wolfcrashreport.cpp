@@ -138,7 +138,7 @@ namespace
     // straight on to the previous handler. Of two threads, the first in writes the buffers; the other waits up to a
     // second for it, so the crash it is about to cause does not cut the first one's note short.
     thread_local bool tInTerminate = false;
-    std::atomic_flag sTermClaimed = ATOMIC_FLAG_INIT;
+    std::atomic_flag sTermClaimed;   // C++20: default-constructed clear ([atomics.flag], P0883)
     std::atomic<bool> sTermNoted(false);
     std::terminate_handler sPrevTerminate = nullptr;
 
@@ -146,6 +146,7 @@ namespace
     {
         if (tInTerminate)
         {
+            sTermNoted.store(true);   // a thread waiting for this one's note need not wait out its second
             if (sPrevTerminate) sPrevTerminate();
             abort();
         }
@@ -431,15 +432,18 @@ namespace
                 ++out->mCount;
                 // what() only for those types, through the std::exception base: the entry's NonVirtualAdjustment finds
                 // it inside the thrown object (a virtual base, OffsetToVBPtr != -1, is not followed), and its virtual
-                // table pointer must lie in a loaded module before anything is called through it.
+                // table pointer must lie in a loaded module's image before anything is called through it. VirtualQuery,
+                // not GetModuleHandleExW: that takes the loader lock, which a thread that died inside LoadLibrary or
+                // DllMain still holds. Source: learn.microsoft.com MEMORY_BASIC_INFORMATION - State MEM_COMMIT
+                // "committed pages"; Type MEM_IMAGE "mapped into the view of an image section".
                 if (plain && object && !out->mWhat[0] && strcmp(name, ".?AVexception@std@@") == 0
                     && *reinterpret_cast<const int*>(type + 12) == -1)
                 {
                     const ULONG_PTR base = object + static_cast<ULONG_PTR>(static_cast<LONG_PTR>(*reinterpret_cast<const int*>(type + 8)));
                     const ULONG_PTR vtable = *reinterpret_cast<const ULONG_PTR*>(base);
-                    HMODULE mod = nullptr;
-                    if (vtable && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                                     reinterpret_cast<LPCWSTR>(vtable), &mod) && mod)
+                    MEMORY_BASIC_INFORMATION mbi;
+                    if (vtable && VirtualQuery(reinterpret_cast<LPCVOID>(vtable), &mbi, sizeof(mbi)) == sizeof(mbi)
+                        && mbi.State == MEM_COMMIT && mbi.Type == MEM_IMAGE)
                     {
                         const std::exception* e = reinterpret_cast<const std::exception*>(base);
                         copy_printable(out->mWhat, THROWN_WHAT_CHARS, e->what());
@@ -678,7 +682,9 @@ namespace
     char sLogIn[2048] = {};
     char sLogOut[2048] = {};
     bool sCopyLog = false;
-    volatile sig_atomic_t sWritten = 0;
+    // Once per process. std::atomic_flag "shall be lock-free" ([atomics.flag]) and a lock-free atomic operation may
+    // be used in a signal handler ([support.signal]), so two threads crashing at once cannot both get past it.
+    std::atomic_flag sWritten;   // C++20: default-constructed clear ([atomics.flag], P0883)
     const off_t LOG_COPY_MAX = 8 * 1024 * 1024;
 
     bool copy_path(char* dst, size_t cap, const std::string& s)
@@ -825,8 +831,7 @@ namespace
 
     void on_fatal_signal(int signum, void* siginfo, void* ucontext)
     {
-        if (sWritten) return;
-        sWritten = 1;
+        if (sWritten.test_and_set()) return;
         const int fd = open(sStackPath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
         if (fd >= 0)
         {
@@ -865,13 +870,9 @@ namespace
             {
                 out_str(o, "thrown: ");
                 out_str(o, sTermType);
+                out_str(o, "\nwhat: ");
+                out_str(o, sTermWhat[0] ? sTermWhat : "?");   // as on Windows: "?" when there is no plain what() text
                 out_str(o, "\n");
-                if (sTermWhat[0])
-                {
-                    out_str(o, "what: ");
-                    out_str(o, sTermWhat);
-                    out_str(o, "\n");
-                }
             }
             {   // [W106 MEMLOG 2026-11-13] memory now and the viewer's last figures (wolfmemorylog.cpp). Static, not on
                 // the crashed thread's stack (this handler runs on it; once per process: sWritten).

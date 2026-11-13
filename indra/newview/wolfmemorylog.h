@@ -54,6 +54,11 @@ namespace WolfMemoryLog
     /// The viewer's own figures from the last log line and how many seconds ago it was written; 0 (empty) when no
     /// line has been written yet. Crash-safe.
     size_t formatLastViewer(char* buf, size_t cap);
+
+    /// [W106 MEMLOG 2026-11-13] For the second-copy notice: whether the copy that was already open when this one
+    /// started still holds its exec marker lock, tested again now (this run's isSecondInstance() is decided once at
+    /// start). Defined in llappviewer.cpp beside processMarkerFiles, which owns the marker's name and rules.
+    bool anotherCopyStillOpen();
 }
 
 #endif // WOLF_MEMORY_LOG_H

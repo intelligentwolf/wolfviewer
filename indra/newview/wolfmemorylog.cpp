@@ -480,6 +480,13 @@ namespace
         low = low || r.mCommitAvail < SECOND_COPY_LOW;
 #endif
         if (!low) return;
+        // the first copy may have closed since this one started
+        if (!WolfMemoryLog::anotherCopyStillOpen())
+        {
+            s_done = true;
+            LL_INFOS("WolfMemory") << "Memory is low, but the other copy of WolfViewer has closed: no notice" << LL_ENDL;
+            return;
+        }
         s_done = true;
         char buf[1024];
         Text t = text_on(buf, sizeof(buf));

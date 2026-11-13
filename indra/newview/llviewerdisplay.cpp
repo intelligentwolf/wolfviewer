@@ -29,6 +29,7 @@
 #include "llviewerdisplay.h"
 #include "wolfvrscreen.h"   // [VR BIG SCREEN 2026-11-03/] WolfVRScreen::captureFrame
 #include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/] WolfVkBridge::present in place of swapBuffers in Vulkan mode
+#include "wolfmemorylog.h"   // [W106 MEMLOG 2026-11-13/] WolfMemoryLog::idle
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> far clip grows with height
 #include "wolfbuilder.h"       // [WOLF BUILDER 2026-10-13/] the builder's grid on the ground
 
@@ -216,7 +217,6 @@ U32 gRecentFrameCount = 0; // number of 'recent' frames
 LLFrameTimer gRecentFPSTime;
 LLFrameTimer gRecentMemoryTime;
 LLFrameTimer gAssetStorageLogTime;
-LLFrameTimer gWolfMemoryBreakdownTime;   // <WolfViewer 2026-10-02/>
 
 // Rendering stuff
 void render_ui(F32 zoom_factor = 1.f, int subfield = 0);
@@ -420,22 +420,9 @@ void display_stats()
     // <WolfViewer 2026-10-02> WHERE THE MEMORY IS, once a minute. A resident's log showed the
     // viewer at 12 GB on a 16 GB machine at WolfFest (+1.85 GB in one minute as prims came into
     // range) with nothing to say what held it; MEMORY above is every 600 s and is RSS alone.
-    // These are the viewer's own counters, read, not estimated: GL texture bytes
-    // (LLImageGL::getTextureBytesAllocated), compressed image bytes held
-    // (LLImageFormatted::sGlobalFormattedMemory), decoded raw images alive
-    // (LLImageRaw::sRawImageCount), textures known, objects and avatars.
-    if (gWolfMemoryBreakdownTime.getElapsedTimeF32() >= 60.f)
-    {
-        gWolfMemoryBreakdownTime.reset();
-        LL_INFOS("WolfMemory") << llformat("RSS %llu MB | GL textures %llu MB, %d textures | compressed images %d MB | raw images %d | objects %d | avatars %d",
-                                           (unsigned long long)(LLMemory::getCurrentRSS() >> 20),
-                                           (unsigned long long)(LLImageGL::getTextureBytesAllocated() >> 20),
-                                           gTextureList.getNumImages(),
-                                           LLImageFormatted::sGlobalFormattedMemory >> 20,
-                                           LLImageRaw::sRawImageCount,
-                                           gObjectList.getNumObjects(),
-                                           (S32)LLCharacter::sInstances.size()) << LL_ENDL;
-    }
+    // [W106 MEMLOG 2026-11-13] now in wolfmemorylog.cpp, with the process's committed memory, the computer's
+    // available memory and commit, the VRAM budget, and an early line when memory moves by 1 GB (tickets 796/799/838).
+    WolfMemoryLog::idle();
     constexpr F32 ASSET_STORAGE_LOG_FREQUENCY = 60.f;
     if (gAssetStorageLogTime.getElapsedTimeF32() >= ASSET_STORAGE_LOG_FREQUENCY)
     {

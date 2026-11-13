@@ -933,6 +933,7 @@ set(viewer_SOURCE_FILES
     wolffloaterbugreport.cpp   # [WOLF BUG REPORT 2026-10-24] Report a Problem (ticket + viewer logs)
     wolfcrashreport.cpp   # [CRASH REPORTS 2026-10-28] crash stack / minidump, sent as a staff ticket next run
     wolflogscrub.cpp   # [CRASH REPORTS 2026-10-28] log scrub / tail / gzip shared with the Flea Report
+    wolfmemorylog.cpp   # [W106 MEMLOG 2026-11-13] memory line once a minute + memory figures in the crash report
     wolffloaterdob.cpp   # [DOB IN THE VIEWER 2026-10-26] Your Date of Birth (asked after login when the account has none)
     wolffloatergreedy.cpp   # [GREEDY WINDOW 2026-11-10] Greedy, the dice game (ticket 721)
     wolfgreedyhud.cpp   # [W104 FEATFIX 2026-11-11] the Greedy HUD (Paul: "a HUD not a floater")
@@ -1981,6 +1982,7 @@ set(viewer_HEADER_FILES
     wolffloaterbugreport.h   # [WOLF BUG REPORT 2026-10-24]
     wolfcrashreport.h   # [CRASH REPORTS 2026-10-28]
     wolflogscrub.h   # [CRASH REPORTS 2026-10-28]
+    wolfmemorylog.h   # [W106 MEMLOG 2026-11-13]
     wolffloaterdob.h   # [DOB IN THE VIEWER 2026-10-26]
     wolffloatergreedy.h   # [GREEDY WINDOW 2026-11-10]
     wolfgreedyhud.h   # [W104 FEATFIX 2026-11-11]

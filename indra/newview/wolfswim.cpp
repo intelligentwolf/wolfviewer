@@ -34,6 +34,7 @@
 #include "llworld.h"
 #include "wolfgrid.h"
 #include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] no swimming in a sea tunnel
+#include "wolfboatrock.h"     // [SWIM HEAD 2026-11-13/] drawnWaveHeight: the surface as drawn
 
 namespace
 {
@@ -52,6 +53,15 @@ namespace
     // From the head joint to the top of the head. Source: wolfstorm/python/charbuilder std_male.npz (the standard
     // shape's body mesh) highest vertex z 1.946 against sl_skeleton.json (avatar_skeleton.xml) mSkull z 1.762.
     const F32 SKULL_TO_TOP = 0.184f;
+
+    // [SWIM HEAD 2026-11-13] Ticket 802 (IndigoQueen King): treading water at the surface, the head is held out of it
+    // with the waterline at the chin, on the waves this viewer draws. Design values: the hold starts once the top of
+    // the head is within SURFACE_REACH of the drawn surface (so a swimmer who comes up, or dips under for a moment,
+    // pops back up; one who stops deeper down stays there); the chin is let be within HOLD_BAND of the surface; the
+    // chin is judged where it will be HOLD_LEAD_S from now at its present vertical speed, so the up / down press ends
+    // before the region's move (3.28 m/s, wolfswim.h) has overshot.
+    const F32 SURFACE_REACH = 0.30f, HOLD_BAND = 0.04f;
+    const F32 HOLD_LEAD_S = 0.15f;
 
     // Stroke when moving faster than this (m/s), back to the tread under STILL_SPEED for STILL_FOR_S (design values;
     // the swim itself is 3.28 m/s - wolfswim.h).
@@ -95,6 +105,10 @@ namespace
         F64 mRequestedAt = 0.0;
         F64 mPaddleStartAt = 0.0;      // OWN_PADDLE: start (again) at this time, 0 = no start pending
         F64 mPaddleStartedAt = 0.0;
+        // [SWIM HEAD 2026-11-13] mHolding: treading with the head held out (holdHead); mHeadUp: the head was raised and the
+        // top has not been back under the surface band since, so the out-of-the-water test goes by the chin meanwhile
+        bool mHolding = false;
+        bool mHeadUp = false;
 
         // on land
         F64 mNextSample = 0.0;
@@ -366,6 +380,55 @@ namespace
         return true;
     }
 
+    // [SWIM HEAD 2026-11-13] The chin, from the skeleton: the bento mFaceChin joint (avatar_skeleton.xml:55, under
+    // mFaceJaw under mHead - 0.069 m below the head joint and 0.33 m below the top of the head on the standard shape),
+    // which every avatar has and which follows the head's live pose and any rigged mesh's joint offsets. The head joint
+    // if a skeleton should lack it.
+    LLJoint* chinJoint(LLVOAvatarSelf* av)
+    {
+        LLJoint* chin = av->getJoint("mFaceChin");
+        return chin ? chin : av->mHeadp;
+    }
+
+    // [SWIM HEAD 2026-11-13] The water surface as this viewer DRAWS it over an agent-space point: the region's water
+    // height plus the Wolf sea's wave there now - the same reading the swim bubbles and the floating birds use
+    // (wolfswimbubbles.cpp surfaceOf, wolfbirds.cpp waterSurfaceZ: WolfBoatRock::drawnWaveHeight, the shader's wave model).
+    bool drawnSurface(const LLVector3& p, F32& surface)
+    {
+        LLViewerRegion* r = LLWorld::getInstance()->getRegionFromPosAgent(p);
+        if (!r)
+        {
+            r = gAgent.getRegion();
+        }
+        if (!r)
+        {
+            return false;
+        }
+        const F32 wave = WolfBoatRock::instanceExists() ? WolfBoatRock::instance().drawnWaveHeight(r, p.mV[VX], p.mV[VY]) : 0.f;
+        surface = r->getWaterHeight() + wave;
+        return std::isfinite(surface);
+    }
+
+    // [SWIM HEAD 2026-11-13] Treading at the surface: up or down (the region's own swim speed, steer) so the chin rides
+    // the drawn surface. The position is the region's, so every viewer sees the head out of the water. Upward is only
+    // pressed while the chin is (about to be) under the surface, so the hold never lifts the body out of the water.
+    void holdHead(LLVOAvatarSelf* av, F32 chin_z, F32 surface)
+    {
+        gAgent.setControlFlags(AGENT_CONTROL_STOP);   // the slow swim speed, as steer
+        gAgent.clearControlFlags(AGENT_CONTROL_UP_POS | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_FAST_UP
+                                 | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_UP_NEG);
+        const F32 ahead = chin_z + av->getVelocity().mV[VZ] * HOLD_LEAD_S;
+        if (ahead < surface - HOLD_BAND)
+        {
+            gAgent.setControlFlags(AGENT_CONTROL_NUDGE_UP_POS);
+        }
+        else if (ahead > surface + HOLD_BAND && av->mInAir)
+        {
+            // never down while touching (flying + down + touching lands: steer)
+            gAgent.setControlFlags(AGENT_CONTROL_NUDGE_UP_NEG);
+        }
+    }
+
     void request(const LLUUID& id, bool start)
     {
         if (id.notNull())
@@ -485,6 +548,7 @@ namespace
         State& s = st();
         s.mSwimming = true;
         s.mStroke = false;
+        s.mHolding = s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
         s.mStillSince = now();
         s.mWeTurnedFlyOn = false;
         if (!gAgent.getFlying())
@@ -522,6 +586,7 @@ namespace
         setMode(EMode::NONE);
         stopPlaying();
         s.mSwimming = false;
+        s.mHolding = s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
         if (end_fly && s.mWeTurnedFlyOn && gAgent.getFlying())
         {
             gAgent.setFlying(false);
@@ -563,7 +628,14 @@ namespace
         if (s.mMode == EMode::WOLF_ANIMS)
         {
             checkAssets();
-            const F32 speed = av->getVelocity().length();
+            // [SWIM HEAD 2026-11-13] while the head is up its own up / down moves (holdHead, the waves) are no stroke:
+            // only the speed across the water counts then. (holdHead's NUDGE_UP_POS / NUDGE_UP_NEG are not in `input`.)
+            LLVector3 vel = av->getVelocity();
+            if (s.mHeadUp)
+            {
+                vel.mV[VZ] = 0.f;
+            }
+            const F32 speed = vel.length();
             const bool input = (gAgent.getControlFlags() & (AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_LEFT_POS
                                 | AGENT_CONTROL_LEFT_NEG | AGENT_CONTROL_UP_POS | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_AT_POS
                                 | AGENT_CONTROL_NUDGE_AT_NEG | AGENT_CONTROL_NUDGE_LEFT_POS | AGENT_CONTROL_NUDGE_LEFT_NEG)) != 0;
@@ -645,6 +717,7 @@ namespace WolfSwim
         if (!isAgentAvatarValid() || !gAgent.getRegion())
         {
             s.mSwimming = false;   // nothing to send to: the region forgets our animations with us
+            s.mHolding = s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
             if (s.mMode == EMode::AO_PADDLE && AOEngine::instanceExists())
             {
                 AOEngine::instance().setWolfSwimPaddle(false);
@@ -678,9 +751,26 @@ namespace WolfSwim
             return;
         }
 
+        // [SWIM HEAD 2026-11-13] the chin and the drawn surface over it (ticket 802: treading holds the chin there)
+        F32 chin_z = 0.f, surface = 0.f;
+        LLJoint* chin = chinJoint(av);
+        const bool have_chin = chin && drawnSurface(chin->getWorldPosition(), surface);
+        if (have_chin)
+        {
+            chin_z = chin->getWorldPosition().mV[VZ];
+        }
+        // the raised head is back under (the duck before a stroke away from the surface, steer): the top decides again
+        if (s.mHeadUp && !s.mHolding && (!have_chin || top <= water + PUSH_DOWN_ABOVE))
+        {
+            s.mHeadUp = false;
+        }
+        // Out of the water: the top past the band - or, while the head is held up (its top is then ~0.33 m over the
+        // water on the standard shape, by design), the chin past the same band over the drawn surface.
+        const bool out = (s.mHeadUp && have_chin) ? chin_z > surface + EXIT_ABOVE : top > water + EXIT_ABOVE;
+
         // [WOLF SEA TUNNEL 2026-10-28] a head inside an air-filled volume (a sea tunnel, wolfdryvolumes.h) is out of the
         // water: walk, as on land
-        if (top > water + EXIT_ABOVE || WolfDryVolumes::instance().contains(LLVector3(root.mV[VX], root.mV[VY], top)))
+        if (out || WolfDryVolumes::instance().contains(LLVector3(root.mV[VX], root.mV[VY], top)))
         {
             stopSwimming(true);
             s.mSuppressed = false;     // out of the water: the next dip swims again
@@ -717,7 +807,45 @@ namespace WolfSwim
             return;
         }
 
-        steer(av, top, water);
+        // [SWIM HEAD 2026-11-13] Treading: no key across the water or down (up is fine: that is surfacing) and hardly
+        // moving across it. The hold starts near the surface only (SURFACE_REACH), then lasts until a stroke or a dive.
+        const U32 keys = gAgent.getControlFlags();   // the person's own this frame (resetControlFlags after each send)
+        const bool across_or_down = (keys & (AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_LEFT_POS
+                                     | AGENT_CONTROL_LEFT_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG
+                                     | AGENT_CONTROL_NUDGE_LEFT_POS | AGENT_CONTROL_NUDGE_LEFT_NEG | AGENT_CONTROL_UP_NEG
+                                     | AGENT_CONTROL_NUDGE_UP_NEG)) != 0;
+        LLVector3 across = av->getVelocity();
+        across.mV[VZ] = 0.f;
+        if (!have_chin || across_or_down || across.length() > MOVING_SPEED)
+        {
+            s.mHolding = false;
+        }
+        else if (!s.mHolding && top >= surface - SURFACE_REACH)
+        {
+            s.mHolding = true;
+        }
+
+        if (s.mHolding)
+        {
+            s.mHeadUp = true;
+            holdHead(av, chin_z, surface);
+        }
+        else
+        {
+            steer(av, top, water);
+        }
         animate(av);
+
+        // [SWIM HEAD 2026-11-13] debug only (logcontrol tag WolfSwim), four times a second: what the hold works from
+        static F64 next_debug = 0.0;
+        if (now() >= next_debug)
+        {
+            next_debug = now() + 0.25;
+            LL_DEBUGS("WolfSwim") << "swim hold=" << s.mHolding << " headup=" << s.mHeadUp << " stroke=" << s.mStroke
+                                  << " chin=" << chin_z << " head=" << (av->mHeadp ? av->mHeadp->getWorldPosition().mV[VZ] : 0.f)
+                                  << " surface=" << surface << " water=" << water << " top=" << top
+                                  << " vz=" << av->getVelocity().mV[VZ] << " inair=" << av->mInAir
+                                  << " flags=" << std::hex << gAgent.getControlFlags() << std::dec << LL_ENDL;
+        }
     }
 }

@@ -530,6 +530,21 @@ namespace
         s.mItemId = item->getUUID();
         s.mItemName = item->getName();
         s.mRezGlobal = spot.mHit;
+        // [REZ OVER DEEP WATER 2026-11-12] Paul: "it said the submarine wasn't rezzed but it was there!" (Greedy Wolf,
+        // the sea bed at -93.7 m; his log: "rezzed 'Wolf Submarine' (submarine) at { ..., -93.7309 } on the land", then
+        // "Your submarine didn't appear within 30 seconds." with the submarine afloat in front of him). Over the land
+        // the spot is the SEA BED, but the sim puts the object on the water's surface where that is higher
+        // (Scene.cs GetNewRezLocation: "if (wpos.Z > pos.Z) pos = wpos", the same rule findSpot's comment cites), so
+        // over water deeper than APPEAR_RADIUS the new object was never within reach of the point it was measured
+        // from. Where it is looked for is where the sim puts it: on the water, when the land there is under it.
+        if (spot.mOnLand && spot.mRegion)
+        {
+            const F64 water = (F64)spot.mRegion->getWaterHeight();
+            if (s.mRezGlobal.mdV[VZ] < water)
+            {
+                s.mRezGlobal.mdV[VZ] = water;
+            }
+        }
         s.mRegionHandle = gAgent.getRegion()->getHandle();
         s.mNewId.setNull();
         s.mMatchedAt = 0.0;

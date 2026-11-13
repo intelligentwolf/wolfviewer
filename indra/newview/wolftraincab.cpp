@@ -239,11 +239,6 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     mCab = c;
     mSeat = root->getID();
     mLastAt = now();
-    // [wolf-rail 1.2] the region's word on Auto (its own, or a script's train.control [train, "auto"]) - unless the driver
-    // has just chosen here (AUTO_GRACE_S)
-    if (fresh || now() - mAutoChosenAt > AUTO_GRACE_S) mAutoWant = c.mMode == "auto";
-    // the POINTS question is about the points named in it: other points ahead now (or none a driver may change), it goes
-    if (mPointsAsk && (!canChangePoints() || mCab.mPts != mPointsAskName)) mPointsAsk = false;
     if (fresh)
     {
         mOpen = true;
@@ -258,6 +253,7 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
             mPower = mKept.power;
             mBrake = mKept.brake;
             mRev = mKept.rev;
+            mEasyBack = mKept.easyBack;
         }
         else
         {
@@ -266,9 +262,31 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
             mPower = 0.f;
             mBrake = 1.f;
             mRev = 1;
+            mEasyBack = false;
         }
         mKept = Levers();
+        mAutoWant = false;
+        mAutoAskUntil = -1.0;
         claimBottom();
+    }
+    // [wolf-rail 1.2] the region's word on Auto (its own, or a script's train.control [train, "auto"]).
+    // [client review 13 Nov, W3] An AUTO press waiting for its answer (autoAsking) takes the first mode=auto as the yes; a
+    // mode that is not "auto" meanwhile may still be a message sent before the region read the press, so it waits until
+    // AUTO_GRACE_S is over - and then the levers are simply the driver's as they were (the press never changed them).
+    // After the driver let Auto go here (an off press, a lever: mAutoChosenAt) the region's old "auto" is not believed for
+    // AUTO_GRACE_S either.
+    if (c.mMode == "auto")
+    {
+        if (fresh || autoAsking() || now() - mAutoChosenAt > AUTO_GRACE_S)
+        {
+            if (!mAutoWant) autoLetGo();
+            mAutoWant = true;
+            mAutoAskUntil = -1.0;
+        }
+    }
+    else if (!autoAsking() && (fresh || now() - mAutoChosenAt > AUTO_GRACE_S))
+    {
+        mAutoWant = false;
     }
 }
 
@@ -282,8 +300,8 @@ void WolfTrain::close()
     mCab = Cab();
     mHornHeld = false;
     mAutoWant = false;
+    mAutoAskUntil = -1.0;
     mAutoPulseUntil = -1.0;
-    mPointsAsk = false;
     mPointsPulseUntil = -1.0;
 }
 
@@ -353,7 +371,7 @@ void WolfTrain::idle()
             // the region stopped saying (the region stops the train itself): keep the levers in case the same train's
             // cab comes back from the next region a moment later (W3)
             mKept.seat = mSeat; mKept.train = mCab.mTrain; mKept.at = now();
-            mKept.notch = mNotch; mKept.power = mPower; mKept.brake = mBrake; mKept.rev = mRev;
+            mKept.notch = mNotch; mKept.power = mPower; mKept.brake = mBrake; mKept.rev = mRev; mKept.easyBack = mEasyBack;
             const Levers kept = mKept;
             close();
             mKept = kept;
@@ -385,10 +403,11 @@ void WolfTrain::setEasy(bool on)
 {
     takeBack();   // [wolf-rail 1.2] the new mode's levers start on the brake: that takes the train back from Auto
     gSavedSettings.setBOOL("WolfTrainCabEasy", on);
-    // Changing mode never lets the train run on by itself: both start on the brake.
+    // Changing mode never lets the train run on by itself: both start on the brake (Easy driving going forward).
     mNotch = NOTCH_STOP;
     mPower = 0.f;
     mBrake = 1.f;
+    mEasyBack = false;
 }
 
 void WolfTrain::setNotch(S32 n)
@@ -413,30 +432,46 @@ void WolfTrain::setBrake(F32 v)
 // Auto off on seeing it move (EngineDriver.ReadDriver).
 void WolfTrain::takeBack()
 {
-    if (!mAutoWant) return;
+    if (!mAutoWant && !autoAsking()) return;
     mAutoWant = false;
+    mAutoAskUntil = -1.0;   // a lever taken while the press waits for its answer: the driver has the train
     mAutoChosenAt = now();
+}
+
+bool WolfTrain::autoAsking() const
+{
+    return now() < mAutoAskUntil;
+}
+
+// [wolf-rail 1.2] The region has switched Auto on (mode=auto): the levers to their let-go position, as they are then sent
+// (sendPower / sendBrake). The region takes Auto back when power or brake move from where they were when it came on, and
+// not while both are let go (EngineDriver.ReadDriver: `Auto && levers && moved`), so the levers sent as let go never take
+// it back. Easy driving's lever has no let-go notch: it goes to STOP, which is not sent while Auto is on, so Auto ending
+// for any other reason (the end of a run, a script) leaves the train on the brake, never at GO.
+void WolfTrain::autoLetGo()
+{
+    mPower = 0.f;
+    mBrake = 0.f;
+    mNotch = NOTCH_STOP;
 }
 
 void WolfTrain::pressAuto()
 {
     if (!driving()) return;
-    mAutoChosenAt = now();
+    if (autoAsking()) return;   // one press is on its way: a second is not another switch
     mAutoPulseUntil = now() + AUTO_PULSE_S;
     if (mAutoWant)
     {
-        // off again: in Easy driving the lever is put to STOP (the train brakes to a stand); in the driver's mode both
-        // levers stay let go, so the train keeps its speed and the driver takes it from there
+        // off again: the levers are already let go (autoLetGo); in the driver's mode the train keeps its speed and the
+        // driver takes it from there, in Easy driving the lever is at STOP and the train brakes to a stand
         mAutoWant = false;
-        if (easy()) mNotch = NOTCH_STOP;
+        mAutoChosenAt = now();
         return;
     }
-    // on: both levers let go with the press - the region switches Auto on only with neither held. Easy driving's lever goes
-    // to STOP meanwhile (not sent while Auto is on), so Auto ending for any other reason never leaves it at GO
-    mAutoWant = true;
-    mPower = 0.f;
-    mBrake = 0.f;
-    mNotch = NOTCH_STOP;
+    // on: [client review 13 Nov, W3] the levers stay exactly as the driver has them until the region says mode=auto
+    // (receive); the region switches Auto on only with neither lever held, and otherwise says so in the note ("Let both
+    // levers go, then press AUTO.").
+    mAutoAskUntil = now() + AUTO_GRACE_S;
 }
 
 bool WolfTrain::canChangePoints() const
@@ -444,27 +479,22 @@ bool WolfTrain::canChangePoints() const
     return driving() && !mCab.mPts.empty() && mCab.mPtsDriver && mCab.mPtsM >= 0.f && mCab.mPtsM <= DRIVER_POINTS_M && !mCab.mBack;
 }
 
-// static
-std::string WolfTrain::nextSetting(const std::string& now)
+void WolfTrain::pressPoints()
 {
-    // Source: wolf-rail RailEngine.SetPoints "toggle": Left -> Right, anything else (Right, Auto) -> Left
-    return now == "left" ? "right" : "left";
+    // [Paul 13 Nov, D-b] one press, no question: STAGE held as AUTO's is (wolf-rail Cab.cs BTN_POINTS 512; the region changes
+    // the next points a driver may set on the bit coming on, EngineDriver.ReadDriver / RailEngine "toggle"), and puts the new
+    // setting in the cab's note ("Points P1 set left.")
+    if (!canChangePoints() || now() < mPointsPulseUntil) return;
+    mPointsPulseUntil = now() + AUTO_PULSE_S;
 }
 
-void WolfTrain::askPoints()
+void WolfTrain::setEasyBack(bool back)
 {
-    if (!canChangePoints()) return;
-    mPointsAsk = true;
-    mPointsAskName = mCab.mPts;
-}
-
-void WolfTrain::answerPoints(bool yes)
-{
-    if (!mPointsAsk) return;
-    mPointsAsk = false;
-    // the press: STAGE held as AUTO's is (wolf-rail Cab.cs BTN_POINTS 512; the region changes the next points a driver may
-    // set on the bit coming on, EngineDriver.ReadDriver), and says so in the cab's note
-    if (yes && canChangePoints() && mCab.mPts == mPointsAskName) mPointsPulseUntil = now() + AUTO_PULSE_S;
+    // [wolf-rail 1.2, D-c] chosen at any time; the region changes the way the train goes only from a stand and otherwise
+    // says "Stop the train before you change direction." in the note. Not while Auto drives (Auto runs forward: the
+    // choice is under the AUTO card and is not sent then).
+    if (mAutoWant) return;
+    mEasyBack = back;
 }
 
 void WolfTrain::setReverser(S32 r)
@@ -482,23 +512,34 @@ void WolfTrain::setMph(bool on)
     gSavedSettings.setBOOL("WolfTrainCabMph", on);
 }
 
+// [wolf-rail 1.2] Both levers let go on the wire: in Auto, and - in Easy driving only - for an AUTO press waiting for its
+// answer. Easy driving's lever has no let-go notch (STOP is the brake, SLOW and GO are power), so without this the region
+// could never switch Auto on from it ("Let both levers go"); in Easy driving no power is a stop, never a run on (wolf-rail
+// EngineDriver.DrivenTarget: the target is power x the line speed, or the slow backing share), so the train only slows
+// meanwhile. The notch itself is not changed and is sent again if the region does not switch Auto on. In the driver's mode
+// the levers are sent exactly as they are until the region says mode=auto (client review 13 Nov, W3: no brake released while
+// the region has not agreed, e.g. while backing).
+static bool letGoOnWire(const WolfTrain& t) { return t.autoOn() || (t.easy() && t.autoAsking()); }
+
 F32 WolfTrain::sendPower() const
 {
-    if (mAutoWant) return 0.f;   // [wolf-rail 1.2] Auto: both levers let go
+    if (letGoOnWire(*this)) return 0.f;
     return easy() ? NOTCH_POWER[mNotch] : mPower;
 }
 
 F32 WolfTrain::sendBrake() const
 {
-    if (mAutoWant) return 0.f;
+    if (letGoOnWire(*this)) return 0.f;
     return easy() ? (mNotch == NOTCH_STOP ? 1.f : 0.f) : mBrake;
 }
 
 S32 WolfTrain::sendGear() const
 {
-    // Source: wolfdrive.h GEAR_R -1, GEAR_N 0, 1 the first forward gear; the plugin reads -1 R, 0 N, >= 1 forward
-    // (wolf-rail Cab.cs DriveControls.Reverser). Easy driving always goes forward.
-    if (easy() || mAutoWant) return 1;   // [wolf-rail 1.2] Auto runs forward
+    // Source: wolfdrive.h:74 GEAR_R -1, GEAR_N 0, 1 the first forward gear; the plugin reads -1 R, 0 N, >= 1 forward
+    // (wolf-rail Cab.cs DriveControls.Reverser). Auto runs forward (EngineDriver.Direction).
+    if (mAutoWant) return 1;
+    // [wolf-rail 1.2, D-c] Easy driving's BACK: the very gear the driver's mode sends for REVERSE (below), WolfDrive::GEAR_R
+    if (easy()) return mEasyBack ? WolfDrive::GEAR_R : 1;
     return mRev > 0 ? 1 : mRev < 0 ? WolfDrive::GEAR_R : WolfDrive::GEAR_N;
 }
 
@@ -508,7 +549,7 @@ U32 WolfTrain::sendButtons() const
     if (mHornHeld) b |= WolfDrive::BTN_HORN;
     if (easy()) b |= WolfDrive::BTN_ASSIST;   // the plugin's Easy driving (Cab.cs BTN_ASSIST, held while it is on)
     if (now() < mAutoPulseUntil) b |= WolfDrive::BTN_CRUISE;   // [wolf-rail 1.2] AUTO pressed (Cab.cs BTN_AUTO 256)
-    if (now() < mPointsPulseUntil) b |= WolfDrive::BTN_STAGE;  // [wolf-rail 1.2] POINTS, said yes to (Cab.cs BTN_POINTS 512)
+    if (now() < mPointsPulseUntil) b |= WolfDrive::BTN_STAGE;  // [wolf-rail 1.2] POINTS pressed (Cab.cs BTN_POINTS 512)
     return b;
 }
 
@@ -526,7 +567,8 @@ void WolfTrain::noteKey(KEY key, bool key_down, bool repeat)
     {
         if (repeat) return;   // one press, one step
         if (key == KEY_F8) pressAuto();
-        else if (key == KEY_F9) { if (mPointsAsk) answerPoints(true); else askPoints(); }   // F9 asks, F9 again says yes
+        else if (key == KEY_F9) pressPoints();   // one press (D-b)
+        else if (key == KEY_F5 && easy()) setEasyBack(!mEasyBack);   // [D-c] Easy driving: forward <-> back
         else if (key == KEY_F5) setReverser(mRev > 0 ? 0 : mRev == 0 ? -1 : 1);   // forward -> neutral -> reverse -> forward
         else if (key == KEY_F2) setEasy(!easy());
         else if (key == KEY_F3) setMph(!mph());
@@ -712,10 +754,11 @@ namespace
         return llformat("%d m", (S32)llround(m));
     }
 
-    // [wolf-rail 1.2] a points setting in words: the branch to that side of the line, or as the points were laid
+    // [wolf-rail 1.2] a points setting in words, as the region's own note says it ("Points P1 set left.": RailEngine
+    // SettingName left / right / auto; auto = the points as they were laid, Guides.cs NextGuide)
     std::string settingWords(const std::string& s)
     {
-        return s == "left" ? "to the left" : s == "right" ? "to the right" : "as laid";
+        return s == "left" ? "Set left" : s == "right" ? "Set right" : "Set auto";
     }
 
     // The guide (Paul 2026-11-11, paul-games-must-look-fun: cards with Back / Next and dots, not "page 1 of 9").
@@ -723,8 +766,9 @@ namespace
     const Card CARDS[] = {
         { "Welcome to the cab", "You are driving this train. Take your time - there is no clock and no score.",
           "The line looks after itself: the train always stops before the end of its line.", "Stand up to leave the cab; the train stops when you do." },
-        { "Easy driving", "One lever: STOP, SLOW and GO. Click a notch, or press Up and Down.",
-          "GO runs at the line's speed, SLOW at a third of it, STOP brakes to a stand.", "The train stops at stations by itself and waits while people board." },
+        { "Easy driving", "One lever: STOP, SLOW and GO. Click a notch, or press Up and Down. It stops at stations by itself.",
+          "GO runs at the line's speed, SLOW at a third of it, STOP brakes to a stand.",
+          "FORWARD or BACK (F5) sets the way it goes. Backing is always slow; stop the train first." },
         { "Driver's mode", "The REGULATOR (or POWER) lever pulls, the BRAKE lever slows the train. Drag them, or press Up / Down.",
           "With neither, the train keeps its speed. The reverser: FORWARD, NEUTRAL, or REVERSE to back it from a stand.", "Stations are yours to stop at. The red lamp lights when the line makes the train brake." },
         { "The horn and the dial", "WHISTLE (or HORN) sounds the engine's own - everyone near hears it. The horn key works too.",
@@ -734,10 +778,11 @@ namespace
           "Take any lever, or press AUTO again, and you are driving once more.", "Stand up in Auto and the train goes on to the next station and stops there." },
         // [wolf-rail 1.2] signals, points and backing
         { "Signals and points", "SIGNAL shows the next signal: STOP (red) - the train waits; CAUTION (yellow) - the next is red; CLEAR (green).",
-          "POINTS shows the next points. Where drivers may change them, press POINTS and say yes: they change once no train is on them.",
-          "To back out of a platform, stop, set the reverser to REVERSE in driver's mode and take power. The train stops before the buffers." },
-        { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power). F5 sets the reverser:",
-          "forward, neutral, reverse in turn. F2 switches Easy driving and driver's mode, F3 mph and km/h, F8 AUTO, F9 POINTS.", "F4 hides or shows the cab. Your horn key (H unless you changed it) sounds the horn." },
+          "POINTS shows the next points and how they are set. Where drivers may change them, one press of POINTS changes them.",
+          "To back out of a platform: stop, choose BACK (or REVERSE in driver's mode), then go. It stops before the buffers." },
+        { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power).",
+          "F5: FORWARD or BACK in Easy driving; FORWARD, NEUTRAL, REVERSE in driver's mode. F2 Easy or driver's mode.",
+          "F3 mph or km/h, F4 hides or shows the cab, F8 AUTO, F9 POINTS. Your horn key (H unless changed) sounds the horn." },
         // [client review 13 Nov, W7] a gesture's own key is not taken from it: LLGestureMgr::triggerGesture(key, mask)
         // (llgesturemgr.cpp:761) plays it from the same key press
         { "Your gestures", "A gesture you have put on F2, F3, F4, F5, F8 or F9 still plays while you drive, as well as the cab's key.",
@@ -776,7 +821,6 @@ bool WolfTrainCabView::onPanel(S32 x, S32 y) const
     if (hitAt(x, y)) return true;
     // the guide card (above the panel) and the tab are ours too: a click on them never reaches the world (review W11)
     if (mShowHelp && (F32)x >= mHelpL && (F32)x <= mHelpR && (F32)y >= mHelpB && (F32)y <= mHelpT) return true;
-    if (WolfTrain::instance().pointsAsking() && (F32)x >= mAskL && (F32)x <= mAskR && (F32)y >= mAskB && (F32)y <= mAskT) return true;
     return (F32)y >= mPanelB && (F32)y <= mPanelT;
 }
 
@@ -914,6 +958,9 @@ void WolfTrainCabView::draw()
         static const char* NAMES[WolfTrain::NOTCH_COUNT] = { "STOP", "SLOW", "GO" };
         static const EHit HITS[WolfTrain::NOTCH_COUNT] = { H_NOTCH_STOP, H_NOTCH_SLOW, H_NOTCH_GO };
         static const char* TIPS[WolfTrain::NOTCH_COUNT] = { "Stop: brake to a stand", "Slow: a third of the line's speed", "Go: the line's speed" };
+        // [D-c] set to BACK: the region backs the train at a slow speed share (lever x a slow maximum)
+        static const char* TIPS_BACK[WolfTrain::NOTCH_COUNT] = { "Stop: brake to a stand", "Slow: back very slowly", "Go: back slowly" };
+        const bool back = tr.easyBack();
         for (S32 n = 0; n < WolfTrain::NOTCH_COUNT; ++n)
         {
             const F32 ny = Y(36.f + 80.f * (F32)n);
@@ -921,16 +968,32 @@ void WolfTrainCabView::draw()
             const LLColor4 col = n == WolfTrain::NOTCH_STOP ? C_RED : n == WolfTrain::NOTCH_SLOW ? C_AMBER : C_GREEN;
             rectF(sx + S(24.f), ny - S(18.f), X(330.f), ny + S(18.f), sel ? col : LLColor4(col.mV[0] * 0.25f, col.mV[1] * 0.25f, col.mV[2] * 0.25f, 1.f));
             T(X(232.f), ny, NAMES[n], 18.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : col, true);
-            addHit(sx - S(30.f), ny - S(24.f), X(330.f), ny + S(24.f), HITS[n], TIPS[n]);
+            addHit(sx - S(30.f), ny - S(24.f), X(330.f), ny + S(24.f), HITS[n], back ? TIPS_BACK[n] : TIPS[n]);
         }
         const F32 ky = Y(36.f + 80.f * (F32)tr.notch());
         lineW(sx, Y(36.f), sx, ky, S(8.f), C_GREY);
         circleF(sx, ky, S(18.f), th.accent);
         circleF(sx - S(5.f), ky + S(5.f), S(6.f), LLColor4(1.f, 1.f, 1.f, 0.35f));
-        T(X(430.f), Y(176.f), "EASY", 16.f, th.accent, true);
-        T(X(430.f), Y(150.f), "DRIVING", 12.f, th.accent, true);
-        T(X(430.f), Y(110.f), "Up / Down", 10.f, C_GREY);
-        T(X(430.f), Y(92.f), "to move it", 10.f, C_GREY);
+        T(X(428.f), Y(208.f), "EASY DRIVING", 11.f, th.accent, true);
+        // [wolf-rail 1.2, D-c] the way it goes: FORWARD or BACK (slow only), in words, large; F5 too. back=1 from the region
+        // (it is backing) reads BACKING on the button.
+        struct Dir { F32 b; bool isBack; EHit id; const char* tip; };
+        const Dir D[2] = {
+            { 128.f, false, H_EASY_FWD, "Forward (F5: forward or back)" },
+            { 62.f, true, H_EASY_BACK, "Back, slowly - to back out of a platform. Stop the train first (F5: forward or back)" },
+        };
+        for (const Dir& d : D)
+        {
+            const F32 b = Y(d.b), t = Y(d.b + 56.f);
+            const bool sel = back == d.isBack;
+            rectF(X(346.f), b, X(510.f), t, sel ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
+            frameW(X(346.f), b, X(510.f), t, S(2.f), th.accent);
+            const char* word = !d.isBack ? "FORWARD" : (sel && c.mBack ? "BACKING" : "BACK");
+            T(X(428.f), (b + t) * 0.5f, word, 15.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
+            addHit(X(346.f), b, X(510.f), t, d.id, d.tip);
+        }
+        T(X(428.f), Y(42.f), "Up / Down: the lever", 9.f, C_GREY);
+        T(X(428.f), Y(26.f), "F5: forward or back", 9.f, C_GREY);
     }
     else
     {
@@ -981,25 +1044,31 @@ void WolfTrainCabView::draw()
     rectF(X(536.f), Y(130.f), X(680.f), Y(214.f), autoOn ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
     frameW(X(536.f), Y(130.f), X(680.f), Y(214.f), S(2.f), th.accent);
     T(X(608.f), Y(182.f), "AUTO", 18.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : th.accent, true);
-    T(X(608.f), Y(152.f), autoOn ? "ON" : "OFF", 11.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_GREY, true);
-    addHit(X(536.f), Y(130.f), X(680.f), Y(214.f), H_AUTO, autoOn ? "Drive yourself again (F8)" : "Auto: the train drives itself - the line's speed, stations and signals (F8)");
+    // (the press on its way, the region's answer not heard yet: "ONE MOMENT"; its note says why when it does not agree)
+    T(X(608.f), Y(152.f), autoOn ? "ON" : tr.autoAsking() ? "ONE MOMENT" : "OFF", 11.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_GREY, true);
+    addHit(X(536.f), Y(130.f), X(680.f), Y(214.f), H_AUTO, autoOn ? std::string("Drive yourself again (F8)")
+           : std::string("Auto: the train drives itself - the line's speed, stations and signals") + (easy ? " (F8)" : ". Let both levers go first (F8)"));
 
-    // [wolf-rail 1.2] the POINTS button (F9): the next points ahead, and - when drivers may set them - the change, asked first
+    // [wolf-rail 1.2] the POINTS button (F9): the next points ahead, their setting in words and - when drivers may set them -
+    // one press changes them (Paul 13 Nov, D-b); the region's note then says how they are set
     const bool canPts = tr.canChangePoints();
     rectF(X(536.f), Y(14.f), X(680.f), Y(118.f), canPts ? LLColor4(0.f, 0.f, 0.f, 0.55f) : LLColor4(0.f, 0.f, 0.f, 0.3f));
     frameW(X(536.f), Y(14.f), X(680.f), Y(118.f), S(2.f), canPts ? th.accent : th.accentLo);
-    T(X(608.f), Y(100.f), "POINTS", 14.f, canPts ? th.accent : C_DIM, true);
+    T(X(608.f), Y(102.f), "POINTS", 14.f, canPts ? th.accent : C_DIM, true);
     if (c.mPts.empty())
     {
-        T(X(608.f), Y(70.f), "None ahead", 10.f, C_GREY);
+        // the same words as the signal's (and WolfStorm's): "None in sight"
+        T(X(608.f), Y(72.f), "None", 11.f, C_GREY, true);
+        T(X(608.f), Y(54.f), "in sight", 10.f, C_GREY);
     }
     else
     {
-        T(X(608.f), Y(76.f), fitW(c.mPts, 11.f, true, S(136.f)), 11.f, C_WHITE, true);
-        T(X(608.f), Y(56.f), fitW(settingWords(c.mPtsSet) + ", " + distance(c.mPtsM), 9.f, false, S(136.f)), 9.f, C_GREY);
-        T(X(608.f), Y(34.f), canPts ? "Change them" : c.mPtsDriver ? "Too far to change" : "Set by the line", 9.f, canPts ? th.accent : C_DIM, true);
+        T(X(608.f), Y(82.f), fitW(c.mPts, 11.f, true, S(136.f)), 11.f, C_WHITE, true);
+        T(X(608.f), Y(64.f), fitW(settingWords(c.mPtsSet), 10.f, true, S(136.f)), 10.f, C_WHITE, true);
+        T(X(608.f), Y(46.f), "in " + distance(c.mPtsM), 9.f, C_GREY);
+        T(X(608.f), Y(27.f), canPts ? "Press to change" : c.mPtsDriver ? "Too far to change" : "Set by the line", 9.f, canPts ? th.accent : C_DIM, true);
     }
-    addHit(X(536.f), Y(14.f), X(680.f), Y(118.f), H_POINTS, canPts ? std::string("Change the points ahead - the cab asks first (F9)")
+    addHit(X(536.f), Y(14.f), X(680.f), Y(118.f), H_POINTS, canPts ? std::string("Change the points ahead - one press (F9)")
            : c.mPts.empty() ? std::string("No points ahead on the line")
            : c.mPtsDriver ? "These points can be changed from " + distance(DRIVER_POINTS_M) + " away"
            : std::string("These points are set by the line's owner, not from the cab"));
@@ -1094,31 +1163,9 @@ void WolfTrainCabView::draw()
     T(X(1450.f), Y(50.f), easy ? "SWITCH TO DRIVER'S MODE" : "SWITCH TO EASY DRIVING", 10.f, th.accent, true);
     addHit(X(1320.f), Y(26.f), X(1580.f), Y(74.f), H_MODE, easy ? "Switch to the driver's own levers - F2 (the train stops first)" : "Switch to the one-lever Easy driving - F2 (the train stops first)");
 
-    if (tr.pointsAsking()) drawPointsAsk(top, W);
-    else if (mShowHelp) drawHelp(top, W);
+    if (mShowHelp) drawHelp(top, W);
     zoomed.reset();
     mResize.draw();
-}
-
-// [wolf-rail 1.2] "Change the points?" - asked before the press goes (the lead's brief; seen in the cab, no timer: it stays
-// until answered, or the points ahead are no longer these)
-void WolfTrainCabView::drawPointsAsk(F32 top, F32 W)
-{
-    const WolfTrain::Cab& c = WolfTrain::instance().cab();
-    const F32 l = W * 0.5f - S(360.f), r = W * 0.5f + S(360.f), b = top + S(16.f), t = b + S(170.f);
-    mAskL = l * mHitScale; mAskR = r * mHitScale; mAskB = b * mHitScale; mAskT = t * mHitScale;
-    rectF(l, b, r, t, LLColor4(0.02f, 0.03f, 0.02f, 0.95f));
-    frameW(l, b, r, t, S(2.f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
-    const F32 cx = (l + r) * 0.5f;
-    T(cx, t - S(30.f), "Change the points?", 18.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f), true);
-    T(cx, t - S(70.f), fitW("Points " + c.mPts + " are set " + settingWords(c.mPtsSet) + ". Set them " + settingWords(WolfTrain::nextSetting(c.mPtsSet)) + "?", 12.f, false, r - l - S(40.f)), 12.f, C_WHITE);
-    T(cx, t - S(96.f), "They change only when no train is on them. F9 again says yes.", 10.f, C_GREY);
-    rectF(l + S(40.f), b + S(16.f), cx - S(20.f), b + S(56.f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
-    T((l + S(40.f) + cx - S(20.f)) * 0.5f, b + S(36.f), "Yes, change them", 13.f, LLColor4(0.f, 0.f, 0.f, 1.f), true);
-    addHit(l + S(40.f), b + S(16.f), cx - S(20.f), b + S(56.f), H_POINTS_YES, "Change the points (F9)");
-    rectF(cx + S(20.f), b + S(16.f), r - S(40.f), b + S(56.f), LLColor4(0.f, 0.f, 0.f, 0.6f));
-    T((cx + S(20.f) + r - S(40.f)) * 0.5f, b + S(36.f), "No, leave them", 13.f, C_WHITE, true);
-    addHit(cx + S(20.f), b + S(16.f), r - S(40.f), b + S(56.f), H_POINTS_NO, "Leave the points as they are");
 }
 
 void WolfTrainCabView::drawHelp(F32 top, F32 W)
@@ -1165,9 +1212,9 @@ void WolfTrainCabView::press(EHit id, S32 y)
     case H_REV_REV:    tr.setReverser(-1); break;
     case H_HORN:       tr.setHorn(true); break;
     case H_AUTO:       tr.pressAuto(); break;
-    case H_POINTS:     tr.askPoints(); break;
-    case H_POINTS_YES: tr.answerPoints(true); break;
-    case H_POINTS_NO:  tr.answerPoints(false); break;
+    case H_POINTS:     tr.pressPoints(); break;
+    case H_EASY_FWD:   tr.setEasyBack(false); break;
+    case H_EASY_BACK:  tr.setEasyBack(true); break;
     case H_MODE:       tr.setEasy(!tr.easy()); break;
     case H_UNITS:      tr.setMph(!tr.mph()); break;
     case H_HELP:       mShowHelp = !mShowHelp; mHelpPage = 0; break;

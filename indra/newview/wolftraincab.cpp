@@ -53,6 +53,10 @@ namespace
     // The region sends at least once a second while someone drives (Cab.cs FIRST_EVERY_MS, then every plan): a cab
     // that has heard nothing for this long has been let go (the engine left the region, the plugin was taken out).
     const F64 SILENT_CLOSE_S = 6.0;
+    // [client review 13 Nov, W3] a cab closed by that silence and opened again for the same seat and train this soon keeps
+    // its levers (a hand-over at a border that took longer than SILENT_CLOSE_S). The region gives the driver
+    // EngineDriver.CROSS_GIVE_UP_MS (30 s) to be seated after a crossing; the levers are kept as long.
+    const F64 REOPEN_KEEP_S = 30.0;
     // Easy driving's three notches. The plugin takes power as the share of the line speed it keeps
     // (EngineDriver.DrivenTarget: line = power x LineSpeed; any brake stops it). SLOW is a third of the line speed:
     // the Wolf Grid Railroad's Castle runs 11 m/s (wolf-rail README "the template's 3 m at 11 m/s"), so SLOW is about
@@ -139,8 +143,21 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn || rgn->getRegionID() != invoice) return;
     LLViewerObject* root = seatRoot();
-    if (!root) return;
     if (strings.size() > 32) return;
+    if (!root)
+    {
+        // [client review 13 Nov, W1] no seat (stood up, or a moment mid-crossing): only "state=off" is read - the region
+        // lets a driver who stood up go at once (wolf-rail RailEngine.LetDriverGo), and the cab now waits for it
+        for (const std::string& s : strings)
+        {
+            if (s == "state=off")
+            {
+                if (mOpen) close();
+                return;
+            }
+        }
+        return;
+    }
 
     Cab c = mOpen && root->getID() == mSeat ? mCab : Cab();
     bool on = false, off = false;
@@ -177,26 +194,38 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     const bool fresh = !mOpen || root->getID() != mSeat;
     mCab = c;
     mSeat = root->getID();
-    mRegion = invoice;
     mLastAt = now();
     if (fresh)
     {
-        // A new cab starts on the brake, going forward, in the driver's chosen mode (WolfTrainCabEasy).
         mOpen = true;
         mHidden = false;
         mYielded = false;
         mByHand = false;
-        mNotch = NOTCH_STOP;
-        mPower = 0.f;
-        mBrake = 1.f;
-        mRev = 1;
         mHornHeld = false;
+        if (mKept.at >= 0.0 && mKept.seat == mSeat && mKept.train == c.mTrain && now() - mKept.at <= REOPEN_KEEP_S)
+        {
+            // the same train after a long hand-over (W3): its levers as the driver left them
+            mNotch = mKept.notch;
+            mPower = mKept.power;
+            mBrake = mKept.brake;
+            mRev = mKept.rev;
+        }
+        else
+        {
+            // A new cab starts on the brake, going forward, in the driver's chosen mode (WolfTrainCabEasy).
+            mNotch = NOTCH_STOP;
+            mPower = 0.f;
+            mBrake = 1.f;
+            mRev = 1;
+        }
+        mKept = Levers();
         claimBottom();
     }
 }
 
 void WolfTrain::close()
 {
+    mKept = Levers();   // only the silence rule keeps the levers (idle)
     mOpen = false;
     mHidden = false;
     mYielded = false;
@@ -257,10 +286,24 @@ void WolfTrain::idle()
         LLViewerObject* root = seatRoot();
         // A border crossed with the engine is NOT a reason to close (Paul 13 Nov: "trains should run across regions"): the
         // next region takes the driver over and its cab follows with the levers as they are; if no region drives the
-        // train there, nothing more comes and the silence rule closes it (re-review S5: a child agent hears no state=off)
-        if (!root || root->getID() != mSeat || now() - mLastAt > SILENT_CLOSE_S)
+        // train there, nothing more comes and the silence rule closes it (re-review S5: a child agent hears no state=off).
+        // [client review 13 Nov, W1] mid-crossing the avatar's seat is not known for a moment (no root): that alone does
+        // not close the cab - only sitting on something else does at once; with no seat it waits for the silence rule (a
+        // driver who really stood up is told state=off by the region: wolf-rail RailEngine.LetDriverGo)
+        if (root && root->getID() != mSeat)
         {
-            close();   // stood up, sat elsewhere, or the region stopped saying (the region stops the train itself)
+            close();   // sat on something else
+            return;
+        }
+        if (now() - mLastAt > SILENT_CLOSE_S)
+        {
+            // the region stopped saying (the region stops the train itself): keep the levers in case the same train's
+            // cab comes back from the next region a moment later (W3)
+            mKept.seat = mSeat; mKept.train = mCab.mTrain; mKept.at = now();
+            mKept.notch = mNotch; mKept.power = mPower; mKept.brake = mBrake; mKept.rev = mRev;
+            const Levers kept = mKept;
+            close();
+            mKept = kept;
             return;
         }
     }
@@ -560,6 +603,10 @@ namespace
           "The dial shows the speed and, in red, the fastest this line allows. Click it for mph or km/h.", "THE LINE AHEAD shows the next station and how much track is in front of you." },
         { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power). F5 sets the reverser:",
           "forward, neutral, reverse in turn. F2 switches Easy driving and driver's mode, F3 mph and km/h.", "F4 hides or shows the cab. Your horn key (H unless you changed it) sounds the horn." },
+        // [client review 13 Nov, W7] a gesture's own key is not taken from it: LLGestureMgr::triggerGesture(key, mask)
+        // (llgesturemgr.cpp:761) plays it from the same key press
+        { "Your gestures", "A gesture you have put on F2, F3, F4 or F5 still plays while you drive, as well as the cab's key.",
+          "If you would rather it did not, give the gesture another key in the Gestures window.", "Standing up gives every key back as it was." },
     };
     const S32 CARD_COUNT = (S32)(sizeof(CARDS) / sizeof(CARDS[0]));
 }

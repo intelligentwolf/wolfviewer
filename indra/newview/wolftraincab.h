@@ -109,8 +109,11 @@ private:
     bool mYielded = false;          // hidden because another panel took the bottom: it comes back when that one goes
     bool mByHand = false;           // opened from Wolf World without driving (the guide, "sit in a cab")
     LLUUID mSeat;                   // the root the avatar sat on when the region opened the cab
-    LLUUID mRegion;                 // the region that opened it
     F64  mLastAt = 0.0;             // when the region last said anything
+    // [client review 13 Nov, W3] the levers of a cab that closed only because the regions went quiet (a long hand-over at a
+    // border): a cab that opens again for the same seat and train within REOPEN_KEEP_S keeps them, not "fresh"
+    struct Levers { LLUUID seat; std::string train; F64 at = -1.0; S32 notch = 0; F32 power = 0.f, brake = 1.f; S32 rev = 1; };
+    Levers mKept;
     S32  mNotch = NOTCH_STOP;
     F32  mPower = 0.f, mBrake = 1.f;
     S32  mRev = 1;

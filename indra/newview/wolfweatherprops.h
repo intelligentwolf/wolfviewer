@@ -83,6 +83,7 @@ private:
     void takeOff(const LLUUID& item, const char* why);
     void setStatus(const std::string& text, bool error = false);
     void stopAll(const char* why);
+    void forgetScans();
 
     F64 mNextCheck = 0.0;
     bool mWasActive = false;            // enabled on Wolf at the last check (a change to off takes our prop off once)
@@ -99,8 +100,11 @@ private:
     EKind mDeclined = NONE;             // the resident took this one off: not again until the wanted prop changes
     EKind mWearFailed = NONE;           // would not go on: not again until the wanted prop changes
     std::map<S32, LLUUID> mFound;       // kind -> the item last found (checked again before use)
-    S32 mScanCount = -1;                // gInventory's item count at the last whole scan that found nothing
-    F64 mScanAt = -1.e9;
+    // [REVIEW 11-13 W4] per kind: gInventory's item count and the time of the last whole scan that found nothing
+    S32 mScanCount[KIND_COUNT] = { -1, -1, -1, -1 };
+    F64 mScanAt[KIND_COUNT] = { -1.e9, -1.e9, -1.e9, -1.e9 };
+    EKind mCalled = NONE;               // [REVIEW 11-13 W6] the prop the weather / season calls for, sitting aside
+    F64 mFirstCheck = -1.0;             // [REVIEW 11-13 W8] the first check while active: the inventory wait has a limit
     S32 mSeasonKind = -1;               // WolfLeavesSeason::Kind, worked out every SEASON_S
     F64 mSeasonAt = -1.e9;
     EGive mGive = GIVE_IDLE;

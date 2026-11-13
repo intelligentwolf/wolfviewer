@@ -60,6 +60,7 @@ namespace
     constexpr F64 REFETCH_S = 5.0;        // CHOSEN: while waiting, the props' folders are asked for again this often
     constexpr F64 RESCAN_S = 30.0;        // CHOSEN: a whole-inventory scan that found nothing is repeated at most this often
                                           // unless the inventory's item count changes (wolffishingoverlay.cpp RodWatch)
+    constexpr F64 LOGIN_WAIT_S = 90.0;    // CHOSEN: the login's inventory fetch is waited for at most this long (WolfStorm the same)
 
     /** The items a scan finds: an object item (not a link) whose description names `kind` (wolffishingoverlay.cpp RodItems). */
     class PropItems : public LLInventoryCollectFunctor
@@ -242,9 +243,9 @@ LLViewerInventoryItem* WolfWeatherProps::findProp(EKind k)
     }
     const F64 now = LLFrameTimer::getTotalSeconds();
     const S32 count = gInventory.getItemCount();
-    if (count == mScanCount && now - mScanAt < RESCAN_S) return nullptr;
-    mScanCount = count;
-    mScanAt = now;
+    if (count == mScanCount[k] && now - mScanAt[k] < RESCAN_S) return nullptr;
+    mScanCount[k] = count;
+    mScanAt[k] = now;
     LLInventoryModel::cat_array_t cats;
     LLInventoryModel::item_array_t items;
     PropItems match(k);
@@ -259,9 +260,14 @@ LLViewerInventoryItem* WolfWeatherProps::findProp(EKind k)
     if (first)
     {
         mFound[(S32)k] = first->getUUID();
-        mScanCount = -1;
+        mScanCount[k] = -1;
     }
     return first;
+}
+
+void WolfWeatherProps::forgetScans()
+{
+    for (S32 i = 0; i < KIND_COUNT; ++i) mScanCount[i] = -1;
 }
 
 void WolfWeatherProps::takeOff(const LLUUID& item, const char* why)
@@ -296,7 +302,7 @@ void WolfWeatherProps::retry()
 {
     if (mGive != GIVE_FAILED) return;
     mGive = GIVE_IDLE;
-    mScanCount = -1;
+    forgetScans();
     mNextCheck = 0.0;
     setStatus("Trying again...");
 }
@@ -321,7 +327,8 @@ void WolfWeatherProps::idle()
         return;
     }
     mWasActive = true;
-    if (!mLoginScanned && !backgroundFetchIdle())
+    if (mFirstCheck < 0.0) mFirstCheck = now;
+    if (!mLoginScanned && !backgroundFetchIdle() && now - mFirstCheck < LOGIN_WAIT_S)
     {
         // the inventory must be known before a worn prop can be told from anything else in the hand (loginScan below)
         setStatus("Waiting for your inventory to load...");
@@ -402,9 +409,15 @@ void WolfWeatherProps::idle()
     {
         mPending = want;
         mPendingSince = now;
-        // a change of weather: a prop taken off by hand, or one that would not go on, may come again
-        if (mDeclined != want) mDeclined = NONE;
-        if (mWearFailed != want) mWearFailed = NONE;
+    }
+    // [REVIEW 11-13 W6] a change of WEATHER (not sitting down and standing up, which only masks `want`): a prop taken off by hand,
+    // or one that would not go on, may come again
+    // (`weather` is the prop the weather / season calls for, sitting aside; `called` is NONE while sitting)
+    if (weather != mCalled)
+    {
+        mCalled = weather;
+        if (mDeclined != weather) mDeclined = NONE;
+        if (mWearFailed != weather) mWearFailed = NONE;
     }
     const bool settled = now - mPendingSince >= SETTLE_S;
     const bool can_act = now - mLastAction >= SETTLE_S;
@@ -475,7 +488,7 @@ void WolfWeatherProps::idle()
                           "yet. Press Try again, or log out and back in.", true);
                 return;
             }
-            if (now >= mRefetchAt) { refetchPropFolders(); mRefetchAt = now + REFETCH_S; mScanCount = -1; }
+            if (now >= mRefetchAt) { refetchPropFolders(); mRefetchAt = now + REFETCH_S; forgetScans(); }
             setStatus("Your weather props are on their way into your inventory...");
             return;
         }
@@ -573,6 +586,6 @@ void WolfWeatherProps::onGiveReply(bool ok, const std::string& error, const LLUU
     mGiveAt = LLFrameTimer::getTotalSeconds();
     mGiveFolder = folder;
     mRefetchAt = 0.0;
-    mScanCount = -1;
+    forgetScans();
     mNextCheck = 0.0;
 }

@@ -160,7 +160,7 @@ void WolfFloaterTutorials::refreshView()
     bool error = false;
     if (!sError.empty())
     {
-        // a failed fetch says so even when an older list is still shown
+        // a failed fetch shows only the error and Try again, an older list too (WolfStorm floater_wolf_tutorials.js the same)
         msg = "The list of videos could not be fetched: " + sError + " Press Try again.";
         error = true;
     }

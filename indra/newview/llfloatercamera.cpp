@@ -388,21 +388,24 @@ bool LLFloaterCamera::inFreeCameraMode()
 // static
 void LLFloaterCamera::resetCameraMode()
 {
+    // <WolfViewer 2026-11-13> [VR CAMERA ON ENTRY] each of the three camera windows on its own. Stock returned at the
+    // first one that does not exist, so with only the small (fs_camera_small) or the Phototools camera window open,
+    // Reset View (Escape) left its free camera on - and with it LLToolCamera, which in VR 3D Mode turns every click of
+    // the headset's pointer on the world into a desktop camera orbit (wolfvrscreen.cpp resetCameraForVR). The camera
+    // windows' own Reset View button already does each one on its own (onClickCameraItem "reset_view", below).
     LLFloaterCamera* floater_camera = LLFloaterCamera::findInstance();
-    if (!floater_camera) return;
-    floater_camera->switchMode(CAMERA_CTRL_MODE_PAN);
+    if (floater_camera) floater_camera->switchMode(CAMERA_CTRL_MODE_PAN);
 
     // <FS:Ansariel> Phototools camera
     floater_camera = LLFloaterCamera::findPhototoolsInstance();
-    if (!floater_camera) return;
-    floater_camera->switchMode(CAMERA_CTRL_MODE_PAN);
+    if (floater_camera) floater_camera->switchMode(CAMERA_CTRL_MODE_PAN);
     // <FS:Ansariel>
 
     // <FS:Ansariel> Optional small camera floater
     floater_camera = LLFloaterCamera::findSmallInstance();
-    if (!floater_camera) return;
-    floater_camera->switchMode(CAMERA_CTRL_MODE_PAN);
+    if (floater_camera) floater_camera->switchMode(CAMERA_CTRL_MODE_PAN);
     // </FS:Ansariel>
+    // </WolfViewer>
 }
 
 // static

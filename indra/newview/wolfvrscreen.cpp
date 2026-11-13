@@ -2540,7 +2540,8 @@ namespace
 // (llvoavatar.cpp:9118) or the seat going (llagentcamera.cpp:1348) does - so the desktop shows the seat's camera after VR.
 // The headset itself does not use it (buildMap anchors the head to the avatar's eyes on a seat too: a scripted camera
 // metres away, moving with a vehicle, would be the uncommanded motion the nausea rule there forbids).
-void resetCameraForVR()
+// gap: seconds since 3D Mode last ended (-1: the first time this run); pending: the entry was waiting for the log-in
+void resetCameraForVR(F64 gap, bool pending)
 {
     LLViewerJoystick* joy = LLViewerJoystick::getInstance();
     LLToolMgr* tools = LLToolMgr::getInstance();
@@ -2550,12 +2551,14 @@ void resetCameraForVR()
     const F32 dist_before = (F32)(gAgentCamera.getCameraPositionGlobal() - gAgent.getPositionGlobal()).magVec();
     const bool free_before = LLFloaterCamera::inFreeCameraMode();
     const bool building = tools->inBuildMode();
+    const F32 zoom_before = gAgentCamera.getCurrentCameraZoomFraction();
     if (gAgentCamera.cameraCustomizeAvatar())
     {
         // appearance editing owns the camera (LLAgentCamera::changeCameraToCustomizeAvatar); leaving it is not a
         // camera step (Reset View saves the wearable and opens My Outfits for it, llviewermenu.cpp:6060-6064). The
         // headset's head is placed from the avatar whatever the desktop camera does (buildMap).
-        LL_INFOS("WolfVR") << "VR 3D: entering 3D Mode while editing appearance - the desktop camera is left to it" << LL_ENDL;
+        LL_INFOS("WolfVR") << "VR 3D: entering 3D Mode while editing appearance - the desktop camera is left to it ("
+                           << (gap < 0.0 ? std::string("first entry") : llformat("%.1f s since the last exit", gap)) << ")" << LL_ENDL;
         gViewLog = "entering VR 3D Mode";
         return;
     }
@@ -2569,9 +2572,16 @@ void resetCameraForVR()
         // flycam goes first: changeCameraToDefault returns at once while it is on (llagentcamera.cpp:2590)
         if (flycam) handle_toggle_flycam();
         // Source: llagentcamera.cpp:2588 changeCameraToDefault() -> changeCameraToFollow / changeCameraToThirdPerson:
-        // out of mouselook, the zoom back to INITIAL_ZOOM_FRACTION (:2680), the avatar's pitch removed (:2719-2726).
+        // out of mouselook, the zoom back to INITIAL_ZOOM_FRACTION (:2680). Not only the camera: changeCameraToThirdPerson
+        // also takes the pitch out of the AVATAR's at-axis when it is not seated (:2719-2726, gAgent.resetAxes) - the
+        // stock side effect of Escape, kept (a pitched avatar is the mouselook look-down the reset is leaving).
         // Both switch to gBasicToolset when the mode changes (:2638-2641, :2700-2703), which ends the build tools, so
-        // while building (LLToolMgr::inBuildMode, never true in mouselook, lltoolmgr.cpp:400) only the zoom is reset.
+        // while building (LLToolMgr::inBuildMode, never true in mouselook, lltoolmgr.cpp:400) only the zoom is reset
+        // here; the focus, pan and orbit below still bring the camera back behind the avatar.
+        // UI: with HideUIControls on, changeCameraToDefault hides the UI as Escape does (:2603-2607, the resident's
+        // own setting); leaving mouselook gives back the toolbars' own visibility (LLAgent::endAnimationUpdateUI:
+        // setToolBarsVisible), which is not the whole-view gToolBarView->setVisible that WolfVRStream reconcileDesktop
+        // uses to hide them in 3D Mode, so they stay hidden in the headset's 3D Mode.
         if (!building) gAgentCamera.changeCameraToDefault();
         else gAgentCamera.resetCameraZoomFraction();   // Source: llagentcamera.cpp:3324 (= :2680)
         // Source: llagentcamera.cpp:383-397 resetView() reset_camera - leaving mouse-steer, the focus on the avatar,
@@ -2601,8 +2611,11 @@ void resetCameraForVR()
                        << " -> " << (S32)gAgentCamera.getCameraMode() << ", focus on the avatar " << focus_before << " -> "
                        << gAgentCamera.getFocusOnAvatar() << ", flycam " << flycam << " -> " << joy->getOverrideCamera()
                        << ", free camera " << free_before << " -> " << LLFloaterCamera::inFreeCameraMode() << ", camera "
-                       << dist_before << " m from the avatar before, build tools " << building << " -> "
-                       << tools->inBuildMode() << LL_ENDL;
+                       << dist_before << " m from the avatar before, zoom " << zoom_before << " -> "
+                       << gAgentCamera.getCurrentCameraZoomFraction() << ", build tools " << building << " -> "
+                       << tools->inBuildMode() << (building ? " (building: zoom reset, camera mode kept)" : "") << "; "
+                       << (gap < 0.0 ? std::string("first entry") : llformat("%.1f s since the last exit", gap))
+                       << (pending ? ", after waiting for the log-in and the avatar" : "") << LL_ENDL;
     gViewLog = "entering VR 3D Mode";   // where the head is placed, against the avatar's eyes, once it is (buildMap)
 }
 }
@@ -2619,6 +2632,11 @@ void pumpInput()
         // same 2 s of grace the desktop gets (wolfvrstream.cpp:318 reconcileDesktop) is not a new entry and does not
         // reset the camera again (a moment's gap is not the resident coming into 3D Mode).
         static F64 s_world_ended = -1.0;
+        // [VR CAMERA ON ENTRY] an entry before the viewer could reset (log-in not finished, disconnected, no avatar yet:
+        // a headset already in 3D Mode at log-in) waits here and runs the first frame it can while in 3D Mode
+        static bool s_pending = false;
+        static F64 s_pending_gap = -1.0;
+        const auto can_reset = []() { return LLStartUp::getStartupState() == STATE_STARTED && !gDisconnected && isAgentAvatarValid(); };
         const bool world = WolfVRStream::worldWanted();
         if (world != s_world)
         {
@@ -2628,7 +2646,7 @@ void pumpInput()
             const F64 now = LLTimer::getTotalSeconds();
             if (!world)
             {
-                s_world_ended = now;
+                s_world_ended = now;   // a reset still pending is kept: a return inside the grace still owes it
                 // [VR CAMERA ON ENTRY] the state the desktop camera goes back to, so a "my camera is still odd after VR"
                 // report can be read from the log (only getters: calcCameraPositionTargetGlobal would step its lerps)
                 if (LLStartUp::getStartupState() == STATE_STARTED)
@@ -2636,9 +2654,30 @@ void pumpInput()
                                        << ", focus on the avatar " << gAgentCamera.getFocusOnAvatar() << ", flycam "
                                        << LLViewerJoystick::getInstance()->getOverrideCamera() << LL_ENDL;
             }
-            else if ((s_world_ended < 0.0 || now - s_world_ended >= 2.0) && LLStartUp::getStartupState() == STATE_STARTED &&
-                     !gDisconnected && isAgentAvatarValid())
-                resetCameraForVR();
+            else
+            {
+                const F64 gap = s_world_ended < 0.0 ? -1.0 : now - s_world_ended;
+                if (gap >= 0.0 && gap < 2.0)
+                    LL_INFOS("WolfVR") << llformat("VR 3D: back in 3D Mode after %.1f s - inside the 2 s grace, not a new "
+                                                   "entry: the camera is left as it is", gap) << LL_ENDL;
+                else if (can_reset())
+                {
+                    s_pending = false;
+                    resetCameraForVR(gap, false);
+                }
+                else
+                {
+                    s_pending = true;
+                    s_pending_gap = gap;
+                    LL_INFOS("WolfVR") << "VR 3D: entered 3D Mode before the log-in or the avatar was ready - the camera "
+                                          "reset waits for them" << LL_ENDL;
+                }
+            }
+        }
+        else if (world && s_pending && can_reset())
+        {
+            s_pending = false;
+            resetCameraForVR(s_pending_gap, true);
         }
     }
     if (!gViewerWindow) return;

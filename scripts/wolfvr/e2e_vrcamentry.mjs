@@ -1,15 +1,20 @@
 // [VR CAMERA ON ENTRY 2026-11-13] Paul (11-12): he had moved the camera somewhere odd, went into VR 3D Mode and was stuck
 // getting it back. Every entry into 3D Mode now gives the desktop camera the camera steps of the viewer's Reset View,
-// and only those (wolfvrscreen.cpp resetCameraForVR). Against the REAL viewer (logged in as Shadow Testwolf, WolfVR3DMode on, WolfVRStreamMode "world"),
-// in headless Chromium (muted) with WolfStorm's fake WebXR device and Touch Plus controllers, the LEAP relay FIFO in
-// $RIG (default ~/.cache/skyband):
+// and only those (wolfvrscreen.cpp resetCameraForVR). Against the REAL viewer (logged in as Shadow Testwolf,
+// WolfVR3DMode on, WolfVRStreamMode "world"), in headless Chromium (muted) with WolfStorm's fake WebXR device and Touch
+// Plus controllers, the LEAP relay FIFO in $RIG (default ~/.cache/skyband):
 //   1. free camera on the SMALL camera window only (the main one never opened: the stock resetCameraMode early return)
 //      -> enter VR: the reset line says free camera 1 -> 0; the head is placed behind and above the avatar's eyes
 //   2. desktop mouselook -> enter VR: mode 1 -> 0; then the Camera Controls window's pan stick, held in the headset, still
 //      moves the headset's view (reset once, not locked); exit VR: the desktop camera is back in mode 0, focus on avatar
-//   3. out and straight back in (inside the 2 s grace): no second reset
+//   3. out and straight back in: the logged gap decides - under 2 s the grace line and no reset, else a reset
 //   4. Hide my avatar (WolfVRHideAvatar) -> enter VR: the head at the avatar's eyes
-//   5. the Build window open (Paul: "camera only") -> enter VR: the camera reset, the Build window and tools still there
+//   5. build mode (Build.Toggle "build": the Build window and the create tool, LLToolMgr::enterBuildMode, which with
+//      EditCameraMovement also takes the focus off the avatar) -> enter VR: focus back, zoom reset, build tools still on
+//      (Paul: "camera only"), the Build window still open
+//   6. the flycam (JoystickFlycamEnabled on, View.JoystickFlycam) -> enter VR: flycam 1 -> 0
+//   7. appearance editing (EditShape: the customise camera, LLVOAvatarSelf::onCustomizeStart) -> enter VR: the desktop
+//      camera is left to it (no reset); then Escape (View.ResetView) ends the editing as a resident would
 //   node e2e_vrcamentry.mjs <url> <out_dir> <fake_xr.js> <fake_xr_controllers.js>
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, appendFileSync } from 'node:fs';
@@ -53,8 +58,10 @@ async function floaterVisible(name, tag) {
 function resetLine(since) {
     const l = after(since, 'VR 3D: camera reset on entering 3D Mode').pop();
     if (!l) return null;
-    const m = l.match(/desktop camera mode (\d+) -> (\d+), focus on the avatar (\d) -> (\d), flycam (\d) -> (\d), free camera (\d) -> (\d), camera ([\d.e+-]+) m from the avatar before, build tools (\d) -> (\d)/);
-    return m ? { mode0: +m[1], mode1: +m[2], focus0: +m[3], focus1: +m[4], fly0: +m[5], fly1: +m[6], free0: +m[7], free1: +m[8], dist: +m[9], build0: +m[10], build1: +m[11], line: l.replace(/^.*VR 3D:/, 'VR 3D:') } : null;
+    const m = l.match(/desktop camera mode (\d+) -> (\d+), focus on the avatar (\d) -> (\d), flycam (\d) -> (\d), free camera (\d) -> (\d), camera ([\d.e+-]+) m from the avatar before, zoom ([\d.e+-]+) -> ([\d.e+-]+), build tools (\d) -> (\d)/);
+    const g = l.match(/; ([\d.]+) s since the last exit/);
+    return m ? { mode0: +m[1], mode1: +m[2], focus0: +m[3], focus1: +m[4], fly0: +m[5], fly1: +m[6], free0: +m[7], free1: +m[8], dist: +m[9],
+                 zoom0: +m[10], zoom1: +m[11], build0: +m[12], build1: +m[13], gap: g ? +g[1] : -1, line: l.replace(/^.*VR 3D:/, 'VR 3D:') } : null;
 }
 
 const chrome = spawn('chromium', ['--headless=new', '--no-sandbox', '--use-angle=vulkan', '--enable-unsafe-swiftshader', '--mute-audio',
@@ -160,7 +167,7 @@ await sleep(1000);
 const back = await exitVR('2');
 check(!!back && /back in mode 0, focus on the avatar 1, flycam 0/.test(back), '2: out of VR the desktop camera is the normal one (third person, on the avatar)');
 
-// ---- 3. out and straight back in: no second reset ----
+// ---- 3. out and straight back in: the logged gap decides ----
 await sleep(3500);
 since = await enterVR('3a');
 check(!!(await waitFor(() => resetLine(since), 10000)), '3: a new entry (more than 2 s out) resets');
@@ -172,8 +179,13 @@ await evalJs('window.__wolfvr.toggleVR()');
 check(await waitFor(inWorld, 30000), '3: back in VR 3D Mode at once');
 const drawing = await waitFor(() => after(since3, 'VR 3D: drawing both eyes').length >= 1, 10000);
 await sleep(2000);
-console.log(`   re-entry: drawing again ${!!drawing}; reset lines since ${after(since3, 'camera reset on entering 3D Mode').length}`);
-check(!!drawing && after(since3, 'camera reset on entering 3D Mode').length === 0, '3: back within the 2 s grace: no second reset');
+const grace = after(since3, 'VR 3D: back in 3D Mode after').pop();
+const gm = grace && grace.match(/after ([\d.]+) s - inside the 2 s grace/);
+const r3 = resetLine(since3);
+console.log(`   re-entry: drawing again ${!!drawing}; grace line: ${grace ? grace.replace(/^.*VR 3D:/, 'VR 3D:') : 'none'}; reset: ${r3 ? r3.line : 'none'}`);
+check(!!drawing && ((!!gm && +gm[1] < 2 && !r3) || (!gm && !!r3 && r3.gap >= 2)),
+      `3: the re-entry follows its logged gap (${gm ? gm[1] + ' s: grace, no reset' : r3 ? r3.gap + ' s: a new entry, reset' : 'nothing logged'})`);
+if (!gm) console.log('   NOTE: the re-entry took 2 s or more, so the grace itself was not exercised this run');
 await exitVR('3');
 await sleep(3500);
 
@@ -188,19 +200,47 @@ await exitVR('4');
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRHideAvatar','value':false}");
 await sleep(3500);
 
-// ---- 5. the Build window open: entering VR resets the camera only ----
-leap('UI', "{'op':'call','function':'Floater.Show','parameter':'build'}");
+// ---- 5. build mode: entering VR resets the camera only ----
+leap('UI', "{'op':'call','function':'Build.Toggle','parameter':'build'}");
 await sleep(3000);
 const b0 = await floaterVisible('build', 'b5a');
-check(!!b0 && b0.visible, '5: the Build window is open before VR');
+check(!!b0 && b0.visible, '5: build mode on (the Build window open) before VR');
 since = await enterVR('5');
 r = await waitFor(() => resetLine(since), 10000);
 console.log('  ', r && r.line);
-check(!!r && r.build0 === 1 && r.build1 === 1, `5: entering 3D Mode reset the camera and left the build tools on (${r && r.build0} -> ${r && r.build1})`);
+check(!!r && r.build0 === 1 && r.build1 === 1, `5: the build tools are still on after the reset (${r && r.build0} -> ${r && r.build1})`);
+check(!!r && r.focus1 === 1 && Math.abs(r.zoom1 - 1) < 1e-3 && r.mode1 === r.mode0,
+      `5: the camera is back on the avatar, zoom reset, camera mode kept (focus ${r && r.focus0} -> ${r && r.focus1}, zoom ${r && r.zoom0} -> ${r && r.zoom1}, mode ${r && r.mode0} -> ${r && r.mode1})`);
 await sleep(2000);
 const b1 = await floaterVisible('build', 'b5b');
 check(!!b1 && b1.visible, '5: the Build window is still open in VR 3D Mode');
 await exitVR('5');
-leap('UI', "{'op':'call','function':'Floater.Hide','parameter':'build'}");
+leap('UI', "{'op':'call','function':'Build.Toggle','parameter':'build'}");   // out of build mode (LLToolMgr::leaveBuildMode)
+await sleep(3500);
+
+// ---- 6. the flycam on entry ----
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'JoystickFlycamEnabled','value':true}");
+await sleep(500);
+leap('UI', "{'op':'call','function':'View.JoystickFlycam'}");
+await sleep(2000);
+since = await enterVR('6');
+r = await waitFor(() => resetLine(since), 10000);
+console.log('  ', r && r.line);
+check(!!r && r.fly0 === 1 && r.fly1 === 0 && r.focus1 === 1, `6: entering 3D Mode turned the flycam off (flycam ${r && r.fly0} -> ${r && r.fly1})`);
+await exitVR('6');
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'JoystickFlycamEnabled','value':false}");
+await sleep(3500);
+
+// ---- 7. appearance editing: left to it ----
+leap('UI', "{'op':'call','function':'EditShape'}");
+await sleep(5000);
+since = await enterVR('7');
+const cust = await waitFor(() => after(since, 'while editing appearance - the desktop camera is left to it').pop(), 10000);
+await sleep(1500);
+console.log('  ', cust ? cust.replace(/^.*VR 3D:/, 'VR 3D:') : 'no appearance line', '; reset:', resetLine(since) ? 'yes' : 'none');
+check(!!cust && !resetLine(since), '7: entering 3D Mode while editing appearance leaves the desktop camera (and the editing) alone');
+await exitVR('7');
+leap('UI', "{'op':'call','function':'View.ResetView'}");   // Escape: ends the editing, as a resident would
+await sleep(2000);
 console.log(`RESULT failures ${failures}`);
 process.exit(failures ? 1 : 0);

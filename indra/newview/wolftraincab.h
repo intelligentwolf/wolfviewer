@@ -92,9 +92,10 @@ public:
 
     /** The cab's keys, while driving() (wolfdrive.cpp noteScanKey: unmodified keys only, never one the UI took - so typing
      *  in chat never reaches them, llviewerinput.cpp mKeyHandledByUI). Watch-only like every Wolf HUD key: the key's own
-     *  binding still runs. Up / W one step more, Down / S one step less; F the reverser (forward, neutral, reverse in turn:
-     *  F has no binding while sitting, key_bindings.xml <sitting>); F2 Easy / driver's mode; F3 mph / km/h; F4 show / hide
-     *  the cab (F2-F4 are no menu's shortcut: only F1 is, menu_viewer.xml). */
+     *  binding still runs. Up / W one step more, Down / S one step less; F5 the reverser (forward, neutral, reverse in turn);
+     *  F2 Easy / driver's mode; F3 mph / km/h; F4 show / hide the cab. F2-F5 have no binding in any mode (key_bindings.xml
+     *  first_person / third_person / sitting) and are no menu's shortcut (only F1 is, menu_viewer.xml); every free letter
+     *  is a driving action's default key (wolfdrive.cpp ACTION_DEFAULT_KEYS) or a movement key. */
     static bool isCabKey(KEY key);
     void noteKey(KEY key, bool key_down, bool repeat);
 
@@ -108,6 +109,7 @@ private:
     bool mYielded = false;          // hidden because another panel took the bottom: it comes back when that one goes
     bool mByHand = false;           // opened from Wolf World without driving (the guide, "sit in a cab")
     LLUUID mSeat;                   // the root the avatar sat on when the region opened the cab
+    LLUUID mRegion;                 // the region that opened it
     F64  mLastAt = 0.0;             // when the region last said anything
     S32  mNotch = NOTCH_STOP;
     F32  mPower = 0.f, mBrake = 1.f;

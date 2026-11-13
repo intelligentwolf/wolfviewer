@@ -177,6 +177,7 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     const bool fresh = !mOpen || root->getID() != mSeat;
     mCab = c;
     mSeat = root->getID();
+    mRegion = invoice;
     mLastAt = now();
     if (fresh)
     {
@@ -254,7 +255,10 @@ void WolfTrain::idle()
     if (mOpen)
     {
         LLViewerObject* root = seatRoot();
-        if (!root || root->getID() != mSeat || now() - mLastAt > SILENT_CLOSE_S)
+        // ... or the agent is now in another region: the engine was carried over a border, where nobody drives it for them
+        // and from where the old region cannot reach a child agent with state=off (re-review S5)
+        LLViewerRegion* rgn = gAgent.getRegion();
+        if (!root || root->getID() != mSeat || now() - mLastAt > SILENT_CLOSE_S || !rgn || rgn->getRegionID() != mRegion)
         {
             close();   // stood up, sat elsewhere, or the region stopped saying (the region stops the train itself)
             return;
@@ -349,16 +353,16 @@ U32 WolfTrain::sendButtons() const
 // static
 bool WolfTrain::isCabKey(KEY key)
 {
-    return key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S' || key == 'F' || key == KEY_F2 || key == KEY_F3 || key == KEY_F4;
+    return key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S' || key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4;
 }
 
 void WolfTrain::noteKey(KEY key, bool key_down, bool repeat)
 {
     if (!key_down || !driving()) return;
-    if (key == 'F' || key == KEY_F2 || key == KEY_F3 || key == KEY_F4)
+    if (key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4)
     {
         if (repeat) return;   // one press, one step
-        if (key == 'F') setReverser(mRev > 0 ? 0 : mRev == 0 ? -1 : 1);   // forward -> neutral -> reverse -> forward
+        if (key == KEY_F5) setReverser(mRev > 0 ? 0 : mRev == 0 ? -1 : 1);   // forward -> neutral -> reverse -> forward
         else if (key == KEY_F2) setEasy(!easy());
         else if (key == KEY_F3) setMph(!mph());
         else toggleShown();
@@ -513,9 +517,21 @@ namespace
         WolfHudScale::text(face("B612", bold ? LLFontGL::BOLD : LLFontGL::NORMAL, llmax(6.f, S(px) * 1.25f)), s, x, y, c, h, LLFontGL::VCENTER);
     }
 
+    std::string fitWMeasure(const std::string& str, F32 px, bool bold, F32 maxw);
     // Text cut to `maxw` picture units on a character boundary, with "..." (review 13 Nov, W12): measured with the very
     // face T() draws it with.
     std::string fitW(const std::string& str, F32 px, bool bold, F32 maxw)
+    {
+        // cached by (text, size, weight, width): the same few strings every frame are measured once (review W6)
+        static std::map<std::string, std::string> cache;
+        const std::string key = llformat("%d|%d|%d|", (S32)llround(S(px) * 100.f), bold ? 1 : 0, (S32)llround(maxw)) + str;
+        auto hit = cache.find(key);
+        if (hit != cache.end()) return hit->second;
+        if (cache.size() > 256) cache.clear();
+        return cache[key] = fitWMeasure(str, px, bold, maxw);
+    }
+
+    std::string fitWMeasure(const std::string& str, F32 px, bool bold, F32 maxw)
     {
         const LLFontGL* f = face("B612", bold ? LLFontGL::BOLD : LLFontGL::NORMAL, llmax(6.f, S(px) * 1.25f));
         if (!f || f->getWidthF32(utf8str_to_wstring(str).c_str()) <= maxw) return str;
@@ -542,7 +558,7 @@ namespace
           "With neither, the train keeps its speed. The reverser sets FORWARD or NEUTRAL.", "Stations are yours to stop at. The red lamp lights when the line makes the train brake." },
         { "The horn and the dial", "WHISTLE (or HORN) sounds the engine's own - everyone near hears it. The horn key works too.",
           "The dial shows the speed and, in red, the fastest this line allows. Click it for mph or km/h.", "THE LINE AHEAD shows the next station and how much track is in front of you." },
-        { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power). F sets the reverser:",
+        { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power). F5 sets the reverser:",
           "forward, neutral, reverse in turn. F2 switches Easy driving and driver's mode, F3 mph and km/h.", "F4 hides or shows the cab. Your horn key (H unless you changed it) sounds the horn." },
     };
     const S32 CARD_COUNT = (S32)(sizeof(CARDS) / sizeof(CARDS[0]));
@@ -597,8 +613,23 @@ void WolfTrainCabView::draw()
         {
             // still driving with the cab hidden (review suggestion 16): a small tab at the bottom centre brings it back
             const F32 w = (F32)getRect().getWidth();
+            // above the bottom toolbar, as the cab itself sits (review W5; the same measure as draw() below)
+            F32 tb = 0.f;
+            if (gToolBarView)
+            {
+                if (LLView* bp = gToolBarView->findChildView("bottom_toolbar_panel", true))
+                {
+                    if (bp->isInVisibleChain())
+                    {
+                        const LLRect sr = bp->calcScreenRect();
+                        S32 lx = 0, ly = 0;
+                        screenPointToLocal(sr.mLeft, sr.mTop, &lx, &ly);
+                        tb = llclamp((F32)ly, 0.f, (F32)getRect().getHeight() * 0.4f);
+                    }
+                }
+            }
             LLGLSUIDefault gls_ui;
-            mTabL = w * 0.5f - 90.f; mTabR = w * 0.5f + 90.f; mTabB = 4.f; mTabT = 34.f;
+            mTabL = w * 0.5f - 90.f; mTabR = w * 0.5f + 90.f; mTabB = tb + 4.f; mTabT = tb + 34.f;
             mHitScale = 1.f;
             rectF(mTabL, mTabB, mTabR, mTabT, LLColor4(0.02f, 0.07f, 0.04f, 0.9f));
             frameW(mTabL, mTabB, mTabR, mTabT, 1.5f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
@@ -750,7 +781,7 @@ void WolfTrainCabView::draw()
             rectF(X(300.f), b, X(500.f), t, sel ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
             T(X(400.f), (b + t) * 0.5f, RN[i], 12.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
             addHit(X(300.f), b, X(500.f), t, RH[i], i == 2 ? std::string("Reverse: the train does not run backwards yet on Wolf Rail - it stays where it is")
-                                                          : std::string(i == 0 ? "Forward (F: forward, neutral, reverse in turn)" : "Neutral: no power reaches the wheels (F)"));
+                                                          : std::string(i == 0 ? "Forward (F5: forward, neutral, reverse in turn)" : "Neutral: no power reaches the wheels (F5)"));
         }
         T(X(400.f), Y(212.f), "REVERSER", 10.f, C_WHITE, true);
     }

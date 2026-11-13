@@ -57,7 +57,9 @@ namespace
         return k == 'W' || k == 'A' || k == 'S' || k == 'D' || k == 'E' || k == 'C' || k == 'F'
             || k == 'R' || k == 'T'
             || k == KEY_UP || k == KEY_DOWN || k == KEY_LEFT || k == KEY_RIGHT
-            || k == ' ' || k == KEY_HOME || k == KEY_RETURN || k == KEY_DIVIDE;
+            || k == ' ' || k == KEY_HOME || k == KEY_RETURN || k == KEY_DIVIDE
+            // [TRAIN CAB 2026-11-13] the Train Cab's own keys while driving a train (wolftraincab.h isCabKey)
+            || k == KEY_F2 || k == KEY_F3 || k == KEY_F4 || k == KEY_F5;
     }
 
     /** A channel typed by the driver: digits only, 0 to 2147483646 (2147483647 is CHAT_CHANNEL_DEBUG,

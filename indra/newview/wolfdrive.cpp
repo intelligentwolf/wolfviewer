@@ -655,7 +655,7 @@ void WolfDrive::noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool
             mKeySeen[a] = t;
         }
     }
-    // [TRAIN CAB 2026-11-13] driving a train: the cab's keys (WolfTrain::isCabKey - Up / Down the levers, F the reverser,
+    // [TRAIN CAB 2026-11-13] driving a train: the cab's keys (WolfTrain::isCabKey - Up / Down the levers, F5 the reverser,
     // F2 the mode, F3 the units, F4 show / hide); the car's pedals are not pressed by them
     if (WolfTrain::instance().driving() && WolfTrain::isCabKey(key))
     {
@@ -1101,11 +1101,15 @@ void WolfDrive::sendAnalogue()
             // [TRAIN CAB 2026-11-13] a train's let-go is full brake, neutral, nothing held (review 13 Nov, W10): the region
             // stops the train when the driver leaves anyway, this makes the last word say the same
             if (mWasTrain)
+            {
                 send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "1.000", "0.000", llformat("%d", GEAR_N), "0", "0" });
+            }
             else
-            send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "0.000", "0.000",
-                                                  llformat("%d", mSelector), "0",
-                                                  llformat("%u", retarderWord() & ~(RETARDER_W_DSC_UP | RETARDER_W_DSC_DOWN)) });
+            {
+                send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "0.000", "0.000",
+                                                      llformat("%d", mSelector), "0",
+                                                      llformat("%u", retarderWord() & ~(RETARDER_W_DSC_UP | RETARDER_W_DSC_DOWN)) });
+            }
         }
         mWasTrain = false;
         mWasSending = false;

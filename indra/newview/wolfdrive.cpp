@@ -1098,10 +1098,16 @@ void WolfDrive::sendAnalogue()
             // Let go: one last message with nothing pressed, so a script stops at once.
             // [WOLF RETARDER 2026-10-12] the stalk and switches stay where they were set (levers, not presses);
             // only the downhill + / - (held) let go
+            // [TRAIN CAB 2026-11-13] a train's let-go is full brake, neutral, nothing held (review 13 Nov, W10): the region
+            // stops the train when the driver leaves anyway, this makes the last word say the same
+            if (mWasTrain)
+                send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "1.000", "0.000", llformat("%d", GEAR_N), "0", "0" });
+            else
             send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "0.000", "0.000",
                                                   llformat("%d", mSelector), "0",
                                                   llformat("%u", retarderWord() & ~(RETARDER_W_DSC_UP | RETARDER_W_DSC_DOWN)) });
         }
+        mWasTrain = false;
         mWasSending = false;
         mLastSentKey.clear();
         return;
@@ -1144,6 +1150,7 @@ void WolfDrive::sendAnalogue()
         // Source: llviewergenericmessage.cpp send_generic_message - each parameter goes out with
         // its NUL, which WolfDriveModule.ParseNumber strips.
         send_generic_message(METHOD_TO_SIM, params);
+        mWasTrain = train;
         mLastSent = t;
         mLastSentKey = key;
         mWasSending = true;
@@ -1282,7 +1289,7 @@ void WolfDrive::receiveDashboard(const LLUUID& invoice, const std::vector<std::s
     // seat unless the driver closed it (World > Car Dashboard brings it back).
     // [SKIS 2026-11-06] never for skis / a snowboard: theirs is the Ski HUD (wolfskis.h)
     if (!mDashOn && !mAutoDone && gSavedSettings.getBOOL("WolfDashboardAuto") && !WolfFlight::instance().active()
-        && !WolfSkis::seatIsSkis(mScript.mVehicle))
+        && !WolfSkis::seatIsSkis(mScript.mVehicle) && !WolfTrain::instance().driving())   // [TRAIN CAB 2026-11-13] the cab has the bottom
     {
         mAutoDone = true;
         mAutoOpened = true;
@@ -1535,7 +1542,7 @@ void WolfDrive::refreshDashGate()
         {
             // back home: the dashboard that was up when Wolf was left comes back
             mReopenOnWolf = false;
-            if (!WolfFlight::instance().active()) requestDashboard(true);   // the flight deck keeps the bottom
+            if (!WolfFlight::instance().active() && !WolfTrain::instance().driving()) requestDashboard(true);   // the flight deck / train cab keeps the bottom
         }
         if (!wolf)
         {
@@ -1677,7 +1684,7 @@ void WolfDrive::watchSeat()
     // [SKIS 2026-11-06] skis and a snowboard go physical too, but theirs is the Ski HUD (wolfskis.h): never the dashboard
     if (!mDashOn && !mAutoDone && onWolf() && root->flagUsePhysics()
         && gSavedSettings.getBOOL("WolfDashboardAuto") && !WolfFlight::instance().active()
-        && !WolfSkis::seatIsSkis(root->getID()))
+        && !WolfSkis::seatIsSkis(root->getID()) && !WolfTrain::instance().driving())   // [TRAIN CAB 2026-11-13]
     {
         mAutoDone = true;
         mAutoOpened = true;

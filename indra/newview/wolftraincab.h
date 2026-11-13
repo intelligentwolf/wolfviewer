@@ -62,6 +62,8 @@ public:
     /** The HUD is up (driving, or opened by hand from Wolf World to read the guide). */
     bool shown() const;
     void toggleShown();
+    /** Driving with the cab hidden by the driver (not given way to another panel): the view draws a small tab to bring it back. */
+    bool hiddenByDriver() const { return driving() && mHidden && !mYielded; }
     const Cab& cab() const { return mCab; }
     static bool onWolf();
 
@@ -97,7 +99,8 @@ private:
 
     Cab mCab;
     bool mOpen = false;             // the region said state=on for this seat
-    bool mHidden = false;           // driving, but the bottom went to another panel (dashboard, deck, helm)
+    bool mHidden = false;           // driving, but hidden: by the driver (X), or given way to another panel
+    bool mYielded = false;          // hidden because another panel took the bottom: it comes back when that one goes
     bool mByHand = false;           // opened from Wolf World without driving (the guide, "sit in a cab")
     LLUUID mSeat;                   // the root the avatar sat on when the region opened the cab
     F64  mLastAt = 0.0;             // when the region last said anything
@@ -135,7 +138,7 @@ public:
         H_NOTCH_STOP, H_NOTCH_SLOW, H_NOTCH_GO,
         H_POWER, H_BRAKE,
         H_REV_FWD, H_REV_N, H_REV_REV,
-        H_HORN, H_MODE, H_UNITS, H_HELP, H_HELP_BACK, H_HELP_NEXT, H_HELP_CLOSE, H_CLOSE,
+        H_HORN, H_MODE, H_UNITS, H_HELP, H_HELP_BACK, H_HELP_NEXT, H_HELP_CLOSE, H_CLOSE, H_SHOW_TAB,
     };
 
 private:
@@ -147,6 +150,8 @@ private:
     WolfHudResize mResize{ "WolfTrainCabScale" };
     S32 mPressed = H_NONE;
     F32 mLeverB = 0.f, mLeverT = 1.f;   // the levers' slot this frame, picture units (for dragging)
+    F32 mHelpL = 0.f, mHelpB = 0.f, mHelpR = 0.f, mHelpT = 0.f;   // the guide card this frame, view units (its clicks are ours)
+    F32 mTabL = 0.f, mTabB = 0.f, mTabR = 0.f, mTabT = 0.f;       // the "Train Cab" tab while hidden by the driver, view units
     bool mShowHelp = false;
     S32 mHelpPage = 0;
 

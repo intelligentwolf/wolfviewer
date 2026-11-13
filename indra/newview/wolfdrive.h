@@ -458,6 +458,7 @@ private:
     F64  mLastSent = 0.0;
     std::string mLastSentKey;
     bool mWasSending = false;
+    bool mWasTrain = false;   // [TRAIN CAB 2026-11-13] the last "in" sent was a train's (its let-go brakes)
 
     // seat and vehicle
     LLUUID mSeatRoot;

@@ -75,6 +75,15 @@ namespace
         return p;
     }
 
+    // At most `max_bytes` of UTF-8, never cutting a character in two (review 13 Nov, W12): back off continuation bytes.
+    std::string utf8Cut(const std::string& v, size_t max_bytes)
+    {
+        if (v.size() <= max_bytes) return v;
+        size_t n = max_bytes;
+        while (n > 0 && ((unsigned char)v[n] & 0xC0) == 0x80) --n;
+        return v.substr(0, n);
+    }
+
     bool parseF(const std::string& v, F32& out)
     {
         if (v.empty() || v.size() > 16) return false;
@@ -143,12 +152,12 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         const std::string k = s.substr(0, eq), v = s.substr(eq + 1);
         F32 n = 0.f;
         if (k == "state") { on = v == "on"; off = v == "off"; }
-        else if (k == "train") c.mTrain = v.substr(0, 64);
+        else if (k == "train") c.mTrain = utf8Cut(v, 254);
         else if (k == "kind") { if (v.empty() || v == "steam" || v == "diesel" || v == "electric" || v == "highspeed" || v == "shunter" || v == "tram") c.mKind = v; }
         else if (k == "mode") { if (v == "driver" || v == "easy" || v == "script" || v == "timetable") c.mMode = v; }
         else if (k == "stop") { if (v.empty() || v == "station" || v == "stop") c.mStop = v; }
-        else if (k == "region") c.mRegion = v.substr(0, 64);
-        else if (k == "note") c.mNote = v.substr(0, 200);
+        else if (k == "region") c.mRegion = utf8Cut(v, 254);
+        else if (k == "note") c.mNote = utf8Cut(v, 254);
         else if (!parseF(v, n)) continue;
         else if (k == "speed")   c.mSpeed = llclamp(n, 0.f, 100.f);
         else if (k == "line")    c.mLine = llclamp(n, 0.f, 100.f);
@@ -174,6 +183,7 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         // A new cab starts on the brake, going forward, in the driver's chosen mode (WolfTrainCabEasy).
         mOpen = true;
         mHidden = false;
+        mYielded = false;
         mByHand = false;
         mNotch = NOTCH_STOP;
         mPower = 0.f;
@@ -188,6 +198,7 @@ void WolfTrain::close()
 {
     mOpen = false;
     mHidden = false;
+    mYielded = false;
     mSeat.setNull();
     mCab = Cab();
     mHornHeld = false;
@@ -222,6 +233,7 @@ void WolfTrain::toggleShown()
     if (driving())
     {
         mHidden = !mHidden;
+        mYielded = false;   // the driver's own choice now
         if (!mHidden) claimBottom();
         return;
     }
@@ -248,15 +260,19 @@ void WolfTrain::idle()
             return;
         }
     }
-    // One bottom panel: the dashboard, the deck or the helm coming on takes the bottom from the cab.
-    if (shown())
+    // One bottom panel: the dashboard, the deck or the helm coming on takes the bottom from the cab; when it goes again,
+    // a cab that only gave way comes back (review 13 Nov, W5).
+    const WolfFlight& wf = WolfFlight::instance();
+    const bool other = WolfDrive::instance().dashboardOn() || (wf.active() && !wf.deckHidden()) || WolfHelm::instance().hudShowing();
+    if (shown() && other)
     {
-        const WolfFlight& wf = WolfFlight::instance();
-        if (WolfDrive::instance().dashboardOn() || (wf.active() && !wf.deckHidden()) || WolfHelm::instance().hudShowing())
-        {
-            if (driving()) mHidden = true;
-            mByHand = false;
-        }
+        if (driving()) { mHidden = true; mYielded = true; }
+        mByHand = false;
+    }
+    else if (!other && driving() && mHidden && mYielded)
+    {
+        mHidden = false;
+        mYielded = false;
     }
 }
 
@@ -341,15 +357,17 @@ void WolfTrain::noteKey(KEY key, bool key_down, bool repeat)
         if (!repeat) setNotch(mNotch + (up ? 1 : -1));
         return;
     }
+    // whole tenths, so ten presses always come back to exactly 0 (review 13 Nov, W6: no float drift)
+    auto step = [](F32 v, F32 d) { return (F32)llround((v + d) * 10.f) / 10.f; };
     if (up)
     {
-        if (mBrake > 0.f) setBrake(mBrake - KEY_STEP);
-        else setPower(mPower + KEY_STEP);
+        if (mBrake > 0.f) setBrake(step(mBrake, -KEY_STEP));
+        else setPower(step(mPower, KEY_STEP));
     }
     else
     {
-        if (mPower > 0.f) setPower(mPower - KEY_STEP);
-        else setBrake(mBrake + KEY_STEP);
+        if (mPower > 0.f) setPower(step(mPower, -KEY_STEP));
+        else setBrake(step(mBrake, KEY_STEP));
     }
 }
 
@@ -480,6 +498,18 @@ namespace
         WolfHudScale::text(face("B612", bold ? LLFontGL::BOLD : LLFontGL::NORMAL, llmax(6.f, S(px) * 1.25f)), s, x, y, c, h, LLFontGL::VCENTER);
     }
 
+    // Text cut to `maxw` picture units on a character boundary, with "..." (review 13 Nov, W12): measured with the very
+    // face T() draws it with.
+    std::string fitW(const std::string& str, F32 px, bool bold, F32 maxw)
+    {
+        const LLFontGL* f = face("B612", bold ? LLFontGL::BOLD : LLFontGL::NORMAL, llmax(6.f, S(px) * 1.25f));
+        if (!f || f->getWidthF32(utf8str_to_wstring(str).c_str()) <= maxw) return str;
+        LLWString w = utf8str_to_wstring(str);
+        const LLWString dots = utf8str_to_wstring("...");
+        while (!w.empty() && f->getWidthF32((w + dots).c_str()) > maxw) w.pop_back();
+        return wstring_to_utf8str(w + dots);
+    }
+
     std::string distance(F32 m)
     {
         if (m >= 1000.f) return llformat("%.1f km", m / 1000.f);
@@ -529,6 +559,8 @@ bool WolfTrainCabView::onPanel(S32 x, S32 y) const
 {
     if (!mDrawn) return false;
     if (hitAt(x, y)) return true;
+    // the guide card (above the panel) and the tab are ours too: a click on them never reaches the world (review W11)
+    if (mShowHelp && (F32)x >= mHelpL && (F32)x <= mHelpR && (F32)y >= mHelpB && (F32)y <= mHelpT) return true;
     return (F32)y >= mPanelB && (F32)y <= mPanelT;
 }
 
@@ -544,6 +576,21 @@ void WolfTrainCabView::draw()
         if (mPressed == H_HORN) tr.setHorn(false);
         mPressed = H_NONE;
         mResize.hide();
+        if (tr.hiddenByDriver())
+        {
+            // still driving with the cab hidden (review suggestion 16): a small tab at the bottom centre brings it back
+            const F32 w = (F32)getRect().getWidth();
+            LLGLSUIDefault gls_ui;
+            mTabL = w * 0.5f - 90.f; mTabR = w * 0.5f + 90.f; mTabB = 4.f; mTabT = 34.f;
+            mHitScale = 1.f;
+            rectF(mTabL, mTabB, mTabR, mTabT, LLColor4(0.02f, 0.07f, 0.04f, 0.9f));
+            frameW(mTabL, mTabB, mTabR, mTabT, 1.5f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+            g.u = 1.f; g.ox = 0.f; g.oy = 0.f;
+            T((mTabL + mTabR) * 0.5f, (mTabB + mTabT) * 0.5f, "DRIVING - SHOW THE CAB", 10.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f), true);
+            addHit(mTabL, mTabB, mTabR, mTabT, H_SHOW_TAB, "You are still driving: show the Train Cab");
+            mDrawn = true;
+            mPanelB = mPanelT = -1.f;
+        }
         return;
     }
     if (!gSavedSettings.getBOOL("WolfTrainCabHelpSeen") && tr.driving())
@@ -603,8 +650,8 @@ void WolfTrainCabView::draw()
 
     // ── the badge: the line's emblem, the train and its kind ─────────────────────────────────────
     T(X(24.f), Y(284.f), "WOLF GRID RAILROAD", 11.f, th.accent, true, LLFontGL::LEFT);
-    T(X(24.f), Y(262.f), driving ? (c.mTrain.empty() ? std::string("Your train") : c.mTrain) : std::string("Train Cab"), 15.f, C_WHITE, true, LLFontGL::LEFT);
-    T(X(24.f), Y(242.f), std::string(th.name) + (c.mRegion.empty() ? "" : "  -  " + c.mRegion), 10.f, C_GREY, false, LLFontGL::LEFT);
+    T(X(24.f), Y(262.f), fitW(driving ? (c.mTrain.empty() ? std::string("Your train") : c.mTrain) : std::string("Train Cab"), 15.f, true, S(470.f)), 15.f, C_WHITE, true, LLFontGL::LEFT);
+    T(X(24.f), Y(242.f), fitW(std::string(th.name) + (c.mRegion.empty() ? "" : "  -  " + c.mRegion), 10.f, false, S(470.f)), 10.f, C_GREY, false, LLFontGL::LEFT);
     // close (hide): the cab stays yours; Wolf World > Train Cab brings it back
     rectF(X(1560.f), Y(268.f), X(1592.f), Y(296.f), th.inset);
     T(X(1576.f), Y(282.f), "X", 12.f, C_GREY, true);
@@ -616,7 +663,7 @@ void WolfTrainCabView::draw()
     if (!driving)
     {
         T(X(800.f), Y(160.f), "Sit in the cab of a Wolf Rail engine to drive it.", 16.f, C_WHITE, true);
-        T(X(800.f), Y(126.f), "At Paddington Station anyone may drive the trains on the driving loop. Press ? to read how.", 11.f, C_GREY);
+        T(X(800.f), Y(126.f), "Paddington Station's driving loop, where anyone may drive, is being built. Press ? to read how driving works.", 11.f, C_GREY);
         if (mShowHelp) drawHelp(top, W);
         zoomed.reset();
         mResize.draw();
@@ -750,14 +797,14 @@ void WolfTrainCabView::draw()
     circleF(X(1420.f), Y(124.f), S(14.f), lamp);
     T(X(1500.f), Y(132.f), "LINE", 9.f, c.mProtect ? C_RED : C_DIM, true);
     T(X(1500.f), Y(116.f), "BRAKING", 9.f, c.mProtect ? C_RED : C_DIM, true);
-    if (!c.mNote.empty()) T(X(1070.f), Y(92.f), c.mNote, 11.f, C_AMBER, false, LLFontGL::LEFT);
+    if (!c.mNote.empty()) T(X(1070.f), Y(92.f), fitW(c.mNote, 11.f, false, S(510.f)), 11.f, C_AMBER, false, LLFontGL::LEFT);
     // the horn (held while pressed) and the mode switch
     const bool horn = tr.horn();
     rectF(X(1070.f), Y(26.f), X(1300.f), Y(74.f), horn ? th.accent : th.accentLo);
     T(X(1185.f), Y(50.f), th.horn, 16.f, horn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
     addHit(X(1070.f), Y(26.f), X(1300.f), Y(74.f), H_HORN, std::string("Sound the ") + (th.horn == std::string("WHISTLE") ? "whistle" : th.horn == std::string("GONG") ? "gong" : "horn") + " (hold)");
     rectF(X(1320.f), Y(26.f), X(1580.f), Y(74.f), LLColor4(0.f, 0.f, 0.f, 0.45f));
-    T(X(1450.f), Y(50.f), easy ? "DRIVER'S MODE" : "EASY DRIVING", 12.f, th.accent, true);
+    T(X(1450.f), Y(50.f), easy ? "SWITCH TO DRIVER'S MODE" : "SWITCH TO EASY DRIVING", 10.f, th.accent, true);
     addHit(X(1320.f), Y(26.f), X(1580.f), Y(74.f), H_MODE, easy ? "Switch to the driver's own levers (the train stops first)" : "Switch to the one-lever Easy driving (the train stops first)");
 
     if (mShowHelp) drawHelp(top, W);
@@ -770,6 +817,7 @@ void WolfTrainCabView::drawHelp(F32 top, F32 W)
     mHelpPage = llclamp(mHelpPage, 0, CARD_COUNT - 1);
     const Card& cd = CARDS[mHelpPage];
     const F32 l = W * 0.5f - S(420.f), r = W * 0.5f + S(420.f), b = top + S(16.f), t = b + S(230.f);
+    mHelpL = l * mHitScale; mHelpR = r * mHitScale; mHelpB = b * mHitScale; mHelpT = t * mHitScale;
     rectF(l, b, r, t, LLColor4(0.02f, 0.03f, 0.02f, 0.94f));
     frameW(l, b, r, t, S(2.f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
     const F32 cx = (l + r) * 0.5f;
@@ -814,6 +862,7 @@ void WolfTrainCabView::press(EHit id, S32 y)
     case H_HELP_NEXT:  mHelpPage = llmin(CARD_COUNT - 1, mHelpPage + 1); break;
     case H_HELP_CLOSE: mShowHelp = false; break;
     case H_CLOSE:      mShowHelp = false; tr.toggleShown(); break;
+    case H_SHOW_TAB:   tr.toggleShown(); break;
     default: break;
     }
 }

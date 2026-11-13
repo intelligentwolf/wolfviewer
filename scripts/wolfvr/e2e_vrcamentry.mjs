@@ -55,6 +55,16 @@ async function floaterVisible(name, tag) {
         try { const j = JSON.parse(l.replace(/^IN \S+ /, '')); return { visible: !!(j.data || j).visible }; } catch (e) { return null; }
     }, 5000);
 }
+// LLViewerControl get (llviewercontrollistener.cpp:72), its reply found by its reqid in the relay's log
+async function controlValue(key, tag) {
+    leap('LLViewerControl', `{'op':'get','group':'Global','key':'${key}','reply':'@@REPLY@@','reqid':'${tag}'}`);
+    const r = await waitFor(() => {
+        const l = readFileSync(resolve(H, 'leap.log'), 'utf8').split('\n').filter((x) => x.startsWith('IN ') && x.includes(`"reqid": "${tag}"`)).pop();
+        if (!l) return null;
+        try { const j = JSON.parse(l.replace(/^IN \S+ /, '')); return { v: (j.data || j).value }; } catch (e) { return null; }
+    }, 5000);
+    return r ? r.v : null;
+}
 function resetLine(since) {
     const l = after(since, 'VR 3D: camera reset on entering 3D Mode').pop();
     if (!l) return null;
@@ -115,16 +125,24 @@ const BEHIND = 1.75, ABOVE = 0.45, DIST = Math.hypot(BEHIND, ABOVE);
 
 await send('Page.enable'); await send('Runtime.enable');
 await send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(FAKE, 'utf8') + '\n' + readFileSync(CTL, 'utf8') });
+// the headset service starts when VR is switched on in this session (Wolf World > VR: WolfVRStreamEnabled, as the
+// rig's campaign_vr.py does); WolfVRStreamMode only says where it starts
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRStreamEnabled','value':true}");
+await sleep(4000);
 await send('Page.navigate', { url: URL_ });
 check(await waitFor(() => evalJs('!!(window.__wolfvr && window.__wolfvr.xr && window.__wolfvr.xr().said === false)'), 30000), 'connected to the real viewer');
 await evalJs("try { localStorage.setItem('wolfvr.headset', 'auto'); } catch (e) {}");
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRHideAvatar','value':false}");
+// a known start whatever an earlier run left: Escape (Reset View), the camera and Build windows closed
+leap('UI', "{'op':'call','function':'View.ResetView'}");
+for (const f of ['camera', 'fs_camera_small', 'build']) leap('LLFloaterReg', `{'op':'hideInstance','name':'${f}'}`);
+await sleep(1500);
 for (let k = 0; k < 2; k++) { leap('LLWindow', "{'op':'keyDown','keycode':i129}"); leap('LLWindow', "{'op':'keyUp','keycode':i129}"); await sleep(600); }
 
 // ---- 1. free camera on the small camera window only ----
 leap('LLFloaterReg', "{'op':'showInstance','name':'fs_camera_small'}");
 await sleep(2500);
-const ov = await leapInfo('//object_view');
+const ov = await waitFor(async () => { const i = await leapInfo('//object_view'); return i && i.visible_chain ? i : null; }, 8000);
 check(!!(ov && ov.visible_chain), '1: the small camera window is open, its Object View (free camera) button shown');
 leap('LLWindow', "{'op':'mouseDown','button':'LEFT','path':'//object_view'}"); await sleep(200);
 leap('LLWindow', "{'op':'mouseUp','button':'LEFT','path':'//object_view'}"); await sleep(1500);
@@ -164,8 +182,10 @@ console.log('   pan down ->', v && v.line);
 check(!!v && v.up < -0.2 && v.headUp < ABOVE - 0.2, `2: after the reset the camera controls still move the headset view (up ${v && v.up} m, head ${v && v.headUp} m above the eyes)`);
 leap('LLFloaterReg', "{'op':'hideInstance','name':'camera'}");
 await sleep(1000);
+const since2x = logLines().length;
 const back = await exitVR('2');
 check(!!back && /back in mode 0, focus on the avatar 1, flycam 0/.test(back), '2: out of VR the desktop camera is the normal one (third person, on the avatar)');
+check(after(since2x, 'its focus is back on the avatar').length === 1, '2: the focus the camera window had unlocked was put back on the avatar on the way out');
 
 // ---- 3. out and straight back in: the logged gap decides ----
 await sleep(3500);
@@ -201,6 +221,12 @@ leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRHideAvatar','
 await sleep(3500);
 
 // ---- 5. build mode: entering VR resets the camera only ----
+// Build.Toggle does nothing until the Build window exists (LLToolMgr::toggleBuildMode: gFloaterTools), so it is made
+// first (shown and hidden), then Build.Toggle "build" opens it in build mode (enterBuildMode)
+leap('UI', "{'op':'call','function':'Floater.Show','parameter':'build'}");
+await sleep(2000);
+leap('UI', "{'op':'call','function':'Floater.Hide','parameter':'build'}");
+await sleep(1500);
 leap('UI', "{'op':'call','function':'Build.Toggle','parameter':'build'}");
 await sleep(3000);
 const b0 = await floaterVisible('build', 'b5a');
@@ -219,6 +245,11 @@ leap('UI', "{'op':'call','function':'Build.Toggle','parameter':'build'}");   // 
 await sleep(3500);
 
 // ---- 6. the flycam on entry ----
+// LLViewerJoystick::toggleFlycam needs JoystickEnabled and JoystickFlycamEnabled (llviewerjoystick.cpp:1390); both are
+// read first and given back after
+const joy0 = await controlValue('JoystickEnabled', 'j6a'), fly0 = await controlValue('JoystickFlycamEnabled', 'j6b');
+console.log(`   JoystickEnabled ${joy0}, JoystickFlycamEnabled ${fly0} before`);
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'JoystickEnabled','value':true}");
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'JoystickFlycamEnabled','value':true}");
 await sleep(500);
 leap('UI', "{'op':'call','function':'View.JoystickFlycam'}");
@@ -228,7 +259,8 @@ r = await waitFor(() => resetLine(since), 10000);
 console.log('  ', r && r.line);
 check(!!r && r.fly0 === 1 && r.fly1 === 0 && r.focus1 === 1, `6: entering 3D Mode turned the flycam off (flycam ${r && r.fly0} -> ${r && r.fly1})`);
 await exitVR('6');
-leap('LLViewerControl', "{'op':'set','group':'Global','key':'JoystickFlycamEnabled','value':false}");
+leap('LLViewerControl', `{'op':'set','group':'Global','key':'JoystickEnabled','value':${joy0 === true}}`);
+leap('LLViewerControl', `{'op':'set','group':'Global','key':'JoystickFlycamEnabled','value':${fly0 === true}}`);
 await sleep(3500);
 
 // ---- 7. appearance editing: left to it ----

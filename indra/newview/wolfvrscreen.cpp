@@ -147,6 +147,11 @@ namespace
     // [VR 3D] the head pose the camera was turned to for this frame, and the view to give back afterwards
     wolfvr::HeadPose gFramePose;
     bool gCameraOverridden = false;
+    // [VR CAMERA ON EXIT 2026-11-13] the Camera Controls window was used for the headset's view this 3D session. Its
+    // sticks also unlock the DESKTOP camera's focus as they are pressed (LLJoystickCameraRotate / LLJoystickCameraTrack
+    // call gAgentCamera.unlockView, lljoystickbutton.cpp:762-793, 958-959) although the headset takes their movement,
+    // so leaving 3D Mode puts that focus back on the avatar (pumpInput) - seen in the e2e run of 2026-11-13 08:57Z.
+    bool gViewMovedThisSession = false;
     F64 gHudSince = 0.0;       // [VR NAME TAGS 2026-11-13] when this 3D session's head camera began
     bool gHudLogged = false;   // [VR NAME TAGS] its one log line written
     F32 gSavedView = 0.f;
@@ -1703,6 +1708,12 @@ bool secondEye() { return gEye == 1; }
 // walls by the eye's own depth (renderFinalize writes the scene's depth into the target, pipeline.cpp:9552 with
 // postDeferredNoDoFF.glsl:91 gl_FragDepth; the eye target has a depth buffer, eyeTargetFor; and
 // LLHUDNameTag::render tests against it, llhudnametag.cpp:231). One draw per eye - the HUD objects only, no extra pass.
+// The same in Vulkan mode: the headset's world picture is still OpenGL's own copy of the bound eye target
+// (captureInto(true); only Big Screen composes the Vulkan window, composeVkBigScreen), drawn and depth-tested by GL as
+// above; the alpha the tags' blend leaves in that picture is not sent (the video is RGB, wolfvrpipe_video.cpp writes
+// alpha 255), and in the Vulkan window's composite the world layer's alpha is not used (wolfvkscene.cpp:1228-1229).
+// Only head-camera passes draw here (gCameraOverridden); the desktop's own frames keep the stock order, the tags after
+// the HUD attachments.
 // Their size is the desktop's in pixels (font line height), so in the headset about as big as on the desktop screen
 // at the eye picture's pixels a degree (WolfVRStream::frameSize: the eye's square over its tangent window). Every
 // setting is the resident's own: names shown / fading / own name (RenderName, RenderNameShowSelf, AvatarNameTagMode),
@@ -1710,9 +1721,10 @@ bool secondEye() { return gEye == 1; }
 // out in first person (firstPerson), as in mouselook.
 bool drawHudObjectsInEye()
 {
-    // the head camera is this pass's (applyHeadCamera: never for snapshots or reflection probes), and the UI is on - the
-    // same switch render_ui's own HUD-object draw has (llviewerdisplay.cpp RENDER_DEBUG_FEATURE_UI)
-    if (!gCameraOverridden || gSnapshot || gCubeSnapshot || gDisconnected ||
+    // the head camera is this pass's (applyHeadCamera gives the camera back for a snapshot's display(); reflection probes
+    // never reach render_ui), and the UI is on - the same switch render_ui's own HUD-object draw has
+    // (llviewerdisplay.cpp RENDER_DEBUG_FEATURE_UI)
+    if (!gCameraOverridden || gDisconnected ||
         !gPipeline.hasRenderDebugFeatureMask(LLPipeline::RENDER_DEBUG_FEATURE_UI))
         return false;
     {
@@ -1722,6 +1734,10 @@ bool drawHudObjectsInEye()
         gPipeline.disableLights();
         LLHUDObject::renderAll();
     }
+    // (The tags' layout - which are visible, their LOD, the overlap push-apart - is made once a frame in the LEFT eye's
+    // pass, llviewerdisplay.cpp LLHUDObject::updateAll; the right eye, 6.4 cm away, sees the same tag world-placed, so
+    // between the eyes a tag shifts only by its own disparity. LLHUDNameTag::updateAll's "camera still" test for that
+    // push-apart uses the avatar's speed in VR, not the head's: see there.)
     // one line per 3D session, 5 s in (the tags are made by the idle loop), so the eye draw can be seen in the log
     if (!gHudLogged && LLTimer::getTotalSeconds() - gHudSince >= 5.0)
     {
@@ -1741,10 +1757,13 @@ bool drawHudObjectsInEye()
     return true;
 }
 
+// the same test displayFrame's `hiding` uses (world && hide_me && an avatar): the avatar is not drawn in the headset
+// then, so its tag and dot go with it - and not before the first head pose, when the headset still shows nothing
 bool firstPerson()
 {
     static LLCachedControl<bool> hide_me(gSavedSettings, "WolfVRHideAvatar", false);
-    return hide_me && WolfVRStream::worldWanted();
+    return hide_me && LLStartUp::getStartupState() == STATE_STARTED && !gDisconnected && WolfVRStream::worldWanted() &&
+           WolfVRStream::headPose().valid && isAgentAvatarValid();
 }
 bool stereoEye() { return gEye >= 0; }
 bool headCamera() { return gCameraOverridden; }
@@ -1764,6 +1783,7 @@ bool cameraKeys(F32 orbit_up, F32 orbit_left, F32 orbit_in, F32 pan_in, F32 pan_
         return true;
     }
     s_moving = true;
+    gViewMovedThisSession = true;   // [VR CAMERA ON EXIT] (pumpInput)
     if (orbit_left != 0.f)
     {
         const F32 a = orbit_left * kOrbitRate * dt;   // + = left, as LLAgentCamera::cameraOrbitAround and the stick's turn
@@ -1800,6 +1820,7 @@ bool setCameraZoomSlider(F32 value)
     if (!gCameraOverridden || !gMap.valid) return false;
     gView.zoom = llclamp(rescale(value, 0.f, 1.f, kZoomMax, kZoomMin), kZoomMin, kZoomMax);
     gViewLog = "zoom slider";
+    gViewMovedThisSession = true;   // [VR CAMERA ON EXIT]
     return true;
 }
 
@@ -2710,6 +2731,19 @@ void pumpInput()
             if (!world)
             {
                 s_world_ended = now;   // a reset still pending is kept: a return inside the grace still owes it
+                // [VR CAMERA ON EXIT] the desktop camera's focus back on the avatar if the headset's camera controls
+                // unlocked it (gViewMovedThisSession); as Reset View does it (llviewermenu.cpp:6072, no turn of the avatar),
+                // with the pan and orbit the same presses may have left (llagentcamera.cpp:399-400)
+                if (gViewMovedThisSession && LLStartUp::getStartupState() == STATE_STARTED && isAgentAvatarValid() &&
+                    !gAgentCamera.cameraCustomizeAvatar() && !gAgentCamera.getFocusOnAvatar())
+                {
+                    gAgentCamera.setFocusOnAvatar(true, false, false);
+                    gAgentCamera.resetPanDiff();
+                    gAgentCamera.resetOrbitDiff();
+                    LL_INFOS("WolfVR") << "VR 3D: the camera controls used in the headset had unlocked the desktop camera; "
+                                          "its focus is back on the avatar" << LL_ENDL;
+                }
+                gViewMovedThisSession = false;
                 // [VR CAMERA ON ENTRY] the state the desktop camera goes back to, so a "my camera is still odd after VR"
                 // report can be read from the log (only getters: calcCameraPositionTargetGlobal would step its lerps)
                 if (LLStartUp::getStartupState() == STATE_STARTED)

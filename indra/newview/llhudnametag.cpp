@@ -33,6 +33,7 @@
 #include "lltracerecording.h"
 
 #include "llagent.h"
+#include "wolfvrscreen.h"   // <WolfViewer 2026-11-13/> [VR NAME TAGS] headCamera: the push-apart test in VR
 #include "llviewercontrol.h"
 #include "llcriticaldamp.h"
 #include "lldrawable.h"
@@ -767,6 +768,14 @@ void LLHUDNameTag::updateAll()
 
     LLTrace::CountStatHandle<>* camera_vel_stat = LLViewerCamera::getVelocityStat();
     F32 camera_vel = (F32)LLTrace::get_frame_recording().getLastRecording().getPerSec(*camera_vel_stat);
+    // <WolfViewer 2026-11-13> [VR NAME TAGS] in VR 3D Mode the camera stat is not the camera's speed: it is fed only by
+    // LLViewerCamera::updateCameraLocation (llviewercamera.cpp:156), the desktop camera's update, which starts each frame
+    // from where the headset's head left the camera (wolfvrscreen.cpp setPickCamera) - placed from the avatar by buildMap,
+    // not where LLAgentCamera puts the desktop camera - so the jump between the two counted as camera movement every
+    // frame and the overlapping tags were not pushed apart. The headset view goes with the avatar, so its speed
+    // (the body's, not the head's turning) decides, against the same MAX_STABLE_CAMERA_VELOCITY (m/s)
+    if (WolfVRScreen::headCamera()) camera_vel = gAgent.getVelocity().magVec();
+    // </WolfViewer>
     if (camera_vel > MAX_STABLE_CAMERA_VELOCITY)
     {
         return;

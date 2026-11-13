@@ -4,7 +4,9 @@
 // (Shadow Testwolf, WolfVR3DMode on, WolfVRStreamMode "world", default name tag settings: RenderNameShowSelf and
 // AvatarNameTagMode 1, so the own tag is shown), headless Chromium (muted) with the fake headset, LEAP FIFO in $RIG:
 //   1. shown (WolfVRHideAvatar off): the one-per-session log line says the eyes draw the HUD objects, own tag shown
-//      (1); the headset's picture is saved (eyes_shown.jpg) to look at the tag above the avatar's head in both halves
+//      (1); the headset's picture is saved (eyes_shown.jpg) to look at the tag above the avatar's head in both halves;
+//      and in pixels: the picture changes when the own tag is switched off (RenderNameShowSelf) by clearly more than
+//      between two pictures with it on (the sea and sky move a little by themselves)
 //   2. first person (WolfVRHideAvatar on): the same line says own 0, "first person"
 // What it cannot check: the tag's look and its stereo depth (look at the saved pictures: the tag must be above the
 // head in both halves, shifted between them by the head's own disparity), and voice dots (no voice in the rig).
@@ -58,6 +60,18 @@ async function exitVR(tag) {
 }
 
 const grab = async (file) => { const d = await evalJs('window.__wolfvr.grab()'); if (d) writeFileSync(resolve(OUT, file), Buffer.from(d.split(',')[1], 'base64')); return !!d; };
+// the largest change of any 32x16 block of two received pictures (scaled to 512x256), mean absolute difference 0..255:
+// a name tag is small, so a whole-picture mean would hide it; the busiest block shows it
+async function pictureDiff(a, b) {
+    return evalJs(`(async () => { const L = async (s) => { const i = new Image(); i.src = s; await i.decode(); const c = document.createElement('canvas');
+        c.width = 512; c.height = 256; const x = c.getContext('2d'); x.drawImage(i, 0, 0, 512, 256); return x.getImageData(0, 0, 512, 256).data; };
+        const p = await L(${JSON.stringify(a)}), q = await L(${JSON.stringify(b)}); let best = 0;
+        for (let by = 0; by < 256; by += 16) for (let bx = 0; bx < 512; bx += 32) { let s = 0;
+            for (let y = by; y < by + 16; y++) for (let x = bx; x < bx + 32; x++) { const k = (y * 512 + x) * 4;
+                s += Math.abs(p[k] - q[k]) + Math.abs(p[k + 1] - q[k + 1]) + Math.abs(p[k + 2] - q[k + 2]); }
+            best = Math.max(best, s / (32 * 16 * 3)); }
+        return +best.toFixed(2); })()`);
+}
 function hudLine(since) {
     const l = after(since, 'VR 3D: name tags, hover text and voice dots drawn in the').pop();
     if (!l) return null;
@@ -66,6 +80,10 @@ function hudLine(since) {
 }
 await send('Page.enable'); await send('Runtime.enable');
 await send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(FAKE, 'utf8') + '\n' + readFileSync(CTL, 'utf8') });
+// the headset service starts when VR is switched on in this session (Wolf World > VR: WolfVRStreamEnabled, as the
+// rig's campaign_vr.py does); WolfVRStreamMode only says where it starts
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRStreamEnabled','value':true}");
+await sleep(4000);
 await send('Page.navigate', { url: URL_ });
 check(await waitFor(() => evalJs('!!(window.__wolfvr && window.__wolfvr.xr && window.__wolfvr.xr().said === false)'), 30000), 'connected to the real viewer');
 await evalJs("try { localStorage.setItem('wolfvr.headset', 'auto'); } catch (e) {}");
@@ -79,6 +97,18 @@ console.log('  ', h && h.line);
 check(!!h && h.where === 'eyes' && h.own === 1 && !h.first, `1: the eyes draw the HUD objects, own name tag shown (${h && h.tags} tags, own ${h && h.own})`);
 await sleep(1500);
 check(await grab('eyes_shown.jpg'), '1: the headset picture saved (eyes_shown.jpg: look for the tag above the head in both halves)');
+const a1 = await evalJs('window.__wolfvr.grab()');
+await sleep(2500);
+const a2 = await evalJs('window.__wolfvr.grab()');
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'RenderNameShowSelf','value':false}");
+await sleep(2500);
+const b = await evalJs('window.__wolfvr.grab()');
+await grab('eyes_no_own_tag.jpg');
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'RenderNameShowSelf','value':true}");
+const noise = a1 && a2 ? await pictureDiff(a1, a2) : -1, tagged = a2 && b ? await pictureDiff(a2, b) : -1;
+console.log(`   busiest block change: with the tag twice ${noise}, tag on -> off ${tagged}`);
+check(noise >= 0 && tagged > 2 * noise + 2, `1: switching the own tag off changes the headset picture (${tagged} against ${noise} by itself)`);
+await sleep(2500);
 await exitVR('1');
 await sleep(3500);
 

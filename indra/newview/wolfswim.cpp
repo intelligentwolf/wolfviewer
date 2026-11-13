@@ -55,13 +55,28 @@ namespace
     const F32 SKULL_TO_TOP = 0.184f;
 
     // [SWIM HEAD 2026-11-13] Ticket 802 (IndigoQueen King): treading water at the surface, the head is held out of it
-    // with the waterline at the chin, on the waves this viewer draws. Design values: the hold starts once the top of
-    // the head is within SURFACE_REACH of the drawn surface (so a swimmer who comes up, or dips under for a moment,
-    // pops back up; one who stops deeper down stays there); the chin is let be within HOLD_BAND of the surface; the
-    // chin is judged where it will be HOLD_LEAD_S from now at its present vertical speed, so the up / down press ends
-    // before the region's move (3.28 m/s, wolfswim.h) has overshot.
-    const F32 SURFACE_REACH = 0.30f, HOLD_BAND = 0.04f;
+    // with the waterline at the chin, on the waves this viewer draws (holdHead). Design values, all untuned until the
+    // live test. (WolfSim line numbers here are the live tree, airebuilder wtu-invthumbs - swim-floor-t802 README; in the
+    // airebuilder/opensim checkout the same lines are ScenePresence.cs:1124, 3902-3950 AddNewMovement and 6127
+    // SendControlsToScripts.)
+    //   SURFACE_REACH - the hold starts once the top of the head is within this of the drawn surface (a swimmer who
+    //     comes up, or dips under for a moment, pops back up; one who stops deeper down stays there);
+    //   HOLD_START_BAND - a press starts when the chin is (about to be) further than this from the surface; it ends when
+    //     the chin is about to reach the surface (hysteresis: no press for small errors, no stop half-way);
+    //   HOLD_LEAD_S - the chin is judged where it will be this long from now at its present vertical speed, so a press
+    //     ends before the region's move has overshot. That move is AgentControlStopSlowVel x 4 = 0.2 x 4.096 x 4 =
+    //     3.28 m/s (WolfSim ScenePresence.cs:1124, and AddNewMovement's flying `direc *= 4.0f`, :3993);
+    //   HOLD_MIN_PRESS_S / HOLD_MIN_GAP_S - every press and every pause lasts at least this long: each change of the
+    //     control flags is an AgentUpdate straight away (llviewermessage.cpp:4378) plus its follow-up, so this caps the
+    //     hold at about 2 / (0.1 + 0.25) = 5.7 flag changes a second;
+    //   HOLD_MAX_PITCH - the hold only works with a level body: flying, the region turns the up / down move by the body
+    //     rotation the viewer sends (AddNewMovement `direc = vec * rot`, :3961, not levelled while Flying, :3953-3959),
+    //     which is the agent frame (llviewermessage.cpp:4390) and pitches in mouselook (LLAgent::pitch); a pitched body
+    //     would drift across the water on every press. The sine of 5 degrees: up to 0.29 m/s of drift during a press.
+    const F32 SURFACE_REACH = 0.30f, HOLD_START_BAND = 0.08f;
     const F32 HOLD_LEAD_S = 0.15f;
+    const F64 HOLD_MIN_PRESS_S = 0.10, HOLD_MIN_GAP_S = 0.25;
+    const F32 HOLD_MAX_PITCH = 0.0872f;
 
     // Stroke when moving faster than this (m/s), back to the tread under STILL_SPEED for STILL_FOR_S (design values;
     // the swim itself is 3.28 m/s - wolfswim.h).
@@ -109,6 +124,12 @@ namespace
         // top has not been back under the surface band since, so the out-of-the-water test goes by the chin meanwhile
         bool mHolding = false;
         bool mHeadUp = false;
+        S32 mPress = 0;                // holdHead: the press now, +1 up, -1 down, 0 none
+        F64 mPressChangedAt = 0.0;
+        U32 mPressEdges = 0;           // press changes, counted for the debug line
+        LLVOAvatarSelf* mChinOf = nullptr;   // chinJoint's cache: the avatar and head joint it was found for
+        LLJoint* mChinHeadOf = nullptr;
+        LLJoint* mChin = nullptr;
 
         // on land
         F64 mNextSample = 0.0;
@@ -384,10 +405,18 @@ namespace
     // mFaceJaw under mHead - 0.069 m below the head joint and 0.33 m below the top of the head on the standard shape),
     // which every avatar has and which follows the head's live pose and any rigged mesh's joint offsets. The head joint
     // if a skeleton should lack it.
+    // Looked up by name once per avatar and skeleton (a new self avatar or a rebuilt skeleton has a new head joint).
     LLJoint* chinJoint(LLVOAvatarSelf* av)
     {
-        LLJoint* chin = av->getJoint("mFaceChin");
-        return chin ? chin : av->mHeadp;
+        State& s = st();
+        if (s.mChinOf != av || s.mChinHeadOf != av->mHeadp)
+        {
+            s.mChinOf = av;
+            s.mChinHeadOf = av->mHeadp;
+            LLJoint* chin = av->getJoint("mFaceChin");
+            s.mChin = chin ? chin : av->mHeadp;
+        }
+        return s.mChin;
     }
 
     // [SWIM HEAD 2026-11-13] The water surface as this viewer DRAWS it over an agent-space point: the region's water
@@ -410,22 +439,66 @@ namespace
     }
 
     // [SWIM HEAD 2026-11-13] Treading at the surface: up or down (the region's own swim speed, steer) so the chin rides
-    // the drawn surface. The position is the region's, so every viewer sees the head out of the water. Upward is only
-    // pressed while the chin is (about to be) under the surface, so the hold never lifts the body out of the water.
+    // the drawn surface. The position is the region's, so every viewer sees the head out of the water. Upward is capped
+    // at the chin line: up is pressed only while the chin is (about to be) under the surface, so the hold never lifts
+    // the body out of the water. Presses have hysteresis and a minimum length / gap (HOLD_* above).
     void holdHead(LLVOAvatarSelf* av, F32 chin_z, F32 surface)
     {
+        State& s = st();
         gAgent.setControlFlags(AGENT_CONTROL_STOP);   // the slow swim speed, as steer
         gAgent.clearControlFlags(AGENT_CONTROL_UP_POS | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_FAST_UP
                                  | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_UP_NEG);
-        const F32 ahead = chin_z + av->getVelocity().mV[VZ] * HOLD_LEAD_S;
-        if (ahead < surface - HOLD_BAND)
+        const F32 err = surface - (chin_z + av->getVelocity().mV[VZ] * HOLD_LEAD_S);   // > 0: the chin is going under
+        const F64 t = now();
+        const F64 held = t - s.mPressChangedAt;
+        S32 press = s.mPress;
+        if (press == 0)
+        {
+            if (held >= HOLD_MIN_GAP_S)
+            {
+                if (err > HOLD_START_BAND)
+                {
+                    press = 1;
+                }
+                else if (err < -HOLD_START_BAND && av->mInAir)
+                {
+                    press = -1;
+                }
+            }
+        }
+        else if (held >= HOLD_MIN_PRESS_S && (press > 0 ? err <= 0.f : err >= 0.f))
+        {
+            press = 0;   // about to reach the surface
+        }
+        if (press < 0 && !av->mInAir)
+        {
+            press = 0;   // never down while touching (flying + down + touching lands: steer)
+        }
+        if (press != s.mPress)
+        {
+            s.mPress = press;
+            s.mPressChangedAt = t;
+            ++s.mPressEdges;
+        }
+        if (press > 0)
         {
             gAgent.setControlFlags(AGENT_CONTROL_NUDGE_UP_POS);
         }
-        else if (ahead > surface + HOLD_BAND && av->mInAir)
+        else if (press < 0)
         {
-            // never down while touching (flying + down + touching lands: steer)
             gAgent.setControlFlags(AGENT_CONTROL_NUDGE_UP_NEG);
+        }
+    }
+
+    void endHold()
+    {
+        State& s = st();
+        s.mHolding = false;
+        if (s.mPress != 0)
+        {
+            s.mPress = 0;
+            s.mPressChangedAt = now();
+            ++s.mPressEdges;
         }
     }
 
@@ -548,7 +621,8 @@ namespace
         State& s = st();
         s.mSwimming = true;
         s.mStroke = false;
-        s.mHolding = s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
+        endHold();
+        s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
         s.mStillSince = now();
         s.mWeTurnedFlyOn = false;
         if (!gAgent.getFlying())
@@ -586,7 +660,8 @@ namespace
         setMode(EMode::NONE);
         stopPlaying();
         s.mSwimming = false;
-        s.mHolding = s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
+        endHold();
+        s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
         if (end_fly && s.mWeTurnedFlyOn && gAgent.getFlying())
         {
             gAgent.setFlying(false);
@@ -596,8 +671,8 @@ namespace
 
     void steer(LLVOAvatarSelf* av, F32 top, F32 water)
     {
-        // Slow: STOP held makes the region move us at AgentControlStopSlowVel (WolfSim ScenePresence.cs:1124, 2963-2971),
-        // x4 while flying (AddNewMovement, :3984).
+        // Slow: STOP held makes the region move us at AgentControlStopSlowVel (WolfSim ScenePresence.cs:1124, 2968-2977),
+        // x4 while flying (AddNewMovement, :3993).
         gAgent.setControlFlags(AGENT_CONTROL_STOP);
 
         // Never up out of the water.
@@ -717,7 +792,9 @@ namespace WolfSwim
         if (!isAgentAvatarValid() || !gAgent.getRegion())
         {
             s.mSwimming = false;   // nothing to send to: the region forgets our animations with us
-            s.mHolding = s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
+            endHold();
+            s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
+            s.mChinOf = nullptr;   // [SWIM HEAD 2026-11-13/] the next self avatar looks its chin up again
             if (s.mMode == EMode::AO_PADDLE && AOEngine::instanceExists())
             {
                 AOEngine::instance().setWolfSwimPaddle(false);
@@ -751,22 +828,28 @@ namespace WolfSwim
             return;
         }
 
-        // [SWIM HEAD 2026-11-13] the chin and the drawn surface over it (ticket 802: treading holds the chin there)
+        // [SWIM HEAD 2026-11-13] The chin and the drawn surface over it (ticket 802: treading holds the chin there). Read
+        // only while swimming or about to start (the same test as the start, below), so walking on land costs nothing.
         F32 chin_z = 0.f, surface = 0.f;
-        LLJoint* chin = chinJoint(av);
-        const bool have_chin = chin && drawnSurface(chin->getWorldPosition(), surface);
-        if (have_chin)
+        bool have_surface = false;
+        if (s.mSwimming || top < water - ENTER_BELOW)
         {
-            chin_z = chin->getWorldPosition().mV[VZ];
+            if (LLJoint* chin = chinJoint(av))
+            {
+                const LLVector3 c = chin->getWorldPosition();
+                chin_z = c.mV[VZ];
+                have_surface = drawnSurface(c, surface);
+            }
         }
-        // the raised head is back under (the duck before a stroke away from the surface, steer): the top decides again
-        if (s.mHeadUp && !s.mHolding && (!have_chin || top <= water + PUSH_DOWN_ABOVE))
+        // The raised head no longer decides once the hold has let go and the avatar stands on the bottom (wading ashore:
+        // the top's own rule again) or its top is back inside the band, where the top's rule would not end the swim.
+        if (s.mHeadUp && (!have_surface || (!s.mHolding && (!av->mInAir || top <= water + EXIT_ABOVE))))
         {
             s.mHeadUp = false;
         }
         // Out of the water: the top past the band - or, while the head is held up (its top is then ~0.33 m over the
         // water on the standard shape, by design), the chin past the same band over the drawn surface.
-        const bool out = (s.mHeadUp && have_chin) ? chin_z > surface + EXIT_ABOVE : top > water + EXIT_ABOVE;
+        const bool out = s.mHeadUp ? chin_z > surface + EXIT_ABOVE : top > water + EXIT_ABOVE;
 
         // [WOLF SEA TUNNEL 2026-10-28] a head inside an air-filled volume (a sea tunnel, wolfdryvolumes.h) is out of the
         // water: walk, as on land
@@ -809,6 +892,11 @@ namespace WolfSwim
 
         // [SWIM HEAD 2026-11-13] Treading: no key across the water or down (up is fine: that is surfacing) and hardly
         // moving across it. The hold starts near the surface only (SURFACE_REACH), then lasts until a stroke or a dive.
+        // Never while a script has taken the up or down control (it would be sent our presses: WolfSim
+        // ScenePresence.SendControlsToScripts folds the nudge flags into CONTROL_UP / CONTROL_DOWN, :6553-6554; the
+        // viewer counts taken controls from ScriptControlChange,
+        // LLAgent::processScriptControlChange, llagent.cpp:4599), nor with a pitched body (HOLD_MAX_PITCH): today's
+        // swim then.
         const U32 keys = gAgent.getControlFlags();   // the person's own this frame (resetControlFlags after each send)
         const bool across_or_down = (keys & (AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_LEFT_POS
                                      | AGENT_CONTROL_LEFT_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG
@@ -816,9 +904,11 @@ namespace WolfSwim
                                      | AGENT_CONTROL_NUDGE_UP_NEG)) != 0;
         LLVector3 across = av->getVelocity();
         across.mV[VZ] = 0.f;
-        if (!have_chin || across_or_down || across.length() > MOVING_SPEED)
+        const bool scripted = gAgent.isControlTaken(CONTROL_UP_POS_INDEX) || gAgent.isControlTaken(CONTROL_UP_NEG_INDEX);
+        const bool level = std::fabs(gAgent.getFrameAgent().getAtAxis().mV[VZ]) <= HOLD_MAX_PITCH;
+        if (!have_surface || scripted || !level || across_or_down || across.length() > MOVING_SPEED)
         {
-            s.mHolding = false;
+            endHold();
         }
         else if (!s.mHolding && top >= surface - SURFACE_REACH)
         {
@@ -841,11 +931,15 @@ namespace WolfSwim
         if (now() >= next_debug)
         {
             next_debug = now() + 0.25;
+            static U32 last_edges = 0;
             LL_DEBUGS("WolfSwim") << "swim hold=" << s.mHolding << " headup=" << s.mHeadUp << " stroke=" << s.mStroke
+                                  << " press=" << s.mPress << " edges=" << (s.mPressEdges - last_edges) << "/0.25s"
+                                  << " edges_total=" << s.mPressEdges << " scripted=" << scripted << " level=" << level
                                   << " chin=" << chin_z << " head=" << (av->mHeadp ? av->mHeadp->getWorldPosition().mV[VZ] : 0.f)
                                   << " surface=" << surface << " water=" << water << " top=" << top
                                   << " vz=" << av->getVelocity().mV[VZ] << " inair=" << av->mInAir
                                   << " flags=" << std::hex << gAgent.getControlFlags() << std::dec << LL_ENDL;
+            last_edges = s.mPressEdges;
         }
     }
 }

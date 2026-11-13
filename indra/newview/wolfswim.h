@@ -41,7 +41,8 @@
 //   - [SWIM HEAD 2026-11-13] Ticket 802: treading at the surface (no key across the water or down, near the surface)
 //     holds the head out with the waterline at the chin (the skeleton's mFaceChin joint) on the waves this viewer
 //     draws (WolfBoatRock::drawnWaveHeight), by pressing up / down for the avatar - the region moves it, so everyone
-//     sees it. A stroke away ducks the head back under first (as before); down still dives.
+//     sees it. A stroke away ducks the head back under first (as before); down still dives. Not while a script has
+//     taken the up / down control, nor with a pitched body (mouselook): the swim as before then.
 namespace WolfSwim
 {
     /** The whole per-frame step: decide, set the agent's fly state and control flags, start / stop the animations.

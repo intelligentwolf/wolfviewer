@@ -19,8 +19,18 @@
 #include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/]
 
 #include <algorithm>
+#include <atomic>        // std::atomic_flag ([W106 MEMLOG 2026-11-13] the terminate hook)
+#include <cstring>       // strcmp ([W106 MEMLOG 2026-11-13] read_cpp_throw)
 #include <ctime>
+#include <exception>     // std::exception, std::set_terminate, std::bad_exception ([W106 MEMLOG 2026-11-13])
+#include <memory>        // std::bad_weak_ptr
+#include <new>           // std::bad_alloc, std::bad_array_new_length
+#include <optional>      // std::bad_optional_access
+#include <stdexcept>     // std::length_error, std::out_of_range
+#include <chrono>
+#include <thread>        // std::this_thread::sleep_for ([W106 MEMLOG 2026-11-13] the terminate hook)
 #include <sstream>
+#include <typeinfo>      // std::type_info ([W106 MEMLOG 2026-11-13] the terminate hook)
 
 #include <boost/json.hpp>
 
@@ -43,13 +53,16 @@
 #include "workqueue.h"
 #include "wolfgrid.h"
 #include "wolflogscrub.h"
+#include "wolfmemorylog.h"     // [W106 MEMLOG 2026-11-13/] memory figures at the crash
 
 #if LL_WINDOWS
 #include "llwin32headers.h"
 #include <dbghelp.h>     // MiniDumpWriteDump (dbghelp is linked for every Windows target: cmake/Linking.cmake)
+#include <psapi.h>       // EnumProcessModules ([W106 MEMLOG 2026-11-13] the module table; psapi: cmake/Linking.cmake:60)
 #include <intrin.h>      // _ReturnAddress
 #include <signal.h>
 #else
+#include <cxxabi.h>      // abi::__cxa_current_exception_type ([W106 MEMLOG 2026-11-13] the terminate hook)
 #include <dlfcn.h>       // dladdr
 #include <execinfo.h>    // backtrace
 #include <fcntl.h>
@@ -74,6 +87,116 @@ static const char* const DONE_FILE = "crash_report.txt";
 namespace
 {
     const int MAX_FRAMES = 64;
+
+    // [W106 MEMLOG 2026-11-13] This build's version, for a "viewer:" line in crash_stack.txt: the stack file is written
+    // by every crash the handler sees, static_debug_info.log not by one before LLAppViewer::init reaches
+    // writeDebugInfo (ticket 832's crash, from 7.2.4.104, had none, so its ticket said "not recorded").
+    char sViewerVersion[160] = {};
+
+    // Printable ASCII of src into dst (NUL-terminated, cut at cap - 1): a type name or what() text into the crash file.
+    void copy_printable(char* dst, size_t cap, const char* src)
+    {
+        size_t n = 0;
+        if (src)
+        {
+            for (; *src && n + 1 < cap; ++src)
+            {
+                const unsigned char c = static_cast<unsigned char>(*src);
+                dst[n++] = (c >= 0x20 && c < 0x7f) ? static_cast<char>(c) : '?';
+            }
+        }
+        if (cap > 0) dst[n] = '\0';
+    }
+
+    // [W106 MEMLOG 2026-11-13] The standard-library exceptions whose what() goes into the crash file. Theirs is the
+    // library's own fixed wording (or numbers: libstdc++'s at() range messages); anything else - a filesystem_error with
+    // a folder name, a parse error echoing its input, the viewer's own runtime_errors - is written as "?", as the file
+    // goes into a ticket. Every throw of these in the viewer's own code is a fixed literal (grep 2026-11-13: llcommon.cpp,
+    // llimagejpeg.cpp bad_alloc; qrcodegen.cpp length_error "Data too long"). The sending side scrubs these lines too.
+    bool is_plain_std_exception(const std::type_info& t)
+    {
+        return t == typeid(std::bad_alloc) || t == typeid(std::bad_array_new_length) || t == typeid(std::bad_cast)
+            || t == typeid(std::bad_exception) || t == typeid(std::bad_optional_access) || t == typeid(std::bad_weak_ptr)
+            || t == typeid(std::length_error) || t == typeid(std::out_of_range);
+    }
+
+    // [W106 MEMLOG 2026-11-13] What an uncaught C++ exception was, when it ends in std::terminate: on Linux and macOS
+    // always (then llappviewerlinux.cpp exceptionTerminateHandler's forced SIGSEGV, or the C++ library's own handler
+    // and abort's SIGABRT, reach the crash handler); on Windows for a terminate the unhandled-exception filter does not
+    // see first (a noexcept violation, say; an exception nobody catches is decoded from its record instead), after
+    // which llappviewerwin32.cpp's exceptionTerminateHandler forces the access violation the filter writes up.
+    // on_terminate notes the type and what() the way libstdc++'s __verbose_terminate_handler (libsupc++/vterminate.cc)
+    // finds them - "__try { __throw_exception_again; } __catch(const exception& exc)" - then calls the handler that was
+    // there before (installed after the viewer's own in main / wWinMain, so chained, not replaced). The type name is
+    // the compiler's own, not demangled (that allocates, and this may be an out-of-memory crash): Linux/macOS
+    // type_info::name() ("St9bad_alloc"), Windows type_info::raw_name() (".?AVbad_alloc@std@@", "the decorated name",
+    // learn.microsoft.com type_info class). Windows keeps terminate handlers per thread (learn.microsoft.com
+    // set_terminate (CRT): "each new thread needs to install its own"), so there this covers the main thread, as the
+    // viewer's own handler does.
+    char sTermType[256] = {};
+    char sTermWhat[400] = {};
+    // A terminate from inside this one (on Windows a rethrow with no exception active ends in terminate again) goes
+    // straight on to the previous handler. Of two threads, the first in writes the buffers; the other waits up to a
+    // second for it, so the crash it is about to cause does not cut the first one's note short.
+    thread_local bool tInTerminate = false;
+    std::atomic_flag sTermClaimed;   // C++20: default-constructed clear ([atomics.flag], P0883)
+    std::atomic<bool> sTermNoted(false);
+    std::terminate_handler sPrevTerminate = nullptr;
+
+    [[noreturn]] void on_terminate()
+    {
+        if (tInTerminate)
+        {
+            sTermNoted.store(true);   // a thread waiting for this one's note need not wait out its second
+            if (sPrevTerminate) sPrevTerminate();
+            abort();
+        }
+        tInTerminate = true;
+        if (sTermClaimed.test_and_set())
+        {
+            for (int i = 0; i < 1000 && !sTermNoted.load(); ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        else
+        {
+#if LL_WINDOWS
+            const bool active = true;   // MSVC has no __cxa_current_exception_type; see tInTerminate
+#else
+            const std::type_info* current = abi::__cxa_current_exception_type();
+            const bool active = current != nullptr;
+#endif
+            if (active)
+            {
+                try
+                {
+                    throw;
+                }
+                catch (const std::exception& e)
+                {
+                    const std::type_info& t = typeid(e);
+#if LL_WINDOWS
+                    copy_printable(sTermType, sizeof(sTermType), t.raw_name());
+#else
+                    copy_printable(sTermType, sizeof(sTermType), t.name());
+#endif
+                    copy_printable(sTermWhat, sizeof(sTermWhat), is_plain_std_exception(t) ? e.what() : "?");
+                }
+                catch (...)
+                {
+#if LL_WINDOWS
+                    copy_printable(sTermType, sizeof(sTermType), "(not a std::exception)");
+#else
+                    copy_printable(sTermType, sizeof(sTermType), current->name());
+#endif
+                }
+            }
+            sTermNoted.store(true);
+        }
+        if (sPrevTerminate) sPrevTerminate();
+        abort();
+    }
 }
 
 #if LL_WINDOWS
@@ -174,30 +297,330 @@ namespace
         out_str(o, s);
     }
 
-    // "<module file name>+0x<offset>": the file name only, never its folder (which holds the Windows user name).
-    void out_location(CrashText& o, DWORD64 pc)
+    // [W106 MEMLOG 2026-11-13] The module table out_location reads at a crash. GetModuleHandleExW / GetModuleFileNameW
+    // take the loader lock, which a thread that died inside LoadLibrary, FreeLibrary or a DllMain still holds: the
+    // writer then waited out WRITE_WAIT_MS and the report was lost. So the names are gathered OUTSIDE the crash: once at
+    // install (EnumProcessModules), then kept up to date by the loader itself (LdrRegisterDllNotification,
+    // learn.microsoft.com devnotes: "Registers for notification when a DLL is first loaded. This notification occurs
+    // before dynamic linking takes place."; LdrDllNotification: "The loader calls this function when a DLL is first
+    // loaded", Remarks "called before dynamic linking takes place" - the page says nothing more about when, so all this
+    // relies on is that a module is in the table from about the time it is mapped; reason 1 LOADED, 2 UNLOADED;
+    // LDR_DLL_LOADED_NOTIFICATION_DATA { Flags, FullDllName, BaseDllName, DllBase, SizeOfImage }; no header or import
+    // library - GetProcAddress on ntdll.dll; "may be changed or removed", so when it is missing the table is gathered
+    // again from WolfMemoryLog's minute line instead, refreshModuleNames). At the crash: VirtualQuery(pc).AllocationBase
+    // is the module's base (an image is mapped as one allocation; MEMORY_BASIC_INFORMATION AllocationBase "a pointer to
+    // the base address of a range of pages allocated"), looked up here without any lock.
+    //
+    // 64-bit Windows only (the release workflow builds windows64 and windows64-avx2 only: .github/workflows/
+    // wolfviewer.yml:72-73); a 32-bit build names no modules ("?+0x<address>").
+    //
+    // Each slot is a sequence lock: mSeq is odd while one writer (who took it with a compare-exchange from even to odd)
+    // changes mBase / mName, even when they are stable. A reader copies both between two reads of mSeq and keeps the copy
+    // only when mSeq was even and unchanged, so a slot reused while the crash writer waits cannot give it a torn name.
+    bool sDllNotifications = false;
+#if defined(_WIN64)
+    struct ModuleName
     {
-        HMODULE mod = nullptr;
-        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               reinterpret_cast<LPCWSTR>(static_cast<ULONG_PTR>(pc)), &mod) && mod)
+        volatile LONG mSeq;
+        volatile LONG64 mBase;   // 0 = free slot, else the module's base address
+        char mName[64];          // the file name only (no folder: it holds the Windows user name), ASCII
+    };
+    const LONG MAX_MODULES = 1024;
+    ModuleName sModules[MAX_MODULES];
+    volatile LONG sModuleSlots = 0;    // slots ever handed out (an upper bound for the scan)
+    volatile LONG sModuleFull = 0;     // set when a module found no slot (logged once, outside the loader's callback)
+    volatile LONG sModuleDropped = 0;  // set when a module lost every claim to other writers (logged the same way)
+    bool sModuleFullLogged = false;
+    bool sModuleDroppedLogged = false;
+    bool sModuleListCutLogged = false;
+
+    // UNICODE_STRING (learn.microsoft.com ntdef.h UNICODE_STRING: Length "in bytes", MaximumLength, Buffer)
+    struct WolfUnicodeString
+    {
+        USHORT Length;
+        USHORT MaximumLength;
+        PWSTR Buffer;
+    };
+    struct WolfDllNotificationData   // LDR_DLL_LOADED_NOTIFICATION_DATA = LDR_DLL_UNLOADED_NOTIFICATION_DATA
+    {
+        ULONG Flags;
+        const WolfUnicodeString* FullDllName;
+        const WolfUnicodeString* BaseDllName;
+        PVOID DllBase;
+        ULONG SizeOfImage;
+    };
+    const ULONG LDR_DLL_NOTIFICATION_REASON_LOADED = 1;
+    const ULONG LDR_DLL_NOTIFICATION_REASON_UNLOADED = 2;
+    typedef VOID (CALLBACK* WolfDllNotificationFn)(ULONG reason, const WolfDllNotificationData* data, PVOID context);
+    typedef LONG (NTAPI* WolfLdrRegisterDllNotificationFn)(ULONG flags, WolfDllNotificationFn fn, PVOID context, PVOID* cookie);
+
+    // The last path component of a wide string, ASCII (anything else as '?') into dst. No calls into other modules:
+    // the loader's callback may not make any ("It is unsafe for the notification callback to call functions in ANY
+    // other module other than itself", learn.microsoft.com LdrDllNotification).
+    void copy_base_name(char* dst, size_t cap, const wchar_t* src, size_t chars)
+    {
+        size_t from = 0;
+        for (size_t i = 0; i < chars; ++i)
         {
-            wchar_t wpath[1024] = {};
-            const DWORD len = GetModuleFileNameW(mod, wpath, 1024);
-            const wchar_t* base = wpath;
-            for (DWORD i = 0; i < len && i < 1024; ++i)
+            if (src[i] == L'\\' || src[i] == L'/') from = i + 1;
+        }
+        size_t n = 0;
+        for (size_t i = from; i < chars && src[i] && n + 1 < cap; ++i)
+        {
+            const wchar_t c = src[i];
+            dst[n++] = (c > 0x20 && c < 0x7f && c != L'+') ? static_cast<char>(c) : '?';   // no space or '+': crashlib.php's frame pattern
+        }
+        dst[n] = '\0';
+    }
+
+    LONG slots_in_use()
+    {
+        const LONG used = sModuleSlots;
+        return used < MAX_MODULES ? used : MAX_MODULES;
+    }
+
+    // Take slot i for writing: its sequence from even to odd. False when another writer has it.
+    bool slot_lock(LONG i)
+    {
+        const LONG seq = sModules[i].mSeq;
+        return (seq & 1) == 0 && _InterlockedCompareExchange(&sModules[i].mSeq, seq + 1, seq) == seq;
+    }
+
+    void slot_unlock(LONG i)
+    {
+        _InterlockedIncrement(&sModules[i].mSeq);   // odd -> even, a full barrier: the writes above are visible first
+    }
+
+    // A stable copy of slot i (false while it is being written or if it changed under the copy).
+    bool slot_read(LONG i, LONG64& base, char* name, size_t cap)
+    {
+        const LONG seq = sModules[i].mSeq;
+        _ReadWriteBarrier();
+        if (seq & 1) return false;
+        base = sModules[i].mBase;
+        size_t n = 0;
+        for (; n + 1 < cap && n < sizeof(sModules[i].mName) && sModules[i].mName[n]; ++n) name[n] = sModules[i].mName[n];
+        if (cap > 0) name[n] = '\0';
+        // x64 does not reorder a load with an earlier load, so a compiler barrier and a plain volatile read are an
+        // acquire here (no write to the slot from the reader)
+        _ReadWriteBarrier();
+        const LONG after = sModules[i].mSeq;
+        return after == seq;
+    }
+
+    // Lock-free; intrinsics only (the loader's callback calls it). A slot that already has this base is rewritten (a new
+    // module mapped where an old one was), else a free slot is taken, else a new one; a claim lost to another writer is
+    // tried again on another slot (the ones it failed on are skipped). One slot per base is not strict: two writers
+    // adding the same base at once can each take a slot. That is harmless - both hold the same name, and the reader
+    // takes the first that matches.
+    void module_add(ULONG_PTR base, const wchar_t* name, size_t chars)
+    {
+        if (base == 0) return;
+        const int MAX_TRIES = 16;
+        LONG failed[MAX_TRIES];
+        int failed_count = 0;
+        for (int attempt = 0; attempt < MAX_TRIES; ++attempt)
+        {
+            LONG target = -1;
+            const LONG used = slots_in_use();
+            auto skipped = [&](LONG i)
             {
-                if (wpath[i] == L'\\' || wpath[i] == L'/') base = wpath + i + 1;
+                for (int k = 0; k < failed_count; ++k)
+                {
+                    if (failed[k] == i) return true;
+                }
+                return false;
+            };
+            for (LONG i = 0; i < used && target < 0; ++i)
+            {
+                if (static_cast<ULONG_PTR>(sModules[i].mBase) == base && !skipped(i)) target = i;
             }
-            char name[1024] = {};
-            const int n = WideCharToMultiByte(CP_UTF8, 0, base, -1, name, static_cast<int>(sizeof(name)), nullptr, nullptr);
-            if (n > 1)
+            for (LONG i = 0; i < used && target < 0; ++i)
             {
-                out_str(o, name);
-                out_str(o, "+");
-                out_hex(o, pc - static_cast<DWORD64>(reinterpret_cast<ULONG_PTR>(mod)));
-                return;
+                if (sModules[i].mBase == 0 && !skipped(i)) target = i;
+            }
+            if (target < 0)
+            {
+                if (sModuleSlots >= MAX_MODULES)
+                {
+                    _InterlockedExchange(&sModuleFull, 1);
+                    return;
+                }
+                _InterlockedIncrement(&sModuleSlots);   // a new free slot; claimed below like any other
+                continue;
+            }
+            if (!slot_lock(target))
+            {
+                failed[failed_count++] = target;   // another writer has it: try a different slot next
+                continue;
+            }
+            const LONG64 now = sModules[target].mBase;
+            if (now != 0 && static_cast<ULONG_PTR>(now) != base)
+            {
+                slot_unlock(target);   // taken for another module meanwhile: look again elsewhere
+                failed[failed_count++] = target;
+                continue;
+            }
+            copy_base_name(sModules[target].mName, sizeof(sModules[target].mName), name, chars);
+            sModules[target].mBase = static_cast<LONG64>(base);
+            slot_unlock(target);
+            return;
+        }
+        _InterlockedExchange(&sModuleDropped, 1);
+    }
+
+    void module_remove(ULONG_PTR base)
+    {
+        const LONG used = slots_in_use();
+        for (LONG i = 0; i < used; ++i)
+        {
+            if (static_cast<ULONG_PTR>(sModules[i].mBase) != base) continue;
+            for (int attempt = 0; attempt < 16; ++attempt)
+            {
+                if (!slot_lock(i)) continue;
+                if (static_cast<ULONG_PTR>(sModules[i].mBase) == base)
+                {
+                    sModules[i].mBase = 0;
+                    sModules[i].mName[0] = '\0';
+                }
+                slot_unlock(i);
+                break;
             }
         }
+    }
+
+    VOID CALLBACK on_dll_notification(ULONG reason, const WolfDllNotificationData* data, PVOID)
+    {
+        if (!data || !data->DllBase) return;
+        const ULONG_PTR base = reinterpret_cast<ULONG_PTR>(data->DllBase);
+        if (reason == LDR_DLL_NOTIFICATION_REASON_LOADED)
+        {
+            const WolfUnicodeString* n = data->BaseDllName ? data->BaseDllName : data->FullDllName;
+            if (n && n->Buffer) module_add(base, n->Buffer, n->Length / sizeof(wchar_t));
+        }
+        else if (reason == LDR_DLL_NOTIFICATION_REASON_UNLOADED)
+        {
+            module_remove(base);
+        }
+    }
+
+    // The modules loaded now (outside a crash: this takes the loader lock). With prune (the fallback, no loader notices)
+    // entries no longer in the list are dropped, so a module that went away cannot name a later one at its address.
+    void snapshot_modules(bool prune)
+    {
+        static HMODULE mods[MAX_MODULES];   // main thread only (install, then WolfMemoryLog's minute line)
+        DWORD needed = 0;
+        BOOL ok = EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed);
+        if (!ok) ok = EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed);   // once more: a module may have come or gone mid-list
+        if (!ok)
+        {
+            LL_WARNS("WolfCrashReport") << "EnumProcessModules failed (" << GetLastError() << "): crash frames may name no module" << LL_ENDL;
+            return;
+        }
+        if (needed > sizeof(mods) && !sModuleListCutLogged)
+        {
+            sModuleListCutLogged = true;
+            LL_WARNS("WolfCrashReport") << "The process has " << needed / sizeof(HMODULE) << " modules; the crash handler lists the first "
+                                        << MAX_MODULES << LL_ENDL;
+        }
+        const DWORD count = needed / sizeof(HMODULE) < static_cast<DWORD>(MAX_MODULES) ? needed / sizeof(HMODULE) : static_cast<DWORD>(MAX_MODULES);
+        if (prune)
+        {
+            const LONG used = slots_in_use();
+            for (LONG i = 0; i < used; ++i)
+            {
+                const ULONG_PTR base = static_cast<ULONG_PTR>(sModules[i].mBase);
+                if (base == 0) continue;
+                bool present = false;
+                for (DWORD k = 0; k < count && !present; ++k) present = reinterpret_cast<ULONG_PTR>(mods[k]) == base;
+                if (!present) module_remove(base);
+            }
+        }
+        for (DWORD i = 0; i < count; ++i)
+        {
+            // still loaded? (it may have been unloaded since the list was taken: then its unload notice may already have
+            // gone by). Fine here - the main thread, outside any crash. An entry left stale anyway can only be met at a
+            // crash if another image is mapped at that address, and that image's load notice rewrites the slot (module_add).
+            HMODULE again = nullptr;
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    reinterpret_cast<LPCWSTR>(mods[i]), &again) || again != mods[i])
+            {
+                continue;
+            }
+            wchar_t path[1024] = {};
+            const DWORD len = GetModuleFileNameW(mods[i], path, 1024);
+            if (len > 0) module_add(reinterpret_cast<ULONG_PTR>(mods[i]), path, len);
+        }
+    }
+
+    void log_table_full_once()
+    {
+        if (sModuleFull && !sModuleFullLogged)
+        {
+            sModuleFullLogged = true;
+            LL_WARNS("WolfCrashReport") << "Crash handler's module table is full (" << MAX_MODULES << "): later modules are named \"?\" in a crash" << LL_ENDL;
+        }
+        if (sModuleDropped && !sModuleDroppedLogged)
+        {
+            sModuleDroppedLogged = true;
+            LL_WARNS("WolfCrashReport") << "A module could not be added to the crash handler's table (every slot it tried was busy): it is named \"?\" in a crash" << LL_ENDL;
+        }
+    }
+
+    void install_module_names()
+    {
+        // first the loader's own notices, then the list: a module loaded in between is in one or the other (or both:
+        // module_add keeps one slot per base)
+        if (HMODULE ntdll = GetModuleHandleW(L"ntdll.dll"))
+        {
+            const WolfLdrRegisterDllNotificationFn reg = reinterpret_cast<WolfLdrRegisterDllNotificationFn>(
+                reinterpret_cast<void*>(GetProcAddress(ntdll, "LdrRegisterDllNotification")));
+            PVOID cookie = nullptr;
+            sDllNotifications = reg && reg(0, on_dll_notification, nullptr, &cookie) == 0;   // 0 = STATUS_SUCCESS
+        }
+        if (!sDllNotifications)
+        {
+            LL_WARNS("WolfCrashReport") << "No loader notices (LdrRegisterDllNotification): the module list is gathered again once a minute" << LL_ENDL;
+        }
+        snapshot_modules(false);
+        log_table_full_once();
+    }
+#else
+    void install_module_names() {}
+    void log_table_full_once() {}
+    void snapshot_modules(bool) {}
+#endif
+
+    // "<module file name>+0x<offset>": the file name only, never its folder (which holds the Windows user name). The
+    // same shape as before (crashlib.php crParseStack: "[^\\s+]{1,128}\\+0x[0-9a-f]{1,16}"), so signatures do not change.
+    // A module the table does not know: "?+0x<offset from its base>"; no module at all: "?+0x<address>", as before.
+    void out_location(CrashText& o, DWORD64 pc)
+    {
+#if defined(_WIN64)
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(static_cast<ULONG_PTR>(pc)), &mbi, sizeof(mbi)) == sizeof(mbi)
+            && mbi.State == MEM_COMMIT && mbi.Type == MEM_IMAGE && mbi.AllocationBase)
+        {
+            const ULONG_PTR base = reinterpret_cast<ULONG_PTR>(mbi.AllocationBase);
+            const LONG used = slots_in_use();
+            for (LONG i = 0; i < used; ++i)
+            {
+                LONG64 slot_base = 0;
+                char name[sizeof(sModules[0].mName)];
+                if (static_cast<ULONG_PTR>(sModules[i].mBase) != base) continue;
+                if (slot_read(i, slot_base, name, sizeof(name)) && static_cast<ULONG_PTR>(slot_base) == base && name[0])
+                {
+                    out_str(o, name);
+                    out_str(o, "+");
+                    out_hex(o, pc - static_cast<DWORD64>(base));
+                    return;
+                }
+            }
+            out_str(o, "?+");
+            out_hex(o, pc - static_cast<DWORD64>(base));
+            return;
+        }
+#endif
         out_str(o, "?+");
         out_hex(o, pc);
     }
@@ -238,6 +661,147 @@ namespace
     }
 #endif
 
+    // [W106 MEMLOG 2026-11-13] What a C++ exception (0xE06D7363) threw, from its exception record. Tickets 799 and 838
+    // stopped at KERNELBASE RaiseException < VCRUNTIME140 _CxxThrowException < the viewer, and only the release's own
+    // files could say what it was (799: std::bad_alloc, "bad allocation", worked out by hand from the W103 CI build).
+    //
+    // Layout. Raymond Chen, "Decoding the parameters of a thrown C++ exception (0xE06D7363)", The Old New Thing
+    // (devblogs.microsoft.com/oldnewthing/20100730-00/?p=13273): parameter 1 is the thrown object, parameter 2 the
+    // information that describes it, parameter 3 (64-bit only) the module that threw it; in that information "go to
+    // the fourth DWORD" (the catchable type array), in that "the second DWORD" (its first entry), in that "the second
+    // DWORD" (the type descriptor), then "skip over the first two void*s and the rest is the class name"; on 64-bit
+    // each of those is an offset from parameter 3. clang/lib/CodeGen/MicrosoftCXXABI.cpp, which emits the same
+    // structures: ThrowInfo { Flags, CleanupFn, ForwardCompat, CatchableTypeArray }, CatchableTypeArray { NumEntries,
+    // CatchableTypes[] }, CatchableType { Flags, TypeDescriptor, NonVirtualAdjustment, OffsetToVBPtr, VBTableIndex,
+    // Size, CopyCtor }, all image-relative "on every target but 32-bit x86". Checked against ticket 799's minidump and
+    // the W103 build: parameter 0 0x19930520, two entries ".?AVbad_alloc@std@@" and ".?AVexception@std@@", each with
+    // NonVirtualAdjustment 0 and OffsetToVBPtr -1 (no virtual base).
+    // Parameter 0: 0x19930520 in ticket 799's record. Wine's msvcrt (dlls/msvcrt/cppexcept.h is_cxx_exception)
+    // accepts CXX_FRAME_MAGIC_VC6 0x19930520 to CXX_FRAME_MAGIC_VC8 0x19930522 and reads the same throw information
+    // for all three.
+    const ULONG_PTR MSC_THROW_MAGIC_FIRST = 0x19930520;
+    const ULONG_PTR MSC_THROW_MAGIC_LAST = 0x19930522;
+    // The decorated names of is_plain_std_exception's types, as found in the W103 build's own RTTI (.?AV = a class).
+    const char* const PLAIN_STD_DECORATED[] = {
+        ".?AVbad_alloc@std@@", ".?AVbad_array_new_length@std@@", ".?AVbad_cast@std@@", ".?AVbad_exception@std@@",
+        ".?AVbad_optional_access@std@@", ".?AVbad_weak_ptr@std@@", ".?AVlength_error@std@@", ".?AVout_of_range@std@@",
+    };
+    const int MAX_THROWN_TYPES = 6;
+    const size_t THROWN_NAME_CHARS = 160;
+    const size_t THROWN_WHAT_CHARS = 400;
+
+    struct ThrownInfo
+    {
+        int mCount;
+        char mNames[MAX_THROWN_TYPES][THROWN_NAME_CHARS];
+        char mWhat[THROWN_WHAT_CHARS];
+    };
+    ThrownInfo sThrown;   // filled and read on the writer thread only
+
+    // Only plain C here: __try cannot be used in a function with C++ objects to unwind (C2712). Everything it reads
+    // is the crashed process's own memory, which a damaged record could make unreadable: the __except keeps what was
+    // read so far. Returns false when the record is not one this can read.
+    bool read_cpp_throw(const EXCEPTION_RECORD* rec, ThrownInfo* out)
+    {
+        out->mCount = 0;
+        out->mWhat[0] = '\0';
+#if defined(_WIN64)
+        if (rec->NumberParameters < 4 || rec->ExceptionInformation[0] < MSC_THROW_MAGIC_FIRST
+            || rec->ExceptionInformation[0] > MSC_THROW_MAGIC_LAST) return false;
+        const ULONG_PTR object = rec->ExceptionInformation[1];
+        const ULONG_PTR throw_info = rec->ExceptionInformation[2];
+        const ULONG_PTR image = rec->ExceptionInformation[3];
+        if (!throw_info || !image) return false;
+        bool plain = false;   // the thrown type (the array's first entry) is one of PLAIN_STD_DECORATED
+        __try
+        {
+            const ULONG_PTR types = image + *reinterpret_cast<const DWORD*>(throw_info + 12);   // ThrowInfo.CatchableTypeArray
+            const int count = *reinterpret_cast<const int*>(types);                              // NumEntries
+            for (int i = 0; i < count && out->mCount < MAX_THROWN_TYPES; ++i)
+            {
+                const ULONG_PTR type = image + *reinterpret_cast<const DWORD*>(types + 4 + 4 * static_cast<ULONG_PTR>(i));
+                const ULONG_PTR descriptor = image + *reinterpret_cast<const DWORD*>(type + 4);   // CatchableType.TypeDescriptor
+                const char* name = reinterpret_cast<const char*>(descriptor + 2 * sizeof(void*)); // after pVFTable, spare
+                copy_printable(out->mNames[out->mCount], THROWN_NAME_CHARS, name);
+                if (out->mCount == 0)
+                {
+                    for (const char* known : PLAIN_STD_DECORATED)
+                    {
+                        if (strcmp(name, known) == 0) plain = true;
+                    }
+                }
+                ++out->mCount;
+                // what() only for those types, through the std::exception base: the entry's NonVirtualAdjustment finds
+                // it inside the thrown object (a virtual base, OffsetToVBPtr != -1, is not followed), and its virtual
+                // table pointer must lie in a loaded module's image before anything is called through it. VirtualQuery,
+                // not GetModuleHandleExW: that takes the loader lock, which a thread that died inside LoadLibrary or
+                // DllMain still holds. Source: learn.microsoft.com MEMORY_BASIC_INFORMATION - State MEM_COMMIT
+                // "committed pages"; Type MEM_IMAGE "mapped into the view of an image section".
+                if (plain && object && !out->mWhat[0] && strcmp(name, ".?AVexception@std@@") == 0
+                    && *reinterpret_cast<const int*>(type + 12) == -1)
+                {
+                    const ULONG_PTR base = object + static_cast<ULONG_PTR>(static_cast<LONG_PTR>(*reinterpret_cast<const int*>(type + 8)));
+                    const ULONG_PTR vtable = *reinterpret_cast<const ULONG_PTR*>(base);
+                    MEMORY_BASIC_INFORMATION mbi;
+                    if (vtable && VirtualQuery(reinterpret_cast<LPCVOID>(vtable), &mbi, sizeof(mbi)) == sizeof(mbi)
+                        && mbi.State == MEM_COMMIT && mbi.Type == MEM_IMAGE)
+                    {
+                        const std::exception* e = reinterpret_cast<const std::exception*>(base);
+                        copy_printable(out->mWhat, THROWN_WHAT_CHARS, e->what());
+                    }
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return out->mCount > 0;
+#else
+        (void)rec;
+        return false;   // 32-bit x86 keeps absolute pointers here; WolfViewer ships 64-bit Windows builds only
+#endif
+    }
+
+    void write_cpp_throw(CrashText& o, const EXCEPTION_RECORD* rec)
+    {
+        if (!read_cpp_throw(rec, &sThrown))
+        {
+            out_str(o, "thrown: (the exception record has no type information)\n");
+            return;
+        }
+        // The compiler's own type names (".?AVbad_alloc@std@@" is std::bad_alloc), the thrown type first, then the
+        // types it can be caught as.
+        out_str(o, "thrown: ");
+        for (int i = 0; i < sThrown.mCount; ++i)
+        {
+            if (i > 0) out_str(o, " < ");
+            out_str(o, sThrown.mNames[i]);
+        }
+        out_str(o, "\n");
+        out_str(o, "what: ");
+        out_str(o, sThrown.mWhat[0] ? sThrown.mWhat : "?");   // "?": not one of the plain standard types (see above)
+        out_str(o, "\n");
+    }
+
+    // [W106 MEMLOG 2026-11-13] The process's and the computer's memory now, and the viewer's own figures from its last
+    // log line (wolfmemorylog.cpp). A healthy thread writes this, so GetPerformanceInfo's slow read is fine here.
+    void write_memory(CrashText& o)
+    {
+        char line[1024];
+        if (WolfMemoryLog::formatSystemNow(line, sizeof(line), true) > 0)
+        {
+            out_str(o, "memory: ");
+            out_str(o, line);
+            out_str(o, "\n");
+        }
+        if (WolfMemoryLog::formatLastViewer(line, sizeof(line)) > 0)
+        {
+            out_str(o, "viewer memory: ");
+            out_str(o, line);
+            out_str(o, "\n");
+        }
+    }
+
     void write_stack_file()
     {
         HANDLE f = CreateFileW(sStackPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -246,6 +810,12 @@ namespace
         o.mFile = f;
         o.mUsed = 0;
         out_str(o, "WolfViewer crash stack\nformat: 1\nplatform: windows\n");
+        if (sViewerVersion[0])
+        {
+            out_str(o, "viewer: ");
+            out_str(o, sViewerVersion);
+            out_str(o, "\n");
+        }
         const EXCEPTION_RECORD* rec = sPointers ? sPointers->ExceptionRecord : nullptr;
         if (rec)
         {
@@ -263,10 +833,24 @@ namespace
                 out_hex(o, static_cast<unsigned long long>(rec->ExceptionInformation[1]));
                 out_str(o, "\n");
             }
+            if (rec->ExceptionCode == MSC_CPP_EXCEPTION)
+            {
+                write_cpp_throw(o, rec);
+            }
+            else if (sTermType[0])
+            {
+                // the access violation exceptionTerminateHandler forces after on_terminate noted the exception
+                out_str(o, "thrown: ");
+                out_str(o, sTermType);
+                out_str(o, " (std::terminate)\nwhat: ");
+                out_str(o, sTermWhat[0] ? sTermWhat : "?");
+                out_str(o, "\n");
+            }
         }
         out_str(o, "thread: ");
         out_dec(o, sCrashThreadId);
         out_str(o, "\n");
+        write_memory(o);
 #if defined(_M_X64)
         if (sPointers && sPointers->ContextRecord)
         {
@@ -360,6 +944,7 @@ namespace
                           const std::string& log_out, bool copy_log)
     {
         if (!copy_path(sStackPath, PATH_CHARS, stack) || !copy_path(sDumpPath, PATH_CHARS, dump)) return false;
+        install_module_names();   // [W106 MEMLOG 2026-11-13] for out_location, without the loader lock at the crash
         sCopyLog = copy_log && copy_path(sLogIn, PATH_CHARS, log_in) && copy_path(sLogOut, PATH_CHARS, log_out);
         sRequest = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         sDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -375,8 +960,18 @@ namespace
         CloseHandle(t);   // it runs on; the handle is not needed
         sPrevFilter = SetUnhandledExceptionFilter(unhandled_filter);
         signal(SIGABRT, on_sigabrt);
+        // [W106 MEMLOG 2026-11-13] after llappviewerwin32.cpp wWinMain's own set_terminate, so it is chained
+        sPrevTerminate = std::set_terminate(on_terminate);
         return true;
     }
+}
+
+void WolfCrashReport::refreshModuleNames()
+{
+    // [W106 MEMLOG 2026-11-13] the list again only when the loader's notices are not available (see install_module_names)
+    if (!sRequest) return;
+    if (!sDllNotifications) snapshot_modules(true);
+    log_table_full_once();
 }
 
 bool WolfCrashReport::writeForException(void* exception_pointers)
@@ -397,7 +992,9 @@ namespace
     char sLogIn[2048] = {};
     char sLogOut[2048] = {};
     bool sCopyLog = false;
-    volatile sig_atomic_t sWritten = 0;
+    // Once per process. std::atomic_flag "shall be lock-free" ([atomics.flag]) and a lock-free atomic operation may
+    // be used in a signal handler ([support.signal]), so two threads crashing at once cannot both get past it.
+    std::atomic_flag sWritten;   // C++20: default-constructed clear ([atomics.flag], P0883)
     const off_t LOG_COPY_MAX = 8 * 1024 * 1024;
 
     bool copy_path(char* dst, size_t cap, const std::string& s)
@@ -544,8 +1141,7 @@ namespace
 
     void on_fatal_signal(int signum, void* siginfo, void* ucontext)
     {
-        if (sWritten) return;
-        sWritten = 1;
+        if (sWritten.test_and_set()) return;
         const int fd = open(sStackPath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
         if (fd >= 0)
         {
@@ -557,6 +1153,12 @@ namespace
 #else
             out_str(o, "WolfViewer crash stack\nformat: 1\nplatform: linux\n");
 #endif
+            if (sViewerVersion[0])
+            {
+                out_str(o, "viewer: ");
+                out_str(o, sViewerVersion);
+                out_str(o, "\n");
+            }
             out_str(o, "signal: ");
             out_dec(o, static_cast<unsigned long long>(signum));
             out_str(o, " (");
@@ -573,6 +1175,30 @@ namespace
                 out_str(o, "address: ");
                 out_location(o, pc);
                 out_str(o, "\n");
+            }
+            if (sTermType[0])
+            {
+                out_str(o, "thrown: ");
+                out_str(o, sTermType);
+                out_str(o, "\nwhat: ");
+                out_str(o, sTermWhat[0] ? sTermWhat : "?");   // as on Windows: "?" when there is no plain what() text
+                out_str(o, "\n");
+            }
+            {   // [W106 MEMLOG 2026-11-13] memory now and the viewer's last figures (wolfmemorylog.cpp). Static, not on
+                // the crashed thread's stack (this handler runs on it; once per process: sWritten).
+                static char line[1024];
+                if (WolfMemoryLog::formatSystemNow(line, sizeof(line), true) > 0)
+                {
+                    out_str(o, "memory: ");
+                    out_str(o, line);
+                    out_str(o, "\n");
+                }
+                if (WolfMemoryLog::formatLastViewer(line, sizeof(line)) > 0)
+                {
+                    out_str(o, "viewer memory: ");
+                    out_str(o, line);
+                    out_str(o, "\n");
+                }
             }
             // backtrace() from inside the handler: the first frames are this handler and LLApp's, then the signal
             // trampoline, then the code that crashed. The website's signature starts at the "address:" frame.
@@ -601,6 +1227,8 @@ namespace
         void* warm[2];
         backtrace(warm, 2);
         LLApp::setFatalSignalHook(on_fatal_signal);
+        // [W106 MEMLOG 2026-11-13] after llappviewerlinux.cpp main's own set_terminate (macOS has none), so it is chained
+        sPrevTerminate = std::set_terminate(on_terminate);
         return true;
     }
 }
@@ -617,6 +1245,8 @@ void WolfCrashReport::installHandler(bool second_instance)
     // which made it (lldir.cpp getDumpDir). The log: initLoggingAndGetLastDuration logs to LL_PATH_LOGS APP_NAME.log.
     const std::string dir = gDirUtilp->getDumpDir();
     const std::string sep = gDirUtilp->getDirDelimiter();
+    // [W106 MEMLOG 2026-11-13] the build's version, written into crash_stack.txt as "viewer:" (see sViewerVersion)
+    copy_printable(sViewerVersion, sizeof(sViewerVersion), LLVersionInfo::instance().getChannelAndVersion().c_str());
     const bool ok = install_platform(dir + sep + STACK_FILE, dir + sep + APP_NAME + ".dmp",
                                      gDirUtilp->getExpandedFilename(LL_PATH_LOGS, APP_NAME + ".log"), dir + sep + APP_NAME + ".log",
                                      !second_instance);
@@ -824,9 +1454,29 @@ namespace
             p.mFields.emplace_back("crashtime", llformat("%lld", static_cast<long long>(c.mWhen)));
 
             std::string text, gz;
-            if (read_file(c.mDir + sep + STACK_FILE, MAX_STACK_BYTES, text) && WolfLogScrub::gzip_string(text, gz))
+            std::string stack_viewer;   // [W106 MEMLOG 2026-11-13] the stack file's "viewer:" line (write_stack_file / on_fatal_signal)
+            if (read_file(c.mDir + sep + STACK_FILE, MAX_STACK_BYTES, text))
             {
-                p.mParts.push_back({ "stack", "crash-stack.txt.gz", "application/gzip", gz });
+                // the "viewer:" line, and the "thrown:" / "what:" lines through the Flea Report's scrub (they come from
+                // the crashed program's own exception text)
+                std::istringstream lines(text);
+                std::string line, kept;
+                while (std::getline(lines, line))
+                {
+                    if (stack_viewer.empty() && line.compare(0, 8, "viewer: ") == 0)
+                    {
+                        stack_viewer = one_line(line.substr(8), 120);
+                    }
+                    else if (line.compare(0, 8, "thrown: ") == 0 || line.compare(0, 6, "what: ") == 0)
+                    {
+                        const size_t colon = line.find(": ") + 2;
+                        line = line.substr(0, colon) + one_line(WolfLogScrub::wolf_scrub_log(line.substr(colon), secrets), 600);
+                    }
+                    kept += line;
+                    kept += '\n';
+                }
+                text = kept;
+                if (WolfLogScrub::gzip_string(text, gz)) p.mParts.push_back({ "stack", "crash-stack.txt.gz", "application/gzip", gz });
             }
 
             std::string raw;
@@ -840,6 +1490,11 @@ namespace
                     if (WolfLogScrub::gzip_string(info_text, gz)) p.mParts.push_back({ "info", "crash-info.txt.gz", "application/gzip", gz });
                 }
             }
+            // [W106 MEMLOG 2026-11-13] no static_debug_info.log (a crash before writeDebugInfo): the version from the stack
+            // file, so viewercrashreport.php's "Crashed viewer:" is not "(not recorded ...)"
+            const bool has_version = std::any_of(p.mFields.begin(), p.mFields.end(),
+                [](const std::pair<std::string, std::string>& f) { return f.first == "crashed_viewer"; });
+            if (!has_version && !stack_viewer.empty()) p.mFields.emplace_back("crashed_viewer", stack_viewer);
 
             // The log as the crash left it (copied by the handler). WolfViewer.old is not used: after more than one
             // run it may be a different session's.

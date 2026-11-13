@@ -29,6 +29,7 @@
 #include "llvoavatar.h"
 #include "wolfaimode.h"   // [AI MODE 2026-11-05/] the AI Mode name tag
 #include "wolfgrid.h"     // [AI MODE 2026-11-05/] isOnWolfTerritories
+#include "wolfvrscreen.h" // [VR NAME TAGS 2026-11-13/] firstPerson: own tag and voice dot left out, as in mouselook
 
 #include <stdio.h>
 #include <ctype.h>
@@ -3277,7 +3278,8 @@ void LLVOAvatar::idleUpdateVoiceVisualizer(bool voice_enabled, const LLVector3 &
     {
         static LLCachedControl<bool> voice_disable_mic(gSavedSettings, "VoiceDisableMic");
         static LLCachedControl<bool> fsShowMyOwnVoiceVisualizer(gSavedSettings, "FSShowMyOwnVoiceVisualizer"); // <FS:PP> FIRE-21210: Don't show my voice visualizer
-        if (gAgentCamera.cameraMouselook() || voice_disable_mic || !fsShowMyOwnVoiceVisualizer)
+        // <WolfViewer 2026-11-13/> [VR NAME TAGS] VR 3D Mode first person (Hide my avatar) counts as mouselook
+        if (gAgentCamera.cameraMouselook() || WolfVRScreen::firstPerson() || voice_disable_mic || !fsShowMyOwnVoiceVisualizer)
         {
             render_visualizer = false;
         }
@@ -3840,6 +3842,7 @@ void LLVOAvatar::idleUpdateNameTag(const LLVector3& root_pos_last)
         static LLCachedControl<S32> name_tag_mode(gSavedSettings, "AvatarNameTagMode");
         render_name = render_name
             && !gAgentCamera.cameraMouselook()
+            && !WolfVRScreen::firstPerson()   // <WolfViewer 2026-11-13/> [VR NAME TAGS] VR first person, as mouselook
             && (visible_chat || (render_name_show_self && name_tag_mode));
     }
 

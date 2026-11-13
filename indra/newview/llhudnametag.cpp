@@ -33,6 +33,8 @@
 #include "lltracerecording.h"
 
 #include "llagent.h"
+#include "wolfvrscreen.h"   // <WolfViewer 2026-11-13/> [VR NAME TAGS] headCamera: the push-apart test in VR
+#include "llvoavatarself.h" // <WolfViewer 2026-11-13/> [VR NAME TAGS] the seat's speed in VR
 #include "llviewercontrol.h"
 #include "llcriticaldamp.h"
 #include "lldrawable.h"
@@ -580,14 +582,22 @@ void LLHUDNameTag::updateVisibility()
         return;
     }
 
-    if (vec_from_camera * LLViewerCamera::getInstance()->getAtAxis() <= LLViewerCamera::getInstance()->getNear() + 0.1f + mSourceObject->getVObjRadius())
+    // <WolfViewer 2026-11-13> [VR NAME TAGS] In VR 3D Mode the tag stays where LLVOAvatar::idleCalcNameTagPosition put it
+    // (above the head, already clear of the body). The push towards the camera by the avatar's whole radius is for a flat
+    // screen, where it cannot be seen; in a headset each eye sees the tag at its real depth, and pushed by the avatar's
+    // bounding radius it floated towards the viewer: measured 2026-11-13 in the e2e pictures - the own tag 52 px apart
+    // between the eyes against the head's 15 px, as if 0.5 m away for a head about 1.8 m away. Only the near-plane
+    // rule stays (never closer than the near plane + 0.1 m).
+    const F32 push_radius = WolfVRScreen::headCamera() ? 0.f : mSourceObject->getVObjRadius();
+    if (vec_from_camera * LLViewerCamera::getInstance()->getAtAxis() <= LLViewerCamera::getInstance()->getNear() + 0.1f + push_radius)
     {
         mPositionAgent = LLViewerCamera::getInstance()->getOrigin() + vec_from_camera * ((LLViewerCamera::getInstance()->getNear() + 0.1f) / (vec_from_camera * LLViewerCamera::getInstance()->getAtAxis()));
     }
     else
     {
-        mPositionAgent -= dir_from_camera * mSourceObject->getVObjRadius();
+        mPositionAgent -= dir_from_camera * push_radius;
     }
+    // </WolfViewer>
 
     mLastDistance = (mPositionAgent - LLViewerCamera::getInstance()->getOrigin()).magVec();
 
@@ -767,6 +777,22 @@ void LLHUDNameTag::updateAll()
 
     LLTrace::CountStatHandle<>* camera_vel_stat = LLViewerCamera::getVelocityStat();
     F32 camera_vel = (F32)LLTrace::get_frame_recording().getLastRecording().getPerSec(*camera_vel_stat);
+    // <WolfViewer 2026-11-13> [VR NAME TAGS] in VR 3D Mode the camera stat is not the camera's speed: it is fed only by
+    // LLViewerCamera::updateCameraLocation (llviewercamera.cpp:156), the desktop camera's update, which starts each frame
+    // from where the headset's head left the camera (wolfvrscreen.cpp setPickCamera) - placed from the avatar by buildMap,
+    // not where LLAgentCamera puts the desktop camera - so the jump between the two counted as camera movement every
+    // frame and the overlapping tags were not pushed apart. The headset view goes with the avatar, so its speed
+    // (the body's, not the head's turning) decides, against the same MAX_STABLE_CAMERA_VELOCITY (m/s). Seated, the
+    // headset view rides with the seat (wolfvrscreen.cpp buildMap: the rig on the vehicle), so the seat's object (its
+    // root) gives the speed: tags are not pushed apart while the vehicle moves, as on the desktop, whose camera moves
+    // with the vehicle too
+    if (WolfVRScreen::headCamera())
+    {
+        const LLViewerObject* seat = isAgentAvatarValid() && gAgentAvatarp->isSitting() && gAgentAvatarp->getParent()
+                                         ? ((LLViewerObject*)gAgentAvatarp->getParent())->getRootEdit() : nullptr;
+        camera_vel = (seat ? seat->getVelocity() : gAgent.getVelocity()).magVec();
+    }
+    // </WolfViewer>
     if (camera_vel > MAX_STABLE_CAMERA_VELOCITY)
     {
         return;

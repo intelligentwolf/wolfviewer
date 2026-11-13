@@ -37,6 +37,10 @@
 //                     (wolfdrive.cpp WolfDrive::sendAnalogue): throttle = power, brake, gear = the reverser (1 forward,
 //                     0 neutral, -1 reverse), buttons = horn (4) and, while Easy driving is on, ASSIST (4096). The
 //                     region reads them itself (IWolfDriveModule.TryGetInput) - no script in between.
+// [wolf-rail 1.2] AUTO (Paul 13 Nov: "trains should have an auto mode as well btw so they can just run"): the cab's AUTO
+// button holds CRUISE (256) for a moment with both levers let go (Cab.cs BTN_AUTO, EngineDriver.ReadDriver: the bit
+// coming on switches Auto on, or off). The region says mode=auto while the train drives itself; the cab then sends both
+// levers let go, and taking a lever (a notch, a drag, Up / Down) takes the train back.
 // Wolf Territories only: off it nothing is read, nothing is sent and the cab does not show.
 class WolfTrain : public LLSingleton<WolfTrain>
 {
@@ -80,6 +84,9 @@ public:
     S32  reverser() const { return mRev; }
     void setReverser(S32 r);
     void setHorn(bool held) { mHornHeld = held; }
+    /** [wolf-rail 1.2] Auto: shown and sent while the region says mode=auto, or the driver has just asked for it. */
+    bool autoOn() const { return mAutoWant; }
+    void pressAuto();
     bool horn() const { return mHornHeld; }
     bool mph() const;
     void setMph(bool on);
@@ -93,9 +100,10 @@ public:
     /** The cab's keys, while driving() (wolfdrive.cpp noteScanKey: unmodified keys only, never one the UI took - so typing
      *  in chat never reaches them, llviewerinput.cpp mKeyHandledByUI). Watch-only like every Wolf HUD key: the key's own
      *  binding still runs. Up / W one step more, Down / S one step less; F5 the reverser (forward, neutral, reverse in turn);
-     *  F2 Easy / driver's mode; F3 mph / km/h; F4 show / hide the cab. F2-F5 have no binding in any mode (key_bindings.xml
-     *  first_person / third_person / sitting) and are no menu's shortcut (only F1 is, menu_viewer.xml); every free letter
-     *  is a driving action's default key (wolfdrive.cpp ACTION_DEFAULT_KEYS) or a movement key. */
+     *  F2 Easy / driver's mode; F3 mph / km/h; F4 show / hide the cab; [1.2] F8 AUTO. F2-F9 have no binding in any mode
+     *  (key_bindings.xml first_person / third_person / sitting) and are no menu's shortcut unmodified (only F1 is,
+     *  menu_viewer.xml; F2-F9 appear there only with control|alt); every free letter is a driving action's default key
+     *  (wolfdrive.cpp ACTION_DEFAULT_KEYS) or a movement key. */
     static bool isCabKey(KEY key);
     void noteKey(KEY key, bool key_down, bool repeat);
 
@@ -118,6 +126,12 @@ private:
     F32  mPower = 0.f, mBrake = 1.f;
     S32  mRev = 1;
     bool mHornHeld = false;
+    // [wolf-rail 1.2] Auto: what the driver asked for (or the region says, mode=auto), when they last chose here, and the
+    // AUTO button's press on the wire (CRUISE held until mAutoPulseUntil)
+    bool mAutoWant = false;
+    F64  mAutoChosenAt = -1.0e9;
+    F64  mAutoPulseUntil = -1.0;
+    void takeBack();
 };
 
 /** The Train Cab across the bottom of the screen (main_view.xml wolf_train_cab), in the dashboards' family: all drawn
@@ -149,6 +163,7 @@ public:
         H_POWER, H_BRAKE,
         H_REV_FWD, H_REV_N, H_REV_REV,
         H_HORN, H_MODE, H_UNITS, H_HELP, H_HELP_BACK, H_HELP_NEXT, H_HELP_CLOSE, H_CLOSE, H_SHOW_TAB,
+        H_AUTO,
     };
 
 private:

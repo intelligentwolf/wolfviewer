@@ -64,6 +64,13 @@ namespace
     const F32 NOTCH_POWER[WolfTrain::NOTCH_COUNT] = { 0.f, 1.f / 3.f, 1.f };
     // Driver's mode: one key press moves a lever a tenth (Up: brake off first, then power on; Down the other way).
     const F32 KEY_STEP = 0.1f;
+    // [wolf-rail 1.2] AUTO's press on the wire: CRUISE held this long, so at least two of the region's plans see it
+    // (EngineDriver.TICK 0.25 s; the "in" message goes out within wolfdrive.cpp SEND_MIN_GAP 0.1 s of a change). The region
+    // switches on the bit coming on (EngineDriver.ReadDriver), so a longer hold is still one press.
+    const F64 AUTO_PULSE_S = 0.6;
+    // A choice the driver made here (AUTO pressed, a lever taken) wins over the region's mode for this long: its answer to
+    // that press takes a plan and the way back, and the cab messages sent meanwhile still carry the old mode (four a second).
+    const F64 AUTO_GRACE_S = 1.5;
     // 1 m/s = 3.6 km/h; 1 mile = 1609.344 m exactly (the international yard and pound agreement, 1959), so 1 m/s =
     // 3600 / 1609.344 mph.
     const F32 MS_TO_KMH = 3.6f, MS_TO_MPH = 3600.f / 1609.344f;
@@ -171,7 +178,7 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         if (k == "state") { on = v == "on"; off = v == "off"; }
         else if (k == "train") c.mTrain = utf8Cut(v, 254);
         else if (k == "kind") { if (v.empty() || v == "steam" || v == "diesel" || v == "electric" || v == "highspeed" || v == "shunter" || v == "tram") c.mKind = v; }
-        else if (k == "mode") { if (v == "driver" || v == "easy" || v == "script" || v == "timetable") c.mMode = v; }
+        else if (k == "mode") { if (v == "driver" || v == "easy" || v == "auto" || v == "script" || v == "timetable") c.mMode = v; }
         else if (k == "stop") { if (v.empty() || v == "station" || v == "stop") c.mStop = v; }
         else if (k == "region") c.mRegion = utf8Cut(v, 254);
         else if (k == "note") c.mNote = utf8Cut(v, 254);
@@ -195,6 +202,9 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     mCab = c;
     mSeat = root->getID();
     mLastAt = now();
+    // [wolf-rail 1.2] the region's word on Auto (its own, or a script's train.control [train, "auto"]) - unless the driver
+    // has just chosen here (AUTO_GRACE_S)
+    if (fresh || now() - mAutoChosenAt > AUTO_GRACE_S) mAutoWant = c.mMode == "auto";
     if (fresh)
     {
         mOpen = true;
@@ -232,6 +242,8 @@ void WolfTrain::close()
     mSeat.setNull();
     mCab = Cab();
     mHornHeld = false;
+    mAutoWant = false;
+    mAutoPulseUntil = -1.0;
 }
 
 void WolfTrain::claimBottom()
@@ -330,6 +342,7 @@ bool WolfTrain::easy() const
 
 void WolfTrain::setEasy(bool on)
 {
+    takeBack();   // [wolf-rail 1.2] the new mode's levers start on the brake: that takes the train back from Auto
     gSavedSettings.setBOOL("WolfTrainCabEasy", on);
     // Changing mode never lets the train run on by itself: both start on the brake.
     mNotch = NOTCH_STOP;
@@ -339,17 +352,50 @@ void WolfTrain::setEasy(bool on)
 
 void WolfTrain::setNotch(S32 n)
 {
+    takeBack();
     mNotch = llclamp(n, 0, (S32)NOTCH_COUNT - 1);
 }
 
 void WolfTrain::setPower(F32 v)
 {
+    takeBack();
     mPower = llclamp(v, 0.f, 1.f);
 }
 
 void WolfTrain::setBrake(F32 v)
 {
+    takeBack();
     mBrake = llclamp(v, 0.f, 1.f);
+}
+
+// [wolf-rail 1.2] A lever taken while the train drives itself: the cab sends the lever as it now is, and the region takes
+// Auto off on seeing it move (EngineDriver.ReadDriver).
+void WolfTrain::takeBack()
+{
+    if (!mAutoWant) return;
+    mAutoWant = false;
+    mAutoChosenAt = now();
+}
+
+void WolfTrain::pressAuto()
+{
+    if (!driving()) return;
+    mAutoChosenAt = now();
+    mAutoPulseUntil = now() + AUTO_PULSE_S;
+    if (mAutoWant)
+    {
+        // off again: in Easy driving the lever is put to STOP (the train brakes to a stand); in the driver's mode both
+        // levers stay let go, so the train keeps its speed and the driver takes it from there
+        mAutoWant = false;
+        if (easy()) mNotch = NOTCH_STOP;
+        return;
+    }
+    // on: both levers let go with the press - the region switches Auto on only with neither held. Easy driving's lever goes
+    // to STOP meanwhile (not sent while Auto is on), so Auto ending for any other reason never leaves it at GO
+    mAutoWant = true;
+    mPower = 0.f;
+    mBrake = 0.f;
+    mNotch = NOTCH_STOP;
 }
 
 void WolfTrain::setReverser(S32 r)
@@ -369,11 +415,13 @@ void WolfTrain::setMph(bool on)
 
 F32 WolfTrain::sendPower() const
 {
+    if (mAutoWant) return 0.f;   // [wolf-rail 1.2] Auto: both levers let go
     return easy() ? NOTCH_POWER[mNotch] : mPower;
 }
 
 F32 WolfTrain::sendBrake() const
 {
+    if (mAutoWant) return 0.f;
     return easy() ? (mNotch == NOTCH_STOP ? 1.f : 0.f) : mBrake;
 }
 
@@ -381,7 +429,7 @@ S32 WolfTrain::sendGear() const
 {
     // Source: wolfdrive.h GEAR_R -1, GEAR_N 0, 1 the first forward gear; the plugin reads -1 R, 0 N, >= 1 forward
     // (wolf-rail Cab.cs DriveControls.Reverser). Easy driving always goes forward.
-    if (easy()) return 1;
+    if (easy() || mAutoWant) return 1;   // [wolf-rail 1.2] Auto runs forward
     return mRev > 0 ? 1 : mRev < 0 ? WolfDrive::GEAR_R : WolfDrive::GEAR_N;
 }
 
@@ -390,22 +438,25 @@ U32 WolfTrain::sendButtons() const
     U32 b = 0;
     if (mHornHeld) b |= WolfDrive::BTN_HORN;
     if (easy()) b |= WolfDrive::BTN_ASSIST;   // the plugin's Easy driving (Cab.cs BTN_ASSIST, held while it is on)
+    if (now() < mAutoPulseUntil) b |= WolfDrive::BTN_CRUISE;   // [wolf-rail 1.2] AUTO pressed (Cab.cs BTN_AUTO 256)
     return b;
 }
 
 // static
 bool WolfTrain::isCabKey(KEY key)
 {
-    return key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S' || key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4;
+    return key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S' || key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4
+        || key == KEY_F8;   // [wolf-rail 1.2] AUTO
 }
 
 void WolfTrain::noteKey(KEY key, bool key_down, bool repeat)
 {
     if (!key_down || !driving()) return;
-    if (key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4)
+    if (key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4 || key == KEY_F8)
     {
         if (repeat) return;   // one press, one step
-        if (key == KEY_F5) setReverser(mRev > 0 ? 0 : mRev == 0 ? -1 : 1);   // forward -> neutral -> reverse -> forward
+        if (key == KEY_F8) pressAuto();
+        else if (key == KEY_F5) setReverser(mRev > 0 ? 0 : mRev == 0 ? -1 : 1);   // forward -> neutral -> reverse -> forward
         else if (key == KEY_F2) setEasy(!easy());
         else if (key == KEY_F3) setMph(!mph());
         else toggleShown();
@@ -601,11 +652,14 @@ namespace
           "With neither, the train keeps its speed. The reverser sets FORWARD or NEUTRAL.", "Stations are yours to stop at. The red lamp lights when the line makes the train brake." },
         { "The horn and the dial", "WHISTLE (or HORN) sounds the engine's own - everyone near hears it. The horn key works too.",
           "The dial shows the speed and, in red, the fastest this line allows. Click it for mph or km/h.", "THE LINE AHEAD shows the next station and how much track is in front of you." },
+        // [wolf-rail 1.2] Auto (Paul 13 Nov: "trains should have an auto mode as well btw so they can just run")
+        { "Auto", "Press AUTO and the train drives itself: the line's speed, the stations and the signals.",
+          "Take any lever, or press AUTO again, and you are driving once more.", "Stand up in Auto and the train goes on to the next station and stops there." },
         { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power). F5 sets the reverser:",
-          "forward, neutral, reverse in turn. F2 switches Easy driving and driver's mode, F3 mph and km/h.", "F4 hides or shows the cab. Your horn key (H unless you changed it) sounds the horn." },
+          "forward, neutral, reverse in turn. F2 switches Easy driving and driver's mode, F3 mph and km/h, F8 AUTO.", "F4 hides or shows the cab. Your horn key (H unless you changed it) sounds the horn." },
         // [client review 13 Nov, W7] a gesture's own key is not taken from it: LLGestureMgr::triggerGesture(key, mask)
         // (llgesturemgr.cpp:761) plays it from the same key press
-        { "Your gestures", "A gesture you have put on F2, F3, F4 or F5 still plays while you drive, as well as the cab's key.",
+        { "Your gestures", "A gesture you have put on F2, F3, F4, F5 or F8 still plays while you drive, as well as the cab's key.",
           "If you would rather it did not, give the gesture another key in the Gestures window.", "Standing up gives every key back as it was." },
     };
     const S32 CARD_COUNT = (S32)(sizeof(CARDS) / sizeof(CARDS[0]));
@@ -832,6 +886,21 @@ void WolfTrainCabView::draw()
         }
         T(X(400.f), Y(212.f), "REVERSER", 10.f, C_WHITE, true);
     }
+    const bool autoOn = tr.autoOn();
+    if (autoOn)
+    {
+        // [wolf-rail 1.2] the train drives itself: the levers are let go, and the words say so over them
+        rectF(X(18.f), Y(16.f), X(518.f), Y(224.f), LLColor4(th.inset.mV[0], th.inset.mV[1], th.inset.mV[2], 0.86f));
+        T(X(268.f), Y(150.f), "AUTO", 22.f, th.accent, true);
+        T(X(268.f), Y(116.f), "Auto - the train is driving itself", 13.f, C_WHITE, true);
+        T(X(268.f), Y(86.f), "Take a lever, or press AUTO, to drive yourself.", 10.f, C_GREY);
+    }
+    // the AUTO button (F8), between the controls and the dial
+    rectF(X(536.f), Y(130.f), X(680.f), Y(214.f), autoOn ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
+    frameW(X(536.f), Y(130.f), X(680.f), Y(214.f), S(2.f), th.accent);
+    T(X(608.f), Y(182.f), "AUTO", 18.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : th.accent, true);
+    T(X(608.f), Y(152.f), autoOn ? "ON" : "OFF", 11.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_GREY, true);
+    addHit(X(536.f), Y(130.f), X(680.f), Y(214.f), H_AUTO, autoOn ? "Drive yourself again (F8)" : "Auto: the train drives itself - the line's speed, stations and signals (F8)");
 
     // ── centre: the speed dial ────────────────────────────────────────────────────────────────────
     const bool mph = tr.mph();
@@ -866,7 +935,7 @@ void WolfTrainCabView::draw()
     T(cx, cy - S(44.f), llformat("%d", (S32)llround(c.mSpeed * k)), 24.f, C_WHITE, true);
     T(cx, cy - S(70.f), mph ? "mph" : "km/h", 10.f, C_GREY);
     addHit(cx - r, cy - r, cx + r, cy + r, H_UNITS, mph ? "Click for km/h (F3)" : "Click for mph (F3)");
-    T(cx, Y(266.f), c.mMode == "easy" ? "EASY DRIVING" : "YOU ARE DRIVING", 11.f, th.accent, true);
+    T(cx, Y(266.f), autoOn ? "AUTO" : c.mMode == "easy" ? "EASY DRIVING" : "YOU ARE DRIVING", 11.f, th.accent, true);
 
     // ── right: the line ahead, the lamp, the horn ─────────────────────────────────────────────────
     rectF(X(1050.f), Y(14.f), X(1592.f), Y(226.f), th.inset);
@@ -950,6 +1019,7 @@ void WolfTrainCabView::press(EHit id, S32 y)
     case H_REV_N:      tr.setReverser(0); break;
     case H_REV_REV:    tr.setReverser(-1); break;
     case H_HORN:       tr.setHorn(true); break;
+    case H_AUTO:       tr.pressAuto(); break;
     case H_MODE:       tr.setEasy(!tr.easy()); break;
     case H_UNITS:      tr.setMph(!tr.mph()); break;
     case H_HELP:       mShowHelp = !mShowHelp; mHelpPage = 0; break;

@@ -329,7 +329,10 @@ namespace
     ModuleName sModules[MAX_MODULES];
     volatile LONG sModuleSlots = 0;    // slots ever handed out (an upper bound for the scan)
     volatile LONG sModuleFull = 0;     // set when a module found no slot (logged once, outside the loader's callback)
+    volatile LONG sModuleDropped = 0;  // set when a module lost every claim to other writers (logged the same way)
     bool sModuleFullLogged = false;
+    bool sModuleDroppedLogged = false;
+    bool sModuleListCutLogged = false;
 
     // UNICODE_STRING (learn.microsoft.com ntdef.h UNICODE_STRING: Length "in bytes", MaximumLength, Buffer)
     struct WolfUnicodeString
@@ -398,27 +401,43 @@ namespace
         size_t n = 0;
         for (; n + 1 < cap && n < sizeof(sModules[i].mName) && sModules[i].mName[n]; ++n) name[n] = sModules[i].mName[n];
         if (cap > 0) name[n] = '\0';
+        // x64 does not reorder a load with an earlier load, so a compiler barrier and a plain volatile read are an
+        // acquire here (no write to the slot from the reader)
         _ReadWriteBarrier();
-        return _InterlockedCompareExchange(&sModules[i].mSeq, seq, seq) == seq;   // a locked read: acquire
+        const LONG after = sModules[i].mSeq;
+        return after == seq;
     }
 
     // Lock-free; intrinsics only (the loader's callback calls it). A slot that already has this base is rewritten (a new
     // module mapped where an old one was), else a free slot is taken, else a new one; a claim lost to another writer is
-    // tried again.
+    // tried again on another slot (the ones it failed on are skipped). One slot per base is not strict: two writers
+    // adding the same base at once can each take a slot. That is harmless - both hold the same name, and the reader
+    // takes the first that matches.
     void module_add(ULONG_PTR base, const wchar_t* name, size_t chars)
     {
         if (base == 0) return;
-        for (int attempt = 0; attempt < 16; ++attempt)
+        const int MAX_TRIES = 16;
+        LONG failed[MAX_TRIES];
+        int failed_count = 0;
+        for (int attempt = 0; attempt < MAX_TRIES; ++attempt)
         {
             LONG target = -1;
             const LONG used = slots_in_use();
+            auto skipped = [&](LONG i)
+            {
+                for (int k = 0; k < failed_count; ++k)
+                {
+                    if (failed[k] == i) return true;
+                }
+                return false;
+            };
             for (LONG i = 0; i < used && target < 0; ++i)
             {
-                if (static_cast<ULONG_PTR>(sModules[i].mBase) == base) target = i;
+                if (static_cast<ULONG_PTR>(sModules[i].mBase) == base && !skipped(i)) target = i;
             }
             for (LONG i = 0; i < used && target < 0; ++i)
             {
-                if (sModules[i].mBase == 0) target = i;
+                if (sModules[i].mBase == 0 && !skipped(i)) target = i;
             }
             if (target < 0)
             {
@@ -430,11 +449,16 @@ namespace
                 _InterlockedIncrement(&sModuleSlots);   // a new free slot; claimed below like any other
                 continue;
             }
-            if (!slot_lock(target)) continue;
+            if (!slot_lock(target))
+            {
+                failed[failed_count++] = target;   // another writer has it: try a different slot next
+                continue;
+            }
             const LONG64 now = sModules[target].mBase;
             if (now != 0 && static_cast<ULONG_PTR>(now) != base)
             {
-                slot_unlock(target);   // taken for another module meanwhile: look again
+                slot_unlock(target);   // taken for another module meanwhile: look again elsewhere
+                failed[failed_count++] = target;
                 continue;
             }
             copy_base_name(sModules[target].mName, sizeof(sModules[target].mName), name, chars);
@@ -442,6 +466,7 @@ namespace
             slot_unlock(target);
             return;
         }
+        _InterlockedExchange(&sModuleDropped, 1);
     }
 
     void module_remove(ULONG_PTR base)
@@ -492,6 +517,12 @@ namespace
             LL_WARNS("WolfCrashReport") << "EnumProcessModules failed (" << GetLastError() << "): crash frames may name no module" << LL_ENDL;
             return;
         }
+        if (needed > sizeof(mods) && !sModuleListCutLogged)
+        {
+            sModuleListCutLogged = true;
+            LL_WARNS("WolfCrashReport") << "The process has " << needed / sizeof(HMODULE) << " modules; the crash handler lists the first "
+                                        << MAX_MODULES << LL_ENDL;
+        }
         const DWORD count = needed / sizeof(HMODULE) < static_cast<DWORD>(MAX_MODULES) ? needed / sizeof(HMODULE) : static_cast<DWORD>(MAX_MODULES);
         if (prune)
         {
@@ -507,6 +538,15 @@ namespace
         }
         for (DWORD i = 0; i < count; ++i)
         {
+            // still loaded? (it may have been unloaded since the list was taken: then its unload notice may already have
+            // gone by). Fine here - the main thread, outside any crash. An entry left stale anyway can only be met at a
+            // crash if another image is mapped at that address, and that image's load notice rewrites the slot (module_add).
+            HMODULE again = nullptr;
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    reinterpret_cast<LPCWSTR>(mods[i]), &again) || again != mods[i])
+            {
+                continue;
+            }
             wchar_t path[1024] = {};
             const DWORD len = GetModuleFileNameW(mods[i], path, 1024);
             if (len > 0) module_add(reinterpret_cast<ULONG_PTR>(mods[i]), path, len);
@@ -519,6 +559,11 @@ namespace
         {
             sModuleFullLogged = true;
             LL_WARNS("WolfCrashReport") << "Crash handler's module table is full (" << MAX_MODULES << "): later modules are named \"?\" in a crash" << LL_ENDL;
+        }
+        if (sModuleDropped && !sModuleDroppedLogged)
+        {
+            sModuleDroppedLogged = true;
+            LL_WARNS("WolfCrashReport") << "A module could not be added to the crash handler's table (every slot it tried was busy): it is named \"?\" in a crash" << LL_ENDL;
         }
     }
 

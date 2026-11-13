@@ -42,6 +42,7 @@
 #include "llcontrolsavehook.h" // [round 5 2026-11-11] gWolfControlBeforeSave
 #include "llagent.h"       // [G6 2026-11-11] no world-check verdicts from samples taken during a teleport
 #include "llversioninfo.h" // [G5 2026-11-11] the viewer version in the failure stamp
+#include "wolfvkretryrule.h" // [W106 VKRETRY 2026-11-13] the retry rule's pure functions
 #include "llviewercontrol.h"
 #include "llnotificationsutil.h"
 #include "lltrans.h"
@@ -383,33 +384,44 @@ namespace
     // So a resident is never put through more than AUTO_RETRY_LIMIT failed Vulkan starts per viewer version and driver.
     // The driver is OpenGL's, recorded by every start once OpenGL is up (WolfVulkanLastGLDriver): decideBackend runs
     // before the window exists, so it compares against the driver the last start saw.
-    constexpr U32 AUTO_RETRY_LIMIT = 2;
-    std::string failureStamp(bool any_version)
+    //  - [W106 VKRETRY 2026-11-13] A start that crashed (or never came back) while the shared-layer self-test was under
+    //    way (WolfVulkanLayerSelfTestRun still set at the next start, see noteLayerSelfTestStarting) is counted for the
+    //    OpenGL driver only (stamp "*|<driver>"): retried while fewer than AUTO_RETRY_LIMIT are counted, as any start-up
+    //    failure, but a NEW VIEWER VERSION no longer starts that count again - only a different OpenGL driver (another
+    //    driver version or another graphics card changes GL_VERSION / GL_RENDERER) does. Miss Zenn, tickets 805/808/832:
+    //    every release crashed her AMD 26.10.1 driver in that test again before it fell back.
+    //    The resident's own choice (V button, Wolf World > Tools > Vulkan Renderer) still clears the record (chooseBackend).
+    // The rule itself (stamps, counts, the start's decision) is wolfvkretryrule.h, pure functions tested on their own.
+    using WolfVkRetryRule::AUTO_RETRY_LIMIT;
+    WolfVkRetryRule::Record savedFailureRecord()
     {
-        return (any_version ? std::string("*") : LLVersionInfo::instance().getVersion()) + "|" + gSavedSettings.getString("WolfVulkanLastGLDriver");
+        WolfVkRetryRule::Record r;
+        r.mCount = gSavedSettings.getU32("WolfVulkanAutoFailures");
+        r.mStamp = gSavedSettings.getString("WolfVulkanAutoFailStamp");
+        return r;
     }
-    // the stamp's version part is "*" for a failure only a driver change can mend
-    bool stampMatches(const std::string& saved)
+    // fallBack / stopAtRunTime callers say retryable or not ([G5])
+    WolfVkRetryRule::Failure failureKind(bool retryable)
     {
-        if (saved.compare(0, 2, "*|") == 0) return saved == failureStamp(true);
-        return saved == failureStamp(false);
+        return retryable ? WolfVkRetryRule::Failure::PER_VERSION : WolfVkRetryRule::Failure::DRIVER_CHANGE_ONLY;
     }
-    void recordAutomaticFailure(bool retryable)
+    void recordAutomaticFailure(WolfVkRetryRule::Failure kind)
     {
         if (LLAppViewer::instance()->isSecondInstance()) return;   // [round 4 B2] the first instance's counters
-        const std::string stamp = failureStamp(!retryable);
-        U32 count = gSavedSettings.getU32("WolfVulkanAutoFailures");
-        if (gSavedSettings.getString("WolfVulkanAutoFailStamp") != stamp) count = 0;
-        count = retryable ? count + 1 : AUTO_RETRY_LIMIT;
-        gSavedSettings.setU32("WolfVulkanAutoFailures", count);
-        gSavedSettings.setString("WolfVulkanAutoFailStamp", stamp);
-        LL_INFOS("Vulkan") << "Automatic switch to OpenGL recorded: " << count << " of " << AUTO_RETRY_LIMIT << " for " << stamp
-                           << (count < AUTO_RETRY_LIMIT ? " (Vulkan is tried again at the next start)" : " (Vulkan is tried again after a viewer or driver update)") << LL_ENDL;
+        const WolfVkRetryRule::Record r = WolfVkRetryRule::afterFailure(savedFailureRecord(), kind, LLVersionInfo::instance().getVersion(),
+                                                                        gSavedSettings.getString("WolfVulkanLastGLDriver"));
+        gSavedSettings.setU32("WolfVulkanAutoFailures", r.mCount);
+        gSavedSettings.setString("WolfVulkanAutoFailStamp", r.mStamp);
+        const bool driver_only = r.mStamp.compare(0, 2, "*|") == 0;
+        LL_INFOS("Vulkan") << "Automatic switch to OpenGL recorded: " << r.mCount << " of " << AUTO_RETRY_LIMIT << " for " << r.mStamp
+                           << (r.mCount < AUTO_RETRY_LIMIT ? " (Vulkan is tried again at the next start)"
+                               : driver_only ? " (Vulkan is tried again after a graphics driver change, not after a viewer update)"
+                                             : " (Vulkan is tried again after a viewer or driver update)") << LL_ENDL;
     }
     // [round 5 2026-11-11] the Vulkan state keys a second instance must leave as the first instance wrote them
     const char* const VULKAN_STATE_KEYS[] = { "WolfRenderBackend", "WolfVulkanStartOK", "WolfVulkanSessionRun", "WolfVulkanAutoFailures",
                                              "WolfVulkanAutoFailStamp", "WolfVulkanStoppedReason", "WolfVulkanLastGLDriver",
-                                             "WolfVulkanW101SpvRetryDone" };
+                                             "WolfVulkanW101SpvRetryDone", "WolfVulkanLayerSelfTestRun" };
     // Re-reads those keys from the settings file into memory: a key the file holds takes its value, a key it does not
     // hold (saved non-default only, llappviewer.cpp:2237) its default - so the save that follows writes them unchanged.
     void restoreVulkanKeysFromFile(const std::string& filename)
@@ -440,8 +452,7 @@ namespace
     // [round 3] after a recorded failure: will the next start try Vulkan again (decideBackend's rule, same stamp)?
     bool nextStartRetries()
     {
-        const U32 count = gSavedSettings.getU32("WolfVulkanAutoFailures");
-        return count > 0 && count < AUTO_RETRY_LIMIT;
+        return WolfVkRetryRule::nextStartRetries(gSavedSettings.getU32("WolfVulkanAutoFailures"));
     }
     void clearAutomaticFailures()
     {
@@ -626,8 +637,10 @@ namespace
         // the setting follows what is running, so the floater and About tell the truth; the resident can ask again
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
-        recordAutomaticFailure(retryable);   // [G5 2026-11-11]
+        recordAutomaticFailure(failureKind(retryable));   // [G5 2026-11-11]
         gSavedSettings.setString("WolfVulkanSessionRun", "");   // [round 3] counted here, not again as a crash
+        // [W106 VKRETRY] a start that got past the shared-layer self-test and then failed is counted here, by this call
+        gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", false);
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
         // [round 3] the notice says what the next start will do: try Vulkan once more, or not (permanent failure, or the
         // second one in a row)
@@ -651,13 +664,14 @@ namespace
         tearDown();
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
-        recordAutomaticFailure(retryable);   // [G5 2026-11-11] saved with the rest just below
+        recordAutomaticFailure(failureKind(retryable));   // [G5 2026-11-11] saved with the rest just below
         // The reason is saved with the rest BEFORE the box, so a viewer that never comes back from it (killed, or ended
         // from the desktop's "not responding" dialog while the box blocks the main thread: chain42 amd-r49-wlstop) still
         // tells the resident at the next start (decideBackend, WolfVulkanStoppedLastRun). It is cleared once the box has
         // been seen.
         gSavedSettings.setString("WolfVulkanStoppedReason", reason);
         gSavedSettings.setString("WolfVulkanSessionRun", "");   // [round 3] counted here, not again as a crash
+        gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", false);   // [W106 VKRETRY] as fallBack
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
         LLStringUtil::format_map_t args;
         args["[REASON]"] = reason;
@@ -1247,6 +1261,15 @@ void decideBackend()
     // or this start's exec marker saying LLError / out of memory (LAST_EXEC_LLERROR_CRASH / LAST_EXEC_BAD_ALLOC,
     // llappviewer.cpp processMarkerFiles). An OS kill, a Windows logoff (WM_ENDSESSION), a power cut or a resident ending
     // a frozen viewer leave neither and are not counted. The second counted crash in a row sets OpenGL.
+    // [W106 VKRETRY 2026-11-13] the last start was still in (or just past) the shared-layer self-test when it ended:
+    // read once here and cleared whatever this start does, so it can only describe the start just before this one
+    // (it is saved true only by noteLayerSelfTestStarting, and false again by that start's next save)
+    bool layer_self_test_ended = false;
+    if (!LLAppViewer::instance()->isSecondInstance())
+    {
+        layer_self_test_ended = gSavedSettings.getBOOL("WolfVulkanLayerSelfTestRun");
+        gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", false);
+    }
     const std::string last_run = gSavedSettings.getString("WolfVulkanSessionRun");
     if (!last_run.empty() && !LLAppViewer::instance()->isSecondInstance())
     {
@@ -1262,7 +1285,7 @@ void decideBackend()
         {
             LL_WARNS("Vulkan") << "The last Vulkan session (" << last_run << ") crashed (" << (stack ? "its crash stack is in its dump folder" : "exec marker")
                                << ")" << LL_ENDL;
-            recordAutomaticFailure(true);
+            recordAutomaticFailure(WolfVkRetryRule::Failure::PER_VERSION);
             if (!nextStartRetries())
             {
                 gSavedSettings.setString("WolfRenderBackend", "opengl");
@@ -1282,9 +1305,17 @@ void decideBackend()
     if (auto_failures > 0 && gSavedSettings.getString("WolfRenderBackend") == "opengl" && !LLAppViewer::instance()->isSecondInstance())
     {
         const std::string saved = gSavedSettings.getString("WolfVulkanAutoFailStamp");
-        const bool same = stampMatches(saved);
-        if (!same || auto_failures < AUTO_RETRY_LIMIT)
+        const WolfVkRetryRule::Start start = WolfVkRetryRule::atStart(savedFailureRecord(), LLVersionInfo::instance().getVersion(),
+                                                                      gSavedSettings.getString("WolfVulkanLastGLDriver"));
+        if (start == WolfVkRetryRule::Start::AS_SAVED)
         {
+            // [W106 VKRETRY] said in the log, so a report shows why a new version did not try Vulkan
+            LL_INFOS("Vulkan") << "OpenGL kept: " << auto_failures << " automatic failure(s) counted for " << saved
+                               << (saved.compare(0, 2, "*|") == 0 ? " (this graphics driver, any viewer version)" : " (this viewer and driver)") << LL_ENDL;
+        }
+        else
+        {
+            const bool same = start == WolfVkRetryRule::Start::RETRY;
             LL_INFOS("Vulkan") << "Trying Vulkan again: OpenGL was chosen automatically after " << auto_failures << " failure(s) "
                                << (same ? "with this viewer and driver" : "with another viewer version or driver (" + saved + ")") << LL_ENDL;
             if (!same) clearAutomaticFailures();
@@ -1305,10 +1336,13 @@ void decideBackend()
     {
         // The last Vulkan start never confirmed its login screen (crash or hang before it, or [G2] a login screen that
         // was never shown as a picture): OpenGL this time, and say so. [G5] counted like any automatic failure.
-        LL_WARNS("Vulkan") << "The previous Vulkan start did not reach a confirmed login screen; starting in OpenGL" << LL_ENDL;
+        // [W106 VKRETRY] it ended in the shared-layer self-test: counted for this OpenGL driver only, so a viewer update
+        // does not try it again once AUTO_RETRY_LIMIT are counted (rule at recordAutomaticFailure, wolfvkretryrule.h)
+        LL_WARNS("Vulkan") << "The previous Vulkan start did not reach a confirmed login screen"
+                           << (layer_self_test_ended ? " (it ended during the shared-layer self-test)" : "") << "; starting in OpenGL" << LL_ENDL;
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
-        recordAutomaticFailure(true);
+        recordAutomaticFailure(layer_self_test_ended ? WolfVkRetryRule::Failure::SAME_DRIVER_KEEPS : WolfVkRetryRule::Failure::PER_VERSION);
         sState = State::FELL_BACK;
         sLastError = "the previous start with the Vulkan renderer did not get as far as the login screen";
         rememberNotice("WolfVulkanFellBackLastStart", sLastError);
@@ -1332,6 +1366,22 @@ void decideBackend()
 bool vulkanRequested()
 {
     return sRequested;
+}
+
+void noteLayerSelfTestStarting()
+{
+    // [W106 VKRETRY 2026-11-13] Miss Zenn's AMD 26.10.1 starts ended inside the AMD OpenGL driver during this test
+    // (tickets 805/808/832: atio6axx.dll on a driver thread, the last log line wolfvkshare.cpp's "Shared GL/Vulkan
+    // layers" just before selfTest). Saved now, so the next start can tell that ending from any other unconfirmed start
+    // (decideBackend). It stays set through the rest of WolfVkScene::init - a driver thread may fail just after the
+    // round trip returns - and is cleared, on disk, by this start's next save: the Vulkan session marker in initAfterGL,
+    // or fallBack / stopAtRunTime. WolfVulkanLastGLDriver (set in memory at the top of initAfterGL) goes to disk with
+    // it, so the failure is stamped with the driver of the start that failed, not the one before it.
+    // Only the start-up's own test: WolfVkShare::init runs only from WolfVkScene::init (initAfterGL). A second instance
+    // never writes the Vulkan state keys (round 5).
+    if (sState != State::VULKAN_STARTING || LLAppViewer::instance()->isSecondInstance()) return;
+    gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", true);
+    gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
 }
 
 void initAfterGL(LLWindow* window)
@@ -1448,6 +1498,8 @@ void initAfterGL(LLWindow* window)
     {
         const std::string folder = WolfCrashReport::thisRunFolder();
         gSavedSettings.setString("WolfVulkanSessionRun", folder.empty() ? std::string("no-dump-folder") : folder);
+        // [W106 VKRETRY] the start-up is past the shared-layer self-test (and the scene steps after it): saved with this
+        gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", false);
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
     }
 

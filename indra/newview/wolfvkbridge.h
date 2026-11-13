@@ -46,6 +46,10 @@ namespace WolfVkBridge
     void decideBackend();
     bool vulkanRequested();
 
+    // [W106 VKRETRY 2026-11-13] WolfVkShare::init calls this just before the start-up shared-layer self-test: a start
+    // that ends there is then counted for the OpenGL driver only (no retry after a viewer update; wolfvkretryrule.h).
+    void noteLayerSelfTestStarting();
+
     // After the OpenGL context and gGL exist (LLViewerWindow::LLViewerWindow after gGL.init): opens the Vulkan loader,
     // enumerates devices (always, for About and the floater), and in Vulkan mode creates the surface, device and
     // swapchain. On failure in Vulkan mode: falls back to OpenGL for this run and remembers the notice.

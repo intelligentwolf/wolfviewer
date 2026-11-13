@@ -1033,7 +1033,10 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("HUD Update");
             { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "hudEffects R" : "hudEffects L"); LLHUDManager::getInstance()->updateEffects(); }
-            LLHUDObject::updateAll();
+            // [VR NAME TAGS 2026-11-13] once a frame: the name tags' screen layout (LLHUDNameTag::updateAll - visibility,
+            // LOD, the overlap push-apart that moves each tag by a smoothed pixel offset) is made in the left eye's
+            // pass and drawn by both eyes, so a tag sits at the same place for both eyes (no left/right jitter)
+            if (!WolfVRScreen::secondEye()) LLHUDObject::updateAll();
             stop_glerror();
         }
 
@@ -1813,6 +1816,8 @@ void render_ui(F32 zoom_factor, int subfield)
     // apply gamma correction and post effects
     { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui finalize R" : "ui finalize L");   // [VR FRAME PARTS 2026-11-05]
       gPipeline.renderFinalize(); }
+    // [VR NAME TAGS 2026-11-13] a headset view: the name tags, hover text and voice dots into this eye's picture first
+    const bool vr_hud_objects_drawn = WolfVRScreen::drawHudObjectsInEye();
     WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
     // [VULKAN HUD 2026-11-09] In Vulkan mode the world layer is taken AFTER the HUD attachments (below), so a worn HUD is
     // drawn by OpenGL straight over the world in the default framebuffer, exactly as in OpenGL mode, and only the 2D/3D UI
@@ -1905,7 +1910,7 @@ void render_ui(F32 zoom_factor, int subfield)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_UI("UI 2D"); //LL_RECORD_BLOCK_TIME(FTM_RENDER_UI_2D);
             { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui hudobjects R" : "ui hudobjects L");   // [VR FRAME PARTS 2026-11-05]
-              LLHUDObject::renderAll(); }
+              if (!vr_hud_objects_drawn) LLHUDObject::renderAll(); }   // [VR NAME TAGS 2026-11-13/] not twice in one pass
             { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui 2d R" : "ui 2d L");   // [VR FRAME PARTS 2026-11-05]
               render_ui_2d(); }
         }

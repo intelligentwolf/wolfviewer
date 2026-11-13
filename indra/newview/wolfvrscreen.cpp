@@ -49,6 +49,8 @@
 #include "llviewerjoystick.h"   // [VR CAMERA ON ENTRY 2026-11-13] resetCameraForVR: the flycam
 #include "llfloatercamera.h"    // [VR CAMERA ON ENTRY 2026-11-13] resetCameraForVR: the free camera
 #include "llcriticaldamp.h"     // [VR CAMERA ON ENTRY 2026-11-13] resetCameraForVR: LLSmoothInterpolation, as resetView
+#include "llhudobject.h"        // [VR NAME TAGS 2026-11-13] drawHudObjectsInEye: LLHUDObject::renderAll
+#include "llhudnametag.h"       // [VR NAME TAGS 2026-11-13] the name tags counted for the log
 #include "llvoavatarself.h"
 #include "llviewerwindow.h"
 #include "llwindow.h"
@@ -145,6 +147,8 @@ namespace
     // [VR 3D] the head pose the camera was turned to for this frame, and the view to give back afterwards
     wolfvr::HeadPose gFramePose;
     bool gCameraOverridden = false;
+    F64 gHudSince = 0.0;       // [VR NAME TAGS 2026-11-13] when this 3D session's head camera began
+    bool gHudLogged = false;   // [VR NAME TAGS] its one log line written
     F32 gSavedView = 0.f;
 
     // [VR STEREO 2026-11-04] Which eye display() is drawing: -1 one view (mono / big screen), 0 left, 1 right. Both
@@ -1685,6 +1689,63 @@ void setPickCamera()
 // the stream). gPaused is decided once per frame in displayFrame.
 bool uiSkipped() { return gEye == 0 || gPaused; }
 bool secondEye() { return gEye == 1; }
+
+// [VR NAME TAGS 2026-11-13] Paul: "in 3d vr mode there are no character names above avatars or voice dots". The
+// avatars' name tags (LLHUDNameTag, made by LLVOAvatar::idleUpdateNameTag), the voice dots (LLVoiceVisualizer, an
+// LLHUDEffect, LLVOAvatar::idleUpdateVoiceVisualizer), prims' hover text (LLHUDText) and effect beams are all
+// LLHUDObjects, drawn by LLHUDObject::renderAll in render_ui's UI pass (llviewerdisplay.cpp "ui hudobjects"), in the
+// world with the camera's pixel vectors (LLHUDNameTag::renderText: LLViewerCamera::getPixelVectors, draw3D,
+// hud_render_text). The headset's world picture is taken BEFORE that pass (captureWorld, straight after
+// renderFinalize), the left eye's pass stops there (uiSkipped), and the headset's HUDs layer has only the HUD
+// attachments and the 2D UI (captureLayer: render_hud_attachments, render_ui_2d) - so no eye ever had them.
+// Now each eye's pass draws them into its own picture just before it is taken, with that eye's camera: each tag sits at
+// its own place in the world (above the head), seen from each eye, so it has true stereo depth and is hidden behind
+// walls by the eye's own depth (renderFinalize writes the scene's depth into the target, pipeline.cpp:9552 with
+// postDeferredNoDoFF.glsl:91 gl_FragDepth; the eye target has a depth buffer, eyeTargetFor; and
+// LLHUDNameTag::render tests against it, llhudnametag.cpp:231). One draw per eye - the HUD objects only, no extra pass.
+// Their size is the desktop's in pixels (font line height), so in the headset about as big as on the desktop screen
+// at the eye picture's pixels a degree (WolfVRStream::frameSize: the eye's square over its tangent window). Every
+// setting is the resident's own: names shown / fading / own name (RenderName, RenderNameShowSelf, AvatarNameTagMode),
+// voice dots (VoiceVisualizerEnabled, FSShowMyOwnVoiceVisualizer), bubble opacity; and one's own tag and dot are left
+// out in first person (firstPerson), as in mouselook.
+bool drawHudObjectsInEye()
+{
+    // the head camera is this pass's (applyHeadCamera: never for snapshots or reflection probes), and the UI is on - the
+    // same switch render_ui's own HUD-object draw has (llviewerdisplay.cpp RENDER_DEBUG_FEATURE_UI)
+    if (!gCameraOverridden || gSnapshot || gCubeSnapshot || gDisconnected ||
+        !gPipeline.hasRenderDebugFeatureMask(LLPipeline::RENDER_DEBUG_FEATURE_UI))
+        return false;
+    {
+        // Source: llviewerdisplay.cpp render_ui - the state its UI pass sets before LLHUDObject::renderAll
+        LLGLSDefault gls_default;
+        LLGLSUIDefault gls_ui;
+        gPipeline.disableLights();
+        LLHUDObject::renderAll();
+    }
+    // one line per 3D session, 5 s in (the tags are made by the idle loop), so the eye draw can be seen in the log
+    if (!gHudLogged && LLTimer::getTotalSeconds() - gHudSince >= 5.0)
+    {
+        gHudLogged = true;
+        S32 tags = 0, own = 0;
+        for (LLCharacter* c : LLCharacter::sInstances)
+        {
+            LLVOAvatar* av = dynamic_cast<LLVOAvatar*>(c);
+            if (!av || av->isDead() || av->mNameText.isNull() || !av->mNameText->isVisible() || av->mNameText->getHidden()) continue;
+            ++tags;
+            if (av->isSelf()) ++own;
+        }
+        LL_INFOS("WolfVR") << "VR 3D: name tags, hover text and voice dots drawn in the " << (gEye >= 0 ? "eyes" : "view")
+                           << ": " << tags << " name tags shown (own " << own << ")" << (firstPerson() ? ", first person" : "")
+                           << LL_ENDL;
+    }
+    return true;
+}
+
+bool firstPerson()
+{
+    static LLCachedControl<bool> hide_me(gSavedSettings, "WolfVRHideAvatar", false);
+    return hide_me && WolfVRStream::worldWanted();
+}
 bool stereoEye() { return gEye >= 0; }
 bool headCamera() { return gCameraOverridden; }
 
@@ -2179,6 +2240,8 @@ void applyHeadCamera()
     if (!gCameraOverridden)
     {
         gSavedView = cam->getView();
+        gHudSince = LLTimer::getTotalSeconds();   // [VR NAME TAGS] this 3D session's start, for its one log line
+        gHudLogged = false;
         gCameraOverridden = true;
     }
     if (gEye != 1)

@@ -73,6 +73,15 @@ namespace WolfVRScreen
     bool reuseShadowsThisFrame();
     /** [VR SIT 2026-11-04] The object (root) the headset's pointer was on in the last 8 s, for the bar's Sit. */
     bool aimedObject(LLUUID& id);
+    /** [VR NAME TAGS 2026-11-13] render_ui, right before captureWorld: in a headset view (the head camera, not a
+     *  snapshot), the world's HUD objects - avatar name tags, hover text, voice dots, effect beams (LLHUDObject::renderAll)
+     *  - drawn into this eye's picture with this eye's camera; true when drawn, and render_ui then does not draw them a
+     *  second time in its UI pass. */
+    bool drawHudObjectsInEye();
+    /** [VR NAME TAGS 2026-11-13] VR 3D Mode with Hide my avatar (WolfVRHideAvatar): the headset is first person, so
+     *  one's own name tag and voice dot are left out as in mouselook (LLVOAvatar::idleUpdateNameTag /
+     *  idleUpdateVoiceVisualizer). */
+    bool firstPerson();
     /** [VR HUD LAYER 2026-11-04] End of render_ui: the UI layer, drawn again into its own transparent target, to the
      *  headset (VR 3D Mode, while the page shows it). */
     void captureLayer();

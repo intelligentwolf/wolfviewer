@@ -2686,6 +2686,19 @@ You can turn it back on here or at any time in Preferences &gt; Graphics &gt; Ha
      notext="Turn it back on"
      yestext="OK"/>
   </notification>
+  <!-- [W106 MEMLOG 2026-11-13] wolfmemorylog.cpp second_copy_notice: this is a second copy of WolfViewer and the
+       computer is low on memory (tickets 796/799). A notify (not a tip) so it stays until read; it never blocks. -->
+  <notification
+   icon="notify.tga"
+   name="WolfSecondCopyLowMemory"
+   log_to_chat="false"
+   type="notify">
+    <unique/>
+Another copy of WolfViewer is already open. Running two at once uses a lot of memory, and this computer is now running low, which can make them close unexpectedly. Closing one of them will keep things running smoothly.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
   <notification
    icon="notifytip.tga"
    name="WolfWelcomeUnnamed"

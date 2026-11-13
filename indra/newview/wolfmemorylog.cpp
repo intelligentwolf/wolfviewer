@@ -19,11 +19,14 @@
 
 #include <cstring>               // memset
 
+#include "llappviewer.h"         // isSecondInstance ([W106 MEMLOG 2026-11-13] the second-copy notice)
 #include "llcharacter.h"         // LLCharacter::sInstances
 #include "llframetimer.h"
 #include "llgl.h"                // gGLManager.mVRAM
 #include "llimage.h"             // LLImageFormatted::sGlobalFormattedMemory, LLImageRaw::sRawImageCount
 #include "llimagegl.h"           // LLImageGL::getTextureBytesAllocated
+#include "llnotificationsutil.h"
+#include "llstartup.h"           // LLStartUp::getStartupState
 #include "llvertexbuffer.h"      // LLVertexBuffer::getBytesAllocated
 #include "llviewerobjectlist.h"  // gObjectList
 #include "llviewertexture.h"     // LLViewerTexture::sFreeVRAMMegabytes, sDesiredDiscardBias
@@ -451,6 +454,40 @@ namespace
         return false;
     }
 
+    // [W106 MEMLOG 2026-11-13] Paul (13 Nov): a gentle notice when a SECOND copy of WolfViewer is open and the computer
+    // is low on memory - Joyous Melody's crashes 796/799 were two copies at once on a 16 GB computer. Shown in the
+    // second copy (the one that finds the first: llappviewer.cpp's exec marker lock, all three platforms), once per
+    // start, after login so it appears as a notice in world, from the 5-second reading. Never blocks or closes.
+    // The line: under 2 GB available (Windows also: under 2 GB this process can still commit). In the last ten minutes
+    // before each crash the logs never showed more available than 962 MB (796/799, two copies) or 1,679 MB (838), so
+    // 2 GB comes before that state; it is above RenderMinFreeMainMemoryThreshold (512 MB, llviewertexture.cpp), where
+    // the viewer itself starts lowering texture detail.
+    const unsigned long long SECOND_COPY_LOW = 2ULL << 30;
+
+    void second_copy_notice(const Reading& r)
+    {
+        static bool s_done = false;
+        if (s_done) return;
+        LLAppViewer* app = LLAppViewer::instance();
+        if (!app || !app->isSecondInstance())
+        {
+            s_done = true;
+            return;
+        }
+        if (LLStartUp::getStartupState() < STATE_STARTED || !r.mSystemOk) return;
+        bool low = r.mAvail < SECOND_COPY_LOW;
+#if LL_WINDOWS
+        low = low || r.mCommitAvail < SECOND_COPY_LOW;
+#endif
+        if (!low) return;
+        s_done = true;
+        char buf[1024];
+        Text t = text_on(buf, sizeof(buf));
+        format_reading(t, r);
+        LL_WARNS("WolfMemory") << "Another copy of WolfViewer is open and memory is low; told the resident: " << buf << LL_ENDL;
+        LLNotificationsUtil::add("WolfSecondCopyLowMemory");
+    }
+
     const F32 CHECK_SECONDS = 5.f;
     const F32 LINE_SECONDS = 60.f;
     const F32 EARLY_MIN_SECONDS = 15.f;
@@ -468,6 +505,7 @@ void WolfMemoryLog::idle()
 
     Reading now;
     read_now(now, false);
+    second_copy_notice(now);
     const F32 since = s_since_line.getElapsedTimeF32();
     const bool due = !s_started || since >= LINE_SECONDS;
     const bool early = !due && since >= EARLY_MIN_SECONDS && moved_a_lot(s_last, now);

@@ -41,7 +41,9 @@
  */
 namespace WolfMemoryLog
 {
-    /// From display_stats every frame (main thread). Takes a reading every 5 s; writes the line when one is due.
+    /// From display_stats every frame (main thread). Takes a reading every 5 s; writes the line when one is due. In a
+    /// second copy of WolfViewer that reading also decides the once-per-start low-memory notice
+    /// (WolfSecondCopyLowMemory, wolfmemorylog.cpp second_copy_notice).
     void idle();
 
     /// The process and system memory now, as one line of text without a newline ("process: ... | system: ...").

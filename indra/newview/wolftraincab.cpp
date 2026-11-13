@@ -255,10 +255,10 @@ void WolfTrain::idle()
     if (mOpen)
     {
         LLViewerObject* root = seatRoot();
-        // ... or the agent is now in another region: the engine was carried over a border, where nobody drives it for them
-        // and from where the old region cannot reach a child agent with state=off (re-review S5)
-        LLViewerRegion* rgn = gAgent.getRegion();
-        if (!root || root->getID() != mSeat || now() - mLastAt > SILENT_CLOSE_S || !rgn || rgn->getRegionID() != mRegion)
+        // A border crossed with the engine is NOT a reason to close (Paul 13 Nov: "trains should run across regions"): the
+        // next region takes the driver over and its cab follows with the levers as they are; if no region drives the
+        // train there, nothing more comes and the silence rule closes it (re-review S5: a child agent hears no state=off)
+        if (!root || root->getID() != mSeat || now() - mLastAt > SILENT_CLOSE_S)
         {
             close();   // stood up, sat elsewhere, or the region stopped saying (the region stops the train itself)
             return;

@@ -35,8 +35,9 @@
  *
  * AT THE CRASH (wolfcrashreport.cpp): formatSystemNow writes the same process / system figures into crash_stack.txt
  * and formatLastViewer the viewer's own figures from the last line (textures, VRAM budget, objects), with their age.
- * Both are safe in a crashed process: fixed buffers, no allocation, no locks; on Linux and macOS only calls a signal
- * handler may make (open / read / close, clock_gettime) plus the Mach / sysctl queries on macOS.
+ * Both are meant for a crashed process: fixed buffers, no allocation, no locks. On Linux only calls POSIX lists as
+ * async-signal-safe (open / read / close, clock_gettime); on macOS the Mach and sysctl queries are not on that list and
+ * are best effort; on Windows a healthy writer thread calls them.
  */
 namespace WolfMemoryLog
 {

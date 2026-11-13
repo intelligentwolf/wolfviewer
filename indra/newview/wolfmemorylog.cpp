@@ -31,7 +31,7 @@
 
 #if LL_WINDOWS
 #include "llwin32headers.h"
-#include <psapi.h>               // GetProcessMemoryInfo, GetPerformanceInfo (psapi is linked: cmake/Linking.cmake)
+#include <psapi.h>               // GetProcessMemoryInfo, GetPerformanceInfo: psapi is in ll::oslibraries (cmake/Linking.cmake:60), which llcommon links (llcommon/CMakeLists.txt:316)
 #else
 #include <fcntl.h>
 #include <time.h>
@@ -145,6 +145,10 @@ namespace
     // Page size for /proc/self/statm (counted in pages: proc_pid_statm(5)). Read once when the program loads, as
     // sysconf is not on the async-signal-safe list.
     const long sPageSize = sysconf(_SC_PAGESIZE);
+    // The /proc text: one buffer for the crash handler (it runs on the crashed thread's own stack, once per process:
+    // wolfcrashreport.cpp sWritten), one for idle on the main thread, so a crash during a reading cannot share it.
+    char sCrashProcBuf[4096];
+    char sIdleProcBuf[4096];
 
     // A small /proc file into buf (NUL-terminated); false if it could not be read. open / read / close only.
     bool read_proc(const char* path, char* buf, size_t cap)
@@ -255,16 +259,16 @@ namespace
             }
         }
 #elif LL_LINUX
-        (void)at_crash;
-        char buf[4096];
-        if (sPageSize > 0 && read_proc("/proc/self/statm", buf, sizeof(buf)))
+        char* const buf = at_crash ? sCrashProcBuf : sIdleProcBuf;
+        const size_t buf_size = sizeof(sCrashProcBuf);
+        if (sPageSize > 0 && read_proc("/proc/self/statm", buf, buf_size))
         {
             // Source: proc_pid_statm(5) - in pages: (2) resident, (6) data + stack
             r.mResident = statm_field(buf, 1) * static_cast<unsigned long long>(sPageSize);
             r.mPrivate = statm_field(buf, 5) * static_cast<unsigned long long>(sPageSize);
             r.mProcessOk = true;
         }
-        if (read_proc("/proc/meminfo", buf, sizeof(buf)))
+        if (read_proc("/proc/meminfo", buf, buf_size))
         {
             // Source: proc_meminfo(5). MemAvailable (Linux 3.14+) as llsys.cpp getAvailableMemoryKB prefers it.
             r.mSystemOk = meminfo_value(buf, "MemTotal", r.mTotal)
@@ -273,6 +277,9 @@ namespace
             r.mSwapOk = meminfo_value(buf, "SwapTotal", r.mSwapTotal) && meminfo_value(buf, "SwapFree", r.mSwapOther);
         }
 #elif LL_DARWIN
+        // At a crash this runs in the fatal-signal handler. task_info, host_statistics64 and sysctl are kernel calls
+        // that take no locks of ours and allocate nothing, but POSIX does not list them as async-signal-safe: best
+        // effort, like backtrace() already called there. (clock_gettime in monotonic_seconds is on POSIX's list.)
         (void)at_crash;
         task_vm_info_data_t vmi;
         memset(&vmi, 0, sizeof(vmi));

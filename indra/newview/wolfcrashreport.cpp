@@ -19,9 +19,16 @@
 #include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/]
 
 #include <algorithm>
+#include <atomic>        // std::atomic_flag ([W106 MEMLOG 2026-11-13] the terminate hook)
 #include <cstring>       // strcmp ([W106 MEMLOG 2026-11-13] read_cpp_throw)
 #include <ctime>
-#include <exception>     // std::exception, std::set_terminate ([W106 MEMLOG 2026-11-13])
+#include <exception>     // std::exception, std::set_terminate, std::bad_exception ([W106 MEMLOG 2026-11-13])
+#include <memory>        // std::bad_weak_ptr
+#include <new>           // std::bad_alloc, std::bad_array_new_length
+#include <optional>      // std::bad_optional_access
+#include <stdexcept>     // std::length_error, std::out_of_range
+#include <chrono>
+#include <thread>        // std::this_thread::sleep_for ([W106 MEMLOG 2026-11-13] the terminate hook)
 #include <sstream>
 #include <typeinfo>      // std::type_info ([W106 MEMLOG 2026-11-13] the terminate hook)
 
@@ -98,6 +105,95 @@ namespace
             }
         }
         if (cap > 0) dst[n] = '\0';
+    }
+
+    // [W106 MEMLOG 2026-11-13] The standard-library exceptions whose what() goes into the crash file. Theirs is the
+    // library's own fixed wording (or numbers: libstdc++'s at() range messages); anything else - a filesystem_error with
+    // a folder name, a parse error echoing its input, the viewer's own runtime_errors - is written as "?", as the file
+    // goes into a ticket. Every throw of these in the viewer's own code is a fixed literal (grep 2026-11-13: llcommon.cpp,
+    // llimagejpeg.cpp bad_alloc; qrcodegen.cpp length_error "Data too long"). The sending side scrubs these lines too.
+    bool is_plain_std_exception(const std::type_info& t)
+    {
+        return t == typeid(std::bad_alloc) || t == typeid(std::bad_array_new_length) || t == typeid(std::bad_cast)
+            || t == typeid(std::bad_exception) || t == typeid(std::bad_optional_access) || t == typeid(std::bad_weak_ptr)
+            || t == typeid(std::length_error) || t == typeid(std::out_of_range);
+    }
+
+    // [W106 MEMLOG 2026-11-13] What an uncaught C++ exception was, when it ends in std::terminate: on Linux and macOS
+    // always (then llappviewerlinux.cpp exceptionTerminateHandler's forced SIGSEGV, or the C++ library's own handler
+    // and abort's SIGABRT, reach the crash handler); on Windows for a terminate the unhandled-exception filter does not
+    // see first (a noexcept violation, say; an exception nobody catches is decoded from its record instead), after
+    // which llappviewerwin32.cpp's exceptionTerminateHandler forces the access violation the filter writes up.
+    // on_terminate notes the type and what() the way libstdc++'s __verbose_terminate_handler (libsupc++/vterminate.cc)
+    // finds them - "__try { __throw_exception_again; } __catch(const exception& exc)" - then calls the handler that was
+    // there before (installed after the viewer's own in main / wWinMain, so chained, not replaced). The type name is
+    // the compiler's own, not demangled (that allocates, and this may be an out-of-memory crash): Linux/macOS
+    // type_info::name() ("St9bad_alloc"), Windows type_info::raw_name() (".?AVbad_alloc@std@@", "the decorated name",
+    // learn.microsoft.com type_info class). Windows keeps terminate handlers per thread (learn.microsoft.com
+    // set_terminate (CRT): "each new thread needs to install its own"), so there this covers the main thread, as the
+    // viewer's own handler does.
+    char sTermType[256] = {};
+    char sTermWhat[400] = {};
+    // A terminate from inside this one (on Windows a rethrow with no exception active ends in terminate again) goes
+    // straight on to the previous handler. Of two threads, the first in writes the buffers; the other waits up to a
+    // second for it, so the crash it is about to cause does not cut the first one's note short.
+    thread_local bool tInTerminate = false;
+    std::atomic_flag sTermClaimed = ATOMIC_FLAG_INIT;
+    std::atomic<bool> sTermNoted(false);
+    std::terminate_handler sPrevTerminate = nullptr;
+
+    [[noreturn]] void on_terminate()
+    {
+        if (tInTerminate)
+        {
+            if (sPrevTerminate) sPrevTerminate();
+            abort();
+        }
+        tInTerminate = true;
+        if (sTermClaimed.test_and_set())
+        {
+            for (int i = 0; i < 1000 && !sTermNoted.load(); ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        else
+        {
+#if LL_WINDOWS
+            const bool active = true;   // MSVC has no __cxa_current_exception_type; see tInTerminate
+#else
+            const std::type_info* current = abi::__cxa_current_exception_type();
+            const bool active = current != nullptr;
+#endif
+            if (active)
+            {
+                try
+                {
+                    throw;
+                }
+                catch (const std::exception& e)
+                {
+                    const std::type_info& t = typeid(e);
+#if LL_WINDOWS
+                    copy_printable(sTermType, sizeof(sTermType), t.raw_name());
+#else
+                    copy_printable(sTermType, sizeof(sTermType), t.name());
+#endif
+                    copy_printable(sTermWhat, sizeof(sTermWhat), is_plain_std_exception(t) ? e.what() : "?");
+                }
+                catch (...)
+                {
+#if LL_WINDOWS
+                    copy_printable(sTermType, sizeof(sTermType), "(not a std::exception)");
+#else
+                    copy_printable(sTermType, sizeof(sTermType), current->name());
+#endif
+                }
+            }
+            sTermNoted.store(true);
+        }
+        if (sPrevTerminate) sPrevTerminate();
+        abort();
     }
 }
 
@@ -278,7 +374,16 @@ namespace
     // Size, CopyCtor }, all image-relative "on every target but 32-bit x86". Checked against ticket 799's minidump and
     // the W103 build: parameter 0 0x19930520, two entries ".?AVbad_alloc@std@@" and ".?AVexception@std@@", each with
     // NonVirtualAdjustment 0 and OffsetToVBPtr -1 (no virtual base).
-    const ULONG_PTR MSC_THROW_MAGIC = 0x19930520;   // parameter 0 in ticket 799's record (see above)
+    // Parameter 0: 0x19930520 in ticket 799's record. Wine's msvcrt (dlls/msvcrt/cppexcept.h is_cxx_exception)
+    // accepts CXX_FRAME_MAGIC_VC6 0x19930520 to CXX_FRAME_MAGIC_VC8 0x19930522 and reads the same throw information
+    // for all three.
+    const ULONG_PTR MSC_THROW_MAGIC_FIRST = 0x19930520;
+    const ULONG_PTR MSC_THROW_MAGIC_LAST = 0x19930522;
+    // The decorated names of is_plain_std_exception's types, as found in the W103 build's own RTTI (.?AV = a class).
+    const char* const PLAIN_STD_DECORATED[] = {
+        ".?AVbad_alloc@std@@", ".?AVbad_array_new_length@std@@", ".?AVbad_cast@std@@", ".?AVbad_exception@std@@",
+        ".?AVbad_optional_access@std@@", ".?AVbad_weak_ptr@std@@", ".?AVlength_error@std@@", ".?AVout_of_range@std@@",
+    };
     const int MAX_THROWN_TYPES = 6;
     const size_t THROWN_NAME_CHARS = 160;
     const size_t THROWN_WHAT_CHARS = 400;
@@ -299,11 +404,13 @@ namespace
         out->mCount = 0;
         out->mWhat[0] = '\0';
 #if defined(_WIN64)
-        if (rec->NumberParameters < 4 || rec->ExceptionInformation[0] != MSC_THROW_MAGIC) return false;
+        if (rec->NumberParameters < 4 || rec->ExceptionInformation[0] < MSC_THROW_MAGIC_FIRST
+            || rec->ExceptionInformation[0] > MSC_THROW_MAGIC_LAST) return false;
         const ULONG_PTR object = rec->ExceptionInformation[1];
         const ULONG_PTR throw_info = rec->ExceptionInformation[2];
         const ULONG_PTR image = rec->ExceptionInformation[3];
         if (!throw_info || !image) return false;
+        bool plain = false;   // the thrown type (the array's first entry) is one of PLAIN_STD_DECORATED
         __try
         {
             const ULONG_PTR types = image + *reinterpret_cast<const DWORD*>(throw_info + 12);   // ThrowInfo.CatchableTypeArray
@@ -314,14 +421,29 @@ namespace
                 const ULONG_PTR descriptor = image + *reinterpret_cast<const DWORD*>(type + 4);   // CatchableType.TypeDescriptor
                 const char* name = reinterpret_cast<const char*>(descriptor + 2 * sizeof(void*)); // after pVFTable, spare
                 copy_printable(out->mNames[out->mCount], THROWN_NAME_CHARS, name);
+                if (out->mCount == 0)
+                {
+                    for (const char* known : PLAIN_STD_DECORATED)
+                    {
+                        if (strcmp(name, known) == 0) plain = true;
+                    }
+                }
                 ++out->mCount;
-                // what() when the object is a std::exception: the entry's NonVirtualAdjustment finds that base inside
-                // the thrown object; a virtual base (OffsetToVBPtr != -1) is not followed.
-                if (object && !out->mWhat[0] && strcmp(name, ".?AVexception@std@@") == 0
+                // what() only for those types, through the std::exception base: the entry's NonVirtualAdjustment finds
+                // it inside the thrown object (a virtual base, OffsetToVBPtr != -1, is not followed), and its virtual
+                // table pointer must lie in a loaded module before anything is called through it.
+                if (plain && object && !out->mWhat[0] && strcmp(name, ".?AVexception@std@@") == 0
                     && *reinterpret_cast<const int*>(type + 12) == -1)
                 {
-                    const std::exception* e = reinterpret_cast<const std::exception*>(object + *reinterpret_cast<const int*>(type + 8));
-                    copy_printable(out->mWhat, THROWN_WHAT_CHARS, e->what());
+                    const ULONG_PTR base = object + static_cast<ULONG_PTR>(static_cast<LONG_PTR>(*reinterpret_cast<const int*>(type + 8)));
+                    const ULONG_PTR vtable = *reinterpret_cast<const ULONG_PTR*>(base);
+                    HMODULE mod = nullptr;
+                    if (vtable && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                                     reinterpret_cast<LPCWSTR>(vtable), &mod) && mod)
+                    {
+                        const std::exception* e = reinterpret_cast<const std::exception*>(base);
+                        copy_printable(out->mWhat, THROWN_WHAT_CHARS, e->what());
+                    }
                 }
             }
         }
@@ -351,12 +473,9 @@ namespace
             out_str(o, sThrown.mNames[i]);
         }
         out_str(o, "\n");
-        if (sThrown.mWhat[0])
-        {
-            out_str(o, "what: ");
-            out_str(o, sThrown.mWhat);
-            out_str(o, "\n");
-        }
+        out_str(o, "what: ");
+        out_str(o, sThrown.mWhat[0] ? sThrown.mWhat : "?");   // "?": not one of the plain standard types (see above)
+        out_str(o, "\n");
     }
 
     // [W106 MEMLOG 2026-11-13] The process's and the computer's memory now, and the viewer's own figures from its last
@@ -412,6 +531,15 @@ namespace
             if (rec->ExceptionCode == MSC_CPP_EXCEPTION)
             {
                 write_cpp_throw(o, rec);
+            }
+            else if (sTermType[0])
+            {
+                // the access violation exceptionTerminateHandler forces after on_terminate noted the exception
+                out_str(o, "thrown: ");
+                out_str(o, sTermType);
+                out_str(o, " (std::terminate)\nwhat: ");
+                out_str(o, sTermWhat[0] ? sTermWhat : "?");
+                out_str(o, "\n");
             }
         }
         out_str(o, "thread: ");
@@ -526,6 +654,8 @@ namespace
         CloseHandle(t);   // it runs on; the handle is not needed
         sPrevFilter = SetUnhandledExceptionFilter(unhandled_filter);
         signal(SIGABRT, on_sigabrt);
+        // [W106 MEMLOG 2026-11-13] after llappviewerwin32.cpp wWinMain's own set_terminate, so it is chained
+        sPrevTerminate = std::set_terminate(on_terminate);
         return true;
     }
 }
@@ -693,38 +823,6 @@ namespace
         close(in);
     }
 
-    // [W106 MEMLOG 2026-11-13] What an uncaught C++ exception was, for the crash file. On Linux and macOS it ends in
-    // std::terminate (then llappviewerlinux.cpp exceptionTerminateHandler's forced SIGSEGV, or the C++ library's own
-    // handler and abort's SIGABRT): on_terminate notes the type and what() first, the way libstdc++'s
-    // __verbose_terminate_handler (libsupc++/vterminate.cc) finds them - __cxa_current_exception_type(), then
-    // "__try { __throw_exception_again; } __catch(const exception& exc)" for exc.what() - then calls the handler that
-    // was there before. The type name is the compiler's own ("St9bad_alloc" is std::bad_alloc), not demangled:
-    // __cxa_demangle allocates, and this may be an out-of-memory crash.
-    char sThrownType[256] = {};
-    char sThrownWhat[400] = {};
-    std::terminate_handler sPrevTerminate = nullptr;
-
-    [[noreturn]] void on_terminate()
-    {
-        if (const std::type_info* t = abi::__cxa_current_exception_type())
-        {
-            copy_printable(sThrownType, sizeof(sThrownType), t->name());
-            try
-            {
-                throw;
-            }
-            catch (const std::exception& e)
-            {
-                copy_printable(sThrownWhat, sizeof(sThrownWhat), e.what());
-            }
-            catch (...)
-            {
-            }
-        }
-        if (sPrevTerminate) sPrevTerminate();
-        abort();
-    }
-
     void on_fatal_signal(int signum, void* siginfo, void* ucontext)
     {
         if (sWritten) return;
@@ -763,20 +861,21 @@ namespace
                 out_location(o, pc);
                 out_str(o, "\n");
             }
-            if (sThrownType[0])
+            if (sTermType[0])
             {
                 out_str(o, "thrown: ");
-                out_str(o, sThrownType);
+                out_str(o, sTermType);
                 out_str(o, "\n");
-                if (sThrownWhat[0])
+                if (sTermWhat[0])
                 {
                     out_str(o, "what: ");
-                    out_str(o, sThrownWhat);
+                    out_str(o, sTermWhat);
                     out_str(o, "\n");
                 }
             }
-            {   // [W106 MEMLOG 2026-11-13] memory now and the viewer's last figures (wolfmemorylog.cpp, signal-safe)
-                char line[1024];
+            {   // [W106 MEMLOG 2026-11-13] memory now and the viewer's last figures (wolfmemorylog.cpp). Static, not on
+                // the crashed thread's stack (this handler runs on it; once per process: sWritten).
+                static char line[1024];
                 if (WolfMemoryLog::formatSystemNow(line, sizeof(line), true) > 0)
                 {
                     out_str(o, "memory: ");
@@ -817,7 +916,7 @@ namespace
         void* warm[2];
         backtrace(warm, 2);
         LLApp::setFatalSignalHook(on_fatal_signal);
-        // [W106 MEMLOG 2026-11-13] after llappviewerlinux.cpp main's own set_terminate, so it is chained, not replaced
+        // [W106 MEMLOG 2026-11-13] after llappviewerlinux.cpp main's own set_terminate (macOS has none), so it is chained
         sPrevTerminate = std::set_terminate(on_terminate);
         return true;
     }
@@ -1047,16 +1146,25 @@ namespace
             std::string stack_viewer;   // [W106 MEMLOG 2026-11-13] the stack file's "viewer:" line (write_stack_file / on_fatal_signal)
             if (read_file(c.mDir + sep + STACK_FILE, MAX_STACK_BYTES, text))
             {
+                // the "viewer:" line, and the "thrown:" / "what:" lines through the Flea Report's scrub (they come from
+                // the crashed program's own exception text)
                 std::istringstream lines(text);
-                std::string line;
+                std::string line, kept;
                 while (std::getline(lines, line))
                 {
-                    if (line.compare(0, 8, "viewer: ") == 0)
+                    if (stack_viewer.empty() && line.compare(0, 8, "viewer: ") == 0)
                     {
                         stack_viewer = one_line(line.substr(8), 120);
-                        break;
                     }
+                    else if (line.compare(0, 8, "thrown: ") == 0 || line.compare(0, 6, "what: ") == 0)
+                    {
+                        const size_t colon = line.find(": ") + 2;
+                        line = line.substr(0, colon) + one_line(WolfLogScrub::wolf_scrub_log(line.substr(colon), secrets), 600);
+                    }
+                    kept += line;
+                    kept += '\n';
                 }
+                text = kept;
                 if (WolfLogScrub::gzip_string(text, gz)) p.mParts.push_back({ "stack", "crash-stack.txt.gz", "application/gzip", gz });
             }
 

@@ -385,11 +385,15 @@ namespace
     // The driver is OpenGL's, recorded by every start once OpenGL is up (WolfVulkanLastGLDriver): decideBackend runs
     // before the window exists, so it compares against the driver the last start saw.
     //  - [W106 VKRETRY 2026-11-13] A start that crashed (or never came back) while the shared-layer self-test was under
-    //    way (WolfVulkanLayerSelfTestRun still set at the next start, see noteLayerSelfTestStarting) is counted for the
+    //    way (WolfVulkanLayerSelfTestRun still set at the next start, see noteLayerSelfTestStarting) AND left crash
+    //    evidence (that run's crash stack, or an LLError / out-of-memory exec marker - the session marker's evidence) is
+    //    counted for the
     //    OpenGL driver only (stamp "*|<driver>"): retried while fewer than AUTO_RETRY_LIMIT are counted, as any start-up
     //    failure, but a NEW VIEWER VERSION no longer starts that count again - only a different OpenGL driver (another
     //    driver version or another graphics card changes GL_VERSION / GL_RENDERER) does. Miss Zenn, tickets 805/808/832:
     //    every release crashed her AMD 26.10.1 driver in that test again before it fell back.
+    //    A start that was ENDED there without such evidence (Task Manager, a power cut, the resident closing a slow
+    //    start) is counted per version as before, so kills on a healthy driver never lock Vulkan out across versions.
     //    The resident's own choice (V button, Wolf World > Tools > Vulkan Renderer) still clears the record (chooseBackend).
     // The rule itself (stamps, counts, the start's decision) is wolfvkretryrule.h, pure functions tested on their own.
     using WolfVkRetryRule::AUTO_RETRY_LIMIT;
@@ -415,7 +419,8 @@ namespace
         const bool driver_only = r.mStamp.compare(0, 2, "*|") == 0;
         LL_INFOS("Vulkan") << "Automatic switch to OpenGL recorded: " << r.mCount << " of " << AUTO_RETRY_LIMIT << " for " << r.mStamp
                            << (r.mCount < AUTO_RETRY_LIMIT ? " (Vulkan is tried again at the next start)"
-                               : driver_only ? " (Vulkan is tried again after a graphics driver change, not after a viewer update)"
+                               : driver_only ? " (Vulkan is tried again at a start that finds the graphics driver has changed since this failure - "
+                                               "the start after the first one on the new driver - not after a viewer update)"
                                              : " (Vulkan is tried again after a viewer or driver update)") << LL_ENDL;
     }
     // [round 5 2026-11-11] the Vulkan state keys a second instance must leave as the first instance wrote them
@@ -640,7 +645,7 @@ namespace
         recordAutomaticFailure(failureKind(retryable));   // [G5 2026-11-11]
         gSavedSettings.setString("WolfVulkanSessionRun", "");   // [round 3] counted here, not again as a crash
         // [W106 VKRETRY] a start that got past the shared-layer self-test and then failed is counted here, by this call
-        gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", false);
+        gSavedSettings.setString("WolfVulkanLayerSelfTestRun", "");
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
         // [round 3] the notice says what the next start will do: try Vulkan once more, or not (permanent failure, or the
         // second one in a row)
@@ -671,7 +676,7 @@ namespace
         // been seen.
         gSavedSettings.setString("WolfVulkanStoppedReason", reason);
         gSavedSettings.setString("WolfVulkanSessionRun", "");   // [round 3] counted here, not again as a crash
-        gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", false);   // [W106 VKRETRY] as fallBack
+        gSavedSettings.setString("WolfVulkanLayerSelfTestRun", "");   // [W106 VKRETRY] as fallBack
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
         LLStringUtil::format_map_t args;
         args["[REASON]"] = reason;
@@ -1263,12 +1268,19 @@ void decideBackend()
     // a frozen viewer leave neither and are not counted. The second counted crash in a row sets OpenGL.
     // [W106 VKRETRY 2026-11-13] the last start was still in (or just past) the shared-layer self-test when it ended:
     // read once here and cleared whatever this start does, so it can only describe the start just before this one
-    // (it is saved true only by noteLayerSelfTestStarting, and false again by that start's next save)
+    // (it is set only by noteLayerSelfTestStarting, and emptied again by that start's next save)
+    // [review W2] it holds that run's dump folder, so a CRASH there (the crash handler's stack, as the session marker
+    // below) is told from a kill (Task Manager, a power cut, the resident closing a slow start: no stack, no marker)
     bool layer_self_test_ended = false;
+    bool layer_self_test_crashed = false;
     if (!LLAppViewer::instance()->isSecondInstance())
     {
-        layer_self_test_ended = gSavedSettings.getBOOL("WolfVulkanLayerSelfTestRun");
-        gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", false);
+        const std::string self_test_run = gSavedSettings.getString("WolfVulkanLayerSelfTestRun");
+        gSavedSettings.setString("WolfVulkanLayerSelfTestRun", "");
+        layer_self_test_ended = !self_test_run.empty();
+        layer_self_test_crashed = layer_self_test_ended
+            && (WolfCrashReport::runLeftCrashStack(self_test_run)
+                || gLastExecEvent == LAST_EXEC_LLERROR_CRASH || gLastExecEvent == LAST_EXEC_BAD_ALLOC);
     }
     const std::string last_run = gSavedSettings.getString("WolfVulkanSessionRun");
     if (!last_run.empty() && !LLAppViewer::instance()->isSecondInstance())
@@ -1336,13 +1348,16 @@ void decideBackend()
     {
         // The last Vulkan start never confirmed its login screen (crash or hang before it, or [G2] a login screen that
         // was never shown as a picture): OpenGL this time, and say so. [G5] counted like any automatic failure.
-        // [W106 VKRETRY] it ended in the shared-layer self-test: counted for this OpenGL driver only, so a viewer update
-        // does not try it again once AUTO_RETRY_LIMIT are counted (rule at recordAutomaticFailure, wolfvkretryrule.h)
+        // [W106 VKRETRY] it CRASHED in the shared-layer self-test (crash evidence, review W2): counted for this OpenGL
+        // driver only, so a viewer update does not try it again once AUTO_RETRY_LIMIT are counted (rule at
+        // recordAutomaticFailure, wolfvkretryrule.h unconfirmedStartFailure); ended there without evidence: per version
         LL_WARNS("Vulkan") << "The previous Vulkan start did not reach a confirmed login screen"
-                           << (layer_self_test_ended ? " (it ended during the shared-layer self-test)" : "") << "; starting in OpenGL" << LL_ENDL;
+                           << (layer_self_test_crashed ? " (it crashed during the shared-layer self-test)"
+                               : layer_self_test_ended ? " (it ended during the shared-layer self-test, with no crash evidence: counted per viewer version)" : "")
+                           << "; starting in OpenGL" << LL_ENDL;
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
-        recordAutomaticFailure(layer_self_test_ended ? WolfVkRetryRule::Failure::SAME_DRIVER_KEEPS : WolfVkRetryRule::Failure::PER_VERSION);
+        recordAutomaticFailure(WolfVkRetryRule::unconfirmedStartFailure(layer_self_test_ended, layer_self_test_crashed));
         sState = State::FELL_BACK;
         sLastError = "the previous start with the Vulkan renderer did not get as far as the login screen";
         rememberNotice("WolfVulkanFellBackLastStart", sLastError);
@@ -1373,14 +1388,20 @@ void noteLayerSelfTestStarting()
     // [W106 VKRETRY 2026-11-13] Miss Zenn's AMD 26.10.1 starts ended inside the AMD OpenGL driver during this test
     // (tickets 805/808/832: atio6axx.dll on a driver thread, the last log line wolfvkshare.cpp's "Shared GL/Vulkan
     // layers" just before selfTest). Saved now, so the next start can tell that ending from any other unconfirmed start
-    // (decideBackend). It stays set through the rest of WolfVkScene::init - a driver thread may fail just after the
-    // round trip returns - and is cleared, on disk, by this start's next save: the Vulkan session marker in initAfterGL,
-    // or fallBack / stopAtRunTime. WolfVulkanLastGLDriver (set in memory at the top of initAfterGL) goes to disk with
-    // it, so the failure is stamped with the driver of the start that failed, not the one before it.
+    // (decideBackend). It is cleared, on disk, by this start's next save: the Vulkan session marker in initAfterGL, or
+    // fallBack / stopAtRunTime - NOT as soon as selfTest returns. The trade-off, chosen on purpose: her crash was on a
+    // driver worker thread, which can fail just after the round trip has returned, and clearing at once would miss
+    // that; the cost is that a crash in the remaining WolfVkScene::init steps after the test (SPIR-V check,
+    // onSwapchainChanged) is also counted as a self-test crash, i.e. for the driver only. WolfVulkanLastGLDriver (set
+    // in memory at the top of initAfterGL) goes to disk with it, so the failure is stamped with the driver of the start
+    // that failed, not the one before it.
     // Only the start-up's own test: WolfVkShare::init runs only from WolfVkScene::init (initAfterGL). A second instance
     // never writes the Vulkan state keys (round 5).
     if (sState != State::VULKAN_STARTING || LLAppViewer::instance()->isSecondInstance()) return;
-    gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", true);
+    // the run's dump folder, as the session marker (WolfCrashReport::thisRunFolder; "no-dump-folder" when there is none:
+    // runLeftCrashStack then finds no stack, so only an exec marker can count it as a crash)
+    const std::string folder = WolfCrashReport::thisRunFolder();
+    gSavedSettings.setString("WolfVulkanLayerSelfTestRun", folder.empty() ? std::string("no-dump-folder") : folder);
     gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
 }
 
@@ -1499,7 +1520,7 @@ void initAfterGL(LLWindow* window)
         const std::string folder = WolfCrashReport::thisRunFolder();
         gSavedSettings.setString("WolfVulkanSessionRun", folder.empty() ? std::string("no-dump-folder") : folder);
         // [W106 VKRETRY] the start-up is past the shared-layer self-test (and the scene steps after it): saved with this
-        gSavedSettings.setBOOL("WolfVulkanLayerSelfTestRun", false);
+        gSavedSettings.setString("WolfVulkanLayerSelfTestRun", "");
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
     }
 

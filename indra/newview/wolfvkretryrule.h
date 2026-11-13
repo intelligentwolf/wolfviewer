@@ -6,7 +6,7 @@
  * crashed inside the AMD OpenGL driver during the shared-layer self-test (WolfVkShare::selfTest). The viewer fell back
  * to OpenGL after AUTO_RETRY_LIMIT such starts, but the failure record was stamped with the viewer version, so every
  * new release cleared it (decideBackend: a stamp that does not match starts the count again) and crashed her again.
- * A crash in that self-test is now recorded for the OpenGL driver alone (stamp version "*"): retried while fewer than
+ * A crash in that self-test (with crash evidence: review W2) is now recorded for the OpenGL driver alone (stamp version "*"): retried while fewer than
  * AUTO_RETRY_LIMIT are counted, as before, but once the limit is reached only a different driver (or GPU) tries Vulkan
  * again; a new viewer version does not.
  *
@@ -95,6 +95,16 @@ namespace WolfVkRetryRule
             r.mCount = before + 1;
         }
         return r;
+    }
+
+    // [review W2 2026-11-13] The failure of a start that never confirmed its login screen (decideBackend, WolfVulkanStartOK
+    // false): driver-only only when it ended in the shared-layer self-test AND left crash evidence (its crash stack, or an
+    // LLError / out-of-memory exec marker). A start ended there by a kill (Task Manager, a power cut, the resident closing
+    // a slow start) leaves none and is counted per version as before, so kills on a healthy driver cannot keep Vulkan
+    // off across viewer versions.
+    inline Failure unconfirmedStartFailure(bool ended_in_layer_self_test, bool crash_evidence)
+    {
+        return (ended_in_layer_self_test && crash_evidence) ? Failure::SAME_DRIVER_KEEPS : Failure::PER_VERSION;
     }
 
     enum class Start

@@ -20549,7 +20549,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanAutoFailures</key>
 		<map>
 			<key>Comment</key>
-			<string>[G5 2026-11-11] How many automatic switches to OpenGL (start-up fall-back, run-time stop, failed login check, unconfirmed start) were counted for the viewer version and OpenGL driver in WolfVulkanAutoFailStamp. Below 2, the next start tries Vulkan again; a new viewer version or driver starts the count again ([W106 2026-11-13] a driver only, for a stamp whose version is "*": a start that ended in the shared-layer self-test). Cleared by a confirmed good Vulkan start and by the resident choosing a renderer. Set by the viewer.</string>
+			<string>[G5 2026-11-11] How many automatic switches to OpenGL (start-up fall-back, run-time stop, failed login check, unconfirmed start) were counted for the viewer version and OpenGL driver in WolfVulkanAutoFailStamp. Below 2, the next start tries Vulkan again; a new viewer version or driver starts the count again ([W106 2026-11-13] a driver only, for a stamp whose version is "*": a start that crashed in the shared-layer self-test). Cleared by a confirmed good Vulkan start and by the resident choosing a renderer. Set by the viewer.</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>
@@ -20562,7 +20562,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanAutoFailStamp</key>
 		<map>
 			<key>Comment</key>
-			<string>[G5 2026-11-11] "viewer version|OpenGL driver" the automatic OpenGL switches were counted for (version "*" when only a driver change can help: no Vulkan, or no usable Vulkan graphics card; [W106 2026-11-13] also a start that ended in the shared-layer self-test, counted to 2 as usual but not tried again after a viewer update). Set by the viewer.</string>
+			<string>[G5 2026-11-11] "viewer version|OpenGL driver" the automatic OpenGL switches were counted for (version "*" when only a driver change can help: no Vulkan, or no usable Vulkan graphics card; [W106 2026-11-13] also a start that crashed in the shared-layer self-test, counted to 2 as usual but not tried again after a viewer update). Set by the viewer.</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>
@@ -20575,15 +20575,15 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVulkanLayerSelfTestRun</key>
 		<map>
 			<key>Comment</key>
-			<string>[W106 VKRETRY 2026-11-13] Set and saved just before the start-up shared-layer self-test (WolfVkShare::selfTest), cleared by that start's next save (Vulkan session marker, fall-back or run-time stop) and at every start. Still set at the next start, with the start unconfirmed (WolfVulkanStartOK false): that start ended in the self-test, and the failure is counted for the OpenGL driver only, so a viewer update does not retry Vulkan once 2 are counted (tickets 805/808/832). Set by the viewer.</string>
+			<string>[W106 VKRETRY 2026-11-13] This run's dump folder name, set and saved just before the start-up shared-layer self-test (WolfVkShare::selfTest); emptied by that start's next save (Vulkan session marker, fall-back or run-time stop) and at every start. Still set at the next start, with the start unconfirmed (WolfVulkanStartOK false) AND crash evidence (that run's crash stack in the folder, or an LLError / out-of-memory exec marker): the start crashed in the self-test, and the failure is counted for the OpenGL driver only, so a viewer update does not retry Vulkan once 2 are counted (tickets 805/808/832). Without evidence (a kill, a power cut) it is counted per viewer version as before. Set by the viewer.</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
-			<string>Boolean</string>
+			<string>String</string>
 			<key>Value</key>
-			<integer>0</integer>
+			<string />
 		</map>
 		<key>WolfVulkanLastGLDriver</key>
 		<map>

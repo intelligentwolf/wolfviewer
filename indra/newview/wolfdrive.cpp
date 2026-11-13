@@ -655,9 +655,9 @@ void WolfDrive::noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool
             mKeySeen[a] = t;
         }
     }
-    // [TRAIN CAB 2026-11-13] driving a train: Up / Down move its levers a notch (WolfTrain::noteKey); the car's pedals
-    // are not pressed by them
-    if (WolfTrain::instance().driving() && (key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S'))
+    // [TRAIN CAB 2026-11-13] driving a train: the cab's keys (WolfTrain::isCabKey - Up / Down the levers, F the reverser,
+    // F2 the mode, F3 the units, F4 show / hide); the car's pedals are not pressed by them
+    if (WolfTrain::instance().driving() && WolfTrain::isCabKey(key))
     {
         WolfTrain::instance().noteKey(key, key_down, repeat);
         return;

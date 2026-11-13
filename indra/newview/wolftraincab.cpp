@@ -346,9 +346,24 @@ U32 WolfTrain::sendButtons() const
     return b;
 }
 
+// static
+bool WolfTrain::isCabKey(KEY key)
+{
+    return key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S' || key == 'F' || key == KEY_F2 || key == KEY_F3 || key == KEY_F4;
+}
+
 void WolfTrain::noteKey(KEY key, bool key_down, bool repeat)
 {
     if (!key_down || !driving()) return;
+    if (key == 'F' || key == KEY_F2 || key == KEY_F3 || key == KEY_F4)
+    {
+        if (repeat) return;   // one press, one step
+        if (key == 'F') setReverser(mRev > 0 ? 0 : mRev == 0 ? -1 : 1);   // forward -> neutral -> reverse -> forward
+        else if (key == KEY_F2) setEasy(!easy());
+        else if (key == KEY_F3) setMph(!mph());
+        else toggleShown();
+        return;
+    }
     const bool up = key == KEY_UP || key == 'W';
     const bool down = key == KEY_DOWN || key == 'S';
     if (!up && !down) return;
@@ -527,6 +542,8 @@ namespace
           "With neither, the train keeps its speed. The reverser sets FORWARD or NEUTRAL.", "Stations are yours to stop at. The red lamp lights when the line makes the train brake." },
         { "The horn and the dial", "WHISTLE (or HORN) sounds the engine's own - everyone near hears it. The horn key works too.",
           "The dial shows the speed and, in red, the fastest this line allows. Click it for mph or km/h.", "THE LINE AHEAD shows the next station and how much track is in front of you." },
+        { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power). F sets the reverser:",
+          "forward, neutral, reverse in turn. F2 switches Easy driving and driver's mode, F3 mph and km/h.", "F4 hides or shows the cab. Your horn key (H unless you changed it) sounds the horn." },
     };
     const S32 CARD_COUNT = (S32)(sizeof(CARDS) / sizeof(CARDS[0]));
 }
@@ -587,7 +604,7 @@ void WolfTrainCabView::draw()
             frameW(mTabL, mTabB, mTabR, mTabT, 1.5f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
             g.u = 1.f; g.ox = 0.f; g.oy = 0.f;
             T((mTabL + mTabR) * 0.5f, (mTabB + mTabT) * 0.5f, "DRIVING - SHOW THE CAB", 10.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f), true);
-            addHit(mTabL, mTabB, mTabR, mTabT, H_SHOW_TAB, "You are still driving: show the Train Cab");
+            addHit(mTabL, mTabB, mTabR, mTabT, H_SHOW_TAB, "You are still driving: show the Train Cab (F4)");
             mDrawn = true;
             mPanelB = mPanelT = -1.f;
         }
@@ -655,7 +672,7 @@ void WolfTrainCabView::draw()
     // close (hide): the cab stays yours; Wolf World > Train Cab brings it back
     rectF(X(1560.f), Y(268.f), X(1592.f), Y(296.f), th.inset);
     T(X(1576.f), Y(282.f), "X", 12.f, C_GREY, true);
-    addHit(X(1560.f), Y(268.f), X(1592.f), Y(296.f), H_CLOSE, "Hide the Train Cab (you keep driving; Wolf World > Vehicles & Travel > Train Cab brings it back)");
+    addHit(X(1560.f), Y(268.f), X(1592.f), Y(296.f), H_CLOSE, "Hide the Train Cab - F4 (you keep driving; F4 or Wolf World > Vehicles & Travel > Train Cab brings it back)");
     rectF(X(1520.f), Y(268.f), X(1552.f), Y(296.f), th.inset);
     T(X(1536.f), Y(282.f), "?", 13.f, th.accent, true);
     addHit(X(1520.f), Y(268.f), X(1552.f), Y(296.f), H_HELP, "How to drive");
@@ -733,7 +750,7 @@ void WolfTrainCabView::draw()
             rectF(X(300.f), b, X(500.f), t, sel ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
             T(X(400.f), (b + t) * 0.5f, RN[i], 12.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
             addHit(X(300.f), b, X(500.f), t, RH[i], i == 2 ? std::string("Reverse: the train does not run backwards yet on Wolf Rail - it stays where it is")
-                                                          : std::string(i == 0 ? "Forward" : "Neutral: no power reaches the wheels"));
+                                                          : std::string(i == 0 ? "Forward (F: forward, neutral, reverse in turn)" : "Neutral: no power reaches the wheels (F)"));
         }
         T(X(400.f), Y(212.f), "REVERSER", 10.f, C_WHITE, true);
     }
@@ -770,7 +787,7 @@ void WolfTrainCabView::draw()
     circleF(cx, cy, S(10.f), th.accent);
     T(cx, cy - S(44.f), llformat("%d", (S32)llround(c.mSpeed * k)), 24.f, C_WHITE, true);
     T(cx, cy - S(70.f), mph ? "mph" : "km/h", 10.f, C_GREY);
-    addHit(cx - r, cy - r, cx + r, cy + r, H_UNITS, mph ? "Click for km/h" : "Click for mph");
+    addHit(cx - r, cy - r, cx + r, cy + r, H_UNITS, mph ? "Click for km/h (F3)" : "Click for mph (F3)");
     T(cx, Y(266.f), c.mMode == "easy" ? "EASY DRIVING" : "YOU ARE DRIVING", 11.f, th.accent, true);
 
     // ── right: the line ahead, the lamp, the horn ─────────────────────────────────────────────────
@@ -805,7 +822,7 @@ void WolfTrainCabView::draw()
     addHit(X(1070.f), Y(26.f), X(1300.f), Y(74.f), H_HORN, std::string("Sound the ") + (th.horn == std::string("WHISTLE") ? "whistle" : th.horn == std::string("GONG") ? "gong" : "horn") + " (hold)");
     rectF(X(1320.f), Y(26.f), X(1580.f), Y(74.f), LLColor4(0.f, 0.f, 0.f, 0.45f));
     T(X(1450.f), Y(50.f), easy ? "SWITCH TO DRIVER'S MODE" : "SWITCH TO EASY DRIVING", 10.f, th.accent, true);
-    addHit(X(1320.f), Y(26.f), X(1580.f), Y(74.f), H_MODE, easy ? "Switch to the driver's own levers (the train stops first)" : "Switch to the one-lever Easy driving (the train stops first)");
+    addHit(X(1320.f), Y(26.f), X(1580.f), Y(74.f), H_MODE, easy ? "Switch to the driver's own levers - F2 (the train stops first)" : "Switch to the one-lever Easy driving - F2 (the train stops first)");
 
     if (mShowHelp) drawHelp(top, W);
     zoomed.reset();

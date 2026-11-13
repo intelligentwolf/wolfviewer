@@ -90,7 +90,12 @@ public:
     S32 sendGear() const;
     U32 sendButtons() const;
 
-    /** Up / W one step more, Down / S one step less (wolfdrive.cpp noteScanKey, while driving()). */
+    /** The cab's keys, while driving() (wolfdrive.cpp noteScanKey: unmodified keys only, never one the UI took - so typing
+     *  in chat never reaches them, llviewerinput.cpp mKeyHandledByUI). Watch-only like every Wolf HUD key: the key's own
+     *  binding still runs. Up / W one step more, Down / S one step less; F the reverser (forward, neutral, reverse in turn:
+     *  F has no binding while sitting, key_bindings.xml <sitting>); F2 Easy / driver's mode; F3 mph / km/h; F4 show / hide
+     *  the cab (F2-F4 are no menu's shortcut: only F1 is, menu_viewer.xml). */
+    static bool isCabKey(KEY key);
     void noteKey(KEY key, bool key_down, bool repeat);
 
 private:

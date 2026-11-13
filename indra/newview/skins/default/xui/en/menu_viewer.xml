@@ -1838,6 +1838,13 @@
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_chat" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <!-- [TUTORIALS 2026-11-13] ticket 847: "How to ..." videos that open on YouTube (wolffloatertutorials.cpp), in the
+             getting-started group. Also Help > Wolf Tutorial Videos... and a Wolf HUDs tile. [WOLF GRID GATE] gone (not greyed)
+             off Wolf Territories. -->
+        <menu_item_call label="Tutorial Videos..." name="WolfTutorials">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_tutorials" />
+            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
         <menu_item_separator />
         <!-- [STARTER AVATARS 2026-10-24] Paul's rule: every Wolf feature also under Wolf World. Choose an Avatar (also in the
              Avatar menu): wear one of the grid's starter looks. Wolf Territories logins only. -->
@@ -2223,6 +2230,13 @@
              [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
             <menu_item_call label="Wolf Environment..." name="WolfEnvironment">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_environment" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
+            <!-- [WEATHER PROPS 2026-11-13] ticket 847: an umbrella in the rain, a snow shovel in the snow, a leaf rake in autumn
+                 (wolffloaterweatherprops.cpp, wolfweatherprops.cpp). Also a Wolf HUDs tile. [WOLF GRID GATE] gone (not greyed)
+                 off Wolf Territories. -->
+            <menu_item_call label="Weather Props..." name="WolfWeatherProps">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_weather_props" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
             <!-- WolfViewer 2026-09-10: World > Weather (wolfweather.cpp). Rain and snow the user
@@ -3747,6 +3761,17 @@
              function="PromptShowURL"
              name="wolf_whatsnew_url"
              parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=whatsnew" />
+        </menu_item_call>
+        <!-- [TUTORIALS 2026-11-13] ticket 847: the Tutorial Videos window (wolffloatertutorials.cpp), as Wolf World >
+             Tutorial Videos.... Wolf Territories only: gone (not greyed) elsewhere. -->
+        <menu_item_call
+         label="Wolf Tutorial Videos..."
+         name="WolfTutorialsHelp">
+             <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_tutorials" />
+             <menu_item_call.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
         
         <!-- <WolfViewer 2026-09-12> "Troubleshooting" is gone rather than repointed. It went to

@@ -24,6 +24,7 @@
 #include "wolfskis.h"
 #include "wolftraincab.h"   // [HUDS TRAIN 2026-11-13/] WolfTrain: the Train Cab
 #include "wolffloatergreedy.h"   // [W104 FEATFIX 2026-11-11/] WolfGreedyGame: the Greedy HUD
+#include "wolfweatherprops.h"   // [WEATHER PROPS 2026-11-13/] the switch, for the tile's state line
 
 namespace
 {
@@ -33,7 +34,8 @@ namespace
         "game", "car", "skis", "plane", "spaceship", "boat", "ship", "speedboat", "submarine",
         "greedy", "roleplay", "compass", "speed",   // [W104 FEATFIX 2026-11-11]
         "fishing",   // [FISHING HUD 2026-11-11/]
-        "train"   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml tile_train / state_train
+        "train",   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml tile_train / state_train
+        "weatherprops", "tutorials"   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml row 6
     };
 
     // [W104 FEATFIX 2026-11-11 A7] each tile's name as floater_wolf_huds.xml name_<id> shows it, for the status line
@@ -43,7 +45,8 @@ namespace
         "The Captain's Helm", "The Speedboat helm", "The Submarine helm",
         "Greedy", "The Roleplay console", "Tessa's Compass", "Xenon's WolfSpeed",
         "Fishing",   // [W104 MERGE 2026-11-11] floater_wolf_huds.xml name_fishing
-        "The Train Cab"   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml name_train
+        "The Train Cab",   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml name_train
+        "Weather Props", "Tutorial Videos"   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml name_weatherprops / name_tutorials
     };
 
     // [W104 FEATFIX 2026-11-11] Wolf Territories only, as their menu items (menu_viewer.xml on_visible WolfGrid.IsOnWolfTerritories);
@@ -53,7 +56,8 @@ namespace
         true, true, true, true, true, true, true, true, true,
         true, true, false, true,
         true,   // [W104 MERGE 2026-11-11] Fishing: Wolf Territories only, as its menu item (menu_viewer.xml WolfWorldFishing on_visible WolfGrid.IsOnWolfTerritories)
-        true   // [HUDS TRAIN 2026-11-13] the Train Cab: Wolf Territories only, as its menu item (menu_viewer.xml WolfTrainCab on_visible WolfGrid.IsOnWolfTerritories) and WolfTrain::onWolf (wolftraincab.cpp)
+        true,   // [HUDS TRAIN 2026-11-13] the Train Cab: Wolf Territories only, as its menu item (menu_viewer.xml WolfTrainCab on_visible WolfGrid.IsOnWolfTerritories) and WolfTrain::onWolf (wolftraincab.cpp)
+        true, true   // [WEATHER PROPS / TUTORIALS 2026-11-13] Wolf Territories only, as their menu items (menu_viewer.xml WolfWeatherProps / WolfTutorials on_visible WolfGrid.IsOnWolfTerritories)
     };
 
     // [W104 FEATFIX 2026-11-11] the windows these tiles show and hide (menu_viewer.xml WolfRoleplay / WolfCompass / WolfSpeed:
@@ -65,6 +69,8 @@ namespace
             case WolfFloaterHuds::T_ROLEPLAY: return "wolf_roleplay";
             case WolfFloaterHuds::T_COMPASS:  return "wolf_compass";
             case WolfFloaterHuds::T_SPEED:    return "wolf_speed";
+            case WolfFloaterHuds::T_WEATHERPROPS: return "wolf_weather_props";   // [WEATHER PROPS 2026-11-13/] menu_viewer.xml WolfWeatherProps
+            case WolfFloaterHuds::T_TUTORIALS:    return "wolf_tutorials";       // [TUTORIALS 2026-11-13/] menu_viewer.xml WolfTutorials
             default:                          return nullptr;
         }
     }
@@ -147,6 +153,9 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_ROLEPLAY:
         case T_COMPASS:
         case T_SPEED:     return LLFloaterReg::instanceVisible(floaterOf(t));   // as their menu ticks (Floater.Visible)
+        // [WEATHER PROPS / TUTORIALS 2026-11-13] lit while their window shows, as the three above
+        case T_WEATHERPROPS:
+        case T_TUTORIALS: return LLFloaterReg::instanceVisible(floaterOf(t));
         // [FISHING HUD 2026-11-11] on while the Fishing HUD shows (wolffishingoverlay.cpp)
         case T_FISHING:   return WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudWanted();   // (on, or waiting for a vehicle panel)
         // [HUDS TRAIN 2026-11-13] on while the Train Cab shows, as its menu tick (llviewermenu.cpp WolfTrain.IsShown ->
@@ -191,6 +200,9 @@ void WolfFloaterHuds::onTile(ETile t)
         case T_ROLEPLAY:
         case T_COMPASS:
         case T_SPEED:     LLFloaterReg::toggleInstance(floaterOf(t)); break;   // Floater.Toggle, as the menu
+        // [WEATHER PROPS / TUTORIALS 2026-11-13] their windows, as Wolf World > Sky & Weather > Weather Props... / Tutorial Videos...
+        case T_WEATHERPROPS:
+        case T_TUTORIALS: LLFloaterReg::toggleInstance(floaterOf(t)); break;
         // [FISHING HUD 2026-11-11] the same as Wolf World > Fishing (on) and the HUD's CLOSE (off: the rod's touch menu)
         case T_FISHING:   WolfFishingSession::toggleHud(); break;   // on; off; or, while waiting, cancel the wait
         // [HUDS TRAIN 2026-11-13] the same as Wolf World > Vehicles & Travel > Train Cab (llviewermenu.cpp WolfTrain.Toggle ->
@@ -262,6 +274,11 @@ void WolfFloaterHuds::refreshTiles()
             // idle: hidden with its X or F4, or given way to another bottom panel): say so rather than a bare OFF
             const WolfTrain& tr = WolfTrain::instance();
             if (tr.driving() && !on) { state = "Driving - cab hidden"; running = true; }
+        }
+        else if (wolf && t == T_WEATHERPROPS)
+        {
+            // [WEATHER PROPS 2026-11-13] the props carry on with the window closed: say so rather than a bare OFF
+            if (WolfWeatherProps::enabled() && !on) { state = "Props on - window closed"; running = true; }
         }
         // In the WolfViewer skins a lit (selected) button is only a lighter grey, so the state line says it plainly: a filled
         // dot and light green words when on, a hollow dot and the label colour when off. LtGreen (colors.xml, 0.79 1 0.79)

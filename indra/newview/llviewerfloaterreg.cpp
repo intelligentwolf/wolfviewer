@@ -109,6 +109,8 @@
 #include "wolffloatervulkan.h"   // [VULKAN BACKEND 2026-11-08/]
 #include "wolffloaterskis.h"   // [SKIS 2026-11-06/]
 #include "wolffloaterhuds.h"   // [HUDS BUTTON 2026-11-10/]
+#include "wolffloatertutorials.h"   // [TUTORIALS 2026-11-13/] ticket 847
+#include "wolffloaterweatherprops.h"   // [WEATHER PROPS 2026-11-13/] ticket 847
 #include "wolffloatermeshupload.h"
 #include "wolffloaterphotoeffects.h"   // [PAINTERS 2026-09-20/]
 #include "wolffloaterlagdetector.h"   // [LAG DETECTOR 2026-09-29/]
@@ -705,6 +707,8 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_vulkan", "floater_wolf_vulkan.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterVulkan>);   // [VULKAN BACKEND 2026-11-08] Wolf World > Vulkan Renderer...
     LLFloaterReg::add("wolf_skis", "floater_wolf_skis.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSkis>);   // [SKIS 2026-11-06] ticket 556
     LLFloaterReg::add("wolf_huds", "floater_wolf_huds.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterHuds>);   // [HUDS BUTTON 2026-11-10] the HUDs button
+    LLFloaterReg::add("wolf_tutorials", "floater_wolf_tutorials.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTutorials>);   // [TUTORIALS 2026-11-13] ticket 847
+    LLFloaterReg::add("wolf_weather_props", "floater_wolf_weather_props.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWeatherProps>);   // [WEATHER PROPS 2026-11-13] ticket 847
     LLFloaterReg::add("wolf_vr_draw_distance", "floater_wolf_vr_draw_distance.xml", &LLFloaterReg::build<LLFloater>);   // [VR DRAW DISTANCE 2026-11-05]
     LLFloaterReg::add("wolf_vr_stream", "floater_wolf_vr_stream.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterVRStream>);   // [VR PIPE 2026-11-03/] VR in Your Headset Browser
     LLFloaterReg::add("wolf_dob", "floater_wolf_dob.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDob>);   // [DOB IN THE VIEWER 2026-10-26/] Your Date of Birth

@@ -35,6 +35,7 @@
 #include "wolfgrid.h"
 #include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] no swimming in a sea tunnel
 #include "wolfboatrock.h"     // [SWIM HEAD 2026-11-13/] drawnWaveHeight: the surface as drawn
+#include "llstartup.h"        // [SWIM HEAD 2026-11-13/] no swim decisions before STATE_STARTED
 
 namespace
 {
@@ -59,6 +60,11 @@ namespace
     // push-down (pressed until the top is back under PUSH_DOWN_ABOVE) sank the top to 1.16 m under that line at
     // 1.64 m/s: ~0.6 s of the move still arriving after the release. The push is judged that far ahead.
     const F32 PUSH_LEAD_S = 0.6f;
+    // [SWIM HEAD 2026-11-13] Flying out of the water on purpose (review W2): Up held this long at the surface (design
+    // value) lets the swimmer rise out and fly on, as plain flying does (steer otherwise takes Up away at the surface,
+    // and the hold swallows it); a short press only surfaces. Up from the keyboard is AGENT_CONTROL_UP_POS every frame
+    // while the key is down (llviewerinput.cpp agent_jump -> LLAgent::moveUp, llagent.cpp:902).
+    const F64 RISE_OUT_HOLD_S = 1.0;
 
     // From the head joint to the top of the head. Source: wolfstorm/python/charbuilder std_male.npz (the standard
     // shape's body mesh) highest vertex z 1.946 against sl_skeleton.json (avatar_skeleton.xml) mSkull z 1.762.
@@ -139,6 +145,8 @@ namespace
         // top has not been back under the surface band since, so the out-of-the-water test goes by the chin meanwhile
         bool mHolding = false;
         bool mHeadUp = false;
+        F64 mUpAtSurfaceSince = 0.0;   // Up held at the surface since, 0 = not held there
+        bool mRisingOut = false;       // held long enough: rising out of the water (RISE_OUT_HOLD_S)
         S32 mPress = 0;                // holdHead: the press now, +1 up, -1 down, 0 none
         F64 mPressChangedAt = 0.0;
         F64 mPressFor = 0.0;           // the length of the pulse now pressed
@@ -457,7 +465,9 @@ namespace
     // [SWIM HEAD 2026-11-13] Treading at the surface: up or down (the region's own swim speed, steer) so the chin rides
     // the drawn surface. The position is the region's, so every viewer sees the head out of the water. Upward is capped
     // at the chin line: up is pressed only while the chin is under the surface, so the hold never lifts the body out of
-    // the water. It presses in measured pulses, each followed by a pause for its move to arrive (HOLD_* above).
+    // the water. It presses in measured pulses, each followed by a pause for its move to arrive (HOLD_* above). The
+    // person's own Up is swallowed while held (a tap only surfaces); held for RISE_OUT_HOLD_S it ends the hold and the
+    // swimmer rises out.
     void holdHead(LLVOAvatarSelf* av, F32 chin_z, F32 surface)
     {
         State& s = st();
@@ -634,6 +644,8 @@ namespace
         s.mStroke = false;
         endHold();
         s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
+        s.mUpAtSurfaceSince = 0.0;
+        s.mRisingOut = false;
         s.mStillSince = now();
         s.mWeTurnedFlyOn = false;
         if (!gAgent.getFlying())
@@ -655,8 +667,8 @@ namespace
         if (!s.mToldStart)
         {
             s.mToldStart = true;
-            tip("Swimming. The movement keys swim you in any direction; you can't swim up out of the water - swim to the shore. "
-                "Wolf World > Swimming switches it off.");
+            tip("Swimming. The movement keys swim you in any direction. To leave the water, swim to the shore, or hold Up "
+                "for a moment at the surface to fly out. Wolf World > Swimming switches it off.");
         }
     }
 
@@ -675,6 +687,8 @@ namespace
         s.mSwimming = false;
         endHold();
         s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
+        s.mUpAtSurfaceSince = 0.0;
+        s.mRisingOut = false;
         if (end_fly && s.mWeTurnedFlyOn && gAgent.getFlying())
         {
             gAgent.setFlying(false);
@@ -682,20 +696,25 @@ namespace
         s.mWeTurnedFlyOn = false;
     }
 
-    void steer(LLVOAvatarSelf* av, F32 top, F32 water)
+    // rising: the swimmer is flying out on purpose (RISE_OUT_HOLD_S) - their Up is left alone and nothing pushes down.
+    void steer(LLVOAvatarSelf* av, F32 top, F32 water, bool rising)
     {
         // Slow: STOP held makes the region move us at AgentControlStopSlowVel (WolfSim ScenePresence.cs:1124, 2968-2977),
         // x4 while flying (AddNewMovement, :3993).
         gAgent.setControlFlags(AGENT_CONTROL_STOP);
 
-        // Never up out of the water.
-        if (top > water - TOP_STOP_BELOW)
+        // Never up out of the water (unless rising out on purpose).
+        if (!rising && top > water - TOP_STOP_BELOW)
         {
             gAgent.clearControlFlags(AGENT_CONTROL_UP_POS | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_FAST_UP);
         }
         // [SWIM HEAD 2026-11-13] judged PUSH_LEAD_S ahead at the present vertical speed, so the push ends before it has
-        // overshot (the region's move arrives late - see PUSH_LEAD_S)
-        if (top + av->getVelocity().mV[VZ] * PUSH_LEAD_S > water + PUSH_DOWN_ABOVE && av->mInAir)
+        // overshot (the region's move arrives late - see PUSH_LEAD_S). The look-ahead only from the line where Up is taken
+        // away (above), so it never works against a swimmer's own Up on the way up from below (review W1: the region adds
+        // the direction flags together, WolfSim ScenePresence.cs:2875-2879).
+        const bool over = top > water + PUSH_DOWN_ABOVE
+            || (top > water - TOP_STOP_BELOW && top + av->getVelocity().mV[VZ] * PUSH_LEAD_S > water + PUSH_DOWN_ABOVE);
+        if (!rising && over && av->mInAir)
         {
             // climbing with forward alone (a pitched body): forward goes too until it is back under
             gAgent.clearControlFlags(AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG);
@@ -804,7 +823,10 @@ namespace WolfSwim
     void beforeAgentUpdate()
     {
         State& s = st();
-        if (!isAgentAvatarValid() || !gAgent.getRegion())
+        // [SWIM HEAD 2026-11-13] before STATE_STARTED the region's water height and the avatar's position are not real yet
+        // (the region handshake sets the water: llviewerregion.cpp:3365; before it LLSurface::getWaterHeight gives
+        // DEFAULT_WATER_HEIGHT) - live test logs showed a swim start / stop pair at every login
+        if (!isAgentAvatarValid() || !gAgent.getRegion() || LLStartUp::getStartupState() < STATE_STARTED)
         {
             s.mSwimming = false;   // nothing to send to: the region forgets our animations with us
             endHold();
@@ -865,17 +887,22 @@ namespace WolfSwim
         // Out of the water: the top past the band (EXIT_ABOVE_IN_AIR for a swimmer touching nothing) - or, while the head
         // is held up (its top is then ~0.33 m over the water on the standard shape, by design), the chin past the band
         // over the drawn surface.
-        const F32 exit_above = (s.mSwimming && av->mInAir) ? EXIT_ABOVE_IN_AIR : EXIT_ABOVE;
         // (Run 4, 10:30:40Z: a hold pulse that overshot to the chin 0.33 m over the surface ended the swim in mid-air
-        // with the plain band - the in-air band for the chin too.)
-        const bool out = s.mHeadUp ? chin_z > surface + exit_above : top > water + exit_above;
+        // with the plain band - the in-air band for the chin too.) Review W3: the wider band changes nothing for any
+        // other swimmer, because nothing else of the swim's own can put a swimmer touching nothing that high: Up is taken
+        // away at TOP_STOP_BELOW and the push-down starts at PUSH_DOWN_ABOVE, so a top 0.35-1.0 m up in the air is
+        // always momentum, a hold pulse or a wave, and the push-down / the hold bring it back. Rising out on purpose
+        // (RISE_OUT_HOLD_S) uses the plain band on the top and keeps flying, as plain flying out of the water does.
+        const F32 exit_above = (s.mSwimming && av->mInAir && !s.mRisingOut) ? EXIT_ABOVE_IN_AIR : EXIT_ABOVE;
+        const bool out = (s.mHeadUp && !s.mRisingOut) ? chin_z > surface + exit_above : top > water + exit_above;
 
         // [WOLF SEA TUNNEL 2026-10-28] a head inside an air-filled volume (a sea tunnel, wolfdryvolumes.h) is out of the
         // water: walk, as on land
         const bool dry = !out && WolfDryVolumes::instance().contains(LLVector3(root.mV[VX], root.mV[VY], top));
         if (out || dry)
         {
-            stopSwimming(true, dry ? "in a dry volume" : "out of the water");
+            const bool flying_out = s.mRisingOut && !dry;
+            stopSwimming(!flying_out, dry ? "in a dry volume" : (flying_out ? "flew out" : "out of the water"));
             s.mSuppressed = false;     // out of the water: the next dip swims again
             return;
         }
@@ -925,8 +952,25 @@ namespace WolfSwim
         LLVector3 across = av->getVelocity();
         across.mV[VZ] = 0.f;
         const bool scripted = gAgent.isControlTaken(CONTROL_UP_POS_INDEX) || gAgent.isControlTaken(CONTROL_UP_NEG_INDEX);
+        // [SWIM HEAD 2026-11-13] Up held at the surface (where steer takes it away, or the head held up) for
+        // RISE_OUT_HOLD_S: rise out. Let go before the top is out and the swim goes on as before.
+        const bool up_key = (keys & AGENT_CONTROL_UP_POS) != 0;
+        const bool at_surface = s.mHeadUp || top > water - TOP_STOP_BELOW;
+        if (!up_key || !at_surface)
+        {
+            s.mUpAtSurfaceSince = 0.0;
+            s.mRisingOut = s.mRisingOut && up_key;   // keeps rising while Up stays down, once started
+        }
+        else if (s.mUpAtSurfaceSince == 0.0)
+        {
+            s.mUpAtSurfaceSince = now();
+        }
+        else if (now() - s.mUpAtSurfaceSince >= RISE_OUT_HOLD_S)
+        {
+            s.mRisingOut = true;
+        }
         const bool level = std::fabs(gAgent.getFrameAgent().getAtAxis().mV[VZ]) <= HOLD_MAX_PITCH;
-        if (!have_surface || scripted || !level || across_or_down || across.length() > MOVING_SPEED)
+        if (!have_surface || scripted || !level || across_or_down || across.length() > MOVING_SPEED || s.mRisingOut)
         {
             endHold();
         }
@@ -942,7 +986,7 @@ namespace WolfSwim
         }
         else
         {
-            steer(av, top, water);
+            steer(av, top, water, s.mRisingOut);
         }
         animate(av);
 
@@ -953,6 +997,7 @@ namespace WolfSwim
             next_debug = now() + 0.25;
             static U32 last_edges = 0;
             LL_DEBUGS("WolfSwim") << "swim hold=" << s.mHolding << " headup=" << s.mHeadUp << " stroke=" << s.mStroke
+                                  << " rising=" << s.mRisingOut
                                   << " press=" << s.mPress << " edges=" << (s.mPressEdges - last_edges) << "/0.25s"
                                   << " edges_total=" << s.mPressEdges << " scripted=" << scripted << " level=" << level
                                   << " chin=" << chin_z << " head=" << (av->mHeadp ? av->mHeadp->getWorldPosition().mV[VZ] : 0.f)

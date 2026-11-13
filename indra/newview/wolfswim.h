@@ -20,9 +20,9 @@
 // remember that quads are a bit different".
 //
 // Who and what: a resident walks or flies into the sea on a Wolf region; once the top of the avatar is under the
-// surface it swims - moves freely in 3D, slower than flying, can never swim up out of the water, does not land on the
-// bottom - and everyone around sees a swim. Out of the water (or sat down, or the Wolf World > Swimming switch off) it
-// is back to walking.
+// surface it swims - moves freely in 3D, slower than flying, does not swim up out of the water by accident (Up held at
+// the surface flies it out), does not land on the bottom - and everyone around sees a swim. Out of the water (or sat
+// down, or the Wolf World > Swimming switch off) it is back to walking.
 //
 // How (each part read from the source, see wolfswim.cpp):
 //   - Movement: flying (LLAgent::setFlying) with AGENT_CONTROL_STOP held, which the region turns into its slow speed:
@@ -42,7 +42,8 @@
 //     holds the head out with the waterline at the chin (the skeleton's mFaceChin joint) on the waves this viewer
 //     draws (WolfBoatRock::drawnWaveHeight), by pressing up / down for the avatar - the region moves it, so everyone
 //     sees it. A stroke away ducks the head back under first (as before); down still dives. Not while a script has
-//     taken the up / down control, nor with a pitched body (mouselook): the swim as before then.
+//     taken the up / down control, nor with a pitched body (mouselook): the swim as before then. Up held for a moment
+//     at the surface flies the swimmer out of the water (review W2; before, the only way out was the shore).
 namespace WolfSwim
 {
     /** The whole per-frame step: decide, set the agent's fly state and control flags, start / stop the animations.

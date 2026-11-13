@@ -37,6 +37,7 @@
 #include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/] Wolf World > Fishing on the screen
 #include "wolfdrive.h"   // [WOLF DRIVE 2026-10-09/] the Car Dashboard toolbar button
 #include "wolfhelm.h"   // <WolfViewer 2026-10-28/> Captain's Helm
+#include "wolftraincab.h"   // [TRAIN CAB 2026-11-13] the Train Cab (Wolf Rail)
 // <WolfViewer 2026-09-06> Wolf Territories-only features
 #include "wolfgrid.h"
 #include "wolfai.h"   // [FLOATER SPLIT 2026-09-11] WolfAI.CanUse
@@ -13116,6 +13117,9 @@ void initialize_menus()
     // (wolfhelm.cpp toggleHud: Wolf Territories only, refused silently elsewhere like the car icon).
     commit.add("WolfHelm.Toggle", [](LLUICtrl*, const LLSD&) { WolfHelm::instance().toggleHud(); });
     enable.add("WolfHelm.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfHelm::instance().hudShowing(); });
+    // [TRAIN CAB 2026-11-13] Wolf World > Vehicles & Travel > Train Cab: show / hide it (driving), or open its guide
+    commit.add("WolfTrain.Toggle", [](LLUICtrl*, const LLSD&) { WolfTrain::instance().toggleShown(); });
+    enable.add("WolfTrain.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfTrain::instance().shown(); });
     // <WolfViewer 2026-10-11> Wolf World > Show Wolf Icons (bottom right): checked while the icons show, i.e. the
     // inverse of WolfHideToolbarIcons (lltoolbarview.cpp draw hides them and keeps the toolbar showing). Every grid.
     commit.add("Wolf.ToggleToolbarIcons", [](LLUICtrl*, const LLSD&)

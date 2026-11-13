@@ -1760,8 +1760,8 @@ bool drawHudObjectsInEye()
             const LLVector3 tag = gAgent.getPosAgentFromGlobal(gAgentAvatarp->mNameText->getPositionGlobal());
             const glm::vec3 win = glm::project(glm::vec3(tag.mV[0], tag.mV[1], tag.mV[2]), get_current_modelview(),
                                                get_current_projection(), glm::make_vec4(gGLViewport));
-            at = llformat(", own tag at %.3f,%.3f of the %s eye", (win.x - gGLViewport[0]) / gGLViewport[2],
-                          1.f - (win.y - gGLViewport[1]) / gGLViewport[3], gEye ? "right" : "left");
+            at = llformat(", own tag at %.3f,%.3f of the %s eye", (win.x - (F32)gGLViewport[0]) / (F32)gGLViewport[2],
+                          1.f - (win.y - (F32)gGLViewport[1]) / (F32)gGLViewport[3], gEye ? "right" : "left");
         }
         LL_INFOS("WolfVR") << "VR 3D: name tags, hover text and voice dots drawn in the " << (gEye >= 0 ? "eyes" : "view")
                            << ": " << shown << " name tags shown (own " << own << ")" << (firstPerson() ? ", first person" : "")

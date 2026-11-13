@@ -61,21 +61,26 @@ namespace
     // SendControlsToScripts.)
     //   SURFACE_REACH - the hold starts once the top of the head is within this of the drawn surface (a swimmer who
     //     comes up, or dips under for a moment, pops back up; one who stops deeper down stays there);
-    //   HOLD_START_BAND - a press starts when the chin is (about to be) further than this from the surface; it ends when
-    //     the chin is about to reach the surface (hysteresis: no press for small errors, no stop half-way);
-    //   HOLD_LEAD_S - the chin is judged where it will be this long from now at its present vertical speed, so a press
-    //     ends before the region's move has overshot. That move is AgentControlStopSlowVel x 4 = 0.2 x 4.096 x 4 =
-    //     3.28 m/s (WolfSim ScenePresence.cs:1124, and AddNewMovement's flying `direc *= 4.0f`, :3993);
-    //   HOLD_MIN_PRESS_S / HOLD_MIN_GAP_S - every press and every pause lasts at least this long: each change of the
-    //     control flags is an AgentUpdate straight away (llviewermessage.cpp:4378) plus its follow-up, so this caps the
-    //     hold at about 2 / (0.1 + 0.25) = 5.7 flag changes a second;
+    //   The move a press asks for is AgentControlStopSlowVel x 4 = 0.2 x 4.096 x 4 = 3.28 m/s (WolfSim
+    //     ScenePresence.cs:1124, and AddNewMovement's flying `direc *= 4.0f`, :3993). MEASURED (live test 2026-11-13
+    //     09:09Z, Sandbox 2, BulletSim, ~/.cache/w106/swimhead-rig): the viewer saw at most 1.63 m/s, and a press of
+    //     ~0.4 s moved the chin ~1.15 m in all, its last ~0.3 m arriving 0.2-0.35 s AFTER the release (the region's
+    //     update coming back). A press-until-there loop (the first version, 0.15 s look-ahead) swung the chin +/-0.35 m
+    //     at ~0.8 Hz. So the hold moves in measured PULSES instead, and looks again only once each pulse has arrived:
+    //   HOLD_PER_M_S - seconds of press per metre to go: 0.4 s / 1.15 m (the measurement above);
+    //   HOLD_MIN_PRESS_S / HOLD_MAX_PRESS_S - each pulse at least / at most this long (a 0.1 s pulse moves ~0.29 m);
+    //   HOLD_SETTLE_S - after a pulse, no new one until its move has come back (the 0.35 s above, rounded up);
+    //   HOLD_START_BAND - a pulse only for a chin further than this from the surface: more than half the smallest pulse's
+    //     move, so a pulse never ends further away than it started (no hunting about the surface).
+    //   Each change of the control flags is an AgentUpdate straight away (llviewermessage.cpp:4378) plus its follow-up:
+    //     at most 2 changes per (0.1 + 0.4) s = 4 a second.
     //   HOLD_MAX_PITCH - the hold only works with a level body: flying, the region turns the up / down move by the body
     //     rotation the viewer sends (AddNewMovement `direc = vec * rot`, :3961, not levelled while Flying, :3953-3959),
     //     which is the agent frame (llviewermessage.cpp:4390) and pitches in mouselook (LLAgent::pitch); a pitched body
     //     would drift across the water on every press. The sine of 5 degrees: up to 0.29 m/s of drift during a press.
-    const F32 SURFACE_REACH = 0.30f, HOLD_START_BAND = 0.08f;
-    const F32 HOLD_LEAD_S = 0.15f;
-    const F64 HOLD_MIN_PRESS_S = 0.10, HOLD_MIN_GAP_S = 0.25;
+    const F32 SURFACE_REACH = 0.30f, HOLD_START_BAND = 0.15f;
+    const F32 HOLD_PER_M_S = 0.4f / 1.15f;
+    const F64 HOLD_MIN_PRESS_S = 0.10, HOLD_MAX_PRESS_S = 0.40, HOLD_SETTLE_S = 0.40;
     const F32 HOLD_MAX_PITCH = 0.0872f;
 
     // Stroke when moving faster than this (m/s), back to the tread under STILL_SPEED for STILL_FOR_S (design values;
@@ -126,6 +131,7 @@ namespace
         bool mHeadUp = false;
         S32 mPress = 0;                // holdHead: the press now, +1 up, -1 down, 0 none
         F64 mPressChangedAt = 0.0;
+        F64 mPressFor = 0.0;           // the length of the pulse now pressed
         U32 mPressEdges = 0;           // press changes, counted for the debug line
         LLVOAvatarSelf* mChinOf = nullptr;   // chinJoint's cache: the avatar and head joint it was found for
         LLJoint* mChinHeadOf = nullptr;
@@ -440,35 +446,29 @@ namespace
 
     // [SWIM HEAD 2026-11-13] Treading at the surface: up or down (the region's own swim speed, steer) so the chin rides
     // the drawn surface. The position is the region's, so every viewer sees the head out of the water. Upward is capped
-    // at the chin line: up is pressed only while the chin is (about to be) under the surface, so the hold never lifts
-    // the body out of the water. Presses have hysteresis and a minimum length / gap (HOLD_* above).
+    // at the chin line: up is pressed only while the chin is under the surface, so the hold never lifts the body out of
+    // the water. It presses in measured pulses, each followed by a pause for its move to arrive (HOLD_* above).
     void holdHead(LLVOAvatarSelf* av, F32 chin_z, F32 surface)
     {
         State& s = st();
         gAgent.setControlFlags(AGENT_CONTROL_STOP);   // the slow swim speed, as steer
         gAgent.clearControlFlags(AGENT_CONTROL_UP_POS | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_FAST_UP
                                  | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_UP_NEG);
-        const F32 err = surface - (chin_z + av->getVelocity().mV[VZ] * HOLD_LEAD_S);   // > 0: the chin is going under
+        const F32 err = surface - chin_z;   // > 0: the chin is under the surface
         const F64 t = now();
         const F64 held = t - s.mPressChangedAt;
         S32 press = s.mPress;
         if (press == 0)
         {
-            if (held >= HOLD_MIN_GAP_S)
+            if (held >= HOLD_SETTLE_S && std::fabs(err) > HOLD_START_BAND && (err > 0.f || av->mInAir))
             {
-                if (err > HOLD_START_BAND)
-                {
-                    press = 1;
-                }
-                else if (err < -HOLD_START_BAND && av->mInAir)
-                {
-                    press = -1;
-                }
+                press = err > 0.f ? 1 : -1;
+                s.mPressFor = llclamp((F64)(std::fabs(err) * HOLD_PER_M_S), HOLD_MIN_PRESS_S, HOLD_MAX_PRESS_S);
             }
         }
-        else if (held >= HOLD_MIN_PRESS_S && (press > 0 ? err <= 0.f : err >= 0.f))
+        else if (held >= s.mPressFor)
         {
-            press = 0;   // about to reach the surface
+            press = 0;   // the pulse is long enough for the distance
         }
         if (press < 0 && !av->mInAir)
         {
@@ -619,6 +619,7 @@ namespace
     void startSwimming()
     {
         State& s = st();
+        LL_DEBUGS("WolfSwim") << "swim start" << LL_ENDL;   // [SWIM HEAD 2026-11-13/] for the live test's timeline
         s.mSwimming = true;
         s.mStroke = false;
         endHold();
@@ -657,6 +658,7 @@ namespace
         {
             return;
         }
+        LL_DEBUGS("WolfSwim") << "swim stop" << LL_ENDL;   // [SWIM HEAD 2026-11-13/] for the live test's timeline
         setMode(EMode::NONE);
         stopPlaying();
         s.mSwimming = false;

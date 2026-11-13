@@ -51,6 +51,8 @@
 #include "llcriticaldamp.h"     // [VR CAMERA ON ENTRY 2026-11-13] resetCameraForVR: LLSmoothInterpolation, as resetView
 #include "llhudobject.h"        // [VR NAME TAGS 2026-11-13] drawHudObjectsInEye: LLHUDObject::renderAll
 #include "llhudnametag.h"       // [VR NAME TAGS 2026-11-13] the name tags counted for the log
+#include <glm/gtc/matrix_transform.hpp>   // [VR NAME TAGS] glm::project: the own tag's place, for the log
+#include <glm/gtc/type_ptr.hpp>
 #include "llvoavatarself.h"
 #include "llviewerwindow.h"
 #include "llwindow.h"
@@ -1750,9 +1752,20 @@ bool drawHudObjectsInEye()
             ++shown;
             if (av->isSelf()) ++own;
         }
+        // where one's own tag's anchor lands on this eye's picture (0..1 across from the left, 0..1 down from the top), with
+        // this pass's own matrices - the place the e2e test (e2e_vrnametags.mjs) looks for the tag's pixels
+        std::string at;
+        if (own && gEye >= 0 && gGLViewport[2] > 0 && gGLViewport[3] > 0)
+        {
+            const LLVector3 tag = gAgent.getPosAgentFromGlobal(gAgentAvatarp->mNameText->getPositionGlobal());
+            const glm::vec3 win = glm::project(glm::vec3(tag.mV[0], tag.mV[1], tag.mV[2]), get_current_modelview(),
+                                               get_current_projection(), glm::make_vec4(gGLViewport));
+            at = llformat(", own tag at %.3f,%.3f of the %s eye", (win.x - gGLViewport[0]) / gGLViewport[2],
+                          1.f - (win.y - gGLViewport[1]) / gGLViewport[3], gEye ? "right" : "left");
+        }
         LL_INFOS("WolfVR") << "VR 3D: name tags, hover text and voice dots drawn in the " << (gEye >= 0 ? "eyes" : "view")
                            << ": " << shown << " name tags shown (own " << own << ")" << (firstPerson() ? ", first person" : "")
-                           << LL_ENDL;
+                           << at << LL_ENDL;
     }
     return true;
 }

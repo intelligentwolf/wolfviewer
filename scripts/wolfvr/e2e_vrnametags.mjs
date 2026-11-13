@@ -60,13 +60,18 @@ async function exitVR(tag) {
 }
 
 const grab = async (file) => { const d = await evalJs('window.__wolfvr.grab()'); if (d) writeFileSync(resolve(OUT, file), Buffer.from(d.split(',')[1], 'base64')); return !!d; };
-// the number of near-white pixels (all channels > 215) in a received picture at full size: the name tag's text is
-// white (the default name tag colour) and small, so its pixels are counted rather than looked for in blocks - the
-// 11:30Z run showed block differences drowned by the scene moving between two pictures (the avatar's idle turn)
-async function whitePixels(pic) {
+// near-white pixels (all channels > 215) of a received picture within a window around (u, v) of one eye's half (u, v
+// 0..1 of that eye, from the viewer's own log: where the own tag's anchor landed). The tag's text is white (the default
+// name tag colour); looking only around its anchor keeps the avatar's own moving pale hands and the white buildings out
+// (the 11:30-11:40Z runs: block differences, whole-picture counts and changed pixels all drowned in them)
+async function whiteNear(pic, eye, u, v) {
     return evalJs(`(async () => { const i = new Image(); i.src = ${JSON.stringify(pic)}; await i.decode();
         const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const x = c.getContext('2d');
-        x.drawImage(i, 0, 0); const d = x.getImageData(0, 0, i.width, i.height).data; let n = 0;
+        x.drawImage(i, 0, 0); const half = i.width / 2, cx = ${eye} * half + ${u} * half, cy = ${v} * i.height;
+        const x0 = Math.max(${eye} * half, Math.round(cx - 110)), x1 = Math.min((${eye} + 1) * half, Math.round(cx + 110));
+        const y0 = Math.max(0, Math.round(cy - 60)), y1 = Math.min(i.height, Math.round(cy + 60));
+        if (x1 <= x0 || y1 <= y0) return -1;
+        const d = x.getImageData(x0, y0, x1 - x0, y1 - y0).data; let n = 0;
         for (let k = 0; k < d.length; k += 4) if (d[k] > 215 && d[k + 1] > 215 && d[k + 2] > 215) n++; return n; })()`);
 }
 // LLViewerControl get (llviewercontrollistener.cpp:72), its reply found by its reqid in the relay's log
@@ -90,7 +95,9 @@ function hudLine(since) {
     const l = after(since, 'VR 3D: name tags, hover text and voice dots drawn in the').pop();
     if (!l) return null;
     const m = l.match(/drawn in the (eyes|view): (\d+) name tags shown \(own (\d+)\)(, first person)?/);
-    return m ? { where: m[1], tags: +m[2], own: +m[3], first: !!m[4], line: l.replace(/^.*VR 3D:/, 'VR 3D:') } : null;
+    const p = l.match(/own tag at (-?[\d.]+),(-?[\d.]+) of the (left|right) eye/);
+    return m ? { where: m[1], tags: +m[2], own: +m[3], first: !!m[4], u: p ? +p[1] : null, v: p ? +p[2] : null,
+                 eye: p ? (p[3] === 'right' ? 1 : 0) : null, line: l.replace(/^.*VR 3D:/, 'VR 3D:') } : null;
 }
 await send('Page.enable'); await send('Runtime.enable');
 await send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(FAKE, 'utf8') + '\n' + readFileSync(CTL, 'utf8') });
@@ -113,17 +120,18 @@ check(!!h && h.where === 'eyes' && h.own === 1 && !h.first, `1: the eyes draw th
 await sleep(1500);
 check(await grab('eyes_shown.jpg'), '1: the headset picture saved (eyes_shown.jpg: look for the tag above the head in both halves)');
 const a1 = await evalJs('window.__wolfvr.grab()');
-await sleep(2500);
+await sleep(600);
 const a2 = await evalJs('window.__wolfvr.grab()');
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'RenderNameShowSelf','value':false}");
-await sleep(2500);
+await sleep(900);
 const b = await evalJs('window.__wolfvr.grab()');
 await grab('eyes_no_own_tag.jpg');
 setControl('RenderNameShowSelf', typeof SAVED.RenderNameShowSelf === 'boolean' ? SAVED.RenderNameShowSelf : true);
-const w1 = a1 ? await whitePixels(a1) : -1, w2 = a2 ? await whitePixels(a2) : -1, wb = b ? await whitePixels(b) : -1;
-console.log(`   near-white pixels: tag on ${w1}, ${w2}; tag off ${wb}`);
-check(w1 >= 0 && w2 >= 0 && wb >= 0 && Math.min(w1, w2) - wb > 100 && Math.abs(w1 - w2) < 0.25 * (Math.min(w1, w2) - wb),
-      `1: switching the own tag off takes its white text out of both eyes' pictures (${Math.min(w1, w2) - wb} pixels; ${Math.abs(w1 - w2)} between two pictures with it)`);
+const near = (pic) => h && h.u !== null && pic ? whiteNear(pic, h.eye, h.u, h.v) : -1;
+const n1 = await near(a1), n2 = await near(a2), nb = await near(b);
+console.log(`   near-white pixels around the own tag's anchor (${h && h.u},${h && h.v} of the ${h && h.eye ? 'right' : 'left'} eye): tag on ${n1}, ${n2}; tag off ${nb}`);
+check(n1 >= 20 && n2 >= 20 && nb >= 0 && nb * 3 <= Math.min(n1, n2),
+      `1: the tag's white text is there with the tag on and gone with it off (${n1}, ${n2} -> ${nb})`);
 await sleep(2500);
 await exitVR('1');
 await sleep(3500);

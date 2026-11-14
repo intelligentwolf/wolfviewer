@@ -153,6 +153,7 @@
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolfleaves.h"      // [FALLING LEAVES 2026-11-10/] ticket 718
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
+#include "wolfshadowbatch.h"   // [W107 SHADOW BATCH 2026-11-14/] the shadow pass joins neighbouring untextured draws
 #include "wolfterrainlevels.h"   // [WOLF SKY LEVELS 2026-11-05/]
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
 #include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12/] the Wolf Environment's clouds, fog and zones
@@ -10950,6 +10951,29 @@ static LLTrace::BlockTimerStatHandle FTM_SHADOW_ALPHA_TREE("Alpha Tree");
 static LLTrace::BlockTimerStatHandle FTM_SHADOW_ALPHA_GRASS("Alpha Grass");
 static LLTrace::BlockTimerStatHandle FTM_SHADOW_FULLBRIGHT_ALPHA_MASKED("Fullbright Alpha Masked");
 
+// [W107 SHADOW BATCH 2026-11-14] WolfLogFrameRate (the frame-rate test switch) counts for the main view's sun / moon shadow
+// cascades, summed by renderShadow and written by generateSunShadow every 10 s: per cascade, the maps rendered, the
+// groups and bridges the caster cull let in, and for the static casters the draw infos, the draw calls actually sent
+// (after WolfShadowBatch joins neighbouring ones) and the vertex buffer changes between them.
+namespace
+{
+    struct WolfShadowCascadeCounts
+    {
+        U64 mMaps = 0;
+        U64 mVisibleGroups = 0;
+        U64 mDrawableGroups = 0;
+        U64 mBridges = 0;
+        U64 mStaticInfos = 0;
+        U64 mStaticDraws = 0;
+        U64 mStaticBufferChanges = 0;
+        U64 mGLTFInfos = 0;
+        U64 mGLTFDraws = 0;
+    };
+    // Source: pipeline.cpp generateSunShadow() - for (j = 0; j < (gCubeSnapshot ? 2 : 4); j++); pipeline.h shadow[4]
+    constexpr S32 WOLF_SUN_CASCADES = 4;
+    WolfShadowCascadeCounts sWolfShadowCounts[WOLF_SUN_CASCADES];
+}
+
 void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCamera& shadow_cam, LLCullResult& result, bool depth_clamp)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_PIPELINE; //LL_RECORD_BLOCK_TIME(FTM_SHADOW_RENDER);
@@ -11014,6 +11038,13 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
     };
 
 
+    // [W107 SHADOW BATCH 2026-11-14] the static casters' counts for the WolfLogFrameRate line (see sWolfShadowCounts)
+    WolfShadowBatch::Stats wolf_static;
+    WolfShadowBatch::Stats wolf_gltf;
+    const U32 wolf_visible_groups = sCull->getVisibleGroupsSize();
+    const U32 wolf_drawable_groups = sCull->getDrawableGroupsSize();
+    const U32 wolf_bridges = sCull->getVisibleBridgeSize();
+
     LLVertexBuffer::unbind();
     for (int j = 0; j < 2; ++j) // 0 -- static, 1 -- rigged
     {
@@ -11034,12 +11065,40 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
         LL_PROFILE_GPU_ZONE("shadow simple");
         gGL.getTexUnit(0)->disable();
 
-        for (U32 type : types)
+        if (rigged)
         {
-            renderObjects(type, false, false, rigged);
-        }
+            for (U32 type : types)
+            {
+                renderObjects(type, false, false, rigged);
+            }
 
-        renderGLTFObjects(LLRenderPass::PASS_GLTF_PBR, false, rigged);
+            renderGLTFObjects(LLRenderPass::PASS_GLTF_PBR, false, rigged);
+        }
+        else
+        {
+            // [W107 SHADOW BATCH 2026-11-14] the static (not rigged) casters: renderObjects(type, false, false, false) and
+            // renderGLTFObjects(PASS_GLTF_PBR, false, false) as stock, with each render map sent through the call-joining
+            // push (wolfshadowbatch.cpp - the same triangles in the same order)
+            for (U32 type : types)
+            {
+                // Source: pipeline.cpp renderObjects() - the !rigged branch with texture = false
+                assertInitialized();
+                gGL.loadMatrix(gGLModelView);
+                gGLLastMatrix = NULL;
+                WolfShadowBatch::pushUntextured(type, wolf_static);
+                gGL.loadMatrix(gGLModelView);
+                gGLLastMatrix = NULL;
+            }
+
+            // Source: pipeline.cpp renderGLTFObjects() - the !rigged branch with texture = false
+            assertInitialized();
+            gGL.loadMatrix(gGLModelView);
+            gGLLastMatrix = NULL;
+            WolfShadowBatch::pushUntexturedGLTF(LLRenderPass::PASS_GLTF_PBR, wolf_gltf);
+            gGL.loadMatrix(gGLModelView);
+            gGLLastMatrix = NULL;
+            LL::GLTFSceneManager::instance().renderOpaque();
+        }
 
         gGL.getTexUnit(0)->enable(LLTexUnit::TT_TEXTURE);
     }
@@ -11148,6 +11207,24 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
     gGL.matrixMode(LLRender::MM_MODELVIEW);
     gGL.popMatrix();
     gGLLastMatrix = NULL;
+
+    // [W107 SHADOW BATCH 2026-11-14] main view sun / moon cascades only (generateSunShadow sets CAMERA_SUN_SHADOW0 + j;
+    // the reflection probes' passes run with gCubeSnapshot, the projector shadows with CAMERA_SPOT_SHADOW0 + i)
+    static LLCachedControl<bool> wolf_log_rate(gSavedSettings, "WolfLogFrameRate", false);
+    const S32 wolf_cascade = (S32)LLViewerCamera::sCurCameraID - (S32)LLViewerCamera::CAMERA_SUN_SHADOW0;
+    if (wolf_log_rate && !gCubeSnapshot && wolf_cascade >= 0 && wolf_cascade < WOLF_SUN_CASCADES)
+    {
+        WolfShadowCascadeCounts& c = sWolfShadowCounts[wolf_cascade];
+        ++c.mMaps;
+        c.mVisibleGroups += wolf_visible_groups;
+        c.mDrawableGroups += wolf_drawable_groups;
+        c.mBridges += wolf_bridges;
+        c.mStaticInfos += wolf_static.mInfos;
+        c.mStaticDraws += wolf_static.mDraws;
+        c.mStaticBufferChanges += wolf_static.mBufferChanges;
+        c.mGLTFInfos += wolf_gltf.mInfos;
+        c.mGLTFDraws += wolf_gltf.mDraws;
+    }
 
     // reset occlusion culling flag
     sUseOcclusion = saved_occlusion;
@@ -12015,6 +12092,49 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
             {
                 mShadowCamera[j+4] = shadow_cam;
             }
+        }
+    }
+
+    // [W107 SHADOW BATCH 2026-11-14] the cascade counts renderShadow summed (sWolfShadowCounts), every 10 s while
+    // WolfLogFrameRate is on, as means per rendered map; no cull or map is cached between frames (see the commit)
+    {
+        static LLCachedControl<bool> log_rate(gSavedSettings, "WolfLogFrameRate", false);
+        static F64 next_log = 0.0;
+        static bool was_logging = false;
+        if (!log_rate || gCubeSnapshot)
+        {
+            was_logging = was_logging && log_rate;
+        }
+        else if (!was_logging)
+        {   // switched on: start a fresh 10 s window (counts left from an earlier window are dropped)
+            was_logging = true;
+            next_log = LLTimer::getTotalSeconds() + 10.0;
+            for (WolfShadowCascadeCounts& c : sWolfShadowCounts)
+            {
+                c = WolfShadowCascadeCounts();
+            }
+        }
+        else if (LLTimer::getTotalSeconds() >= next_log)
+        {
+            next_log = LLTimer::getTotalSeconds() + 10.0;
+            std::ostringstream line;
+            line << "sun shadow cascades (per map; static draw infos -> draw calls sent, buffer changes):";
+            for (S32 k = 0; k < WOLF_SUN_CASCADES; ++k)
+            {
+                WolfShadowCascadeCounts& c = sWolfShadowCounts[k];
+                const F64 n = c.mMaps ? (F64)c.mMaps : 1.0;
+                line << " [" << k << "] maps " << c.mMaps
+                     << ", groups " << llformat("%.0f", (F64)c.mVisibleGroups / n)
+                     << " + drawable " << llformat("%.0f", (F64)c.mDrawableGroups / n)
+                     << ", bridges " << llformat("%.0f", (F64)c.mBridges / n)
+                     << ", static " << llformat("%.0f", (F64)c.mStaticInfos / n)
+                     << " -> " << llformat("%.0f", (F64)c.mStaticDraws / n)
+                     << " (" << llformat("%.0f", (F64)c.mStaticBufferChanges / n) << " buffers)"
+                     << ", gltf " << llformat("%.0f", (F64)c.mGLTFInfos / n)
+                     << " -> " << llformat("%.0f", (F64)c.mGLTFDraws / n) << ";";
+                c = WolfShadowCascadeCounts();
+            }
+            LL_INFOS("WolfShadows") << line.str() << LL_ENDL;
         }
     }
 

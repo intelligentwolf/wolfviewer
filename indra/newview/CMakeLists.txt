@@ -1028,6 +1028,7 @@ set(viewer_SOURCE_FILES
     wolfhurricane.cpp
     wolfframegovernor.cpp
     wolfsubpixelcull.cpp
+    wolfshadowbatch.cpp
     wolfradiostations.cpp
     wolffloaterradio.cpp
     wolffloaterroleplay.cpp
@@ -2085,6 +2086,7 @@ set(viewer_HEADER_FILES
     wolfhurricane.h
     wolfframegovernor.h
     wolfsubpixelcull.h
+    wolfshadowbatch.h
     wolfradiostations.h
     wolffloaterradio.h
     wolffloaterroleplay.h

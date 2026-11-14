@@ -231,7 +231,7 @@ private:
     void partsMessage(const std::string& lead);
     /** Match the item's objects with new root objects of this agent in its region (a multiset: each expected entry takes one
      *  distinct object, name equal and root within MATCH_M); asks for names not known yet. -> how many matched. */
-    size_t matchPieces(const Item& item, std::vector<std::pair<std::string, LLUUID>>& matched) const;
+    size_t matchPieces(const Item& item, std::vector<std::pair<std::string, LLUUID>>& matched, bool by_position) const;
     static std::vector<Item> readItems(const LLSD& items);
     std::set<LLUUID> laidByOthers() const;
     /** How many of this agent's root objects stand at the item's roots (within MATCH_M), names not checked. */

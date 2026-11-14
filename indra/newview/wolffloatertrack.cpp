@@ -79,6 +79,7 @@ namespace
     constexpr F32 STATUS_EVERY_S = 2.f;        // the brief: "poll status every 2 s ONLY while a job is queued/running"
     constexpr S32 LOOK_S = 60;                 // DESIGN.md 10: wait up to 60 s for the pieces
     constexpr F32 MATCH_M = 0.05f;             // DESIGN.md 10: roots within 0.05 m
+    constexpr F32 NAME_WAIT_S = 20.f;          // MODELLED: a look matches by name this long, then also by place (matchPieces)
     // wolfcave.cpp:941 rezExact waits 20 s for an item in a folder the viewer knows; here the folder itself is new (the worker makes
     // "Railway <code> - <name>" under Objects through Robust: deliver.py:76-78), so two fetches in turn - Objects, then the new
     // folder - each re-asked at most every FOLDER_REASK_S: 30 s (CHOSEN) leaves room for both
@@ -2351,7 +2352,11 @@ size_t WolfFloaterTrack::piecesNear(const Item& item) const
     return n_near;
 }
 
-size_t WolfFloaterTrack::matchPieces(const Item& item, std::vector<std::pair<std::string, LLUUID>>& matched) const
+// by_position: also take a piece whose name has not come (WolfObjectProps asks at most MAX_TRIES times and then treats
+// silence as gone - live 14 Nov 14:45Z: after a 159-piece rez beside the 160 pieces of the railway it replaced, 112 names
+// never came and the window stopped at "96 of 159"). Every object here is new since the rez (mBefore) and yours, so a root
+// within MATCH_M of an expected root is that piece; two expected pieces that share a root share a name (a guide pair).
+size_t WolfFloaterTrack::matchPieces(const Item& item, std::vector<std::pair<std::string, LLUUID>>& matched, bool by_position) const
 {
     matched.clear();
     LLViewerRegion* rgn = gAgent.getRegion();
@@ -2386,8 +2391,8 @@ size_t WolfFloaterTrack::matchPieces(const Item& item, std::vector<std::pair<std
                     near_any = true;
                     // the name is not in ObjectUpdate (wolfobjectprops.h): it is asked for once, through the shared budget
                     if (!known) known = props.get(o->getID());
-                    if (!known) break;
-                    if (known->mName != item.mObjects[i].mName) continue;
+                    if (!known && !by_position) break;
+                    if (known && known->mName != item.mObjects[i].mName) continue;
                     // a multiset: two guides of one place (one each way) share root and name; each takes one object
                     taken[i] = true;
                     matched.emplace_back(item.mObjects[i].mName, o->getID());
@@ -2521,7 +2526,8 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
             fail("You left " + where + " before all the pieces of your railway were found. Go back there and press Look again.");
             return;
         }
-        const size_t got = f->matchPieces(item, matched);
+        // names first; after NAME_WAIT_S of this look, a piece whose name never came is taken by its place alone
+        const size_t got = f->matchPieces(item, matched, t >= (S32)(NAME_WAIT_S * 2.f));
         if (got >= want) break;
         if (!f->mRezAlert.empty() && got == 0)
         {

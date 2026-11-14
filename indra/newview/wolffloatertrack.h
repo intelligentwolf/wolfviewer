@@ -65,9 +65,6 @@ namespace WolfTrackTool
 {
     /** Every AlertMessage (llviewermessage.cpp process_alert_core): a "Can't rez object" refusal is kept for the window. */
     void onAlert(const std::string& message);
-    /** process_kill_object (llviewermessage.cpp) got a KillObject for a local id it has no object for: observed only, for the
-     *  pieces the window deleted while the viewer held them only in its object cache. */
-    void onUnknownKill(U64 region_handle, U32 local_id);
 }
 
 class WolfFloaterTrack : public LLFloater, public WolfRouteHost
@@ -336,20 +333,7 @@ private:
     bool mRezzing = false;
     LLUUID mRezRegion;
     std::string mRezAlert;             // the region's words when it refused the rez
-    /** [live test 14 Nov 15:14Z] a root the viewer holds only in the region's object cache (wolffloatertrack.cpp readCachedRoots) */
-    struct CachedRoot
-    {
-        LLUUID mId;
-        U32 mLocal = 0;
-        LLVector3 mPos;              // region metres
-    };
-    static void readCachedRoots(LLViewerRegion* rgn, const LLUUID& owner, std::vector<CachedRoot>& out);
-    /** This agent's cached roots in the agent's region, read at most every CACHE_SCAN_S, without the ones deleted here. */
-    const std::vector<CachedRoot>& cachedRoots() const;
-    mutable std::vector<CachedRoot> mCached;
-    mutable F64 mCachedAt = -1.0;
-    mutable U64 mCachedRegion = 0;
-    std::set<LLUUID> mDeadCached;      // cache-only pieces this window deleted and the region confirmed gone (their entries stay)
+    std::map<std::string, std::set<LLUUID>> mRemovedEarlier;   // layout id -> pieces this window took away (this session)
     std::set<LLUUID> mBefore;          // the root objects there were before the rez (never taken as a piece)
     std::set<LLUUID> mNotOurs;         // pieces of the resident's other railways here (never taken as a piece)
     bool mItemsFromDrawing = false;    // mItems came from laying the drawing (laying them all clears the drawing)

@@ -4802,9 +4802,6 @@ void process_kill_object(LLMessageSystem *mesgsys, void **user_data)
         if (id == LLUUID::null)
         {
             LL_DEBUGS("Messaging") << "Unknown kill for local " << local_id << LL_ENDL;
-            // [TRACK TOOL 2026-11-14] observed only: a railway piece the Lay Railway Track window deleted while this viewer
-            // held it only in the object cache has no object, so its kill ends here (wolffloatertrack.cpp onUnknownKill)
-            if (regionp) WolfTrackTool::onUnknownKill(regionp->getHandle(), local_id);
             continue;
         }
         else

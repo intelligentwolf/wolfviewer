@@ -417,9 +417,6 @@ public:
 
     LLVOCacheEntry* getCacheEntryForOctree(U32 local_id);
     LLVOCacheEntry* getCacheEntry(U32 local_id, bool valid = true);
-    // [TRACK TOOL 2026-11-14] read-only: every object cache entry of this region by local id (wolffloatertrack.cpp finds the
-    // pieces it placed among them: after a relog they wait here until the camera takes them in)
-    const std::map<U32, LLPointer<LLVOCacheEntry> >& getCacheEntries() const;
     bool probeCache(U32 local_id, U32 crc, U32 flags, U8 &cache_miss_type);
     U64 getRegionCacheHitCount() { return mRegionCacheHitCount; }
     U64 getRegionCacheMissCount() { return mRegionCacheMissCount; }

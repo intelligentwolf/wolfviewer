@@ -3095,12 +3095,6 @@ LLVOCacheEntry* LLViewerRegion::getCacheEntryForOctree(U32 local_id)
     return entry;
 }
 
-// [TRACK TOOL 2026-11-14] llviewerregion.h
-const std::map<U32, LLPointer<LLVOCacheEntry> >& LLViewerRegion::getCacheEntries() const
-{
-    return mImpl->mCacheMap;
-}
-
 LLVOCacheEntry* LLViewerRegion::getCacheEntry(U32 local_id, bool valid)
 {
     LLVOCacheEntry::vocache_entry_map_t::iterator iter = mImpl->mCacheMap.find(local_id);

@@ -63,7 +63,6 @@
 #include "llviewerobjectlist.h"
 #include "llviewerregion.h"
 #include "llviewerwindow.h"
-#include "llvocache.h"
 #include "llvolume.h"
 #include "llworld.h"
 #include "message.h"
@@ -87,7 +86,6 @@ namespace
     constexpr S32 FETCH_TRIES = 30;
     constexpr S32 FOLDER_REASK_S = 5;          // CHOSEN: a folder not seen yet is asked for again this often (wolffloaterlifts.cpp:996-1006 every 5 s)
     constexpr S32 GONE_WAIT_S = 30;            // CHOSEN: after a delete, the pieces are waited for this long to go
-    constexpr F64 CACHE_SCAN_S = 2.0;          // CHOSEN: the region's object cache is read at most this often during a look
     // DESIGN.md 5.1 / 10: the ground box is the drawing's box plus 60 m all round, 4 m apart, 8 m when that is over 256 a side
     constexpr F64 GROUND_MARGIN_M = 60.0;
     constexpr S32 GROUND_MAX = 256;            // tracktool/plan.py:20 GRID_MAX
@@ -215,15 +213,14 @@ namespace
      *  DestinationID = the Trash, a new TransactionID, PacketCount 1, PacketNumber 1), one ObjectLocalID block per root
      *  (:5882-5886 packObjectLocalID), a new message per region and when it is full or has MAX_OBJECTS_PER_PACKET roots
      *  (:126, :6095-6098 sendListToRegions). */
-    void deRezToTrash(LLViewerRegion* rgn, const std::vector<U32>& locals)
+    void deRezToTrash(const std::vector<LLViewerObject*>& objs)
     {
         constexpr S32 MAX_OBJECTS_PER_PACKET = 254;   // llselectmgr.cpp:126
-        if (!rgn || locals.empty()) return;
         const LLUUID trash = gInventory.findCategoryUUIDForType(LLFolderType::FT_TRASH);
         LLMessageSystem* msg = gMessageSystem;
-        bool open = false;
+        LLViewerRegion* open_region = nullptr;
         S32 in_packet = 0;
-        auto start = [&]()
+        auto start = [&](LLViewerRegion* r)
         {
             msg->newMessageFast(_PREHASH_DeRezObject);
             msg->nextBlockFast(_PREHASH_AgentData);
@@ -239,25 +236,24 @@ namespace
             const U8 PACKET = 1;
             msg->addU8Fast(_PREHASH_PacketCount, PACKET);
             msg->addU8Fast(_PREHASH_PacketNumber, PACKET);
-            open = true;
+            open_region = r;
             in_packet = 0;
         };
-        for (U32 local : locals)
+        for (LLViewerObject* o : objs)
         {
-            if (open && (msg->isSendFull(nullptr) || in_packet >= MAX_OBJECTS_PER_PACKET))
+            if (!o || o->isDead() || !o->getRegion()) continue;
+            if (open_region && (o->getRegion() != open_region || msg->isSendFull(nullptr) || in_packet >= MAX_OBJECTS_PER_PACKET))
             {
-                msg->sendReliable(rgn->getHost());
-                open = false;
+                msg->sendReliable(open_region->getHost());
+                open_region = nullptr;
             }
-            if (!open) start();
+            if (!open_region) start(o->getRegion());
             msg->nextBlockFast(_PREHASH_ObjectData);
-            msg->addU32Fast(_PREHASH_ObjectLocalID, local);
+            msg->addU32Fast(_PREHASH_ObjectLocalID, o->getLocalID());
             ++in_packet;
         }
-        if (open) msg->sendReliable(rgn->getHost());
+        if (open_region) msg->sendReliable(open_region->getHost());
     }
-
-
 
     // Source: wolffloaterbuildinggen.cpp:77-95 yardError - the service's own words first, else a plain line per status
     std::string serviceError(S32 status, const LLSD& reply, const std::string& transport)
@@ -366,25 +362,6 @@ namespace
 }
 
 // ---- WolfTrackTool ----------------------------------------------------------------------------------------------------------
-
-namespace
-{
-    // [review of 27827b4a38] the region's KillObject for a piece the viewer holds only in its object cache: process_kill_object
-    // (llviewermessage.cpp) looks the local id up in the local->uuid map, which only an object made by the viewer is in
-    // (llviewerobjectlist.cpp:226 setUUIDAndLocal), and for any other local id it goes on to the next one before
-    // killCacheEntry - so the entry stays valid. The window is told of exactly those unknown kills, for the local ids it
-    // deleted and is waiting for (nothing else is kept), and so knows the region really took them away.
-    std::map<U64, std::set<U32>> sKillWatch;   // region handle -> local ids deleted from the cache only, still waited for
-    std::map<U64, std::set<U32>> sKilled;      // ... and the ones the region's KillObject named
-}
-
-void WolfTrackTool::onUnknownKill(U64 region_handle, U32 local_id)
-{
-    if (sKillWatch.empty()) return;
-    auto w = sKillWatch.find(region_handle);
-    if (w == sKillWatch.end() || !w->second.erase(local_id)) return;
-    sKilled[region_handle].insert(local_id);
-}
 
 void WolfTrackTool::onAlert(const std::string& message)
 {
@@ -2343,60 +2320,6 @@ std::set<LLUUID> WolfFloaterTrack::laidByOthers() const
     return out;
 }
 
-// [live test 14 Nov 15:14Z] A root object the region told this viewer about that is still only an entry of its object cache
-// (after a relog the viewer makes the object only when the camera takes its entry in: llviewerregion.cpp updateVisibleEntries /
-// createVisibleObjects). Read only: nothing in the cache or the render pipeline is changed.
-// The region's valid root entries owned by `owner` (any owner when null). Each entry's data is read with a packer of its own
-// over the entry's buffer (the entry's own cursor is left alone), in the order the viewer reads it: ID, LocalID, PCode
-// (llviewerobjectlist.cpp:353-356 processObjectUpdateFromCache), then CRC, Material, ClickAction, Scale, Pos, Rot, SpecialCode,
-// Owner (llviewerobject.cpp:1799-1823, OUT_FULL_CACHED). A root's Pos is region metres. Only roots (llvocache.h:143 getParentID
-// 0) and valid entries (the region has confirmed them: llviewerregion.cpp getCacheEntry), both tested before the data is read.
-// static
-void WolfFloaterTrack::readCachedRoots(LLViewerRegion* rgn, const LLUUID& owner, std::vector<CachedRoot>& out)
-{
-    out.clear();
-    if (!rgn) return;
-    for (const auto& kv : rgn->getCacheEntries())
-    {
-        LLVOCacheEntry* e = kv.second.get();
-        if (!e || !e->isValid() || e->getParentID() != 0) continue;
-        LLDataPackerBinaryBuffer* src = e->getDP();
-        if (!src || src->getBufferSize() <= 0) continue;
-        LLDataPackerBinaryBuffer dp(const_cast<U8*>(src->getBuffer()), src->getBufferSize());
-        CachedRoot r;
-        U32 local = 0, crc = 0, special = 0;
-        U8 pcode = 0, material = 0, click = 0;
-        LLVector3 scale, rot;
-        LLUUID owner_id;
-        if (!dp.unpackUUID(r.mId, "ID") || !dp.unpackU32(local, "LocalID") || !dp.unpackU8(pcode, "PCode")
-            || !dp.unpackU32(crc, "CRC") || !dp.unpackU8(material, "Material") || !dp.unpackU8(click, "ClickAction")
-            || !dp.unpackVector3(scale, "Scale") || !dp.unpackVector3(r.mPos, "Pos") || !dp.unpackVector3(rot, "Rot")
-            || !dp.unpackU32(special, "SpecialCode") || !dp.unpackUUID(owner_id, "Owner")) continue;
-        if (owner.notNull() && owner_id != owner) continue;
-        r.mLocal = e->getLocalID();
-        out.push_back(r);
-    }
-}
-
-const std::vector<WolfFloaterTrack::CachedRoot>& WolfFloaterTrack::cachedRoots() const
-{
-    // (review of 27827b4a38) the whole cache is read at most every CACHE_SCAN_S on a look, not on every call: the cheap
-    // fields (isValid, getParentID) are tested before an entry's data is read (readCachedRoots)
-    LLViewerRegion* rgn = gAgent.getRegion();
-    const U64 handle = rgn ? rgn->getHandle() : 0;
-    const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (handle != mCachedRegion || mCachedAt < 0.0 || now - mCachedAt >= CACHE_SCAN_S)
-    {
-        readCachedRoots(rgn, gAgent.getID(), mCached);
-        // pieces this window deleted and the region confirmed gone stay out (the viewer keeps their entries: below)
-        mCached.erase(std::remove_if(mCached.begin(), mCached.end(), [this](const CachedRoot& c) { return mDeadCached.count(c.mId) > 0; }),
-                      mCached.end());
-        mCachedRegion = handle;
-        mCachedAt = now;
-    }
-    return mCached;
-}
-
 size_t WolfFloaterTrack::piecesNear(const Item& item) const
 {
     // names are not known yet at this point (they are asked for one by one: wolfobjectprops.h), so any object of this agent's
@@ -2423,22 +2346,6 @@ size_t WolfFloaterTrack::piecesNear(const Item& item) const
                 auto c = cells.find({ cx + dx, cy + dy });
                 if (c == cells.end()) continue;
                 for (size_t i : c->second) if (dist_vec(item.mObjects[i].mRoot, p) <= MATCH_M) { hit = true; break; }
-            }
-        if (hit) ++n_near;
-    }
-    // and the ones still only in the region's object cache (matchPieces, the same)
-    for (const CachedRoot& c : cachedRoots())
-    {
-        if (mNotOurs.count(c.mId)) continue;
-        if (LLViewerObject* o = gObjectList.findObject(c.mId); o && !o->isDead()) continue;   // counted above
-        const S32 cx = (S32)floorf(c.mPos.mV[VX]), cy = (S32)floorf(c.mPos.mV[VY]);
-        bool hit = false;
-        for (S32 dy = -1; dy <= 1 && !hit; ++dy)
-            for (S32 dx = -1; dx <= 1 && !hit; ++dx)
-            {
-                auto cell = cells.find({ cx + dx, cy + dy });
-                if (cell == cells.end()) continue;
-                for (size_t i : cell->second) if (dist_vec(item.mObjects[i].mRoot, c.mPos) <= MATCH_M) { hit = true; break; }
             }
         if (hit) ++n_near;
     }
@@ -2496,35 +2403,6 @@ size_t WolfFloaterTrack::matchPieces(const Item& item, std::vector<std::pair<std
             }
         }
         if (near_any && !known) props.want(o);
-    }
-    // [live test 14 Nov 15:14Z] the pieces the viewer has not made into objects (after a relog they wait in the region's
-    // object cache until the camera takes them in) are read from the cache itself, read only: nothing is loaded or changed.
-    // A name is asked for only of an object (wolfobjectprops.h want), so a cached piece is matched by its place - this
-    // agent's, new since the rez, a root within MATCH_M of an expected root - unless its name is known already.
-    for (const CachedRoot& c : cachedRoots())
-    {
-        if (mBefore.count(c.mId) || mNotOurs.count(c.mId)) continue;
-        if (LLViewerObject* o = gObjectList.findObject(c.mId); o && !o->isDead()) continue;   // looked at above
-        const S32 cx = (S32)floorf(c.mPos.mV[VX]), cy = (S32)floorf(c.mPos.mV[VY]);
-        bool done = false;
-        const WolfObjectProps::Props* known = props.get(c.mId);
-        for (S32 dy = -1; dy <= 1 && !done; ++dy)
-        {
-            for (S32 dx = -1; dx <= 1 && !done; ++dx)
-            {
-                auto cell = cells.find({ cx + dx, cy + dy });
-                if (cell == cells.end()) continue;
-                for (size_t i : cell->second)
-                {
-                    if (taken[i] || dist_vec(item.mObjects[i].mRoot, c.mPos) > MATCH_M) continue;
-                    if (known && known->mName != item.mObjects[i].mName) continue;
-                    taken[i] = true;
-                    matched.emplace_back(item.mObjects[i].mName, c.mId);
-                    done = true;
-                    break;
-                }
-            }
-        }
     }
     return matched.size();
 }
@@ -2625,9 +2503,6 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
                 LLViewerObject* o = gObjectList.getObject(i);
                 if (o && !o->isDead() && o->isRoot()) f->mBefore.insert(o->getID());
             }
-            // and the agent's roots still only in the object cache (never taken as a new piece either)
-            f->mCachedAt = -1.0;   // read the cache now
-            for (const CachedRoot& c : f->cachedRoots()) f->mBefore.insert(c.mId);
             f->mRezAlert.clear();
             f->mRezRegion = item.mRegion;
             LL_INFOS("WolfTrack") << "rez " << item.mItem << " in " << where << " at " << item.mRayEnd << " (" << item.mObjects.size()
@@ -2879,68 +2754,52 @@ void WolfFloaterTrack::removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, L
         f->updateControls();
         return;
     }
-    // exactly these objects: the ones this viewer has made, and [live test 14 Nov 15:14Z] the ones it holds only in the region's
-    // object cache (after a relog, everything out of the camera's view) - DeRezObject needs only the local id
-    // (llselectmgr.cpp:5882-5886 packObjectLocalID), which a cache entry has (llvocache.h:125 getLocalID)
-    std::map<LLUUID, U32> cached;
-    f->mCachedAt = -1.0;   // read the cache now
-    for (const CachedRoot& c : f->cachedRoots()) cached[c.mId] = c.mLocal;   // read only: this agent's roots
-    std::vector<U32> locals;
-    std::vector<std::pair<LLUUID, U32>> sent;
-    size_t missing = 0, from_cache = 0;
+    // exactly these objects, the ones this viewer has (a uuid it does not have cannot be deleted from here). [live test 14 Nov
+    // 16:13Z] Pieces this window took away earlier in this session (a Remove from another spot) are not counted as missing:
+    // the server's record keeps a region's part whole until "removed" (DESIGN.md 10), so the window remembers them, by layout.
+    const std::string layout_key = layout.isDefined() ? layout.asString() : std::string();
+    const std::set<LLUUID> earlier = layout_key.empty() ? std::set<LLUUID>() : f->mRemovedEarlier[layout_key];
+    std::vector<LLViewerObject*> objs;
+    std::vector<LLUUID> sent;
+    size_t missing = 0, before = 0;
     for (const LLUUID& id : uuids)
     {
         LLViewerObject* o = gObjectList.findObject(id);
-        if (o && !o->isDead() && o->getRegion() == rgn) { locals.push_back(o->getLocalID()); sent.emplace_back(id, o->getLocalID()); continue; }
-        auto c = cached.find(id);
-        if (c != cached.end()) { locals.push_back(c->second); sent.emplace_back(id, c->second); ++from_cache; continue; }
-        ++missing;
+        if (o && !o->isDead() && o->getRegion() == rgn) { objs.push_back(o); sent.push_back(id); }
+        else if (earlier.count(id)) ++before;
+        else ++missing;
     }
-    f->setStatus(llformat("Taking %d pieces away (they go to your Trash)...", (S32)locals.size()), false);
-    LL_INFOS("WolfTrack") << "delete " << locals.size() << " pieces (" << from_cache << " of them from the object cache, " << missing
-                          << " not known to this viewer) in " << rgn->getName() << LL_ENDL;
-    deRezToTrash(rgn, locals);
-    const U64 handle = rgn->getHandle();
-    // the cache-only ones are watched for the region's KillObject (onUnknownKill above), sent before the delete goes out
-    std::set<U32> cache_only;
-    for (const auto& s : sent)
-    {
-        LLViewerObject* o = gObjectList.findObject(s.first);
-        if (!o || o->isDead()) cache_only.insert(s.second);
-    }
-    sKillWatch[handle] = cache_only;
-    sKilled.erase(handle);
-    struct KillWatchEnd { U64 h; ~KillWatchEnd() { sKillWatch.erase(h); sKilled.erase(h); } } kill_watch_end{ handle };
-    deRezToTrash(rgn, locals);
+    f->setStatus(llformat("Taking %d pieces away (they go to your Trash)...", (S32)objs.size()), false);
+    LL_INFOS("WolfTrack") << "delete " << objs.size() << " pieces (" << before << " taken away earlier, " << missing << " not in view) in "
+                          << rgn->getName() << LL_ENDL;
+    deRezToTrash(objs);
+    objs.clear();   // the pointers are not kept over a wait
     size_t standing = sent.size();
-    std::vector<LLUUID> cache_gone;
     for (S32 t = 0; t < GONE_WAIT_S * 2 && standing > 0; ++t)
     {
         llcoro::suspendUntilTimeout(0.5f);
         if (!self()) return;
-        // gone: an object - no object left (the region's KillObject: process_kill_object -> killObject); a piece held only in
-        // the cache - the region's KillObject named its local id (onUnknownKill), or its entry is gone (it became an object
-        // meanwhile and was killed the ordinary way, killCacheEntry when VO cache culling is on)
-        LLViewerRegion* now = gAgent.getRegion();
-        const bool same = now && now->getHandle() == handle;
-        const std::set<U32>& killed = sKilled[handle];
         standing = 0;
-        cache_gone.clear();
-        for (const auto& s : sent)
+        for (const LLUUID& id : sent)
         {
-            LLViewerObject* o = gObjectList.findObject(s.first);
-            if (o && !o->isDead()) { ++standing; continue; }
-            if (!cache_only.count(s.second)) continue;
-            if (killed.count(s.second) || (same && !now->getCacheEntry(s.second))) { cache_gone.push_back(s.first); continue; }
-            ++standing;
+            LLViewerObject* o = gObjectList.findObject(id);
+            if (o && !o->isDead()) ++standing;
         }
     }
     f = self();
     if (!f) return;
-    // their entries stay valid in the viewer (above): never counted or matched as standing pieces again
-    for (const LLUUID& id : cache_gone) f->mDeadCached.insert(id);
-    f->mCachedAt = -1.0;
     f->mRemoving = false;
+    if (!layout_key.empty())
+    {
+        // the ones that went are remembered for this layout (this session only)
+        std::set<LLUUID>& gone = f->mRemovedEarlier[layout_key];
+        for (const LLUUID& id : sent)
+        {
+            LLViewerObject* o = gObjectList.findObject(id);
+            if (!o || o->isDead()) gone.insert(id);
+        }
+    }
+    const size_t taken_now = sent.size() - standing;
     if (!layout.isDefined())
     {
         // Take away what was placed: the job's item stays in Objects, nothing is recorded
@@ -2962,9 +2821,13 @@ void WolfFloaterTrack::removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, L
     }
     if (missing > 0)
     {
-        // never "removed" while pieces may still stand: the resident says whether they are gone already
-        f->setStatus(llformat("%d pieces of this railway could not be found here. If you took them away yourself, press Forget "
-                              "them. Otherwise come closer to the railway and press Remove again.", (S32)missing), true);
+        // never "removed" while pieces may still stand: the resident says whether they are gone already. Only the ones still
+        // left are counted (e.g. "38 taken away; 61 were taken away earlier; 61 are still out of reach.")
+        std::string t = llformat("%d taken away", (S32)taken_now);
+        if (before > 0) t += llformat("; %d %s taken away earlier", (S32)before, before == 1 ? "was" : "were");
+        t += llformat("; %d %s still out of reach. Come closer to them and press Remove again. If you took them away yourself, "
+                      "press Forget them.", (S32)missing, missing == 1 ? "is" : "are");
+        f->setStatus(t, true);
         f->ask(llformat("Forget the %d pieces that could not be found?", (S32)missing), "Forget them",
                [f, layout, region, replacing]() { f->sendRemoved(layout, region, replacing); });
         f->updateControls();

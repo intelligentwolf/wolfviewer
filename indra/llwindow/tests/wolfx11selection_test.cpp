@@ -231,7 +231,7 @@ namespace
         return n;
     }
 
-    void runCase(const char* name, const std::string& text, bool stall, bool expect_ok, bool expect_incr)
+    void runCase(const char* name, const std::string& text, bool stall, wolfx11::ReadResult expect, bool expect_incr)
     {
         std::printf("\n== %s: %zu characters, %zu bytes\n", name, utf8Chars(text), text.size());
         Owner owner;
@@ -249,7 +249,7 @@ namespace
         Atom property = XInternAtom(d, "FS_PASTE_BUFFER", False);
 
         // The old read, for the record
-        if (expect_incr && !stall)
+        if (expect_incr && !stall && expect == wolfx11::READ_OK)
         {
             if (convert(d, w, property))
             {
@@ -273,14 +273,18 @@ namespace
                 nullptr, nullptr, got);
         }
         std::printf("   new read: %s, %zu bytes\n", wolfx11::describe(result), got.size());
-        if (expect_ok)
+        if (expect == wolfx11::READ_OK)
         {
             check(result == wolfx11::READ_OK && got == text, "the new read gets every byte of the text");
         }
-        else
+        else if (expect == wolfx11::READ_INCR_TIMEOUT)
         {
             check(result == wolfx11::READ_INCR_TIMEOUT && got.empty(),
                   "an owner that stops mid-transfer gives a clean failure, not part of the text");
+        }
+        else
+        {
+            check(result == expect && got.empty(), "a transfer over the size cap is refused cleanly");
         }
         check((owner.incr_transfers > incr_before) == expect_incr,
               expect_incr ? "the owner used INCR" : "the owner sent it in one go");
@@ -319,12 +323,13 @@ int main(int argc, char** argv)
         std::fwrite(got.data(), 1, got.size(), stdout);
         return result == wolfx11::READ_OK ? 0 : 1;
     }
-    runCase("small script", makeScript(2000, false), false, true, false);
-    runCase("ticket 856 size, plain", makeScript(64511, false), false, true, false);
-    runCase("ticket 856 size, some symbols", makeScript(64511, true), false, true, true);
-    runCase("70,000 characters", makeScript(70000, false), false, true, true);
-    runCase("300,000 characters", makeScript(300000, true), false, true, true);
-    runCase("owner stops after the first piece", makeScript(100000, false), true, false, true);
+    runCase("small script", makeScript(2000, false), false, wolfx11::READ_OK, false);
+    runCase("ticket 856 size, plain", makeScript(64511, false), false, wolfx11::READ_OK, false);
+    runCase("ticket 856 size, some symbols", makeScript(64511, true), false, wolfx11::READ_OK, true);
+    runCase("70,000 characters", makeScript(70000, false), false, wolfx11::READ_OK, true);
+    runCase("300,000 characters", makeScript(300000, true), false, wolfx11::READ_OK, true);
+    runCase("owner stops after the first piece", makeScript(100000, false), true, wolfx11::READ_INCR_TIMEOUT, true);
+    runCase("over the size cap", std::string(wolfx11::MAX_SELECTION_BYTES + 1, 'x'), false, wolfx11::READ_TOO_LARGE, true);
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

@@ -52,6 +52,7 @@
 #include "lluictrlfactory.h"
 #include "llclipboard.h"
 #include "llnotificationsutil.h"   // <WolfViewer 2026-11-14/> ticket 856 paste message
+#include "wolfpastestatus.h"
 #include "llmenugl.h"
 
 //
@@ -1363,9 +1364,12 @@ void LLLineEditor::pasteHelper(bool is_primary)
         // as in LLTextEditor::pasteHelper; it used to do nothing.
         if (!LLClipboard::instance().pasteFromClipboard(paste, is_primary))
         {
-            LL_WARNS() << "Paste: the " << (is_primary ? "primary selection" : "clipboard")
-                       << " offered text but it could not be read" << LL_ENDL;
-            LLNotificationsUtil::add("WolfPasteFailed");
+            if (wolfpaste::lastReadFailed())   // see llwindow/wolfpastestatus.h
+            {
+                LL_WARNS() << "Paste: the " << (is_primary ? "primary selection" : "clipboard")
+                           << " offered text but it could not be read" << LL_ENDL;
+                LLNotificationsUtil::add("WolfPasteFailed");
+            }
             return;
         }
         // </WolfViewer>

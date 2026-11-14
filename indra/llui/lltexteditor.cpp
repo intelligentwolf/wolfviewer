@@ -44,6 +44,7 @@
 
 #include "llclipboard.h"
 #include "llnotificationsutil.h"   // <WolfViewer 2026-11-14/> ticket 856 paste messages
+#include "wolfpastestatus.h"
 #include "llemojihelper.h"
 #include "llscrollbar.h"
 #include "llstl.h"
@@ -1739,16 +1740,18 @@ void LLTextEditor::pasteHelper(bool is_primary)
     }
 
     LLWString paste;
-    // <WolfViewer 2026-11-14> Ticket 856: the clipboard said it had text but none could be read
-    // (on Linux/X11 a large copy sent by INCR used to end up here, see llwindowsdl2.cpp
-    // getSelectionText). Say so rather than doing nothing. An empty but readable clipboard
-    // (pasteFromClipboard true, nothing in it) stays quiet: there is nothing to report.
-    const bool read_ok = LLClipboard::instance().pasteFromClipboard(paste, is_primary);
-    if (!read_ok)
+    // <WolfViewer 2026-11-14> Ticket 856: text was on offer but could not be read (on Linux/X11 a
+    // large copy sent by INCR used to end up here, see llwindowsdl2.cpp getSelectionText). Say so
+    // rather than doing nothing. No text at all (an image, nothing) stays quiet as before: only
+    // the platform code can tell the two apart, see llwindow/wolfpastestatus.h.
+    if (!LLClipboard::instance().pasteFromClipboard(paste, is_primary))
     {
-        LL_WARNS() << "Paste: the " << (is_primary ? "primary selection" : "clipboard")
-                   << " offered text but it could not be read" << LL_ENDL;
-        LLNotificationsUtil::add("WolfPasteFailed");
+        if (wolfpaste::lastReadFailed())
+        {
+            LL_WARNS() << "Paste: the " << (is_primary ? "primary selection" : "clipboard")
+                       << " offered text but it could not be read" << LL_ENDL;
+            LLNotificationsUtil::add("WolfPasteFailed");
+        }
         return;
     }
     // </WolfViewer>

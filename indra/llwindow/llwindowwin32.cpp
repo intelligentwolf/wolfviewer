@@ -29,6 +29,7 @@
 #if LL_WINDOWS && !LL_MESA_HEADLESS
 
 #include "llwindowwin32.h"
+#include "wolfpastestatus.h"   // <WolfViewer 2026-11-14/> ticket 856
 #include "wolfsplash.h"   // [WOLF SPLASH 2026-10-21/]
 #include <atomic>
 #include <mutex>
@@ -3581,6 +3582,7 @@ bool LLWindowWin32::isClipboardTextAvailable()
 bool LLWindowWin32::pasteTextFromClipboard(LLWString &dst)
 {
     bool success = false;
+    wolfpaste::clearLastReadFailed();   // <WolfViewer 2026-11-14/> ticket 856, see wolfpastestatus.h
 
     if (IsClipboardFormatAvailable(CF_UNICODETEXT))
     {
@@ -3599,6 +3601,11 @@ bool LLWindowWin32::pasteTextFromClipboard(LLWString &dst)
                 }
             }
             CloseClipboard();
+        }
+        if (!success)
+        {
+            // <WolfViewer 2026-11-14/> text was on offer but could not be read: worth a message
+            wolfpaste::setLastReadFailed();
         }
     }
 

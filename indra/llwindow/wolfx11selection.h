@@ -29,6 +29,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <algorithm>
 #include <chrono>
 #include <climits>
 #include <cstring>
@@ -47,12 +48,24 @@ namespace wolfx11
     // Source: llwindowsdl2.cpp grab_property() - `const auto end{ start + 1000 };`
     const unsigned int INCR_PIECE_TIMEOUT_MS = 1000;
 
+    // The most an INCR transfer may bring in. Our own limit, not a protocol value: an owner that
+    // keeps sending would otherwise hold the viewer and grow memory without end. 16 MiB is 64
+    // times the largest text box in the viewer, the script editor's 262144 bytes
+    // (skins/default/xui/en/panel_script_ed.xml max_length="262144"), and still a quick read.
+    const size_t MAX_SELECTION_BYTES = 16 * 1024 * 1024;
+
+    // And the longest a whole INCR transfer may take, so an owner that trickles pieces just
+    // inside INCR_PIECE_TIMEOUT_MS cannot hold the viewer for minutes. Also our own limit: the
+    // 300 KB offline test transfers (tests/wolfx11selection_test.cpp) finish in milliseconds.
+    const unsigned int MAX_TRANSFER_MS = 10000;
+
     enum ReadResult
     {
         READ_OK,              // `bytes` holds the whole selection
         READ_NO_PROPERTY,     // the owner left no property (conversion refused)
         READ_NOT_TEXT,        // the property is not 8-bit data, so it cannot be text
         READ_INCR_TIMEOUT,    // an INCR transfer stopped before its zero-length end marker
+        READ_TOO_LARGE,       // an INCR transfer went past MAX_SELECTION_BYTES
         READ_X_ERROR          // XGetWindowProperty failed
     };
 
@@ -74,6 +87,7 @@ namespace wolfx11
         case READ_NO_PROPERTY:  return "no property";
         case READ_NOT_TEXT:     return "not 8-bit text";
         case READ_INCR_TIMEOUT: return "incremental (INCR) transfer stopped before its end";
+        case READ_TOO_LARGE:    return "incremental (INCR) transfer larger than the viewer takes";
         case READ_X_ERROR:      return "XGetWindowProperty failed";
         }
         return "unknown";
@@ -199,9 +213,9 @@ namespace wolfx11
         {
             long estimate = 0;
             memcpy(&estimate, first.data.data(), sizeof(long));
-            if (estimate > 0 && estimate < (long)(256 * 1024 * 1024))
+            if (estimate > 0)
             {
-                bytes.reserve((size_t)estimate);
+                bytes.reserve(std::min((size_t)estimate, MAX_SELECTION_BYTES));
             }
         }
 
@@ -211,6 +225,8 @@ namespace wolfx11
         detail::call(unlock);
 
         int piece_format = 8;
+        const auto transfer_deadline = std::chrono::steady_clock::now()
+                                     + std::chrono::milliseconds(MAX_TRANSFER_MS);
         for (;;)
         {
             XEvent event;
@@ -219,8 +235,8 @@ namespace wolfx11
             // the PropertyNotify(Delete) our own deletions cause). The deadline is for the
             // piece, not for each event, so a stream of mouse moves cannot keep a dead
             // transfer waiting for ever.
-            const auto deadline = std::chrono::steady_clock::now()
-                                + std::chrono::milliseconds(INCR_PIECE_TIMEOUT_MS);
+            const auto deadline = std::min(transfer_deadline, std::chrono::steady_clock::now()
+                                           + std::chrono::milliseconds(INCR_PIECE_TIMEOUT_MS));
             while (!got_piece)
             {
                 const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -256,6 +272,11 @@ namespace wolfx11
                 break;      // the zero-length end marker
             }
             piece_format = piece.format;
+            if (bytes.size() + piece.data.size() > MAX_SELECTION_BYTES)
+            {
+                bytes.clear();
+                return READ_TOO_LARGE;
+            }
             bytes.append(piece.data);
         }
 

@@ -82,6 +82,19 @@ namespace
     // [wolf-rail 1.3, stage V] after CHANGE ENDS the driver has this long to sit in the cab at the other end
     // (Source: wolf-rail Cab.cs CAB_WALK_MS 120_000; RailEngine.cs CommitEnds PendingUntilMs = now + Cab.CAB_WALK_MS)
     const F64 CAB_WALK_S = 120.0;
+    // [wolf-rail 1.3.7] after a change of ends the lamp is drawn large this long: the region keeps its "You are now driving
+    // from the other end ..." / "You have changed ends ..." note on the cab for 15 s (wolf-rail 1.3.7 protocol, 14 Nov)
+    const F64 LEAD_FLASH_S = 15.0;
+    // the starts of those two notes (the second also begins the 1.3 notes, RailEngine.cs:930-932)
+    bool isEndsChangedNote(const std::string& note)
+    {
+        static const char* const P[] = { "You are now driving from the other end", "You have changed ends" };
+        for (const char* p : P)
+        {
+            if (note.compare(0, strlen(p), p) == 0) return true;
+        }
+        return false;
+    }
 
     F64 now() { return LLFrameTimer::getTotalSeconds(); }
 
@@ -317,6 +330,9 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     const bool again = mRearmAt >= 0.0 && now() >= mRearmAt;
     const bool refused = !c.mNote.empty() && (c.mNote != before || again) && isRefusal(c.mNote);
     if (again || c.mNote != before) mRearmAt = -1.0;
+    // [wolf-rail 1.3.7] a change of ends: its note new, or lead= turned round while this cab is open
+    const bool leadTurned = !fresh && c.mHasLead && mCab.mHasLead && c.mLead != mCab.mLead;
+    const bool endsNote = c.mNote != before && isEndsChangedNote(c.mNote);
     mCab = c;
     mSeat = root->getID();
     mLastAt = now();
@@ -335,6 +351,8 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         dismissWalk();
         mEndsPulseUntil = mCouplePulseUntil = mUncouplePulseUntil = -1.0;
         mTtPulseUntil = -1.0;   // [wolf-rail 1.3.7]
+        // [wolf-rail 1.3.7] a cab opened within the walk after CHANGE ENDS: the driver has just changed ends
+        mLeadFlashUntil = keep && mKept.walk ? now() + LEAD_FLASH_S : -1.0;
         if (keep)
         {
             // the same train after a long hand-over (W3): its levers as the driver left them
@@ -359,6 +377,7 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         claimBottom();
     }
     if (refused) mAlert = c.mNote;
+    if (leadTurned || endsNote) mLeadFlashUntil = now() + LEAD_FLASH_S;   // [wolf-rail 1.3.7]
     // [wolf-rail 1.2] the region's word on Auto (its own, or a script's train.control [train, "auto"]).
     // [client review 13 Nov, W3] An AUTO press waiting for its answer (autoAsking) takes the first mode=auto as the yes; a
     // mode that is not "auto" meanwhile may still be a message sent before the region read the press, so it waits until
@@ -395,6 +414,7 @@ void WolfTrain::close()
     mPointsPulseUntil = -1.0;
     mEndsPulseUntil = mCouplePulseUntil = mUncouplePulseUntil = -1.0;   // [stage V]
     mTtPulseUntil = -1.0;   // [wolf-rail 1.3.7]
+    mLeadFlashUntil = -1.0;
     mAlert.clear();
     mRearmAt = -1.0;
     dismissWalk();
@@ -420,6 +440,11 @@ void WolfTrain::beginWalk(const std::string& train, const std::string& note, con
     // the note is the region's own words; were it ever missing, the same sentence from walk= (RailEngine.cs:908)
     mWalkNote = note.empty() ? "Walk to " + walk + " and sit in its cab to drive on." : note;
     mWalkUntil = now() + CAB_WALK_S;
+}
+
+bool WolfTrain::leadFlash() const
+{
+    return driving() && mCab.mHasLead && now() < mLeadFlashUntil;
 }
 
 bool WolfTrain::walkPending() const
@@ -1018,7 +1043,7 @@ namespace
     }
 
     // The guide (Paul 2026-11-11, paul-games-must-look-fun: cards with Back / Next and dots, not "page 1 of 9").
-    struct Card { const char* title; const char* l1; const char* l2; const char* l3; };
+    struct Card { const char* title; const char* l1; const char* l2; const char* l3; const char* l4 = nullptr; };   // [1.3.7] l4
     const Card CARDS[] = {
         { "Welcome to the cab", "You are driving this train. Take your time - there is no clock and no score.",
           "The line looks after itself: the train always stops before the end of its line.", "Stand up to leave the cab; the train stops when you do." },
@@ -1038,7 +1063,9 @@ namespace
           "To back out of a platform: stop, choose BACK (or REVERSE in driver's mode), then go. It stops before the buffers." },
         // [wolf-rail 1.3, stage V] DESIGN-terminus.md 5.4 "a 'Changing ends' page"; the walk (Cab.cs CAB_WALK_MS 120 s), COUPLE's
         // way (RailCouple.cs CabCouple) and UNCOUPLE's part (the cab's own unit) as the region does them
+        // [wolf-rail 1.3.7] Paul 14 Nov ("when i did change ends the locomotive stayed facing the same way?"): the second line
         { "Changing ends", "Stopped at the end of the line? Press CHANGE ENDS (F6), then walk to the cab at the other end and sit in it.",
+          "Changing ends doesn't turn the engine round - use a turntable for that.",
           "COUPLE (F7) shows when your own train stands on the line: set FORWARD or REVERSE towards it, then press. Again stops it.",
           "UNCOUPLE (Shift+F7) leaves the rest standing behind your cab's part. Escape closes a red message." },
         // [wolf-rail 1.3.7] Paul 14 Nov (a shunter stopped at the end of a shed road): the end-of-line note (Cab.cs:85) and
@@ -1462,8 +1489,25 @@ void WolfTrainCabView::draw()
     {
         // [wolf-rail 1.3, stage V] the PROPELLING lamp (DESIGN-terminus.md 5.4): lead=0 - this cab is not at the end that
         // leads, looking the way the train goes (RailEngine.cs Lead), so the train is pushed; lead=1 - this cab leads
-        circleF(X(1400.f), Y(208.f), S(7.f), c.mLead ? LLColor4(0.25f, 0.2f, 0.05f, 1.f) : C_AMBER);
-        T(X(1414.f), Y(208.f), c.mLead ? "YOUR CAB LEADS" : "PROPELLING", 10.f, c.mLead ? C_GREY : C_AMBER, true, LLFontGL::LEFT);
+        if (tr.leadFlash())
+        {
+            // [wolf-rail 1.3.7] just after a change of ends: the same words, larger, black on a filled box - amber PROPELLING,
+            // green YOUR CAB LEADS (the words say it, never the colour alone). Within the LINE AHEAD panel's top row
+            // (X 1388-1588, Y 195-221: under its top frame at Y 224, over the station line, 14 at Y 180). Contrast (WCAG 2):
+            // black text on C_AMBER 10.9:1, on C_GREEN 14.0:1; the box against the darkest themes' insets (themeFor) at least
+            // 10.1:1 (amber) and 13.0:1 (green). Fixed colours: no skin changes them.
+            const LLColor4 fill = c.mLead ? C_GREEN : C_AMBER;
+            const LLColor4 ink(0.f, 0.f, 0.f, 1.f);
+            rectF(X(1388.f), Y(195.f), X(1588.f), Y(221.f), fill);
+            circleF(X(1401.f), Y(208.f), S(8.f), ink);
+            circleF(X(1401.f), Y(208.f), S(5.f), fill);
+            T(X(1414.f), Y(208.f), fitW(c.mLead ? "YOUR CAB LEADS" : "PROPELLING", 12.f, true, S(170.f)), 12.f, ink, true, LLFontGL::LEFT);
+        }
+        else
+        {
+            circleF(X(1400.f), Y(208.f), S(7.f), c.mLead ? LLColor4(0.25f, 0.2f, 0.05f, 1.f) : C_AMBER);
+            T(X(1414.f), Y(208.f), c.mLead ? "YOUR CAB LEADS" : "PROPELLING", 10.f, c.mLead ? C_GREY : C_AMBER, true, LLFontGL::LEFT);
+        }
         addHit(X(1390.f), Y(198.f), X(1585.f), Y(218.f), H_NONE, c.mLead ? "You are in the cab at the front of the train"
                                                                          : "Propelling: your cab is not at the front, so the train is pushed from behind you");
     }
@@ -1565,6 +1609,8 @@ void WolfTrainCabView::drawHelp(F32 above, bool stacked, F32 W)
     T(cx, t - S(74.f), cd.l1, 12.f, C_WHITE);
     T(cx, t - S(102.f), cd.l2, 12.f, C_WHITE);
     T(cx, t - S(130.f), cd.l3, 12.f, C_WHITE);
+    // [1.3.7] a card's fourth line (only "Changing ends" has one), between the third and the dots (at b + 56 = t - 174)
+    if (cd.l4) T(cx, t - S(154.f), cd.l4, 12.f, C_WHITE);
     for (S32 i = 0; i < CARD_COUNT; ++i)   // the dots
     {
         circleF(cx + S(22.f) * ((F32)i - (F32)(CARD_COUNT - 1) * 0.5f), b + S(56.f), S(5.f), i == mHelpPage ? LLColor4(0.86f, 0.69f, 0.34f, 1.f) : C_DIM);

@@ -156,6 +156,9 @@ public:
     /** [stage V] The last refusal the region gave a SHUNT press (isRefusal), kept until the driver closes it: the region's
      *  own note goes after 4 s (EngineDriver.cs Note :1895-1899). */
     const std::string& alert() const { return mAlert; }
+    /** [wolf-rail 1.3.7] Paul 14 Nov ("when i did change ends the locomotive stayed facing the same way?"): for LEAD_FLASH_S
+     *  after a change of ends the PROPELLING / YOUR CAB LEADS lamp is drawn large, so the driver sees which end now leads. */
+    bool leadFlash() const;
     void dismissAlert() { mAlert.clear(); }
     bool horn() const { return mHornHeld; }
     bool mph() const;
@@ -226,6 +229,7 @@ private:
     std::string mWalkNote;
     F64  mWalkUntil = -1.0;
     std::string mAlert;
+    F64  mLeadFlashUntil = -1.0;    // [wolf-rail 1.3.7] the lamp is drawn large until then (leadFlash)
     F64  mRearmAt = -1.0;   // [review W2] after a SHUNT press: from then on the same refusal text is raised again
 };
 

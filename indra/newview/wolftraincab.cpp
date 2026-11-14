@@ -89,6 +89,7 @@ namespace
     // RailEngine.cs:2010 "The train cannot change ends: "; RailCouple.cs:322 / :332 "You may not couple / uncouple this
     // train: ", :324 "Put the reverser to forward or reverse ...", :326 / :334 / :335 "The train cannot couple / uncouple",
     // :130 "The train did not couple: ", :497 "The train was not ". These are kept on screen until the driver closes them.
+    // [wolf-rail 1.3.7] a refused TURNTABLE press says "The train cannot be turned: ..." - already "The train cannot ".
     bool isRefusal(const std::string& note)
     {
         static const char* const P[] = { "The train cannot ", "You may not ", "The train did not ", "The train was not ",
@@ -206,6 +207,9 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     }
 
     Cab c = mOpen && root->getID() == mSeat ? mCab : Cab();
+    // [wolf-rail 1.3.7] tt= says a turntable only while the engine stands at one; every state=on message is whole
+    // (RailEngine.cs SendCab :1207-1226 builds every key each time), so a message without it is no turntable
+    c.mTt.clear();
     bool on = false, off = false;
     for (const std::string& s : strings)
     {
@@ -268,6 +272,13 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
                 if (side == "ahead" || side == "behind") { c.mCoupleSide = side; c.mCoupleM = llclamp(m, 0.f, 100000.f); c.mCoupleName = v.substr(b2 + 1); }
             }
         }
+        else if (k == "tt")
+        {
+            // [wolf-rail 1.3.7] the turntable's name: one word of 1-32 characters, no space and no '|' (the names a region
+            // keeps, Turntable.cs:841 ReadDecks); anything else is no turntable
+            const size_t len = utf8str_to_wstring(v).size();
+            c.mTt = len >= 1 && len <= MAX_MARK_NAME && v.find(' ') == std::string::npos && v.find('|') == std::string::npos ? v : std::string();
+        }
         else if (!parseF(v, n)) continue;
         // [wolf-rail 1.3 stage 1 / 3] RailEngine.cs SendCab :1215-1218: "0" / "1", and the vehicle count
         else if (k == "lead")    { c.mHasLead = true; c.mLead = n >= 0.5f; }
@@ -323,6 +334,7 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         mAlert.clear();
         dismissWalk();
         mEndsPulseUntil = mCouplePulseUntil = mUncouplePulseUntil = -1.0;
+        mTtPulseUntil = -1.0;   // [wolf-rail 1.3.7]
         if (keep)
         {
             // the same train after a long hand-over (W3): its levers as the driver left them
@@ -382,6 +394,7 @@ void WolfTrain::close()
     mAutoPulseUntil = -1.0;
     mPointsPulseUntil = -1.0;
     mEndsPulseUntil = mCouplePulseUntil = mUncouplePulseUntil = -1.0;   // [stage V]
+    mTtPulseUntil = -1.0;   // [wolf-rail 1.3.7]
     mAlert.clear();
     mRearmAt = -1.0;
     dismissWalk();
@@ -614,6 +627,12 @@ bool WolfTrain::canUncouple() const
     return driving() && mCab.mShunt && mCab.mVeh > 0;
 }
 
+// [wolf-rail 1.3.7] only while the region names the turntable whose deck-edge stop the engine stands at (tt=)
+bool WolfTrain::canTurntable() const
+{
+    return driving() && !mCab.mTt.empty();
+}
+
 bool WolfTrain::coupleWrongWay() const
 {
     // RailCouple.cs CabCouple: the record's way = the reverser x TrainRecord.CabSign; CoupleSeen's "ahead" is the record's
@@ -648,6 +667,16 @@ void WolfTrain::pressUncouple()
     mAlert.clear();
     mUncouplePulseUntil = now() + AUTO_PULSE_S;
     mRearmAt = mUncouplePulseUntil;
+}
+
+// [wolf-rail 1.3.7] the region turns the engine round on the turntable in tt= on BOOST coming on (Cab.cs:79 "One press (the
+// bit coming on), as CHANGE ENDS"); a refusal ("The train cannot be turned: ...") is raised again after this press as the others'
+void WolfTrain::pressTurntable()
+{
+    if (!canTurntable() || now() < mTtPulseUntil) return;
+    mAlert.clear();
+    mTtPulseUntil = now() + AUTO_PULSE_S;
+    mRearmAt = mTtPulseUntil;
 }
 
 void WolfTrain::setEasyBack(bool back)
@@ -717,6 +746,8 @@ U32 WolfTrain::sendButtons() const
     if (now() < mEndsPulseUntil) b |= WolfDrive::BTN_ENGINE;
     if (now() < mCouplePulseUntil) b |= WolfDrive::BTN_ANCHOR;
     if (now() < mUncouplePulseUntil) b |= WolfDrive::BTN_LANDING_GEAR;
+    // [wolf-rail 1.3.7] wolfdrive.h:82 BTN_BOOST 1024 = wolf-rail Cab.cs:82 BTN_TURNTABLE, inside BUTTON_MASK 0x7FFFF (wolfdrive.h:85)
+    if (now() < mTtPulseUntil) b |= WolfDrive::BTN_BOOST;
     return b;
 }
 
@@ -926,6 +957,53 @@ namespace
         return wstring_to_utf8str(w + dots);
     }
 
+    // [wolf-rail 1.3.7] Text broken into at most `max_lines` lines of whole words, each at most `maxw` picture units, measured
+    // with the very face T() draws it with (as fitW). What does not fit on the last line is cut there with "..." (fitW); a
+    // single word longer than a line is cut the same way. Cached as fitW is (the same note is drawn every frame).
+    std::vector<std::string> wrapW(const std::string& str, F32 px, bool bold, F32 maxw, size_t max_lines)
+    {
+        static std::map<std::string, std::vector<std::string>> cache;
+        const std::string key = llformat("%d|%d|%d|%d|", (S32)llround(S(px) * 100.f), bold ? 1 : 0, (S32)llround(maxw), (S32)max_lines) + str;
+        auto hit = cache.find(key);
+        if (hit != cache.end()) return hit->second;
+        if (cache.size() > 64) cache.clear();
+        std::vector<std::string> lines;
+        const LLFontGL* f = face("B612", bold ? LLFontGL::BOLD : LLFontGL::NORMAL, llmax(6.f, S(px) * 1.25f));
+        std::vector<LLWString> words;
+        {
+            const LLWString all = utf8str_to_wstring(str);
+            LLWString cur;
+            for (llwchar ch : all)
+            {
+                if (ch == ' ') { if (!cur.empty()) words.push_back(cur); cur.clear(); }
+                else cur.push_back(ch);
+            }
+            if (!cur.empty()) words.push_back(cur);
+        }
+        const LLWString space = utf8str_to_wstring(" ");
+        LLWString line;
+        for (size_t i = 0; i < words.size() && f && max_lines > 0; ++i)
+        {
+            if (lines.size() + 1 == max_lines)
+            {
+                // the last line there is room for: everything left, cut to fit
+                LLWString rest = line;
+                for (size_t j = i; j < words.size(); ++j) rest += (rest.empty() ? LLWString() : space) + words[j];
+                lines.push_back(fitW(wstring_to_utf8str(rest), px, bold, maxw));
+                line.clear();
+                break;
+            }
+            if (line.empty()) { line = words[i]; continue; }
+            const LLWString trial = line + space + words[i];
+            if (f->getWidthF32(trial.c_str()) <= maxw) { line = trial; continue; }
+            lines.push_back(fitW(wstring_to_utf8str(line), px, bold, maxw));
+            line = words[i];
+        }
+        if (!line.empty()) lines.push_back(fitW(wstring_to_utf8str(line), px, bold, maxw));
+        if (!f && !str.empty() && max_lines > 0) lines.push_back(str);
+        return cache[key] = lines;
+    }
+
     std::string distance(F32 m)
     {
         if (m >= 1000.f) return llformat("%.1f km", m / 1000.f);
@@ -963,6 +1041,11 @@ namespace
         { "Changing ends", "Stopped at the end of the line? Press CHANGE ENDS (F6), then walk to the cab at the other end and sit in it.",
           "COUPLE (F7) shows when your own train stands on the line: set FORWARD or REVERSE towards it, then press. Again stops it.",
           "UNCOUPLE (Shift+F7) leaves the rest standing behind your cab's part. Escape closes a red message." },
+        // [wolf-rail 1.3.7] Paul 14 Nov (a shunter stopped at the end of a shed road): the end-of-line note (Cab.cs:85) and
+        // the TURNTABLE button (tt=, Cab.cs:82), button only
+        { "End of the line and turntables", "Line ended? The note above the cab says so. Press BACK (or REVERSE), or CHANGE ENDS, to drive out.",
+          "At a turntable's edge a TURNTABLE button shows, with the turntable's name. Press it once.",
+          "The turntable turns your engine round with you in the cab. Then take the power to drive off." },
         { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power).",
           "F5: FORWARD or BACK in Easy driving; FORWARD, NEUTRAL, REVERSE in driver's mode. F2 Easy or driver's mode.",
           "F3 mph or km/h, F4 hides or shows the cab, F8 AUTO, F9 POINTS. Your horn key (H unless changed) sounds the horn." },
@@ -1143,7 +1226,7 @@ void WolfTrainCabView::draw()
     {
         T(X(800.f), Y(160.f), "Sit in the cab of a Wolf Rail engine to drive it.", 16.f, C_WHITE, true);
         T(X(800.f), Y(126.f), "Paddington Station's driving loop, where anyone may drive, is being built. Press ? to read how driving works.", 11.f, C_GREY);
-        if (mShowHelp) drawHelp(top, W);
+        if (mShowHelp) drawHelp(top, false, W);
         zoomed.reset();
         mResize.draw();
         return;
@@ -1327,19 +1410,26 @@ void WolfTrainCabView::draw()
             coupleTip = "Couple to " + (c.mCoupleName.empty() ? std::string("the stock") : "\"" + c.mCoupleName + "\"") + ", "
                 + distance(c.mCoupleM) + (ahead ? " ahead" : " behind") + ". Set " + way + " towards it, then press COUPLE (F7); press again to stop";
         }
-        const Shunt SH[3] = {
+        // [wolf-rail 1.3.7] TURNTABLE (tt=) under its turntable's name: the turntable turns the engine round, the driver seated
+        const std::string ttTip = "Turn your engine round on the turntable " + c.mTt
+            + ": you stay in the cab and go round with it. One press (button only - no key)";
+        // four fixed places of 140 between the badge's band end (X 930) and the ? button (X 1520): 930 + 4 x 146 - 6 = 1508.
+        // The longest word, CHANGE ENDS at 14, is about 5.6 line heights wide in B612 (fonts/B612-Bold.ttf advances; a
+        // line height of at most S(14) x 1.25 = 17.5 at u = 1): about 99 of the 130 it is fitted to.
+        const Shunt SH[4] = {
             { 930.f, H_ENDS, tr.canChangeEnds(), "CHANGE ENDS", "F6", "Change ends: then walk to the cab at the other end and sit in it (F6)", false },
-            { 1120.f, H_COUPLE, tr.canCouple(), "COUPLE", coupleSub, coupleTip, wrong },
-            { 1310.f, H_UNCOUPLE, tr.canUncouple(), "UNCOUPLE", "Shift+F7", "Uncouple: your cab's part leaves the rest standing on its own (Shift+F7)", false },
+            { 1076.f, H_COUPLE, tr.canCouple(), "COUPLE", coupleSub, coupleTip, wrong },
+            { 1222.f, H_UNCOUPLE, tr.canUncouple(), "UNCOUPLE", "Shift+F7", "Uncouple: your cab's part leaves the rest standing on its own (Shift+F7)", false },
+            { 1368.f, H_TURNTABLE, tr.canTurntable(), "TURNTABLE", c.mTt, ttTip, false },
         };
         for (const Shunt& s : SH)
         {
             if (!s.can) continue;
-            const F32 l = X(s.l), r = X(s.l + 180.f), b = Y(232.f), t = Y(296.f);
+            const F32 l = X(s.l), r = X(s.l + 140.f), b = Y(232.f), t = Y(296.f);
             rectF(l, b, r, t, s.dim ? LLColor4(0.f, 0.f, 0.f, 0.45f) : LLColor4(0.f, 0.f, 0.f, 0.6f));
             frameW(l, b, r, t, S(2.f), s.dim ? th.accentLo : th.accent);
-            T((l + r) * 0.5f, Y(274.f), fitW(s.word, 14.f, true, S(170.f)), 14.f, th.accent, true);
-            T((l + r) * 0.5f, Y(248.f), fitW(s.sub, 9.f, true, S(170.f)), 9.f, s.dim ? C_AMBER : C_GREY, true);
+            T((l + r) * 0.5f, Y(274.f), fitW(s.word, 14.f, true, S(130.f)), 14.f, th.accent, true);
+            T((l + r) * 0.5f, Y(248.f), fitW(s.sub, 9.f, true, S(130.f)), 9.f, s.dim ? C_AMBER : C_GREY, true);
             addHit(l, b, r, t, s.id, s.tip);
         }
     }
@@ -1398,8 +1488,8 @@ void WolfTrainCabView::draw()
     circleF(X(1420.f), Y(124.f), S(14.f), lamp);
     T(X(1500.f), Y(132.f), "LINE", 9.f, c.mProtect ? C_RED : C_DIM, true);
     T(X(1500.f), Y(116.f), "BRAKING", 9.f, c.mProtect ? C_RED : C_DIM, true);
-    // (a refusal is shown once, in the strip above the panel that stays until the driver closes it)
-    if (!c.mNote.empty() && c.mNote != tr.alert()) T(X(1070.f), Y(92.f), fitW(c.mNote, 11.f, false, S(510.f)), 11.f, C_AMBER, false, LLFontGL::LEFT);
+    // [wolf-rail 1.3.7] the region's note (where to go at the end of the line, the turntable's progress, a points setting...):
+    // drawn below, over the panel, so it cannot be missed. (A refusal is shown once, in the red strip that stays until OK.)
     // the horn (held while pressed) and the mode switch
     const bool horn = tr.horn();
     rectF(X(1070.f), Y(26.f), X(1300.f), Y(74.f), horn ? th.accent : th.accentLo);
@@ -1409,12 +1499,41 @@ void WolfTrainCabView::draw()
     T(X(1450.f), Y(50.f), easy ? "SWITCH TO DRIVER'S MODE" : "SWITCH TO EASY DRIVING", 10.f, th.accent, true);
     addHit(X(1320.f), Y(26.f), X(1580.f), Y(74.f), H_MODE, easy ? "Switch to the driver's own levers - F2 (the train stops first)" : "Switch to the one-lever Easy driving - F2 (the train stops first)");
 
-    // [wolf-rail 1.3, stage V] a refusal of CHANGE ENDS, COUPLE or UNCOUPLE: in a red strip just above the panel, in the
-    // region's own words, until the driver presses OK (the region's note is gone after 4 s: EngineDriver.cs Note)
+    // what is drawn over the panel stacks upwards from its top: the note box, the refusal strip, the guide card
+    F32 above = top;
+    bool stacked = false;
+
+    // [wolf-rail 1.3.7] THE NOTE: Paul 14 Nov - a stop guide halted his shunter at the end of a shed road and he did not know
+    // how to get out. 1.3.7 says how in the note, which was one small amber line cut at 510 units. Now: whole words on up to
+    // three lines at 15 (was 11), white on an opaque near-black box with a 3-unit amber border, just above the panel over the
+    // SIGNAL and LINE AHEAD panels (X 922-1592). Inside the panel there is no room for it: between the horn / mode buttons
+    // (top Y 74) and the track strip and LINE BRAKING lamp (bottom Y 110) are 36 units, one line. Contrast (WCAG 2 relative
+    // luminance, sRGB): C_WHITE 0.96 (L 0.911) on (0.06, 0.05, 0.03) (L 0.0040) is 17.8:1; the C_AMBER border on it 10.1:1.
+    // The colours are this file's own constants (no skin or colour table reads them): every viewer skin and theme is the same.
+    if (!c.mNote.empty() && c.mNote != tr.alert())
+    {
+        const F32 l = X(922.f), r = X(1592.f);
+        const std::vector<std::string> lines = wrapW(c.mNote, 15.f, true, S(630.f), 3);
+        const F32 step = S(22.f);
+        const F32 b = above + S(8.f), t = b + step * (F32)lines.size() + S(20.f);
+        rectF(l, b, r, t, LLColor4(0.06f, 0.05f, 0.03f, 1.f));
+        frameW(l, b, r, t, S(3.f), C_AMBER);
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            T(l + S(20.f), t - S(21.f) - step * (F32)i, lines[i], 15.f, C_WHITE, true, LLFontGL::LEFT);
+        }
+        addHit(l, b, r, t, H_NONE, c.mNote);   // the whole note as a tooltip (a very long one is cut at the third line)
+        above = t;
+        stacked = true;
+    }
+
+    // [wolf-rail 1.3, stage V] a refusal of CHANGE ENDS, COUPLE, UNCOUPLE or [1.3.7] TURNTABLE: in a red strip above the panel
+    // (and the note), in the region's own words, until the driver presses OK (the region's note is gone after 4 s:
+    // EngineDriver.cs Note)
     mShowAlert = !tr.alert().empty();
     if (mShowAlert)
     {
-        const F32 l = W * 0.5f - S(560.f), r = W * 0.5f + S(560.f), b = top + S(8.f), t = b + S(56.f);
+        const F32 l = W * 0.5f - S(560.f), r = W * 0.5f + S(560.f), b = above + S(8.f), t = b + S(56.f);
         mAlertL = l * mHitScale; mAlertR = r * mHitScale; mAlertB = b * mHitScale; mAlertT = t * mHitScale;
         rectF(l, b, r, t, LLColor4(0.30f, 0.02f, 0.02f, 0.96f));
         frameW(l, b, r, t, S(2.f), C_RED);
@@ -1423,19 +1542,21 @@ void WolfTrainCabView::draw()
         T(r - S(62.f), (b + t) * 0.5f, "OK", 13.f, LLColor4(0.f, 0.f, 0.f, 1.f), true);
         addHit(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), H_ALERT_OK, "Close this message (Escape)");
         addHit(l, b, r - S(112.f), t, H_NONE, tr.alert());   // the whole text as a tooltip (it may be cut to fit)
+        above = t;
+        stacked = true;
     }
 
-    if (mShowHelp) drawHelp(top, W);
+    if (mShowHelp) drawHelp(above, stacked, W);
     zoomed.reset();
     mResize.draw();
 }
 
-void WolfTrainCabView::drawHelp(F32 top, F32 W)
+void WolfTrainCabView::drawHelp(F32 above, bool stacked, F32 W)
 {
     mHelpPage = llclamp(mHelpPage, 0, CARD_COUNT - 1);
     const Card& cd = CARDS[mHelpPage];
-    // (above the refusal strip while one is shown, [stage V])
-    const F32 l = W * 0.5f - S(420.f), r = W * 0.5f + S(420.f), b = top + S(mShowAlert ? 72.f : 16.f), t = b + S(230.f);
+    // (above the refusal strip while one is shown, [stage V], and [1.3.7] the note box: 8 over what is stacked, 16 over the panel)
+    const F32 l = W * 0.5f - S(420.f), r = W * 0.5f + S(420.f), b = above + S(stacked ? 8.f : 16.f), t = b + S(230.f);
     mHelpL = l * mHitScale; mHelpR = r * mHitScale; mHelpB = b * mHitScale; mHelpT = t * mHitScale;
     rectF(l, b, r, t, LLColor4(0.02f, 0.03f, 0.02f, 0.94f));
     frameW(l, b, r, t, S(2.f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
@@ -1489,6 +1610,7 @@ void WolfTrainCabView::press(EHit id, S32 y)
     case H_ENDS:       tr.pressEnds(); break;       // [wolf-rail 1.3, stage V]
     case H_COUPLE:     tr.pressCouple(); break;
     case H_UNCOUPLE:   tr.pressUncouple(); break;
+    case H_TURNTABLE:  tr.pressTurntable(); break;   // [wolf-rail 1.3.7]
     case H_ALERT_OK:   tr.dismissAlert(); break;
     case H_WALK:       tr.dismissWalk(); break;
     default: break;

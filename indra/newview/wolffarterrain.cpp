@@ -18,6 +18,9 @@
 #include "wolffarterrain.h"
 
 #include <algorithm>
+#include <array>
+#include <functional>
+#include <set>
 
 #include "llagent.h"
 #include "llvoavatarself.h"
@@ -107,6 +110,7 @@ bool WolfFarTerrain::coversCell(U32 x, U32 y) const
 void WolfFarTerrain::clearAll()
 {
     mDraw.clear();
+    mPrepare.clear();
     mCovered.clear();
 }
 
@@ -217,7 +221,7 @@ void WolfFarTerrain::idleBody()
         mNextRefresh = now + REFRESH_SECS;
         refresh();
     }
-    if (mDraw.empty())
+    if (mDraw.empty() && mPrepare.empty())   // <WolfViewer 2026-11-14/> pieces readied before they are drawn too
     {
         return;
     }
@@ -245,49 +249,60 @@ void WolfFarTerrain::idleBody()
     // the agent frame the vertices are in: a crossing moves it, and so does a huge-region rebase (LLAgent::rebaseOrigin),
     // which leaves the region's own origin where it was
     const LLVector3d origin = gAgent.getAgentOriginGlobal();
+    // <WolfViewer 2026-11-14> the pieces drawn first (one built in an old agent frame is skipped until rebuilt), then
+    // the wanted ones being readied, so the draw pass can switch to them without a gap (ticket 853)
     S32 builds = 0;
-    for (const PieceKey& key : mDraw)
+    for (const std::vector<PieceKey>* list : { &mDraw, &mPrepare })
     {
-        auto it = mPieces.find(key);
-        if (it == mPieces.end())
+        for (const PieceKey& key : *list)
         {
-            continue;
-        }
-        Piece& p = it->second;
-        if (p.mState == Piece::READY && !p.mBuildFailed && (p.mVB.isNull() || p.mBuiltOrigin != origin)
-            && builds < MAX_BUILDS_PER_FRAME)
-        {
-            buildMesh(key, p);
-            p.mBuildFailed = p.mVB.isNull();
-            ++builds;
+            if (builds >= MAX_BUILDS_PER_FRAME)
+            {
+                break;
+            }
+            auto it = mPieces.find(key);
+            if (it == mPieces.end())
+            {
+                continue;
+            }
+            Piece& p = it->second;
+            if (p.mState == Piece::READY && !p.mBuildFailed && (p.mVB.isNull() || p.mBuiltOrigin != origin))
+            {
+                buildMesh(key, p);
+                p.mBuildFailed = p.mVB.isNull();
+                ++builds;
+            }
         }
     }
     // the region's own ground on the pieces of connected regions, a couple a frame (the map tile stands in until then)
     S32 bakes = 0;
     const F64 now_bake = LLFrameTimer::getElapsedSeconds();
-    for (const PieceKey& key : mDraw)
+    for (const std::vector<PieceKey>* list : { &mDraw, &mPrepare })   // <WolfViewer 2026-11-14/> drawn first, then readied
     {
-        if (bakes >= MAX_BAKES_PER_FRAME)
+        for (const PieceKey& key : *list)
         {
-            break;
-        }
-        auto it = mPieces.find(key);
-        if (it == mPieces.end())
-        {
-            continue;
-        }
-        Piece& p = it->second;
-        if (p.mState != Piece::READY || p.mGround.notNull() || now_bake < p.mBakeRetryAt)
-        {
-            continue;
-        }
-        if (bakeGround(key, p))
-        {
-            ++bakes;
-        }
-        else
-        {
-            p.mBakeRetryAt = now_bake + BAKE_RETRY_SECS;
+            if (bakes >= MAX_BAKES_PER_FRAME)
+            {
+                break;
+            }
+            auto it = mPieces.find(key);
+            if (it == mPieces.end())
+            {
+                continue;
+            }
+            Piece& p = it->second;
+            if (p.mState != Piece::READY || p.mGround.notNull() || now_bake < p.mBakeRetryAt)
+            {
+                continue;
+            }
+            if (bakeGround(key, p))
+            {
+                ++bakes;
+            }
+            else
+            {
+                p.mBakeRetryAt = now_bake + BAKE_RETRY_SECS;
+            }
         }
     }
 }
@@ -329,6 +344,7 @@ void WolfFarTerrain::refresh()
             }
         }
     }
+    const std::vector<std::tuple<S32, U32, U32>> roots = stack;   // <WolfViewer 2026-11-14/> the z8 tiles, for the draw pass
     while (!stack.empty())
     {
         auto [z, tx, ty] = stack.back();
@@ -364,14 +380,25 @@ void WolfFarTerrain::refresh()
     // the regions to draw: the connected ones at their own size, then the rest of the map. A map block carries the
     // size as a U16 (llworldmapmessage.cpp MapBlockReply SizeX/SizeY), so a region past 65,535 m (Ireland, 460,800 m)
     // arrives wrapped, and a huge region's map block is only fetched when the camera is near its corner
-    struct FarRegion { U64 mHandle; U32 mX, mY, mW, mH; bool mConnected; };
+    struct FarRegion { U32 mX, mY, mW, mH; };
     std::vector<FarRegion> regions;
+    // <WolfViewer 2026-11-14> only the regions that reach into the reach box (the world map keeps every region it has
+    // ever been told about; the draw pass below walks each one from the z8 tiles)
+    auto add_region = [&](U32 ox, U32 oy, U32 w_cells, U32 h_cells) {
+        const FarRegion fr{ ox / CELL_M, oy / CELL_M, w_cells, h_cells };
+        if ((F64)(fr.mX + fr.mW) * CELL_M <= x0 || (F64)fr.mX * CELL_M >= x1
+            || (F64)(fr.mY + fr.mH) * CELL_M <= y0 || (F64)fr.mY * CELL_M >= y1)
+        {
+            return;
+        }
+        regions.push_back(fr);
+    };
     for (LLViewerRegion* r : LLWorld::getInstance()->getRegionList())
     {
         U32 ox = 0, oy = 0;
         from_region_handle(r->getHandle(), &ox, &oy);
         const U32 cells = llmax((U32)r->getWidth(), CELL_M) / CELL_M;
-        regions.push_back({ r->getHandle(), ox / CELL_M, oy / CELL_M, cells, cells, true });
+        add_region(ox, oy, cells, cells);
     }
     for (const auto& kv : LLWorldMap::getInstance()->getRegionMap())
     {
@@ -382,76 +409,221 @@ void WolfFarTerrain::refresh()
         }
         U32 ox = 0, oy = 0;
         from_region_handle(kv.first, &ox, &oy);
-        regions.push_back({ kv.first, ox / CELL_M, oy / CELL_M,
-                            llmax((U32)info->getSizeX(), CELL_M) / CELL_M, llmax((U32)info->getSizeY(), CELL_M) / CELL_M, false });
+        add_region(ox, oy, llmax((U32)info->getSizeX(), CELL_M) / CELL_M, llmax((U32)info->getSizeY(), CELL_M) / CELL_M);
     }
 
-    // every region that overlaps a leaf gives its piece of it
+    // <WolfViewer 2026-11-14> ticket 853 (Benny Moonstone, flying slowly with a 4,096 m draw distance: blocky
+    // map-coloured slabs before the land). The quadtree picks finer tiles as the camera comes nearer, and a piece was
+    // drawn only once its OWN tile had arrived (MAX_FETCHING at a time) and been meshed - so each time a tile split in
+    // four, or four merged into one, that ground went: a hole, or WolfFarGround's flat map tile (a slab, the skirts of
+    // the pieces round it standing up as walls) until the new tiles came. Now:
+    //  1. the wanted tiles (the leaves) are fetched, meshed and pictured BEFORE they are drawn (mPrepare);
+    //  2. what is drawn falls back, region by region: a tile whose quarters cannot all be drawn keeps its own piece,
+    //     and a leaf not ready itself shows the finer pieces that are ready below it. A tile's piece and any piece
+    //     inside it are never drawn together (both lie on the same lower envelope and would fight for the same depth).
     mDraw.clear();
+    mPrepare.clear();
     mCovered.clear();
+    std::set<std::tuple<S32, U32, U32>> pictures;   // tiles whose map picture is kept loading
+    auto overlaps = [](const FarRegion& fr, S32 z, U32 tx, U32 ty) {
+        const U32 span = 1u << (z - 1);
+        return !(fr.mX + fr.mW <= tx || fr.mX >= tx + span || fr.mY + fr.mH <= ty || fr.mY >= ty + span);
+    };
+    auto tile_dist = [&](S32 z, U32 tx, U32 ty) {
+        const F64 size = tileMetres(z);
+        const F64 rx0 = (F64)tx * CELL_M, ry0 = (F64)ty * CELL_M;
+        const F64 dx = llmax(0.0, llmax(rx0 - cam.mdV[VX], cam.mdV[VX] - (rx0 + size)));
+        const F64 dy = llmax(0.0, llmax(ry0 - cam.mdV[VY], cam.mdV[VY] - (ry0 + size)));
+        return sqrt(dx * dx + dy * dy);
+    };
+
+    // 1. the leaves, nearest first: fetched (the budget goes to the ground closest to the camera) and readied
     for (const auto& [z, tx, ty] : leaves)
     {
-        const U32 span = 1u << (z - 1);
-        const U32 tx1 = tx + span, ty1 = ty + span;
-        bool any = false;
         for (const FarRegion& fr : regions)
         {
-            const U32 rx = fr.mX, ry = fr.mY, rw = fr.mW, rh = fr.mH;
-            if (rx + rw <= tx || rx >= tx1 || ry + rh <= ty || ry >= ty1)
+            if (!overlaps(fr, z, tx, ty))
             {
                 continue;
             }
-            const PieceKey key(rx, ry, z, tx, ty);
+            const PieceKey key(fr.mX, fr.mY, z, tx, ty);
             Piece& p = mPieces[key];
             p.mLastWanted = now;
-            p.mRegionX = rx; p.mRegionY = ry; p.mRegionW = rw; p.mRegionH = rh;
+            p.mRegionX = fr.mX; p.mRegionY = fr.mY; p.mRegionW = fr.mW; p.mRegionH = fr.mH;
             if ((p.mState == Piece::NEW || (p.mState == Piece::MISSING && now >= p.mRetryAt)) && mFetching < MAX_FETCHING)
             {
                 fetch(key);
             }
-            if (p.mState != Piece::READY)
+            if (p.mState == Piece::READY)
             {
-                continue;
-            }
-            mDraw.push_back(key);
-            any = true;
-            // its cells, for WolfFarGround to leave alone: it draws flat tiles only for regions not connected, so
-            // a connected one (Ireland, a million cells) is never listed. Only once this piece really draws (a mesh
-            // and a picture for it), or the flat tile would go and leave a hole.
-            if (fr.mConnected || p.mVB.isNull() || p.mIndices == 0 || p.mBuiltOrigin != gAgent.getAgentOriginGlobal())
-            {
-                continue;
-            }
-            if (p.mGround.isNull())
-            {
-                auto t = mTextures.find(std::make_tuple(z, tx, ty));
-                if (t == mTextures.end() || t->second.mDraw.isNull())
-                {
-                    continue;
-                }
-            }
-            for (U32 cx = llmax(rx, tx); cx < llmin(rx + rw, tx1); ++cx)
-            {
-                for (U32 cy = llmax(ry, ty); cy < llmin(ry + rh, ty1); ++cy)
-                {
-                    mCovered.insert(to_region_handle(cx * CELL_M, cy * CELL_M));
-                }
-            }
-        }
-        if (any)
-        {
-            TileTex& t = mTextures[std::make_tuple(z, tx, ty)];
-            t.mLastWanted = now;
-            if (t.mTexture.isNull())
-            {
-                t.mTexture = LLWorldMap::getInstance()->getObjectsTile(tx, ty, z, true);
-                if (t.mTexture.notNull())
-                {
-                    t.mTexture->setBoostLevel(LLGLTexture::BOOST_MAP);
-                }
+                mPrepare.push_back(key);
+                pictures.emplace(z, tx, ty);
             }
         }
     }
+
+    // 2. what to draw: each region's pieces from the z8 tiles down, falling back where the wanted ones are not ready
+    const LLVector3d agent_origin = gAgent.getAgentOriginGlobal();
+    const U32 reach_cx0 = (U32)(x0 / CELL_M), reach_cx1 = (U32)(x1 / CELL_M);
+    const U32 reach_cy0 = (U32)(y0 / CELL_M), reach_cy1 = (U32)(y1 / CELL_M);
+    auto show = [&](const FarRegion& fr, const PieceKey& key) {
+        mDraw.push_back(key);
+        Piece& p = mPieces[key];
+        p.mLastWanted = now;
+        const S32 z = std::get<2>(key);
+        const U32 tx = std::get<3>(key), ty = std::get<4>(key), tx1 = tx + (1u << (z - 1)), ty1 = ty + (1u << (z - 1));
+        pictures.emplace(z, tx, ty);
+        // its cells within the reach, for WolfFarGround to leave alone - only once this piece really draws in the
+        // current agent frame (renderDeferred skips one built in an old frame until it is rebuilt)
+        if (p.mBuiltOrigin != agent_origin)
+        {
+            return;
+        }
+        for (U32 cx = llmax(llmax(fr.mX, tx), reach_cx0); cx < llmin(llmin(fr.mX + fr.mW, tx1), reach_cx1 + 1); ++cx)
+        {
+            for (U32 cy = llmax(llmax(fr.mY, ty), reach_cy0); cy < llmin(llmin(fr.mY + fr.mH, ty1), reach_cy1 + 1); ++cy)
+            {
+                mCovered.insert(to_region_handle(cx * CELL_M, cy * CELL_M));
+            }
+        }
+    };
+    // the four quarters of a tile, as the split above makes them
+    auto quarters = [](S32 z, U32 tx, U32 ty) {
+        const U32 half = 1u << (z - 2);
+        return std::array<std::pair<U32, U32>, 4>{ { { tx, ty }, { tx + half, ty }, { tx, ty + half }, { tx + half, ty + half } } };
+    };
+    // Below a leaf whose own piece is not ready (flying away, or a jump of more than one level): whatever finer pieces
+    // are ready, at any depth. complete_below: they cover this tile's part of the region whole; show_below: draw them.
+    std::function<bool(const FarRegion&, S32, U32, U32)> complete_below = [&](const FarRegion& fr, S32 z, U32 tx, U32 ty) -> bool {
+        if (!overlaps(fr, z, tx, ty) || tile_dist(z, tx, ty) > reach || drawable(PieceKey(fr.mX, fr.mY, z, tx, ty)))
+        {
+            return true;
+        }
+        if (z <= Z_MIN)
+        {
+            return false;
+        }
+        for (const auto& [qx, qy] : quarters(z, tx, ty))
+        {
+            if (!complete_below(fr, z - 1, qx, qy))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    std::function<void(const FarRegion&, S32, U32, U32)> show_below = [&](const FarRegion& fr, S32 z, U32 tx, U32 ty) {
+        if (!overlaps(fr, z, tx, ty) || tile_dist(z, tx, ty) > reach)
+        {
+            return;
+        }
+        const PieceKey key(fr.mX, fr.mY, z, tx, ty);
+        if (drawable(key))
+        {
+            show(fr, key);
+            return;
+        }
+        if (z <= Z_MIN)
+        {
+            return;
+        }
+        for (const auto& [qx, qy] : quarters(z, tx, ty))
+        {
+            show_below(fr, z - 1, qx, qy);
+        }
+    };
+    // can this tile's part of the region be drawn whole (by the same rules as visit below)?
+    std::function<bool(const FarRegion&, S32, U32, U32)> complete = [&](const FarRegion& fr, S32 z, U32 tx, U32 ty) -> bool {
+        if (!overlaps(fr, z, tx, ty))
+        {
+            return true;
+        }
+        const F64 d = tile_dist(z, tx, ty);
+        if (d > reach)
+        {
+            return true;
+        }
+        if (drawable(PieceKey(fr.mX, fr.mY, z, tx, ty)))
+        {
+            return true;
+        }
+        if (z <= Z_MIN)
+        {
+            return false;
+        }
+        const bool split = d < SPLIT * tileMetres(z);
+        for (const auto& [qx, qy] : quarters(z, tx, ty))
+        {
+            if (split ? !complete(fr, z - 1, qx, qy) : !complete_below(fr, z - 1, qx, qy))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    std::function<void(const FarRegion&, S32, U32, U32)> visit = [&](const FarRegion& fr, S32 z, U32 tx, U32 ty) {
+        if (!overlaps(fr, z, tx, ty))
+        {
+            return;
+        }
+        const F64 d = tile_dist(z, tx, ty);
+        if (d > reach)
+        {
+            return;
+        }
+        const PieceKey key(fr.mX, fr.mY, z, tx, ty);
+        const bool split = z > Z_MIN && d < SPLIT * tileMetres(z);
+        if (!split)
+        {
+            // a leaf: its own piece, else the finer pieces that are ready below it, at any depth (flying away: they
+            // stay until the coarser one comes; where none is ready, WolfFarGround's tile shows as before)
+            show_below(fr, z, tx, ty);
+            return;
+        }
+        // finer wanted here: the quarters when every one of them can be drawn whole, else this tile's own piece
+        // (flying nearer: the coarser piece stays until the finer ones come); with neither, whatever the quarters have
+        bool quarters_whole = true;
+        for (const auto& [qx, qy] : quarters(z, tx, ty))
+        {
+            if (!complete(fr, z - 1, qx, qy))
+            {
+                quarters_whole = false;
+                break;
+            }
+        }
+        if (!quarters_whole && drawable(key))
+        {
+            show(fr, key);
+            return;
+        }
+        for (const auto& [qx, qy] : quarters(z, tx, ty))
+        {
+            visit(fr, z - 1, qx, qy);
+        }
+    };
+    for (const FarRegion& fr : regions)
+    {
+        for (const auto& [rz, rtx, rty] : roots)
+        {
+            visit(fr, rz, rtx, rty);
+        }
+    }
+
+    // the map pictures of every piece readied or drawn
+    for (const auto& [z, tx, ty] : pictures)
+    {
+        TileTex& t = mTextures[std::make_tuple(z, tx, ty)];
+        t.mLastWanted = now;
+        if (t.mTexture.isNull())
+        {
+            t.mTexture = LLWorldMap::getInstance()->getObjectsTile(tx, ty, z, true);
+            if (t.mTexture.notNull())
+            {
+                t.mTexture->setBoostLevel(LLGLTexture::BOOST_MAP);
+            }
+        }
+    }
+    // </WolfViewer>
 
     // forget what has not been wanted for a while
     for (auto it = mPieces.begin(); it != mPieces.end();)
@@ -472,6 +644,28 @@ void WolfFarTerrain::refresh()
     {
         it = (now - it->second.mLastWanted > TEXTURE_FORGET_SECS) ? mTextures.erase(it) : std::next(it);
     }
+}
+
+// <WolfViewer 2026-11-14> ticket 853: heights, a mesh (in any agent frame: idleBody rebuilds one from an old frame
+// within frames, and renderDeferred skips it until then) and a picture - its baked ground or the map tile.
+bool WolfFarTerrain::drawable(const PieceKey& key) const
+{
+    auto it = mPieces.find(key);
+    if (it == mPieces.end())
+    {
+        return false;
+    }
+    const Piece& p = it->second;
+    if (p.mState != Piece::READY || p.mBuildFailed || p.mVB.isNull() || p.mIndices == 0)
+    {
+        return false;
+    }
+    if (p.mGround.notNull())
+    {
+        return true;
+    }
+    auto t = mTextures.find(std::make_tuple(std::get<2>(key), std::get<3>(key), std::get<4>(key)));
+    return t != mTextures.end() && t->second.mDraw.notNull();
 }
 
 void WolfFarTerrain::fetch(const PieceKey& key)

@@ -44,6 +44,14 @@
 			Maximum bandwidth ([https://www.wolf-grid.com/blog/faq.php need a suggestion?]):
 		</text>
 
+		<!-- WolfViewer 2026-11-14 ticket 853: the slider goes to 10000 Kbps, the limit LLViewerThrottle::getMaxBandwidthKbps
+		     clamps the setting to (llviewerthrottle.cpp: MIN 100, MAX 10000); it stopped at 3000. The throttle sent to the
+		     region is the setting times a fraction the viewer moves between 0.2 and 1.5 with packet loss, capped at 6000
+		     (llviewerthrottle.cpp MAX_BANDWIDTH, getThrottleGroup); a region sends one viewer at most 5120 Kbps
+		     (WolfSim ThrottleRates.cs ClientMaxRate 640000 bytes/s, not overridden on the grid). So a setting above 3000
+		     mostly keeps the throttle higher after the viewer has eased it down for packet loss. The marks sit at 50, 1500,
+		     3000 and 10000 on the same 392 px track (x = 23 + (value - 50) * 392 / 9950): Wi-Fi / DSL up to 1500, Cable to 3000,
+		     "May cause issues" above (Firestorm put that above 1500 on its 3000 scale; DSL is folded into the first label). -->
 		<icon
 		 color="Slidermark"
 		 height="14"
@@ -58,7 +66,7 @@
 		 height="14"
 		 image_name="Rounded_Square"
 		 layout="topleft"
-		 left_pad="61"
+		 left_pad="55"
 		 name="NetworkMidGraphicsDivet"
 		 top_delta="0"
 		 width="2" />
@@ -67,7 +75,7 @@
 		 height="14"
 		 image_name="Rounded_Square"
 		 layout="topleft"
-		 left_pad="61"
+		 left_pad="57"
 		 name="NetworkHighGraphicsDivet"
 		 top_delta="0"
 		 width="2" />
@@ -76,8 +84,9 @@
 		 height="14"
 		 image_name="Rounded_Square"
 		 layout="topleft"
-		 left_pad="61"
+		 left_pad="0"
 		 name="NetworkLimitGraphicsDivet"
+		 visible="false"
 		 top_delta="0"
 		 width="2" />
 		<icon
@@ -85,7 +94,7 @@
 		 height="14"
 		 image_name="Rounded_Square"
 		 layout="topleft"
-		 left_pad="201"
+		 left="415"
 		 name="NetworkScaleEndGraphicsDivet"
 		 top_delta="0"
 		 width="2" />
@@ -99,7 +108,7 @@
 		 increment="50"
 		 initial_value="500"
 		 layout="topleft"
-		 max_val="3000"
+		 max_val="10000"
 		 min_val="50"
 		 top="35"
 		 name="max_bandwidth"
@@ -124,11 +133,11 @@
 		 halign="center"
 		 height="12"
 		 layout="topleft"
-		 left="20"
+		 left="15"
 		 name="NetworkPrefText1"
 		 top_delta="17"
-		 width="67">
-			Wi-Fi
+		 width="73">
+			Wi-Fi / DSL
 		</text>
 		<text
 		 type="string"
@@ -139,8 +148,9 @@
 		 layout="topleft"
 		 left_pad="0"
 		 name="NetworkPrefText2"
+		 visible="false"
 		 top_delta="0"
-		 width="63">
+		 width="0">
 			DSL
 		</text>
 		<text
@@ -153,7 +163,7 @@
 		 left_pad="0"
 		 name="NetworkPrefText3"
 		 top_delta="0"
-		 width="63">
+		 width="43">
 			Cable
 		</text>
 		<text
@@ -166,7 +176,7 @@
 		 left_pad="0"
 		 name="NetworkPrefText4"
 		 top_delta="0"
-		 width="205">
+		 width="292">
 			May cause issues
 		</text>
 

@@ -22,6 +22,8 @@
 #include "llagent.h"
 #include "llagentcamera.h"
 #include "llrender.h"
+#include "llsurface.h"
+#include "llsurfacepatch.h"
 #include "llvertexbuffer.h"
 #include "llviewercamera.h"
 #include "llviewercontrol.h"
@@ -175,7 +177,17 @@ void WolfFarGround::refresh()
             {
                 const U64 handle = to_region_handle(x, y);
                 // <WolfViewer 2026-10-08> nor where WolfFarTerrain draws the ground in relief
-                if (connected(handle) || WolfFarTerrain::instance().coversCell(x, y) || cells >= MAX_QUADS)
+                // <WolfViewer 2026-11-14> ticket 853: a CONNECTED region's cell keeps its tile until the region's own
+                // terrain has all come in there. It used to drop out the moment the region connected, and the sim
+                // sends a region's terrain over many seconds (128 patches a pass, nearest first only within the draw
+                // distance), so the land vanished into the sea until it arrived. The tile lies at the water level, under
+                // the real ground wherever that has come (only land shows: its water is cut away).
+                if (LLViewerRegion* region = connected(handle) ? LLWorld::getInstance()->getRegionFromHandle(handle) : nullptr;
+                    region && groundComplete(region, x, y))
+                {
+                    continue;
+                }
+                if (WolfFarTerrain::instance().coversCell(x, y) || cells >= MAX_QUADS)
                 {
                     continue;
                 }
@@ -209,6 +221,47 @@ void WolfFarGround::refresh()
         mTiles.push_back(std::move(t));
     }
     rebuildBuffer();
+}
+
+// <WolfViewer 2026-11-14> Has the region sent every terrain patch of the 256 m cell at global (x, y)? Source:
+// llsurface.cpp LLSurface::decompressDCTPatch -> LLSurfacePatch::setHasReceivedData (a patch with heights);
+// llsurfacepatch.cpp ensureVObj (a patch without them draws nothing); llsurface.h findPatch (null = never made, so no
+// heights). The first patch without heights ends the count, so an empty cell costs one look.
+bool WolfFarGround::groundComplete(LLViewerRegion* region, U32 x, U32 y)
+{
+    const U64 handle = to_region_handle(x, y);
+    if (mGroundComplete.count(handle))
+    {
+        return true;
+    }
+    const LLSurface& land = region->getLand();
+    const F32 patch_m = land.getMetersPerGrid() * (F32)land.getGridsPerPatchEdge();
+    const S32 per_edge = land.getPatchesPerEdge();
+    if (patch_m <= 0.f || per_edge <= 0)
+    {
+        return false;
+    }
+    const LLVector3d origin = region->getOriginGlobal();
+    const F64 lx = (F64)x - origin.mdV[VX], ly = (F64)y - origin.mdV[VY];
+    const S32 i0 = llclamp((S32)(lx / patch_m), 0, per_edge), i1 = llclamp((S32)ceil((lx + CELL_M) / patch_m), 0, per_edge);
+    const S32 j0 = llclamp((S32)(ly / patch_m), 0, per_edge), j1 = llclamp((S32)ceil((ly + CELL_M) / patch_m), 0, per_edge);
+    if (i0 >= i1 || j0 >= j1)
+    {
+        return false;
+    }
+    for (S32 j = j0; j < j1; ++j)
+    {
+        for (S32 i = i0; i < i1; ++i)
+        {
+            const LLSurfacePatch* patch = land.findPatch(i, j);
+            if (!patch || !patch->getHasReceivedData())
+            {
+                return false;
+            }
+        }
+    }
+    mGroundComplete.insert(handle);
+    return true;
 }
 
 void WolfFarGround::rebuildBuffer()

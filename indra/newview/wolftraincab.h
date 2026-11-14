@@ -212,6 +212,7 @@ private:
     std::string mWalkNote;
     F64  mWalkUntil = -1.0;
     std::string mAlert;
+    F64  mRearmAt = -1.0;   // [review W2] after a SHUNT press: from then on the same refusal text is raised again
 };
 
 /** The Train Cab across the bottom of the screen (main_view.xml wolf_train_cab), in the dashboards' family: all drawn

@@ -93,6 +93,9 @@ namespace
     {
         static const char* const P[] = { "The train cannot ", "You may not ", "The train did not ", "The train was not ",
                                          "Put the reverser to forward or reverse" };
+        // [review W1] a second COUPLE press cancels the move: "The train did not couple: the driver cancelled it."
+        // (RailCouple.cs:321 EndCouple("error: the driver cancelled it") -> :130) - the driver's own choice, no refusal
+        if (note.find(": the driver cancelled it") != std::string::npos) return false;
         for (const char* p : P)
         {
             if (note.compare(0, strlen(p), p) == 0) return true;
@@ -298,7 +301,11 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     // [stage V] a refusal of a SHUNT press: kept for the driver to read when the region first says it (the region's note
     // stays 4 s and is sent again with every message meanwhile: only a new text is a new refusal)
     const std::string before = fresh ? std::string() : mCab.mNote;
-    const bool refused = !c.mNote.empty() && c.mNote != before && isRefusal(c.mNote);
+    // [review W2] after a press, the same refusal said again is the answer to that press: once the press is over on the
+    // wire (mRearmAt, its AUTO_PULSE_S; the region reads a press every 0.25 s plan, EngineDriver.TICK) it is raised again
+    const bool again = mRearmAt >= 0.0 && now() >= mRearmAt;
+    const bool refused = !c.mNote.empty() && (c.mNote != before || again) && isRefusal(c.mNote);
+    if (again || c.mNote != before) mRearmAt = -1.0;
     mCab = c;
     mSeat = root->getID();
     mLastAt = now();
@@ -376,6 +383,7 @@ void WolfTrain::close()
     mPointsPulseUntil = -1.0;
     mEndsPulseUntil = mCouplePulseUntil = mUncouplePulseUntil = -1.0;   // [stage V]
     mAlert.clear();
+    mRearmAt = -1.0;
     dismissWalk();
 }
 
@@ -622,6 +630,7 @@ void WolfTrain::pressEnds()
     if (!canChangeEnds() || now() < mEndsPulseUntil) return;
     mAlert.clear();
     mEndsPulseUntil = now() + AUTO_PULSE_S;
+    mRearmAt = mEndsPulseUntil;
 }
 
 void WolfTrain::pressCouple()
@@ -630,6 +639,7 @@ void WolfTrain::pressCouple()
     if (!canCouple() || now() < mCouplePulseUntil) return;
     mAlert.clear();
     mCouplePulseUntil = now() + AUTO_PULSE_S;
+    mRearmAt = mCouplePulseUntil;
 }
 
 void WolfTrain::pressUncouple()
@@ -637,6 +647,7 @@ void WolfTrain::pressUncouple()
     if (!canUncouple() || now() < mUncouplePulseUntil) return;
     mAlert.clear();
     mUncouplePulseUntil = now() + AUTO_PULSE_S;
+    mRearmAt = mUncouplePulseUntil;
 }
 
 void WolfTrain::setEasyBack(bool back)
@@ -714,7 +725,8 @@ bool WolfTrain::isCabKey(KEY key)
 {
     return key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S' || key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4
         || key == KEY_F8 || key == KEY_F9    // [wolf-rail 1.2] AUTO, POINTS
-        || key == KEY_F6 || key == KEY_F7;   // [wolf-rail 1.3, stage V] CHANGE ENDS, COUPLE
+        || key == KEY_F6 || key == KEY_F7    // [wolf-rail 1.3, stage V] CHANGE ENDS, COUPLE
+        || key == KEY_ESCAPE;                // [stage V, review W4] closes the refusal strip (watched only: Escape still does its own job)
 }
 
 void WolfTrain::noteShiftKey(KEY key, bool key_down, bool repeat)
@@ -726,6 +738,7 @@ void WolfTrain::noteShiftKey(KEY key, bool key_down, bool repeat)
 void WolfTrain::noteKey(KEY key, bool key_down, bool repeat)
 {
     if (!key_down || !driving()) return;
+    if (key == KEY_ESCAPE) { if (!repeat) dismissAlert(); return; }   // [stage V, review W4] the keyboard's OK
     if (key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4 || key == KEY_F8 || key == KEY_F9 || key == KEY_F6 || key == KEY_F7)
     {
         if (repeat) return;   // one press, one step
@@ -949,10 +962,10 @@ namespace
         // way (RailCouple.cs CabCouple) and UNCOUPLE's part (the cab's own unit) as the region does them
         { "Changing ends", "Stopped at the end of the line? Press CHANGE ENDS (F6), then walk to the cab at the other end and sit in it.",
           "COUPLE (F7) shows when your own train stands on the line: set FORWARD or REVERSE towards it, then press. Again stops it.",
-          "UNCOUPLE (Shift+F7) leaves the rest standing behind your cab's part. Both need the owner to let you shunt." },
+          "UNCOUPLE (Shift+F7) leaves the rest standing behind your cab's part. Escape closes a red message." },
         { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power).",
           "F5: FORWARD or BACK in Easy driving; FORWARD, NEUTRAL, REVERSE in driver's mode. F2 Easy or driver's mode.",
-          "F3 mph or km/h, F4 hides the cab, F8 AUTO, F9 POINTS, F6 CHANGE ENDS, F7 COUPLE, Shift+F7 UNCOUPLE." },
+          "F3 mph or km/h, F4 hides or shows the cab, F8 AUTO, F9 POINTS. Your horn key (H unless changed) sounds the horn." },
         // [client review 13 Nov, W7] a gesture's own key is not taken from it: LLGestureMgr::triggerGesture(key, mask)
         // (llgesturemgr.cpp:761) plays it from the same key press
         { "Your gestures", "A gesture you have put on F2 to F9 (or Shift+F7) still plays while you drive, as well as the cab's key.",
@@ -1325,7 +1338,7 @@ void WolfTrainCabView::draw()
             const F32 l = X(s.l), r = X(s.l + 180.f), b = Y(232.f), t = Y(296.f);
             rectF(l, b, r, t, s.dim ? LLColor4(0.f, 0.f, 0.f, 0.45f) : LLColor4(0.f, 0.f, 0.f, 0.6f));
             frameW(l, b, r, t, S(2.f), s.dim ? th.accentLo : th.accent);
-            T((l + r) * 0.5f, Y(274.f), s.word, 14.f, th.accent, true);
+            T((l + r) * 0.5f, Y(274.f), fitW(s.word, 14.f, true, S(170.f)), 14.f, th.accent, true);
             T((l + r) * 0.5f, Y(248.f), fitW(s.sub, 9.f, true, S(170.f)), 9.f, s.dim ? C_AMBER : C_GREY, true);
             addHit(l, b, r, t, s.id, s.tip);
         }
@@ -1408,7 +1421,7 @@ void WolfTrainCabView::draw()
         T(l + S(20.f), (b + t) * 0.5f, fitW(tr.alert(), 12.f, true, S(950.f)), 12.f, C_WHITE, true, LLFontGL::LEFT);
         rectF(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), C_WHITE);
         T(r - S(62.f), (b + t) * 0.5f, "OK", 13.f, LLColor4(0.f, 0.f, 0.f, 1.f), true);
-        addHit(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), H_ALERT_OK, "Close this message");
+        addHit(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), H_ALERT_OK, "Close this message (Escape)");
         addHit(l, b, r - S(112.f), t, H_NONE, tr.alert());   // the whole text as a tooltip (it may be cut to fit)
     }
 

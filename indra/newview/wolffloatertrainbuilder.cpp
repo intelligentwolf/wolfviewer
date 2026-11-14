@@ -603,9 +603,13 @@ void WolfFloaterTrainBuilder::onClassChanged()
     mLivery->selectFirstItem();
     // carriages: the class's range (make_preview.py catalogue "carriages" {min, max, default})
     const LLSD& cr = (*c)["carriages"];
-    mCarriages->setMinValue((F32)cr["min"].asInteger());
-    mCarriages->setMaxValue((F32)llmax(cr["max"].asInteger(), cr["min"].asInteger()));
-    mCarriages->setValue(LLSD((F64)cr["default"].asInteger()));
+    const S32 lo = cr["min"].asInteger(), hi = cr["max"].asInteger();
+    // a set that comes as it is (the Rambler: 0..0) keeps a range of one step and the slider is hidden: a slider with its
+    // minimum equal to its maximum divides by zero (llslider.cpp:118 updateThumbRect: (value - min) / (max - min); review W8)
+    mCarriages->setMinValue((F32)lo);
+    mCarriages->setMaxValue((F32)llmax(hi, lo + 1));
+    mCarriages->setValue(LLSD((F64)(hi > lo ? cr["default"].asInteger() : lo)));
+    mCarriages->setVisible(hi > lo);
     const std::string word = (*c)["carriage_word"].asString();
     mCarriagesLabel->setText(word.empty() ? getString("carriages_fixed") : llformat(getString("carriages_how_many").c_str(), word.c_str()));
     // styles: the class's, plus "Your own colours" for coaches (catalogue "custom_style")

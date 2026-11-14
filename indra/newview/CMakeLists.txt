@@ -1048,6 +1048,7 @@ set(viewer_SOURCE_FILES
     wolffloaterbuildinggen.cpp # [BUILDING GENERATOR 2026-11-01] Building Generator: describe a building, the yard plans, builds and delivers it
     wolffloaterplanebuilder.cpp # [PLANE BUILDER 2026-11-01] Plane Builder: design a fighter, the yard builds and delivers it
     wolffloatershipbuilder.cpp # [SHIP BUILDER 2026-10-29] Ship Builder: design a ship, the shipyard builds and delivers her
+    wolffloatertrainbuilder.cpp # [TRAIN BUILDER 2026-11-14] Train Builder: choose and make a train, the yard builds and delivers it
     wolfdryvolumes.cpp # [WOLF SEA TUNNEL 2026-10-28] wolfdry prims and tunnel boxes: no water fog / surface inside
     wolffloateradventurestudiowizard.cpp # [WOLF ADVENTURE AUDIT 2026-10-17] Studio: the "Start here" wizard
     wolffloateradventurestudioflow.cpp # [WOLF STORY FIRST 2026-10-17] Studio: the helper conversation and the flowchart
@@ -2102,6 +2103,7 @@ set(viewer_HEADER_FILES
     wolffloaterbuildinggen.h   # [BUILDING GENERATOR 2026-11-01]
     wolffloaterplanebuilder.h   # [PLANE BUILDER 2026-11-01]
     wolffloatershipbuilder.h   # [SHIP BUILDER 2026-10-29]
+    wolffloatertrainbuilder.h   # [TRAIN BUILDER 2026-11-14]
     wolfdryvolumes.h   # [WOLF SEA TUNNEL 2026-10-28]
     wolfadventurestudioutil.h  # [WOLF ADVENTURE AUDIT 2026-10-17]
     wolffloateradventureguide.h # [WOLF ADVENTURE AUDIT 2026-10-17]

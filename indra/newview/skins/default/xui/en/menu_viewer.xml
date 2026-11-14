@@ -2174,6 +2174,13 @@
                 <menu_item_check.on_click function="WolfTrain.Toggle" />
                 <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_check>
+            <!-- [TRAIN BUILDER 2026-11-14] Paul: "a whole range of trains and a customiser to build trains" (wolffloatertrainbuilder.cpp),
+             beside the Train Cab: choose a train, make it yours, the yard builds it into your inventory in a train box. The same
+             window and gate as Wolf World > Build & Land > Train Builder... -->
+            <menu_item_call label="Train Builder..." name="WolfVehiclesTrainBuilder">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_train_builder" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <!-- [SPACESHIP HUD 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, "spaceships are basically
              aircraft" - the dashboard in its spaceship / rocket design, beside Flight Mode. Wolf Territories
              only, gone (not greyed) elsewhere, like the Car Dashboard. -->
@@ -2441,6 +2448,14 @@
              Territories only, as the Ship Builder. -->
             <menu_item_call label="Plane Builder..." name="WolfWorldPlaneBuilder">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_plane_builder" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
+            <!-- [TRAIN BUILDER 2026-11-14] Paul: "the same as boats and planes have a whole range of trains and a customiser to build
+             trains" (wolffloatertrainbuilder.cpp): choose a train - steam, diesel, high-speed, bullet train or shunter - give it your
+             colours, name, logo and company lettering; the yard builds it into your inventory in a train box that puts it on your
+             track, priced in AI credits. Wolf Territories only, as the Plane Builder. -->
+            <menu_item_call label="Train Builder..." name="WolfWorldTrainBuilder">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_train_builder" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
             <!-- [WOLF LIFTS 2026-11-10] Ticket 691 (Indi Moon): "Cable cars and ski lifts that can be laid out in a similar way to
@@ -2732,6 +2747,17 @@
          <menu_item_call.on_click
           function="Floater.Show"
           parameter="wolf_ship_builder" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
+       </menu_item_call>
+       <!-- [TRAIN BUILDER 2026-11-14] The Train Builder (wolffloatertrainbuilder.cpp), beside the Plane and Ship Builders; same
+            window and gate as Wolf World > Build & Land > Train Builder... -->
+       <menu_item_call
+        label="Train Builder..."
+        name="WolfTrainBuilderBuildMenu">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_train_builder" />
          <menu_item_call.on_visible
           function="WolfGrid.IsOnWolfTerritories" />
        </menu_item_call>

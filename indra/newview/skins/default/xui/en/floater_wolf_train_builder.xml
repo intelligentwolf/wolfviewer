@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [TRAIN BUILDER 2026-11-14] Train Builder (wolffloatertrainbuilder.cpp): Build > Train Builder..., Wolf World > Build & Land >
+     Train Builder... and Wolf World > Vehicles & Travel > Train Builder... Who and why: a Wolf Territories member who wants a train
+     of their own for their track. Flow, as the Plane Builder's: the turntable and its figures on the left; on the right, top to
+     bottom, 1. kind of train 2. carriages 3. make it yours (livery, colours, name, number, company, logo, who drives, top speed)
+     4. the price line by line against the credits they have; Build bottom right (Buy credits... beside it when short; Cancel the
+     order bottom left while it waits). Field problems under their field; the status line above the buttons: failures in the
+     caution colour, kept until the next action. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="744"
+ layout="topleft"
+ name="wolf_train_builder"
+ help_topic="wolf_train_builder"
+ save_rect="true"
+ single_instance="true"
+ title="Train Builder"
+ width="720">
+    <string name="feature_name">Train Builder</string>
+    <string name="loading">Fetching its drawings...</string>
+    <string name="opening">Opening the train yard...</string>
+    <string name="closed">The yard is closed</string>
+    <string name="reopen">Close this window and open it again to try again.</string>
+    <string name="no_preview">Its picture could not be fetched - you can still build it.</string>
+    <string name="name_needed">Give your train a name.</string>
+    <string name="text_long">This can be at most %d letters.</string>
+    <string name="name_letters">Only letters, numbers, spaces and ' - . &amp; please.</string>
+    <string name="number_long">The number can be at most %d characters.</string>
+    <string name="number_chars">Number: A to Z, 0 to 9, spaces and - only.</string>
+    <string name="custom_livery">Your own colours</string>
+    <string name="carriages_fixed">It comes as one set: nothing to add.</string>
+    <string name="carriages_how_many">How many %s</string>
+    <!-- [LEN] [VEHICLES] [SEATS] [SPEED] [KMH]: worked out from the catalogue's figures (make_preview.py catalogue) -->
+    <string name="figures">[TITLE] ([ERA])
+About [LEN] m long: [VEHICLES] vehicles, [SEATS] seats. Top speed [SPEED] m/s ([KMH] km/h).
+[ABOUT]</string>
+    <string name="figures_no_seats">[TITLE] ([ERA])
+About [LEN] m long: [VEHICLES] vehicles. Top speed [SPEED] m/s ([KMH] km/h).
+[ABOUT]</string>
+    <string name="price">Yard [BASE] + [N] vehicles [EACH] = [TOTAL] credits</string>
+    <string name="price_one">Yard [BASE] + 1 vehicle [EACH] = [TOTAL] credits</string>
+    <string name="balance_unknown">Reading your AI credits...</string>
+    <string name="balance_short">You have [N] AI credits to spend - not enough for it.</string>
+    <string name="balance_ok">You have [N] AI credits to spend. You pay only once it is in your inventory.</string>
+    <string name="not_confirmed">Wait a moment - this region is still being confirmed as Wolf Territories.</string>
+    <string name="ordering">Sending your order to the yard...</string>
+    <string name="order_waiting">[NAME] is waiting for the yard ([AHEAD] ahead of it). [PRICE] credits are held and charged only once it is delivered.</string>
+    <string name="order_next">[NAME] is next in the yard. [PRICE] credits are held and charged only once it is delivered.</string>
+    <string name="order_building">Building [NAME]: [PROGRESS]...</string>
+    <string name="order_done">[NAME] is in your inventory: Objects &gt; [FOLDER]. [PRICE] credits were charged. Rez its train box beside your track and read the "How to put it on the track" notecard.</string>
+    <string name="order_done_unbilled">[NAME] is in your inventory: Objects &gt; [FOLDER]. Its [PRICE] credits will be taken from your balance shortly. Rez its train box beside your track and read the "How to put it on the track" notecard.</string>
+    <string name="order_cancelled">Cancelled - you have not been charged.</string>
+    <string name="order_failed">The yard could not build it. You have not been charged.</string>
+    <string name="logo_none">No logo: the train carries no emblem.</string>
+    <string name="logo_type">%s is not a PNG or JPEG picture. Choose a PNG or JPEG.</string>
+    <string name="logo_unreadable">%s could not be opened, or is empty.</string>
+    <string name="logo_too_big">%s is too large - choose a picture under %d KB.</string>
+    <string name="logo_sending">Checking your logo...</string>
+    <string name="logo_removed">Logo removed.</string>
+    <string name="logo_failed">The logo could not be checked. Try another picture.</string>
+    <string name="logo_ready">Your logo: [FILE] ([W] x [H] pixels).</string>
+    <string name="logo_tick">Logo ready. Tick the box under it to confirm it is yours to use.</string>
+    <string name="logo_confirm">Tick the box to confirm the logo is yours to use and follows the grid's rules.</string>
+
+    <panel follows="left|top" height="260" layout="topleft" left="12" name="preview_panel" top="26" width="330"
+     tool_tip="Your train as it will look: its engine and what follows. Drag to turn it." />
+    <text follows="left|top" height="150" layout="topleft" left="12" name="figures_text" top="294" width="330" wrap="true" />
+    <text follows="left|top" height="110" layout="topleft" left="12" name="help_text" top="456" width="330" wrap="true">It arrives in your inventory in a train box. Rez the box beside your own track (laid with the track tool), touch it and choose Put on track. Then click the engine's cab to drive. The colours, name, number, company lettering and logo are yours: the train carries no other railway's name or emblem.</text>
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="type_label" top="26" width="352">1. Kind of train</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="356" name="train_type" top="44" width="352"
+     tool_tip="Steam, diesel, high-speed, bullet train or shunter" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="carriages_head" top="78" width="352">2. Carriages</text>
+    <text follows="left|top" height="16" layout="topleft" left="356" name="carriages_label" top="98" width="352">How many coaches</text>
+    <slider decimal_digits="0" follows="left|top" height="16" increment="1" initial_value="2" label="" label_width="0"
+     layout="topleft" left="356" max_val="6" min_val="1" name="carriages" show_text="true" top="116" width="340"
+     tool_tip="How many coaches or wagons it pulls" />
+    <text follows="left|top" height="16" layout="topleft" left="356" name="style_label" top="146" width="60">Style</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="420" name="carriage_style" top="142" width="288"
+     tool_tip="How the coaches or wagons look" />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="52" label="Lower" layout="topleft" left="420" name="coach_lower" top="172"
+     width="56" tool_tip="The coaches' lower panels. Click to choose a colour." />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="52" label="Upper" layout="topleft" left="486" name="coach_upper" top="172"
+     width="56" tool_tip="The coaches' upper panels. Click to choose a colour." />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="look_label" top="232" width="352">3. Make it yours</text>
+    <text follows="left|top" height="16" layout="topleft" left="356" name="livery_label" top="256" width="60">Livery</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="420" name="livery" top="252" width="288"
+     tool_tip="A colour scheme of ours, or your own colours" />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="52" label="Body" layout="topleft" left="420" name="main_colour" top="282"
+     width="56" tool_tip="Its main colour. Click to choose a colour." />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="52" label="Band" layout="topleft" left="486" name="second_colour" top="282"
+     width="56" tool_tip="Its second colour (a band or lower body), when it has one. Click to choose a colour." />
+    <text follows="left|top" height="16" layout="topleft" left="356" name="name_label" top="346" width="60">Name</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="420" max_length_chars="24" name="train_name" top="342" width="288"
+     tool_tip="Its name: on the nameplates, and the name you drive it by (up to 24 letters)" />
+    <text follows="left|top" height="16" layout="topleft" left="420" name="name_problem" top="366" width="288" text_color="AlertCautionTextColor" />
+    <text follows="left|top" height="16" layout="topleft" left="356" name="number_label" top="388" width="60">Number</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="420" max_length_chars="8" name="train_number" top="384" width="120"
+     tool_tip="Painted on the cab side (up to 8: A to Z, 0 to 9, spaces and -). Leave it empty for the one shown." />
+    <text follows="left|top" height="32" layout="topleft" left="548" name="number_problem" top="386" width="160" wrap="true" text_color="AlertCautionTextColor" />
+    <text follows="left|top" height="16" layout="topleft" left="356" name="company_label" top="422" width="64">Company</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="420" max_length_chars="32" name="company" top="418" width="288"
+     tool_tip="Your railway's name, lettered on the tender or the engine's sides (up to 32 letters). Leave it empty for none." />
+    <text follows="left|top" height="16" layout="topleft" left="420" name="company_problem" top="442" width="288" text_color="AlertCautionTextColor" />
+    <text follows="left|top" height="16" layout="topleft" left="356" name="logo_label" top="464" width="60">Logo</text>
+    <button follows="left|top" height="23" layout="topleft" left="420" name="logo_btn" top="460" width="150" label="Choose picture..."
+     tool_tip="Your own emblem (PNG or JPEG, under 1 MB), put on the sides of the engine, tender and coaches" />
+    <button follows="left|top" height="23" layout="topleft" left="578" name="logo_remove_btn" top="460" width="90" label="Remove"
+     tool_tip="Build it without a logo" />
+    <text follows="left|top" height="16" layout="topleft" left="420" name="logo_text" top="488" width="288" />
+    <check_box follows="left|top" height="16" layout="topleft" left="420" name="logo_ok" top="508" width="288"
+     label="This logo is mine to use and follows the grid's rules"
+     tool_tip="No one else's company logo or trade mark, and nothing sexual or offensive" />
+    <check_box follows="left|top" height="16" layout="topleft" left="356" name="public_check" top="534" width="352"
+     label="Let other people drive it"
+     tool_tip="Anyone who sits in its cab may drive it. Otherwise only you drive; anyone may still ride." />
+    <slider decimal_digits="0" follows="left|top" height="16" increment="1" initial_value="18" label="Top speed (m/s)" label_width="110"
+     layout="topleft" left="356" max_val="30" min_val="3" name="speed" show_text="true" top="558" width="340"
+     tool_tip="The fastest it may go, in metres a second" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="price_label" top="588" width="352">4. Price in AI credits</text>
+    <text follows="left|top" height="20" layout="topleft" left="356" name="price_text" top="606" width="352" wrap="true" />
+    <text follows="left|top" height="34" layout="topleft" left="356" name="balance_text" top="626" width="352" wrap="true" />
+
+    <text follows="left|top" height="40" layout="topleft" left="12" name="status_text" top="666" width="696" wrap="true" />
+    <button follows="left|top" height="23" layout="topleft" left="12" name="cancel_btn" top="712" width="150" label="Cancel the order"
+     tool_tip="Take your order back while it is still waiting for the yard (nothing has been charged)" />
+    <button follows="left|top" height="23" layout="topleft" left="452" name="buy_btn" top="712" width="130" label="Buy credits..."
+     tool_tip="Open the AI credits shop in your browser" />
+    <button follows="left|top" height="23" layout="topleft" left="588" name="build_btn" top="712" width="120" label="Build it"
+     tool_tip="Send your design to the yard. It is built and put in your inventory; you pay only once it is there." />
+</floater>

@@ -51,6 +51,7 @@
 #include "llui.h"
 #include "lluictrlfactory.h"
 #include "llclipboard.h"
+#include "llnotificationsutil.h"   // <WolfViewer 2026-11-14/> ticket 856 paste message
 #include "llmenugl.h"
 
 //
@@ -1358,7 +1359,16 @@ void LLLineEditor::pasteHelper(bool is_primary)
     if (can_paste_it)
     {
         LLWString paste;
-        LLClipboard::instance().pasteFromClipboard(paste, is_primary);
+        // <WolfViewer 2026-11-14> Ticket 856: text on offer that cannot be read gets a message,
+        // as in LLTextEditor::pasteHelper; it used to do nothing.
+        if (!LLClipboard::instance().pasteFromClipboard(paste, is_primary))
+        {
+            LL_WARNS() << "Paste: the " << (is_primary ? "primary selection" : "clipboard")
+                       << " offered text but it could not be read" << LL_ENDL;
+            LLNotificationsUtil::add("WolfPasteFailed");
+            return;
+        }
+        // </WolfViewer>
 
         if (!paste.empty())
         {

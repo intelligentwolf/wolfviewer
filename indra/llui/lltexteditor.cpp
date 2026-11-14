@@ -43,6 +43,7 @@
 #include "llmath.h"
 
 #include "llclipboard.h"
+#include "llnotificationsutil.h"   // <WolfViewer 2026-11-14/> ticket 856 paste messages
 #include "llemojihelper.h"
 #include "llscrollbar.h"
 #include "llstl.h"
@@ -1738,7 +1739,19 @@ void LLTextEditor::pasteHelper(bool is_primary)
     }
 
     LLWString paste;
-    LLClipboard::instance().pasteFromClipboard(paste, is_primary);
+    // <WolfViewer 2026-11-14> Ticket 856: the clipboard said it had text but none could be read
+    // (on Linux/X11 a large copy sent by INCR used to end up here, see llwindowsdl2.cpp
+    // getSelectionText). Say so rather than doing nothing. An empty but readable clipboard
+    // (pasteFromClipboard true, nothing in it) stays quiet: there is nothing to report.
+    const bool read_ok = LLClipboard::instance().pasteFromClipboard(paste, is_primary);
+    if (!read_ok)
+    {
+        LL_WARNS() << "Paste: the " << (is_primary ? "primary selection" : "clipboard")
+                   << " offered text but it could not be read" << LL_ENDL;
+        LLNotificationsUtil::add("WolfPasteFailed");
+        return;
+    }
+    // </WolfViewer>
 
     if (paste.empty())
     {
@@ -1759,7 +1772,19 @@ void LLTextEditor::pasteHelper(bool is_primary)
     // Can safely do this here, otherwise it would done in '::insert', which is bad for performance, as ::insert is called once per line.
     // In theory text already in the editor should be taken into account too, but then text that would be overwriten would have to be considered aswell.
     if ( wstring_utf8_length(clean_string) > mMaxTextByteLength )
+    {
+        // <WolfViewer 2026-11-14> Ticket 856: tell the resident it was cut short; it used to be silent.
+        const size_t total_chars = clean_string.length();
         clean_string = utf8str_to_wstring( utf8str_truncate( wstring_to_utf8str(clean_string), mMaxTextByteLength ) );
+        LL_WARNS() << "Paste of " << total_chars << " characters cut to " << clean_string.length()
+                   << " (this box holds " << mMaxTextByteLength << " bytes)" << LL_ENDL;
+        LLSD args;
+        args["KEPT"] = static_cast<LLSD::Integer>(clean_string.length());
+        args["TOTAL"] = static_cast<LLSD::Integer>(total_chars);
+        args["MAX_BYTES"] = mMaxTextByteLength;
+        LLNotificationsUtil::add("WolfPasteTruncated", args);
+        // </WolfViewer>
+    }
     // </FS:ND>
 
     // Insert the new text into the existing text.

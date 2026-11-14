@@ -179,6 +179,34 @@ No tutorial is currently available.
      yestext="Yes"/>
   </notification>
 
+  <!-- [WOLF PASTE 2026-11-14] Ticket 856: a paste into a text box (the script editor and every other) used to fail or
+       be cut short with no message. LLTextEditor::pasteHelper (llui/lltexteditor.cpp) shows these instead. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfPasteFailed"
+   type="alertmodal">
+Nothing was pasted, because the text on the clipboard could not be read.
+
+Please copy it again and paste once more. If it still does not paste, please send us a support ticket.
+    <tag>fail</tag>
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+
+  <notification
+   icon="alertmodal.tga"
+   name="WolfPasteTruncated"
+   type="alertmodal">
+The text was too long for this box, so only the first [KEPT] of its [TOTAL] characters were pasted.
+
+This box holds up to [MAX_BYTES] bytes. Most letters take one byte each; accented letters and symbols take two to four.
+    <tag>fail</tag>
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+
   <!-- [WOLF CAVE LIGHTS 2026-10-23] Light up / Remove lights when some of a cave's stored lamp parts are not in view
        (wolfcavelights.cpp): keep them listed so a later Remove lights finds them, or forget them. -->
   <notification

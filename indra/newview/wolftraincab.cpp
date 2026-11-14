@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <optional>
 
@@ -78,8 +79,36 @@ namespace
     // 1 m/s = 3.6 km/h; 1 mile = 1609.344 m exactly (the international yard and pound agreement, 1959), so 1 m/s =
     // 3600 / 1609.344 mph.
     const F32 MS_TO_KMH = 3.6f, MS_TO_MPH = 3600.f / 1609.344f;
+    // [wolf-rail 1.3, stage V] after CHANGE ENDS the driver has this long to sit in the cab at the other end
+    // (Source: wolf-rail Cab.cs CAB_WALK_MS 120_000; RailEngine.cs CommitEnds PendingUntilMs = now + Cab.CAB_WALK_MS)
+    const F64 CAB_WALK_S = 120.0;
 
     F64 now() { return LLFrameTimer::getTotalSeconds(); }
+
+    // [stage V] The region's answers that refuse a SHUNT press, each the start of the note it sets. Source: wolf-rail
+    // RailEngine.cs:2010 "The train cannot change ends: "; RailCouple.cs:322 / :332 "You may not couple / uncouple this
+    // train: ", :324 "Put the reverser to forward or reverse ...", :326 / :334 / :335 "The train cannot couple / uncouple",
+    // :130 "The train did not couple: ", :497 "The train was not ". These are kept on screen until the driver closes them.
+    bool isRefusal(const std::string& note)
+    {
+        static const char* const P[] = { "The train cannot ", "You may not ", "The train did not ", "The train was not ",
+                                         "Put the reverser to forward or reverse" };
+        for (const char* p : P)
+        {
+            if (note.compare(0, strlen(p), p) == 0) return true;
+        }
+        return false;
+    }
+
+    // The value of `key=` among the parameters, or empty.
+    std::string valueOf(const std::vector<std::string>& strings, const std::string& key)
+    {
+        for (const std::string& s : strings)
+        {
+            if (s.size() <= 254 && s.size() > key.size() && s.compare(0, key.size(), key) == 0 && s[key.size()] == '=') return s.substr(key.size() + 1);
+        }
+        return std::string();
+    }
 
     // Source: wolfdrive.cpp seatRoot - the root of what the avatar sits on.
     LLViewerObject* seatRoot()
@@ -163,7 +192,10 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         {
             if (s == "state=off")
             {
-                if (mOpen) close();
+                // [stage V] the state=off of CHANGE ENDS carries walk= and its note (SceneRailWorld.cs CabOff :242-245)
+                const std::string walk = utf8Cut(valueOf(strings, "walk"), 254);
+                if (mOpen && !walk.empty()) beginWalk(mCab.mTrain, utf8Cut(valueOf(strings, "note"), 254), walk);
+                else if (mOpen) close();
                 return;
             }
         }
@@ -218,7 +250,27 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
                 c.mPts = f[0]; c.mPtsSet = f[1]; c.mPtsM = llclamp(m, 0.f, 100000.f); c.mPtsDriver = f[3] == "1";
             }
         }
+        else if (k == "couple")
+        {
+            // [wolf-rail 1.3 stage 3] "ahead|metres|name" or "behind|metres|name", or empty: no stock of the owner's on the
+            // line laid (RailEngine.cs CoupleKey: side + "|" + metres "0.0" + "|" + the train's name, cut by Cab.Fit). The
+            // name is the rest after the second bar (a train name may hold a bar itself).
+            c.mCoupleSide.clear(); c.mCoupleName.clear(); c.mCoupleM = -1.f;
+            const size_t b1 = v.find('|');
+            const size_t b2 = b1 == std::string::npos ? std::string::npos : v.find('|', b1 + 1);
+            F32 m = 0.f;
+            if (b2 != std::string::npos && parseF(v.substr(b1 + 1, b2 - b1 - 1), m))
+            {
+                const std::string side = v.substr(0, b1);
+                if (side == "ahead" || side == "behind") { c.mCoupleSide = side; c.mCoupleM = llclamp(m, 0.f, 100000.f); c.mCoupleName = v.substr(b2 + 1); }
+            }
+        }
         else if (!parseF(v, n)) continue;
+        // [wolf-rail 1.3 stage 1 / 3] RailEngine.cs SendCab :1215-1218: "0" / "1", and the vehicle count
+        else if (k == "lead")    { c.mHasLead = true; c.mLead = n >= 0.5f; }
+        else if (k == "ends")    c.mEnds = n >= 0.5f;
+        else if (k == "veh")     c.mVeh = (S32)llround(llclamp(n, 0.f, 100000.f));
+        else if (k == "shunt")   c.mShunt = n >= 0.5f;
         else if (k == "speed")   c.mSpeed = llclamp(n, 0.f, 100.f);
         else if (k == "line")    c.mLine = llclamp(n, 0.f, 100.f);
         else if (k == "power")   c.mPower = llclamp(n, 0.f, 1.f);
@@ -231,11 +283,22 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
     }
     if (off)
     {
-        if (mOpen && root->getID() == mSeat) close();
+        if (mOpen && root->getID() == mSeat)
+        {
+            // [stage V] CHANGE ENDS: "Walk to <vehicle> and sit in its cab to drive on." with walk=<vehicle>
+            // (RailEngine.cs CommitEnds :907-909, SceneRailWorld.cs CabOff); without walk= it is the cab let go
+            const std::string walk = utf8Cut(valueOf(strings, "walk"), 254);
+            if (!walk.empty()) beginWalk(c.mTrain, c.mNote, walk);
+            else close();
+        }
         return;
     }
     if (!on) return;
     const bool fresh = !mOpen || root->getID() != mSeat;
+    // [stage V] a refusal of a SHUNT press: kept for the driver to read when the region first says it (the region's note
+    // stays 4 s and is sent again with every message meanwhile: only a new text is a new refusal)
+    const std::string before = fresh ? std::string() : mCab.mNote;
+    const bool refused = !c.mNote.empty() && c.mNote != before && isRefusal(c.mNote);
     mCab = c;
     mSeat = root->getID();
     mLastAt = now();
@@ -246,7 +309,14 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         mYielded = false;
         mByHand = false;
         mHornHeld = false;
-        if (mKept.at >= 0.0 && mKept.seat == mSeat && mKept.train == c.mTrain && now() - mKept.at <= REOPEN_KEEP_S)
+        // [stage V] after CHANGE ENDS: the same train's cab at the other end (another seat) within CAB_WALK_S keeps them too
+        // (DESIGN-terminus.md 5.4); the region still asks for the power to be let go once (RailEngine.cs PendingCheck NeedRelease)
+        const bool keep = mKept.at >= 0.0 && mKept.train == c.mTrain && now() >= mKept.at
+            && (mKept.walk ? now() - mKept.at <= CAB_WALK_S : (mKept.seat == mSeat && now() - mKept.at <= REOPEN_KEEP_S));
+        mAlert.clear();
+        dismissWalk();
+        mEndsPulseUntil = mCouplePulseUntil = mUncouplePulseUntil = -1.0;
+        if (keep)
         {
             // the same train after a long hand-over (W3): its levers as the driver left them
             mNotch = mKept.notch;
@@ -269,6 +339,7 @@ void WolfTrain::receive(const LLUUID& invoice, const std::vector<std::string>& s
         mAutoAskUntil = -1.0;
         claimBottom();
     }
+    if (refused) mAlert = c.mNote;
     // [wolf-rail 1.2] the region's word on Auto (its own, or a script's train.control [train, "auto"]).
     // [client review 13 Nov, W3] An AUTO press waiting for its answer (autoAsking) takes the first mode=auto as the yes; a
     // mode that is not "auto" meanwhile may still be a message sent before the region read the press, so it waits until
@@ -303,6 +374,36 @@ void WolfTrain::close()
     mAutoAskUntil = -1.0;
     mAutoPulseUntil = -1.0;
     mPointsPulseUntil = -1.0;
+    mEndsPulseUntil = mCouplePulseUntil = mUncouplePulseUntil = -1.0;   // [stage V]
+    mAlert.clear();
+    dismissWalk();
+}
+
+// The levers as they are now, for a cab of the same train that opens soon after (the silence rule, or [stage V] the walk
+// after CHANGE ENDS). Taken before close(), which forgets them; put back after it.
+void WolfTrain::keepLevers(bool walk)
+{
+    mKept.seat = mSeat; mKept.train = mCab.mTrain; mKept.at = now(); mKept.walk = walk;
+    mKept.notch = mNotch; mKept.power = mPower; mKept.brake = mBrake; mKept.rev = mRev; mKept.easyBack = mEasyBack;
+}
+
+// [stage V] CHANGE ENDS done: the cab closes; the region's note ("Walk to <vehicle> and sit in its cab to drive on.") stays
+// on screen while the driver walks, and the levers wait for the cab at the other end (DESIGN-terminus.md 5.1 step 3, 5.4).
+void WolfTrain::beginWalk(const std::string& train, const std::string& note, const std::string& walk)
+{
+    keepLevers(true);
+    if (!train.empty()) mKept.train = train;   // the state=off names the train (SceneRailWorld.cs CabOff "train=")
+    const Levers kept = mKept;
+    close();
+    mKept = kept;
+    // the note is the region's own words; were it ever missing, the same sentence from walk= (RailEngine.cs:908)
+    mWalkNote = note.empty() ? "Walk to " + walk + " and sit in its cab to drive on." : note;
+    mWalkUntil = now() + CAB_WALK_S;
+}
+
+bool WolfTrain::walkPending() const
+{
+    return !mWalkNote.empty() && now() < mWalkUntil && !mOpen;
 }
 
 void WolfTrain::claimBottom()
@@ -350,8 +451,10 @@ void WolfTrain::idle()
         // [WOLF ONLY] left Wolf: the cab goes, nothing more is read or sent
         if (mOpen) close();
         mByHand = false;
+        dismissWalk();   // [stage V]
         return;
     }
+    if (mWalkUntil >= 0.0 && now() >= mWalkUntil) dismissWalk();   // [stage V] the region's CAB_WALK_MS is over
     if (mOpen)
     {
         LLViewerObject* root = seatRoot();
@@ -370,8 +473,7 @@ void WolfTrain::idle()
         {
             // the region stopped saying (the region stops the train itself): keep the levers in case the same train's
             // cab comes back from the next region a moment later (W3)
-            mKept.seat = mSeat; mKept.train = mCab.mTrain; mKept.at = now();
-            mKept.notch = mNotch; mKept.power = mPower; mKept.brake = mBrake; mKept.rev = mRev; mKept.easyBack = mEasyBack;
+            keepLevers(false);
             const Levers kept = mKept;
             close();
             mKept = kept;
@@ -488,6 +590,55 @@ void WolfTrain::pressPoints()
     mPointsPulseUntil = now() + AUTO_PULSE_S;
 }
 
+// [wolf-rail 1.3, stage V] DESIGN-terminus.md 5.4: each SHUNT button only when it can act.
+bool WolfTrain::canChangeEnds() const
+{
+    return driving() && mCab.mEnds;
+}
+
+bool WolfTrain::canCouple() const
+{
+    return driving() && mCab.mShunt && !mCab.mCoupleSide.empty();
+}
+
+bool WolfTrain::canUncouple() const
+{
+    return driving() && mCab.mShunt && mCab.mVeh > 0;
+}
+
+bool WolfTrain::coupleWrongWay() const
+{
+    // RailCouple.cs CabCouple: the record's way = the reverser x TrainRecord.CabSign; CoupleSeen's "ahead" is the record's
+    // way x CabSign > 0, so "ahead" is reached with the reverser at FORWARD and "behind" with it at REVERSE (gear R).
+    // What this cab sends as its reverser is sendGear (Easy driving: FORWARD 1, BACK R; Auto: forward).
+    if (mCab.mCoupleSide.empty()) return false;
+    const S32 g = sendGear();
+    return mCab.mCoupleSide == "ahead" ? g <= 0 : g >= 0;
+}
+
+// Each one press as POINTS is (EngineDriver.cs ReadDriver :1845-1855: the bit coming on), held AUTO_PULSE_S so a plan sees it.
+void WolfTrain::pressEnds()
+{
+    if (!canChangeEnds() || now() < mEndsPulseUntil) return;
+    mAlert.clear();
+    mEndsPulseUntil = now() + AUTO_PULSE_S;
+}
+
+void WolfTrain::pressCouple()
+{
+    // (pressed again while it couples: the region cancels the move, RailCouple.cs CabCouple; couple= is still sent then)
+    if (!canCouple() || now() < mCouplePulseUntil) return;
+    mAlert.clear();
+    mCouplePulseUntil = now() + AUTO_PULSE_S;
+}
+
+void WolfTrain::pressUncouple()
+{
+    if (!canUncouple() || now() < mUncouplePulseUntil) return;
+    mAlert.clear();
+    mUncouplePulseUntil = now() + AUTO_PULSE_S;
+}
+
 void WolfTrain::setEasyBack(bool back)
 {
     // [wolf-rail 1.2, D-c] chosen at any time; the region changes the way the train goes only from a stand and otherwise
@@ -550,6 +701,11 @@ U32 WolfTrain::sendButtons() const
     if (easy()) b |= WolfDrive::BTN_ASSIST;   // the plugin's Easy driving (Cab.cs BTN_ASSIST, held while it is on)
     if (now() < mAutoPulseUntil) b |= WolfDrive::BTN_CRUISE;   // [wolf-rail 1.2] AUTO pressed (Cab.cs BTN_AUTO 256)
     if (now() < mPointsPulseUntil) b |= WolfDrive::BTN_STAGE;  // [wolf-rail 1.2] POINTS pressed (Cab.cs BTN_POINTS 512)
+    // [wolf-rail 1.3, stage V] wolfdrive.h BTN_ENGINE 16384 / BTN_ANCHOR 2048 / BTN_LANDING_GEAR 8192 = wolf-rail Cab.cs
+    // BTN_ENDS / BTN_COUPLE / BTN_UNCOUPLE (IWolfDriveModule.cs:29-30), all inside wolfdrive.h:85 BUTTON_MASK 0x7FFFF
+    if (now() < mEndsPulseUntil) b |= WolfDrive::BTN_ENGINE;
+    if (now() < mCouplePulseUntil) b |= WolfDrive::BTN_ANCHOR;
+    if (now() < mUncouplePulseUntil) b |= WolfDrive::BTN_LANDING_GEAR;
     return b;
 }
 
@@ -557,16 +713,25 @@ U32 WolfTrain::sendButtons() const
 bool WolfTrain::isCabKey(KEY key)
 {
     return key == KEY_UP || key == 'W' || key == KEY_DOWN || key == 'S' || key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4
-        || key == KEY_F8 || key == KEY_F9;   // [wolf-rail 1.2] AUTO, POINTS
+        || key == KEY_F8 || key == KEY_F9    // [wolf-rail 1.2] AUTO, POINTS
+        || key == KEY_F6 || key == KEY_F7;   // [wolf-rail 1.3, stage V] CHANGE ENDS, COUPLE
+}
+
+void WolfTrain::noteShiftKey(KEY key, bool key_down, bool repeat)
+{
+    if (!key_down || repeat || !driving()) return;
+    if (key == KEY_F7) pressUncouple();   // [stage V] Shift+F7 UNCOUPLE (DESIGN-terminus.md 5.4)
 }
 
 void WolfTrain::noteKey(KEY key, bool key_down, bool repeat)
 {
     if (!key_down || !driving()) return;
-    if (key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4 || key == KEY_F8 || key == KEY_F9)
+    if (key == KEY_F5 || key == KEY_F2 || key == KEY_F3 || key == KEY_F4 || key == KEY_F8 || key == KEY_F9 || key == KEY_F6 || key == KEY_F7)
     {
         if (repeat) return;   // one press, one step
-        if (key == KEY_F8) pressAuto();
+        if (key == KEY_F6) pressEnds();          // [stage V]
+        else if (key == KEY_F7) pressCouple();   // [stage V]
+        else if (key == KEY_F8) pressAuto();
         else if (key == KEY_F9) pressPoints();   // one press (D-b)
         else if (key == KEY_F5 && easy()) setEasyBack(!mEasyBack);   // [D-c] Easy driving: forward <-> back
         else if (key == KEY_F5) setReverser(mRev > 0 ? 0 : mRev == 0 ? -1 : 1);   // forward -> neutral -> reverse -> forward
@@ -780,12 +945,17 @@ namespace
         { "Signals and points", "SIGNAL shows the next signal: STOP (red) - the train waits; CAUTION (yellow) - the next is red; CLEAR (green).",
           "POINTS shows the next points and how they are set. Where drivers may change them, one press of POINTS changes them.",
           "To back out of a platform: stop, choose BACK (or REVERSE in driver's mode), then go. It stops before the buffers." },
+        // [wolf-rail 1.3, stage V] DESIGN-terminus.md 5.4 "a 'Changing ends' page"; the walk (Cab.cs CAB_WALK_MS 120 s), COUPLE's
+        // way (RailCouple.cs CabCouple) and UNCOUPLE's part (the cab's own unit) as the region does them
+        { "Changing ends", "Stopped at the end of the line? Press CHANGE ENDS (F6), then walk to the cab at the other end and sit in it.",
+          "COUPLE (F7) shows when your own train stands on the line: set FORWARD or REVERSE towards it, then press. Again stops it.",
+          "UNCOUPLE (Shift+F7) leaves the rest standing behind your cab's part. Both need the owner to let you shunt." },
         { "Driving from the keyboard", "Up and Down move the lever (in driver's mode: the brake off first, then the power).",
           "F5: FORWARD or BACK in Easy driving; FORWARD, NEUTRAL, REVERSE in driver's mode. F2 Easy or driver's mode.",
-          "F3 mph or km/h, F4 hides or shows the cab, F8 AUTO, F9 POINTS. Your horn key (H unless changed) sounds the horn." },
+          "F3 mph or km/h, F4 hides the cab, F8 AUTO, F9 POINTS, F6 CHANGE ENDS, F7 COUPLE, Shift+F7 UNCOUPLE." },
         // [client review 13 Nov, W7] a gesture's own key is not taken from it: LLGestureMgr::triggerGesture(key, mask)
         // (llgesturemgr.cpp:761) plays it from the same key press
-        { "Your gestures", "A gesture you have put on F2, F3, F4, F5, F8 or F9 still plays while you drive, as well as the cab's key.",
+        { "Your gestures", "A gesture you have put on F2 to F9 (or Shift+F7) still plays while you drive, as well as the cab's key.",
           "If you would rather it did not, give the gesture another key in the Gestures window.", "Standing up gives every key back as it was." },
     };
     const S32 CARD_COUNT = (S32)(sizeof(CARDS) / sizeof(CARDS[0]));
@@ -821,6 +991,7 @@ bool WolfTrainCabView::onPanel(S32 x, S32 y) const
     if (hitAt(x, y)) return true;
     // the guide card (above the panel) and the tab are ours too: a click on them never reaches the world (review W11)
     if (mShowHelp && (F32)x >= mHelpL && (F32)x <= mHelpR && (F32)y >= mHelpB && (F32)y <= mHelpT) return true;
+    if (mShowAlert && (F32)x >= mAlertL && (F32)x <= mAlertR && (F32)y >= mAlertB && (F32)y <= mAlertT) return true;   // [stage V]
     return (F32)y >= mPanelB && (F32)y <= mPanelT;
 }
 
@@ -829,6 +1000,7 @@ void WolfTrainCabView::draw()
     WolfTrain& tr = WolfTrain::instance();
     mHits.clear();
     mDrawn = false;
+    mShowAlert = false;   // [stage V] set again below while the refusal strip is drawn
     if (!tr.shown())
     {
         mShowHelp = false;
@@ -836,9 +1008,12 @@ void WolfTrainCabView::draw()
         if (mPressed == H_HORN) tr.setHorn(false);
         mPressed = H_NONE;
         mResize.hide();
-        if (tr.hiddenByDriver())
+        const bool walk = !tr.hiddenByDriver() && tr.walkPending();
+        if (tr.hiddenByDriver() || walk)
         {
-            // still driving with the cab hidden (review suggestion 16): a small tab at the bottom centre brings it back
+            // still driving with the cab hidden (review suggestion 16): a small tab at the bottom centre brings it back;
+            // [stage V] or, after CHANGE ENDS, the region's word on where to walk, in the same place until the cab at the
+            // other end opens (or the region's 120 s are over, or the driver closes it)
             const F32 w = (F32)getRect().getWidth();
             // above the bottom toolbar, as the cab itself sits (review W5; the same measure as draw() below)
             F32 tb = 0.f;
@@ -856,13 +1031,26 @@ void WolfTrainCabView::draw()
                 }
             }
             LLGLSUIDefault gls_ui;
-            mTabL = w * 0.5f - 90.f; mTabR = w * 0.5f + 90.f; mTabB = tb + 4.f; mTabT = tb + 34.f;
             mHitScale = 1.f;
-            rectF(mTabL, mTabB, mTabR, mTabT, LLColor4(0.02f, 0.07f, 0.04f, 0.9f));
-            frameW(mTabL, mTabB, mTabR, mTabT, 1.5f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
             g.u = 1.f; g.ox = 0.f; g.oy = 0.f;
-            T((mTabL + mTabR) * 0.5f, (mTabB + mTabT) * 0.5f, "DRIVING - SHOW THE CAB", 10.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f), true);
-            addHit(mTabL, mTabB, mTabR, mTabT, H_SHOW_TAB, "You are still driving: show the Train Cab (F4)");
+            if (walk)
+            {
+                const F32 half = llmin(380.f, w * 0.5f - 8.f);
+                mTabL = w * 0.5f - half; mTabR = w * 0.5f + half; mTabB = tb + 4.f; mTabT = tb + 58.f;
+                rectF(mTabL, mTabB, mTabR, mTabT, LLColor4(0.02f, 0.07f, 0.04f, 0.94f));
+                frameW(mTabL, mTabB, mTabR, mTabT, 2.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+                T((mTabL + mTabR) * 0.5f, mTabT - 18.f, fitW(tr.walkNote(), 12.f, true, 2.f * half - 24.f), 12.f, C_WHITE, true);
+                T((mTabL + mTabR) * 0.5f, mTabB + 15.f, "You have two minutes to sit down there. Click to close this message.", 10.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+                addHit(mTabL, mTabB, mTabR, mTabT, H_WALK, tr.walkNote() + " - click to close this message");
+            }
+            else
+            {
+                mTabL = w * 0.5f - 90.f; mTabR = w * 0.5f + 90.f; mTabB = tb + 4.f; mTabT = tb + 34.f;
+                rectF(mTabL, mTabB, mTabR, mTabT, LLColor4(0.02f, 0.07f, 0.04f, 0.9f));
+                frameW(mTabL, mTabB, mTabR, mTabT, 1.5f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+                T((mTabL + mTabR) * 0.5f, (mTabB + mTabT) * 0.5f, "DRIVING - SHOW THE CAB", 10.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f), true);
+                addHit(mTabL, mTabB, mTabR, mTabT, H_SHOW_TAB, "You are still driving: show the Train Cab (F4)");
+            }
             mDrawn = true;
             mPanelB = mPanelT = -1.f;
         }
@@ -926,7 +1114,10 @@ void WolfTrainCabView::draw()
     // ── the badge: the line's emblem, the train and its kind ─────────────────────────────────────
     T(X(24.f), Y(284.f), "WOLF GRID RAILROAD", 11.f, th.accent, true, LLFontGL::LEFT);
     T(X(24.f), Y(262.f), fitW(driving ? (c.mTrain.empty() ? std::string("Your train") : c.mTrain) : std::string("Train Cab"), 15.f, true, S(470.f)), 15.f, C_WHITE, true, LLFontGL::LEFT);
-    T(X(24.f), Y(242.f), fitW(std::string(th.name) + (c.mRegion.empty() ? "" : "  -  " + c.mRegion), 10.f, false, S(470.f)), 10.f, C_GREY, false, LLFontGL::LEFT);
+    // [wolf-rail 1.3, stage V] veh= is the vehicles behind the head (RailEngine.cs SendCab: TrainRecord.Vehicles.Count, the
+    // head not counted - RailCouple.cs counts an uncoupled part "Vehicles.Count + 1 objects"): the train is veh + 1
+    const std::string vehicles = !driving || c.mVeh < 0 ? std::string() : c.mVeh == 0 ? std::string("  -  1 vehicle") : llformat("  -  %d vehicles", c.mVeh + 1);
+    T(X(24.f), Y(242.f), fitW(std::string(th.name) + vehicles + (c.mRegion.empty() ? "" : "  -  " + c.mRegion), 10.f, false, S(470.f)), 10.f, C_GREY, false, LLFontGL::LEFT);
     // close (hide): the cab stays yours; Wolf World > Train Cab brings it back
     rectF(X(1560.f), Y(268.f), X(1592.f), Y(296.f), th.inset);
     T(X(1576.f), Y(282.f), "X", 12.f, C_GREY, true);
@@ -1108,6 +1299,38 @@ void WolfTrainCabView::draw()
     addHit(cx - r, cy - r, cx + r, cy + r, H_UNITS, mph ? "Click for km/h (F3)" : "Click for mph (F3)");
     T(cx, Y(266.f), autoOn ? "AUTO" : c.mBack ? "BACKING" : c.mMode == "easy" ? "EASY DRIVING" : "YOU ARE DRIVING", 11.f, th.accent, true);
 
+    // ── [wolf-rail 1.3, stage V] SHUNT: CHANGE ENDS, COUPLE, UNCOUPLE along the top band, each only when it can act
+    //    (DESIGN-terminus.md 5.4); fixed places, so a button that comes and goes never moves the others ─────────────────
+    {
+        struct Shunt { F32 l; EHit id; bool can; const char* word; std::string sub; std::string tip; bool dim; };
+        std::string coupleSub, coupleTip;
+        const bool wrong = tr.coupleWrongWay();
+        if (!c.mCoupleSide.empty())
+        {
+            const bool ahead = c.mCoupleSide == "ahead";
+            // the reverser's own words for the way (FORWARD / REVERSE; Easy driving's FORWARD / BACK)
+            const char* way = ahead ? "FORWARD" : (easy ? "BACK" : "REVERSE");
+            coupleSub = wrong ? std::string("Set ") + way + " first" : "Stock " + distance(c.mCoupleM) + (ahead ? " ahead" : " behind");
+            coupleTip = "Couple to " + (c.mCoupleName.empty() ? std::string("the stock") : "\"" + c.mCoupleName + "\"") + ", "
+                + distance(c.mCoupleM) + (ahead ? " ahead" : " behind") + ". Set " + way + " towards it, then press COUPLE (F7); press again to stop";
+        }
+        const Shunt SH[3] = {
+            { 930.f, H_ENDS, tr.canChangeEnds(), "CHANGE ENDS", "F6", "Change ends: then walk to the cab at the other end and sit in it (F6)", false },
+            { 1120.f, H_COUPLE, tr.canCouple(), "COUPLE", coupleSub, coupleTip, wrong },
+            { 1310.f, H_UNCOUPLE, tr.canUncouple(), "UNCOUPLE", "Shift+F7", "Uncouple: your cab's part leaves the rest standing on its own (Shift+F7)", false },
+        };
+        for (const Shunt& s : SH)
+        {
+            if (!s.can) continue;
+            const F32 l = X(s.l), r = X(s.l + 180.f), b = Y(232.f), t = Y(296.f);
+            rectF(l, b, r, t, s.dim ? LLColor4(0.f, 0.f, 0.f, 0.45f) : LLColor4(0.f, 0.f, 0.f, 0.6f));
+            frameW(l, b, r, t, S(2.f), s.dim ? th.accentLo : th.accent);
+            T((l + r) * 0.5f, Y(274.f), s.word, 14.f, th.accent, true);
+            T((l + r) * 0.5f, Y(248.f), fitW(s.sub, 9.f, true, S(170.f)), 9.f, s.dim ? C_AMBER : C_GREY, true);
+            addHit(l, b, r, t, s.id, s.tip);
+        }
+    }
+
     // ── [wolf-rail 1.2] the signal ahead: its lamp, its word (never the colour alone) and how far ──────────────────────
     rectF(X(922.f), Y(14.f), X(1040.f), Y(226.f), th.inset);
     frameW(X(922.f), Y(14.f), X(1040.f), Y(226.f), S(2.f), th.accentLo);
@@ -1132,6 +1355,15 @@ void WolfTrainCabView::draw()
     rectF(X(1050.f), Y(14.f), X(1592.f), Y(226.f), th.inset);
     frameW(X(1050.f), Y(14.f), X(1592.f), Y(226.f), S(2.f), th.accentLo);
     T(X(1070.f), Y(208.f), c.mBack ? "THE LINE BEHIND" : "THE LINE AHEAD", 10.f, th.accent, true, LLFontGL::LEFT);
+    if (c.mHasLead)
+    {
+        // [wolf-rail 1.3, stage V] the PROPELLING lamp (DESIGN-terminus.md 5.4): lead=0 - this cab is not at the end that
+        // leads, looking the way the train goes (RailEngine.cs Lead), so the train is pushed; lead=1 - this cab leads
+        circleF(X(1400.f), Y(208.f), S(7.f), c.mLead ? LLColor4(0.25f, 0.2f, 0.05f, 1.f) : C_AMBER);
+        T(X(1414.f), Y(208.f), c.mLead ? "YOUR CAB LEADS" : "PROPELLING", 10.f, c.mLead ? C_GREY : C_AMBER, true, LLFontGL::LEFT);
+        addHit(X(1390.f), Y(198.f), X(1585.f), Y(218.f), H_NONE, c.mLead ? "You are in the cab at the front of the train"
+                                                                         : "Propelling: your cab is not at the front, so the train is pushed from behind you");
+    }
     std::string stop_line = "No station in sight";
     if (c.mBack) stop_line = "Backing";   // [wolf-rail 1.2] ("ahead" is the line behind while it backs)
     else if (c.mStopM >= 0.f) stop_line = (c.mStop == "stop" ? "End of the run in " : "Station in ") + distance(c.mStopM);
@@ -1153,7 +1385,8 @@ void WolfTrainCabView::draw()
     circleF(X(1420.f), Y(124.f), S(14.f), lamp);
     T(X(1500.f), Y(132.f), "LINE", 9.f, c.mProtect ? C_RED : C_DIM, true);
     T(X(1500.f), Y(116.f), "BRAKING", 9.f, c.mProtect ? C_RED : C_DIM, true);
-    if (!c.mNote.empty()) T(X(1070.f), Y(92.f), fitW(c.mNote, 11.f, false, S(510.f)), 11.f, C_AMBER, false, LLFontGL::LEFT);
+    // (a refusal is shown once, in the strip above the panel that stays until the driver closes it)
+    if (!c.mNote.empty() && c.mNote != tr.alert()) T(X(1070.f), Y(92.f), fitW(c.mNote, 11.f, false, S(510.f)), 11.f, C_AMBER, false, LLFontGL::LEFT);
     // the horn (held while pressed) and the mode switch
     const bool horn = tr.horn();
     rectF(X(1070.f), Y(26.f), X(1300.f), Y(74.f), horn ? th.accent : th.accentLo);
@@ -1162,6 +1395,22 @@ void WolfTrainCabView::draw()
     rectF(X(1320.f), Y(26.f), X(1580.f), Y(74.f), LLColor4(0.f, 0.f, 0.f, 0.45f));
     T(X(1450.f), Y(50.f), easy ? "SWITCH TO DRIVER'S MODE" : "SWITCH TO EASY DRIVING", 10.f, th.accent, true);
     addHit(X(1320.f), Y(26.f), X(1580.f), Y(74.f), H_MODE, easy ? "Switch to the driver's own levers - F2 (the train stops first)" : "Switch to the one-lever Easy driving - F2 (the train stops first)");
+
+    // [wolf-rail 1.3, stage V] a refusal of CHANGE ENDS, COUPLE or UNCOUPLE: in a red strip just above the panel, in the
+    // region's own words, until the driver presses OK (the region's note is gone after 4 s: EngineDriver.cs Note)
+    mShowAlert = !tr.alert().empty();
+    if (mShowAlert)
+    {
+        const F32 l = W * 0.5f - S(560.f), r = W * 0.5f + S(560.f), b = top + S(8.f), t = b + S(56.f);
+        mAlertL = l * mHitScale; mAlertR = r * mHitScale; mAlertB = b * mHitScale; mAlertT = t * mHitScale;
+        rectF(l, b, r, t, LLColor4(0.30f, 0.02f, 0.02f, 0.96f));
+        frameW(l, b, r, t, S(2.f), C_RED);
+        T(l + S(20.f), (b + t) * 0.5f, fitW(tr.alert(), 12.f, true, S(950.f)), 12.f, C_WHITE, true, LLFontGL::LEFT);
+        rectF(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), C_WHITE);
+        T(r - S(62.f), (b + t) * 0.5f, "OK", 13.f, LLColor4(0.f, 0.f, 0.f, 1.f), true);
+        addHit(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), H_ALERT_OK, "Close this message");
+        addHit(l, b, r - S(112.f), t, H_NONE, tr.alert());   // the whole text as a tooltip (it may be cut to fit)
+    }
 
     if (mShowHelp) drawHelp(top, W);
     zoomed.reset();
@@ -1172,7 +1421,8 @@ void WolfTrainCabView::drawHelp(F32 top, F32 W)
 {
     mHelpPage = llclamp(mHelpPage, 0, CARD_COUNT - 1);
     const Card& cd = CARDS[mHelpPage];
-    const F32 l = W * 0.5f - S(420.f), r = W * 0.5f + S(420.f), b = top + S(16.f), t = b + S(230.f);
+    // (above the refusal strip while one is shown, [stage V])
+    const F32 l = W * 0.5f - S(420.f), r = W * 0.5f + S(420.f), b = top + S(mShowAlert ? 72.f : 16.f), t = b + S(230.f);
     mHelpL = l * mHitScale; mHelpR = r * mHitScale; mHelpB = b * mHitScale; mHelpT = t * mHitScale;
     rectF(l, b, r, t, LLColor4(0.02f, 0.03f, 0.02f, 0.94f));
     frameW(l, b, r, t, S(2.f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
@@ -1223,6 +1473,11 @@ void WolfTrainCabView::press(EHit id, S32 y)
     case H_HELP_CLOSE: mShowHelp = false; break;
     case H_CLOSE:      mShowHelp = false; tr.toggleShown(); break;
     case H_SHOW_TAB:   tr.toggleShown(); break;
+    case H_ENDS:       tr.pressEnds(); break;       // [wolf-rail 1.3, stage V]
+    case H_COUPLE:     tr.pressCouple(); break;
+    case H_UNCOUPLE:   tr.pressUncouple(); break;
+    case H_ALERT_OK:   tr.dismissAlert(); break;
+    case H_WALK:       tr.dismissWalk(); break;
     default: break;
     }
 }
@@ -1285,7 +1540,9 @@ bool WolfTrainCabView::handleHover(S32 x, S32 y, MASK mask)
         return true;
     }
     if (!hasMouseCapture() && !onPanel(x, y)) return false;
-    getWindow()->setCursor(hitAt(x, y) ? UI_CURSOR_HAND : UI_CURSOR_ARROW);
+    // (a hit that is only a tooltip - [stage V] the PROPELLING lamp, the refusal's text - is not a button)
+    const Hit* h = hitAt(x, y);
+    getWindow()->setCursor(h && h->mId != H_NONE ? UI_CURSOR_HAND : UI_CURSOR_ARROW);
     return true;
 }
 

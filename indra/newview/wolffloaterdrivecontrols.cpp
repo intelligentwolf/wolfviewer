@@ -60,7 +60,8 @@ namespace
             || k == ' ' || k == KEY_HOME || k == KEY_RETURN || k == KEY_DIVIDE
             // [TRAIN CAB 2026-11-13] the Train Cab's own keys while driving a train (wolftraincab.h isCabKey)
             || k == KEY_F2 || k == KEY_F3 || k == KEY_F4 || k == KEY_F5
-            || k == KEY_F8 || k == KEY_F9;   // [wolf-rail 1.2] the cab's AUTO and POINTS
+            || k == KEY_F8 || k == KEY_F9    // [wolf-rail 1.2] the cab's AUTO and POINTS
+            || k == KEY_F6 || k == KEY_F7;   // [wolf-rail 1.3, stage V] the cab's CHANGE ENDS and COUPLE
     }
 
     /** A channel typed by the driver: digits only, 0 to 2147483646 (2147483647 is CHAT_CHANNEL_DEBUG,

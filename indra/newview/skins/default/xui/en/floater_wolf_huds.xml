@@ -32,9 +32,10 @@
          wolffloaterhuds.cpp fitToArea makes the window no taller than the floaters' area (LLFloaterView::getSnapRect, in UI
          units, so it follows the UI size), the tiles scrolling inside. Panel coordinates are the old floater ones less 64
          (the scroll's top). The window is 16 wider (824) so the vertical scroll bar (settings.xml UIScrollbarSize 15) never
-         covers a tile nor brings a horizontal one (tiles_panel 808 wide fits the 809 left beside the bar). -->
+         covers a tile nor brings a horizontal one (tiles_panel is 796 wide, the right edge of the last column; 824 less a bar of
+         up to 28 still leaves it room). -->
     <scroll_container follows="all" layout="topleft" left="0" top="64" width="824" height="804" name="tiles_scroll" opaque="false" border_visible="false" reserve_scroll_corner="false">
-    <panel follows="left|top" layout="topleft" left="0" top="0" width="808" height="804" name="tiles_panel" background_visible="false" mouse_opaque="false">
+    <panel follows="left|top" layout="topleft" left="0" top="0" width="796" height="804" name="tiles_panel" background_visible="false" mouse_opaque="false">
         <!-- Game Mode -->
         <button follows="left|top" layout="topleft" left="12" top="0" width="256" height="108" name="tile_game" is_toggle="true" label="" tab_stop="true" tool_tip="Game Mode: Your character, actions and bag across the bottom of the screen." />
         <icon follows="left|top" layout="topleft" left="22" top="14" width="80" height="80" name="pic_game" image_name="WolfHuds_game" mouse_opaque="false" />

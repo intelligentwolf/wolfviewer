@@ -161,7 +161,8 @@ void WolfFloaterHuds::draw()
 // floaters' area on many screens at a larger UI size. LLFloaterView::adjustToFitScreen (llfloater.cpp:3242-3307) only
 // shrinks resizable floaters and this one is not, so it is done here: never taller than the area (getSnapRect, the space
 // between the toolbars, in the same UI units as this window's rect, so it follows the UI size), never shorter than the
-// intro, one row of tiles and the status line (64 + 108 + 52, floater_wolf_huds.xml), and never taller than every tile
+// intro, one row of tiles with its gap and the status line (64 + 116 + 52, floater_wolf_huds.xml; the row's 8-unit gap
+// covers the title bar's few units of header stretch, llfloater.cpp), and never taller than every tile
 // needs. The tiles scroll inside (tiles_scroll follows all; the status line follows the bottom). Then the window is brought
 // wholly inside the area (adjustToFitScreen, allow_partial_outside false, snap_in_toolbars true, as wolffloaterbuilder.cpp).
 void WolfFloaterHuds::fitToArea()
@@ -172,7 +173,7 @@ void WolfFloaterHuds::fitToArea()
     }
     const S32 room = gFloaterView->getSnapRect().getHeight();
     mFitRoom = room;
-    constexpr S32 MIN_HEIGHT = 64 + 108 + 52;
+    constexpr S32 MIN_HEIGHT = 64 + 116 + 52;
     const S32 want = llmax(MIN_HEIGHT, llmin(room, mFullHeight));
     const LLRect r = getRect();
     if (want != r.getHeight())

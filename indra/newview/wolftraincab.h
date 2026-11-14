@@ -49,7 +49,12 @@
 // [wolf-rail 1.3, stage V] (region-terrain-work/wolf-rail/DESIGN-terminus.md section 5) the region adds lead=, ends=, veh=,
 // couple=, shunt= to every cab message and walk= to the state=off after CHANGE ENDS; the SHUNT buttons CHANGE ENDS (ENGINE
 // 16384), COUPLE (ANCHOR 2048) and UNCOUPLE (LANDING_GEAR 8192) are one press each and show only when the region says they
-// can act. The turntable (train.turntable) is a script call for a train nobody drives: the cab has nothing for it.
+// can act.
+// [wolf-rail 1.3.7] (Paul 14 Nov: he drove his shunter into a shed road, a stop guide halted it and he did not know how to
+// get out) the region's note says "End of the line. Press BACK (or set the reverser to reverse), or CHANGE ENDS, to drive
+// out." there (wolf-rail Cab.cs:85 END_OF_LINE_NOTE), drawn large and wrapped above the cab; tt=<turntable name> while the
+// engine stands at the deck-edge stop of a turntable's road shows a TURNTABLE button (BOOST 1024, Cab.cs:82 BTN_TURNTABLE),
+// one press as CHANGE ENDS: the region turns the engine round on that turntable with the driver seated.
 // Wolf Territories only: off it nothing is read, nothing is sent and the cab does not show.
 class WolfTrain : public LLSingleton<WolfTrain>
 {
@@ -83,6 +88,9 @@ public:
         std::string mCoupleSide, mCoupleName;
         F32  mCoupleM = -1.f;
         bool mShunt = false;            // shunt=1 this driver may couple and uncouple (train.driver [.., "shunt"])
+        // [wolf-rail 1.3.7] tt= the turntable whose deck-edge stop the engine stands at (one word, 1-32 characters, no space,
+        // no '|': Turntable.cs:841 ReadDecks, the names a region keeps); empty: none, or a region before 1.3.7
+        std::string mTt;
     };
 
     void receive(const LLUUID& invoice, const std::vector<std::string>& strings);
@@ -132,6 +140,11 @@ public:
     void pressEnds();
     void pressCouple();
     void pressUncouple();
+    /** [wolf-rail 1.3.7] TURNTABLE (BOOST 1024, Cab.cs:82 BTN_TURNTABLE) while the region names a turntable in tt=: one press
+     *  as CHANGE ENDS; the region turns the engine round on it ("opposite" road), the driver seated. Button only: no free
+     *  key is proven (F2-F9 are the cab's; F1 is Help, menu_viewer.xml; F10-F12 are not checked free on every system). */
+    bool canTurntable() const;
+    void pressTurntable();
     /** COUPLE joins towards the cab's front with the reverser at FORWARD, else behind (wolf-rail RailCouple.cs CabCouple):
      *  true while the way the cab is set to go is not the way to the stock in couple=. */
     bool coupleWrongWay() const;
@@ -143,6 +156,9 @@ public:
     /** [stage V] The last refusal the region gave a SHUNT press (isRefusal), kept until the driver closes it: the region's
      *  own note goes after 4 s (EngineDriver.cs Note :1895-1899). */
     const std::string& alert() const { return mAlert; }
+    /** [wolf-rail 1.3.7] Paul 14 Nov ("when i did change ends the locomotive stayed facing the same way?"): for LEAD_FLASH_S
+     *  after a change of ends the PROPELLING / YOUR CAB LEADS lamp is drawn large, so the driver sees which end now leads. */
+    bool leadFlash() const;
     void dismissAlert() { mAlert.clear(); }
     bool horn() const { return mHornHeld; }
     bool mph() const;
@@ -209,9 +225,11 @@ private:
     // [stage V] the SHUNT presses on the wire (ENGINE / ANCHOR / LANDING_GEAR held until these), the walk after CHANGE
     // ENDS and the refusal kept for the driver to read
     F64  mEndsPulseUntil = -1.0, mCouplePulseUntil = -1.0, mUncouplePulseUntil = -1.0;
+    F64  mTtPulseUntil = -1.0;      // [wolf-rail 1.3.7] the TURNTABLE press on the wire (BOOST held until then)
     std::string mWalkNote;
     F64  mWalkUntil = -1.0;
     std::string mAlert;
+    F64  mLeadFlashUntil = -1.0;    // [wolf-rail 1.3.7] the lamp is drawn large until then (leadFlash)
     F64  mRearmAt = -1.0;   // [review W2] after a SHUNT press: from then on the same refusal text is raised again
 };
 
@@ -246,6 +264,7 @@ public:
         H_HORN, H_MODE, H_UNITS, H_HELP, H_HELP_BACK, H_HELP_NEXT, H_HELP_CLOSE, H_CLOSE, H_SHOW_TAB,
         H_AUTO, H_POINTS, H_EASY_FWD, H_EASY_BACK,
         H_ENDS, H_COUPLE, H_UNCOUPLE, H_ALERT_OK, H_WALK,   // [wolf-rail 1.3, stage V]
+        H_TURNTABLE,                                        // [wolf-rail 1.3.7]
     };
 
 private:
@@ -269,7 +288,8 @@ private:
     bool onPanel(S32 x, S32 y) const;
     void press(EHit id, S32 y);
     void dragLever(S32 y);
-    void drawHelp(F32 top, F32 W);
+    // `above`: the top of what is drawn over the panel (the panel's own top, or [1.3.7] the note box / the refusal strip)
+    void drawHelp(F32 above, bool stacked, F32 W);
 };
 
 #endif // WOLF_TRAINCAB_H

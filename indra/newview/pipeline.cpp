@@ -11065,7 +11065,9 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
         LL_PROFILE_GPU_ZONE("shadow simple");
         gGL.getTexUnit(0)->disable();
 
-        if (rigged)
+        // [W107 SHADOW BATCH 2026-11-14] WolfShadowBatchJoin off: the stock path below, exactly as before (A/B comparison)
+        static LLCachedControl<bool> wolf_join(gSavedSettings, "WolfShadowBatchJoin", true);
+        if (rigged || !wolf_join)
         {
             for (U32 type : types)
             {

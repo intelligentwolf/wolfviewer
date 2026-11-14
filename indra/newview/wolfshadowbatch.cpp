@@ -66,7 +66,15 @@ namespace
                 && double_sided == mDoubleSided
                 && params.mOffset == mFirst->mOffset + mCount
                 && mCount % 3 == 0
-                && params.mCount % 3 == 0;
+                && params.mCount % 3 == 0
+#if LL_DARWIN
+                // Source: llvovolume.cpp:5756-5759 registerFace() - on macOS a draw info is kept within the GL's vertex and
+                // index range limits (end - start + new vertices <= mGLMaxVertexRange, count + new indices <=
+                // mGLMaxIndexRange); a joined run keeps to the same limits, so no call is bigger than one stock could make
+                && llmax(mEnd, (U32)params.mEnd) - llmin(mStart, (U32)params.mStart) <= (U32)gGLManager.mGLMaxVertexRange
+                && mCount + params.mCount <= (U32)gGLManager.mGLMaxIndexRange
+#endif
+                ;
         }
 
         void start(LLDrawInfo& params, bool double_sided)

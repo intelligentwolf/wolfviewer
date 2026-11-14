@@ -47,6 +47,10 @@ class LLViewerFetchedTexture;
 // it lies UNDER the real terrain wherever that has arrived, so it is drawn for connected regions as well: it shows
 // only where the real ground is missing. Below the water level the water covers it.
 //
+// <WolfViewer 2026-11-14> ticket 853: a finer or coarser tile is fetched, meshed and pictured before it replaces the
+// one drawn, and until it can the one drawn stays (a tile's piece or its four quarters', never both), so the ground no
+// longer drops to WolfFarGround's flat tile each time the quadtree changes level. Cells drawn here are listed for
+// connected regions too (within the reach), as WolfFarGround now keeps a connected region's tile until its terrain is in.
 // Only while flying at least 100 m up (as WolfFarGround), Wolf Territories only; WolfViewerFarTerrain turns it off.
 // A tile a region has not baked yet (404) is asked again 10 minutes later; until then WolfFarGround's flat map
 // tile stands in, as before.
@@ -97,6 +101,8 @@ private:
     };
 
     void refresh();
+    // <WolfViewer 2026-11-14> ticket 853: is this piece ready to be drawn (heights, a mesh, a picture)?
+    bool drawable(const PieceKey& key) const;
     void idleBody();
     void jerkProbe(F32 idle_ms);   // <WolfViewer 2026-10-08/> flight smoothness log (WolfJerk), seated only
     void fetch(const PieceKey& key);
@@ -111,8 +117,9 @@ private:
     std::map<std::tuple<S32, U32, U32>, TileTex> mTextures;   // (z, tile grid x, tile grid y)
     std::map<LLUUID, LLPointer<LLImageRaw>> mDetail;          // detail textures, small copies for baking ground
     std::map<LLUUID, F64> mDetailRetryAt;                     // a read back that gave nothing is not tried again before
-    std::vector<PieceKey> mDraw;                              // pieces to draw this frame (READY, wanted)
-    std::unordered_set<U64> mCovered;                         // cells (handles, metres) of regions NOT connected drawn now
+    std::vector<PieceKey> mDraw;                              // pieces to draw this frame (drawable)
+    std::vector<PieceKey> mPrepare;                           // <WolfViewer 2026-11-14/> wanted pieces with heights, meshes and pictures readied before they are drawn
+    std::unordered_set<U64> mCovered;                         // cells (handles, metres) drawn now, within the reach
     F64 mNextRefresh = 0.0;
     S32 mFetching = 0;
 };

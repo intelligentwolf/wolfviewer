@@ -16,6 +16,7 @@
 #ifndef WOLF_FAR_GROUND_H
 #define WOLF_FAR_GROUND_H
 
+#include <unordered_set>
 #include <vector>
 
 #include "llpointer.h"
@@ -23,6 +24,7 @@
 #include "v3dmath.h"
 
 class LLVertexBuffer;
+class LLViewerRegion;
 class LLViewerFetchedTexture;
 class LLViewerTexture;
 
@@ -57,7 +59,7 @@ public:
     void renderDeferred();
 
     /** A region connected or went: look again on the next frame. */
-    void invalidate() { mNextRefresh = 0.0; }
+    void invalidate() { mNextRefresh = 0.0; mGroundComplete.clear(); }   // <WolfViewer 2026-11-14/> a new or gone region: its cells' terrain starts again
 
 private:
     struct Tile
@@ -78,6 +80,12 @@ private:
     LLPointer<LLVertexBuffer> mVB;
     U32 mVerts = 0;
     F64 mNextRefresh = 0.0;
+    // <WolfViewer 2026-11-14> ticket 853: a connected region's cell keeps its map tile until the region has sent every
+    // terrain patch in it (or WolfFarTerrain draws it in relief). Cells found complete, so they are not counted again;
+    // a patch never loses its heights while its region stays connected (LLSurface keeps them), so the set is only
+    // emptied when a region connects or goes (invalidate).
+    bool groundComplete(LLViewerRegion* region, U32 x, U32 y);
+    std::unordered_set<U64> mGroundComplete;
     LLVector3d mBuiltOrigin;                  // the agent frame origin the buffer was built in (moves on a huge-region rebase too)
     F32 mBuiltWaterZ = 0.f;
     S32 mLevel = 1;

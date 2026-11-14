@@ -40,6 +40,8 @@
 #endif
 #include "media_plugin_base.h"
 
+#include <chrono>   // [SEARCH RESIZE 2026-11-14]
+
 // _getpid()/getpid()
 #if LL_WINDOWS
 #include <process.h>
@@ -52,6 +54,14 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 //
+// [SEARCH RESIZE 2026-11-14] how long a resize waits for CEF's frame at the new size before nudging CEF (see
+// onPageChangedCallback). SLPlugin sends the plugin "idle" at up to 100 Hz (llpluginprocesschild.cpp:38
+// PLUGIN_IDLE_SECONDS, :178), so the check runs many times within this interval.
+static const int WOLF_RESIZE_NUDGE_MS = 250;
+// The nudge: the page zoom moved by this factor for one "idle", then put back. Tested on Xvfb 14 Nov: the browser drew
+// its next frame, at the new size, straight after the zoom change in every one of 9 stalls.
+static const F32 WOLF_RESIZE_NUDGE_ZOOM = 1.001f;
+
 class MediaPluginCEF :
     public MediaPluginBase
 {
@@ -125,6 +135,12 @@ private:
 #endif
     F32 mCurVolume;
     dullahan* mCEFLib;
+
+    // [SEARCH RESIZE 2026-11-14] a resize waits for CEF's first frame at the new size (see onPageChangedCallback)
+    bool mWolfAwaitingSizedPaint = false;
+    std::chrono::steady_clock::time_point mWolfSizeAskedAt;
+    bool mWolfZoomNudged = false;   // the page zoom is WOLF_RESIZE_NUDGE_ZOOM off mWolfPageZoom until the next "idle"
+    F32 mWolfPageZoom = 1.f;        // the zoom last given to mCEFLib->setPageZoom from a viewer message
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -199,15 +215,22 @@ void MediaPluginCEF::onPageChangedCallback(const unsigned char* pixels, int x, i
 {
     if( mPixels && pixels )
     {
+        // [SEARCH RESIZE 2026-11-14] Paul (W106): "when i resize the web search window it goes blank" - and it stayed
+        // blank. Traced on Xvfb with the Search hub: during a drag, CEF sometimes sends one more frame at the old size
+        // after the "size_change" (size_change 1266x672, then a 1266x706 paint) and then no frame at all at the new
+        // size. After that, setSize at the same size or at later sizes (1266x718, 1266x743) got no paint in the
+        // following 17 s; the browser only drew again after its page zoom changed. Stock also marked the whole buffer
+        // dirty for the wrong-sized frame. That buffer is the new shared memory segment, which LLPluginClassMedia::idle
+        // zero-fills (llpluginclassmedia.cpp:236-240), so the viewer showed black, and with no later frame it stayed black.
+        // Now a frame of the wrong size is dropped: nothing is copied or marked dirty, and setSize is not called from
+        // inside CEF's paint. If no frame of the right size has come WOLF_RESIZE_NUDGE_MS after the resize, the "idle"
+        // handler nudges the page zoom so that CEF draws again.
         if (mWidth == width && mHeight == height)
         {
             memcpy(mPixels, pixels, mWidth * mHeight * mDepth);
+            mWolfAwaitingSizedPaint = false;
+            setDirty(0, 0, mWidth, mHeight);
         }
-        else
-        {
-            mCEFLib->setSize(mWidth, mHeight);
-        }
-        setDirty(0, 0, mWidth, mHeight);
     }
 }
 
@@ -562,6 +585,25 @@ void MediaPluginCEF::receiveMessage(const char* message_string)
             {
                 mCEFLib->update();
 
+                // [SEARCH RESIZE 2026-11-14] still no frame at the size the viewer asked for: nudge the page zoom for
+                // one "idle" (see onPageChangedCallback), then put it back. Repeats every WOLF_RESIZE_NUDGE_MS until
+                // the frame comes.
+                if (mWolfZoomNudged)
+                {
+                    mWolfZoomNudged = false;
+                    mCEFLib->setPageZoom(mWolfPageZoom);
+                }
+                else if (mWolfAwaitingSizedPaint && mPixels)
+                {
+                    const auto now = std::chrono::steady_clock::now();
+                    if (now - mWolfSizeAskedAt >= std::chrono::milliseconds(WOLF_RESIZE_NUDGE_MS))
+                    {
+                        mWolfSizeAskedAt = now;
+                        mWolfZoomNudged = true;
+                        mCEFLib->setPageZoom(mWolfPageZoom * WOLF_RESIZE_NUDGE_ZOOM);
+                    }
+                }
+
 #if LL_VOLUME_CATCHER
                 mVolumeCatcher.pump();
 #endif
@@ -736,6 +778,7 @@ void MediaPluginCEF::receiveMessage(const char* message_string)
                 factor*=1.001;
 #endif
                 mCEFLib->setPageZoom(factor);
+                mWolfPageZoom = factor;   // [SEARCH RESIZE 2026-11-14] the zoom a resize nudge returns to
 
                 // Plugin gets to decide the texture parameters to use.
                 mDepth = 4;
@@ -805,6 +848,10 @@ void MediaPluginCEF::receiveMessage(const char* message_string)
                         mTextureHeight = texture_height;
 
                         mCEFLib->setSize(mWidth, mHeight);
+
+                        // [SEARCH RESIZE 2026-11-14] the new buffer is blank until CEF paints at this size
+                        mWolfAwaitingSizedPaint = true;
+                        mWolfSizeAskedAt = std::chrono::steady_clock::now();
                     };
                 };
 
@@ -1001,6 +1048,8 @@ void MediaPluginCEF::receiveMessage(const char* message_string)
                 factor*=1.001;
 #endif
                 mCEFLib->setPageZoom(factor);
+                mWolfPageZoom = factor;    // [SEARCH RESIZE 2026-11-14] the zoom a resize nudge returns to
+                mWolfZoomNudged = false;   // this zoom replaces a nudge in progress
             }
             if (message_name == "browse_stop")
             {

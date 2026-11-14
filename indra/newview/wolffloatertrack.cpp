@@ -1557,24 +1557,36 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
         if (side == "right" || side == "both") bands.emplace_back(-PLATFORM_EDGE_M - PLATFORM_DEPTH_M, -PLATFORM_EDGE_M);
         if (side == "island")
         {
-            // the island sits between the line and its passing loop: the other plan line nearest the platform's middle
-            LLVector3d mid;
-            F64 hx, hy, off = 0.0;
-            if (along(*l, (s0 + s1) * 0.5, mid, hx, hy))
+            // DESIGN.md 10 PLAN stations: `loop` is the island's passing loop line. The platform's middle is half way between the
+            // line and the loop at every sample along it (the loop's nearest point), ISLAND_W wide (tracktool/layout.py:36).
+            const PlanLine* loop = lineById(st["loop"].asString());
+            std::vector<LLVector3d> inner, outer;
+            for (F64 s = s0; s <= s1 + 1e-6; s += llmax(1.0, (s1 - s0) / 40.0))
             {
-                F64 best = 30.0;   // CHOSEN: a loop within 30 m of the platform's middle
-                for (const PlanLine& o : out.mLines)
+                LLVector3d p;
+                F64 hx, hy;
+                if (!along(*l, llmin(s, s1), p, hx, hy)) continue;
+                F64 off = 0.0;   // no loop in the reply: centred on the line
+                if (loop)
                 {
-                    if (&o == l) continue;
-                    for (const LLVector3d& p : o.mP)
+                    F64 best = 1e300;
+                    for (const LLVector3d& q : loop->mP)
                     {
-                        const F64 dx = p.mdV[VX] - mid.mdV[VX], dy = p.mdV[VY] - mid.mdV[VY], d = sqrt(dx * dx + dy * dy);
+                        const F64 dx = q.mdV[VX] - p.mdV[VX], dy = q.mdV[VY] - p.mdV[VY], d = dx * dx + dy * dy;
                         if (d < best) { best = d; off = -hy * dx + hx * dy; }
                     }
                 }
+                const F64 c = off * 0.5;
+                inner.emplace_back(p.mdV[VX] - hy * (c - ISLAND_W_M * 0.5), p.mdV[VY] + hx * (c - ISLAND_W_M * 0.5), p.mdV[VZ] + 0.1);
+                outer.emplace_back(p.mdV[VX] - hy * (c + ISLAND_W_M * 0.5), p.mdV[VY] + hx * (c + ISLAND_W_M * 0.5), p.mdV[VZ] + 0.1);
             }
-            const F64 c = off * 0.5;
-            bands.emplace_back(c - ISLAND_W_M * 0.5, c + ISLAND_W_M * 0.5);
+            if (inner.size() >= 2)
+            {
+                std::vector<LLVector3d> ring = inner;
+                ring.insert(ring.end(), outer.rbegin(), outer.rend());
+                ring.push_back(inner.front());
+                outline(ring, COL_STATION);
+            }
         }
         for (const auto& b : bands)
         {

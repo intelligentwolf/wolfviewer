@@ -66,6 +66,7 @@
 #include "llworld.h"
 #include "llselectmgr.h"
 #include "pipeline.h"
+#include "wolfstaticshadowbatch.h"   // [W107 STATIC BATCH 2026-11-14/] dropCopy: rebuildMesh rewrites a group's vertices in place
 #include "llsdutil.h"
 #include "llmatrix4a.h"
 #include "llmediaentry.h"
@@ -6483,6 +6484,13 @@ void LLVolumeGeometryManager::rebuildMesh(LLSpatialGroup* group)
             LL_PROFILE_ZONE_NAMED_CATEGORY_VOLUME("rebuildMesh - gen draw info");
 
             group->mBuilt = 1.f;
+            // [W107 STATIC BATCH 2026-11-14] llspatialpartition.h: getGeometryVolume below rewrites vertices in the
+            // group's buffers in place; a copy of them made before this is out of date
+            ++group->mWolfGeomVersion;
+            if (group->mWolfStaticBatch)
+            {
+                WolfStaticShadowBatch::dropCopy(group);
+            }
 
             static std::vector<LLVertexBuffer*> locked_buffer;
             locked_buffer.resize(0);

@@ -42,6 +42,7 @@
 #include "llsky.h"
 
 #include "pipeline.h"
+#include "wolfstaticshadowbatch.h"   // [W107 STATIC BATCH 2026-11-14/] supported(): whether its shader is built
 
 #include "llfile.h"
 #include "llviewerwindow.h"
@@ -353,6 +354,7 @@ LLGLSLShader        gWolfSurfCurlProgram;
 LLGLSLShader        gWolfGodRaysProgram;
 LLGLSLShader        gWolfCloudDeckProgram;   // <WolfViewer 2026-10-07/>
 LLGLSLShader        gWolfUnderSeaProgram;    // [UNDERSEA 2026-11-09/] ticket 652: the swaying sea plants (wolfundersea.cpp)
+LLGLSLShader        gWolfShadowBatchProgram; // [W107 STATIC BATCH 2026-11-14/] shadow casters from shared buffers (wolfstaticshadowbatch.cpp)
 LLGLSLShader        gWolfEnvSkyProgram;            // [WOLF ENV TAKRAM 2026-10-12] wolfenvironmentrender.cpp
 LLGLSLShader        gWolfEnvCompositeProgram[2];
 LLGLSLShader        gWolfEnvCameraShadowProgram;
@@ -1550,6 +1552,7 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         gDeferredNonIndexedDiffuseAlphaMaskProgram.unload();
         gDeferredNonIndexedDiffuseAlphaMaskNoColorProgram.unload();
         gWolfUnderSeaProgram.unload();   // [UNDERSEA 2026-11-09/]
+        gWolfShadowBatchProgram.unload();   // [W107 STATIC BATCH 2026-11-14/]
         gDeferredBumpProgram.unload();
         gDeferredSkinnedBumpProgram.unload();
         gDeferredImpostorProgram.unload();
@@ -2693,6 +2696,23 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         gDeferredShadowProgram.mRiggedVariant = &gDeferredSkinnedShadowProgram;
         success = gDeferredShadowProgram.createShader();
         llassert(success);
+    }
+
+    // [W107 STATIC BATCH 2026-11-14] wolfstaticshadowbatch.cpp: deferred/shadowV.glsl with the matrix as a per-instance
+    // attribute, and the stock deferred/shadowF.glsl. Built only where the GL can run it (OpenGL 4.3, not macOS). As the
+    // under-sea shader: its failing loses only the shared-buffer shadow path (every caster then takes the stock path,
+    // WolfStaticShadowBatch::beginPass tests the program object), never the rest of the deferred shaders.
+    if (success && WolfStaticShadowBatch::supported())
+    {
+        gWolfShadowBatchProgram.mName = "Wolf Static Shadow Batch Shader";
+        gWolfShadowBatchProgram.mShaderFiles.clear();
+        gWolfShadowBatchProgram.mShaderFiles.push_back(make_pair("deferred/wolfShadowBatchV.glsl", GL_VERTEX_SHADER));
+        gWolfShadowBatchProgram.mShaderFiles.push_back(make_pair("deferred/shadowF.glsl", GL_FRAGMENT_SHADER));
+        gWolfShadowBatchProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        if (!gWolfShadowBatchProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf static shadow batch shader failed: shadow casters are drawn the stock way" << LL_ENDL;
+        }
     }
 
     if (success)

@@ -240,6 +240,9 @@ public:
     virtual std::string routeHint() const { return std::string(); }
     /** The window's own drawing in the world (its preview), before the pen's markers. */
     virtual void renderRouteExtras(LLViewerRegion* /*rgn*/) {}
+    /** [TRACK TOOL 2026-11-14] The window's own words in the world view (2D, screen space: names and problems beside its
+     *  preview), drawn whenever the pen's window is shown, after renderRouteExtras' frame. Default: none. */
+    virtual void drawRouteExtras(LLViewerRegion* /*rgn*/) {}
     /** Markers can be picked and dragged now (false: every click is a plain click, e.g. Terraform's "From the ground"). */
     virtual bool markersMovable() const { return true; }
     /** Join the clicks into a line (a route), or only mark them (two corners of a box). */

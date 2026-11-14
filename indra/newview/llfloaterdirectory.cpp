@@ -107,11 +107,18 @@ bool LLFloaterDirectory::postBuild()
     mDirectoryTabs = getChild<LLTabContainer>("Directory Tabs");
     mDirectoryTabs->setCommitCallback([&](LLUICtrl*, const LLSD&) { updateProfileButtonVisibility(); });
 
-    if (!mDirectoryTabs->selectTab(gSavedSettings.getS32("FSLastSearchTab")))
+    // </FS:Ansariel>
+    // <FS:Wolf> [SEARCH HUB 2026-11-14] Paul: "it should default to the web tab to start with". Search opens on the
+    // Web tab, which shows the grid's search page (the Wolf Territories hub), instead of the tab used last time
+    // (Firestorm restored the FSLastSearchTab setting here; index 0 = People in floater_directory.xml, so a new
+    // resident started on People). Built once per session (single_instance + reuse, llfloater.cpp mReuseInstance),
+    // so within a session the window still keeps the tab the resident is on. A caller that asks for a tab
+    // (onOpen key "tab"/"query") still gets it.
+    if (!mDirectoryTabs->selectTabByName("panel_dir_web"))
     {
         mDirectoryTabs->selectFirstTab();
     }
-    // </FS:Ansariel>
+    // </FS:Wolf>
 
     // <FS:TJ> Always navigate if the SearchURL has changed
     mLastSearchURL = LLGridManager::getInstance()->isInSecondLife() ? gSavedSettings.getString("SearchURL") : gSavedSettings.getString("SearchURLOpenSim");
@@ -165,15 +172,8 @@ void LLFloaterDirectory::onOpen(const LLSD& key)
 }
 // </FS:PP>
 
-// <FS:Ansariel> Remember last selected tab across sessions
-void LLFloaterDirectory::onClose(bool app_quitting)
-{
-    if (mDirectoryTabs)
-    {
-        gSavedSettings.setS32("FSLastSearchTab", mDirectoryTabs->getCurrentPanelIndex());
-    }
-}
-// </FS:Ansariel>
+// <FS:Wolf> [SEARCH HUB 2026-11-14] onClose no longer saves FSLastSearchTab: Search always starts on the Web tab
+// (postBuild above), so nothing reads the saved tab and the setting is gone.
 
 void LLFloaterDirectory::hideAllDetailPanels()
 {

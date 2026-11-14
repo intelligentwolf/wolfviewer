@@ -293,11 +293,7 @@ void FSFloaterSearch::onOpen(const LLSD& key)
 //virtual
 void FSFloaterSearch::onClose(bool app_quitting)
 {
-    if (mTabContainer)
-    {
-        gSavedSettings.setS32("FSLastSearchTab", mTabContainer->getCurrentPanelIndex());
-    }
-
+    // <FS:Wolf> [SEARCH HUB 2026-11-14] the tab is no longer saved: Search starts on the Web tab (postBuild).
     if (mEventInfoConnection.connected())
     {
         mEventInfoConnection.disconnect();
@@ -344,10 +340,15 @@ bool FSFloaterSearch::postBuild()
 
     mHasSelection = false;
 
-    if (!mTabContainer->selectTab(gSavedSettings.getS32("FSLastSearchTab")))
+    // <FS:Wolf> [SEARCH HUB 2026-11-14] Paul: "it should default to the web tab to start with". Open on the Web tab
+    // (the grid's search page, the Wolf Territories hub), not on the tab used last time (Firestorm restored the
+    // FSLastSearchTab setting here). The same rule as LLFloaterDirectory::postBuild, the Search window used when
+    // FSUseFSLegacySearch is off (its default, app_settings/settings.xml).
+    if (!mTabContainer->selectTabPanel(mPanelWeb))
     {
         mTabContainer->selectFirstTab();
     }
+    // </FS:Wolf>
 
     return true;
 }

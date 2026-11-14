@@ -1087,6 +1087,8 @@ class Enumerator:
             self.add(p)
 
         self.add(prog("Deferred Shadow Shader", "shadowV.glsl", "shadowF.glsl", ":2639"))
+        # [W107 STATIC BATCH 2026-11-14] llviewershadermgr.cpp:2704-2715 (built where WolfStaticShadowBatch::supported())
+        self.add(prog("Wolf Static Shadow Batch Shader", "wolfShadowBatchV.glsl", "shadowF.glsl", ":2706"))
         p = prog("Deferred Skinned Shadow Shader", "shadowSkinnedV.glsl", "shadowF.glsl", ":2651")
         p.features.isDeferred = True
         p.features.hasShadows = True

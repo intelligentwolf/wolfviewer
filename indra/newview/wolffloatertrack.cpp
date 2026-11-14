@@ -63,6 +63,7 @@
 #include "llviewerobjectlist.h"
 #include "llviewerregion.h"
 #include "llviewerwindow.h"
+#include "llvocache.h"
 #include "llvolume.h"
 #include "llworld.h"
 #include "message.h"
@@ -213,14 +214,15 @@ namespace
      *  DestinationID = the Trash, a new TransactionID, PacketCount 1, PacketNumber 1), one ObjectLocalID block per root
      *  (:5882-5886 packObjectLocalID), a new message per region and when it is full or has MAX_OBJECTS_PER_PACKET roots
      *  (:126, :6095-6098 sendListToRegions). */
-    void deRezToTrash(const std::vector<LLViewerObject*>& objs)
+    void deRezToTrash(LLViewerRegion* rgn, const std::vector<U32>& locals)
     {
         constexpr S32 MAX_OBJECTS_PER_PACKET = 254;   // llselectmgr.cpp:126
+        if (!rgn || locals.empty()) return;
         const LLUUID trash = gInventory.findCategoryUUIDForType(LLFolderType::FT_TRASH);
         LLMessageSystem* msg = gMessageSystem;
-        LLViewerRegion* open_region = nullptr;
+        bool open = false;
         S32 in_packet = 0;
-        auto start = [&](LLViewerRegion* r)
+        auto start = [&]()
         {
             msg->newMessageFast(_PREHASH_DeRezObject);
             msg->nextBlockFast(_PREHASH_AgentData);
@@ -236,24 +238,65 @@ namespace
             const U8 PACKET = 1;
             msg->addU8Fast(_PREHASH_PacketCount, PACKET);
             msg->addU8Fast(_PREHASH_PacketNumber, PACKET);
-            open_region = r;
+            open = true;
             in_packet = 0;
         };
-        for (LLViewerObject* o : objs)
+        for (U32 local : locals)
         {
-            if (!o || o->isDead() || !o->getRegion()) continue;
-            if (open_region && (o->getRegion() != open_region || msg->isSendFull(nullptr) || in_packet >= MAX_OBJECTS_PER_PACKET))
+            if (open && (msg->isSendFull(nullptr) || in_packet >= MAX_OBJECTS_PER_PACKET))
             {
-                msg->sendReliable(open_region->getHost());
-                open_region = nullptr;
+                msg->sendReliable(rgn->getHost());
+                open = false;
             }
-            if (!open_region) start(o->getRegion());
+            if (!open) start();
             msg->nextBlockFast(_PREHASH_ObjectData);
-            msg->addU32Fast(_PREHASH_ObjectLocalID, o->getLocalID());
+            msg->addU32Fast(_PREHASH_ObjectLocalID, local);
             ++in_packet;
         }
-        if (open_region) msg->sendReliable(open_region->getHost());
+        if (open) msg->sendReliable(rgn->getHost());
     }
+
+    /** A root object the region told this viewer about that is still only an entry of its object cache (after a relog the
+     *  viewer makes the object only when the camera takes it in: llviewerregion.cpp updateVisibleEntries / createVisibleObjects). */
+    struct CachedRoot
+    {
+        LLUUID mId;
+        U32 mLocal = 0;
+        LLVector3 mPos;              // region metres
+    };
+
+    /** The region's valid root cache entries owned by `owner` (any owner when null). The entry's data is read with a packer of
+     *  its own over the entry's buffer (the entry's own cursor is left alone), in the order the viewer reads it: ID, LocalID,
+     *  PCode (llviewerobjectlist.cpp:353-356 processObjectUpdateFromCache), then CRC, Material, ClickAction, Scale, Pos, Rot,
+     *  SpecialCode, Owner (llviewerobject.cpp:1799-1823, OUT_FULL_CACHED). A root's Pos is region metres; only roots
+     *  (llvocache.h:143 getParentID 0) and valid entries (llviewerregion.cpp getCacheEntry: the region has confirmed them). */
+    std::vector<CachedRoot> cachedRoots(LLViewerRegion* rgn, const LLUUID& owner)
+    {
+        std::vector<CachedRoot> out;
+        if (!rgn) return out;
+        for (const auto& kv : rgn->getCacheEntries())
+        {
+            LLVOCacheEntry* e = kv.second.get();
+            if (!e || !e->isValid() || e->getParentID() != 0) continue;
+            LLDataPackerBinaryBuffer* src = e->getDP();
+            if (!src || src->getBufferSize() <= 0) continue;
+            LLDataPackerBinaryBuffer dp(const_cast<U8*>(src->getBuffer()), src->getBufferSize());
+            CachedRoot r;
+            U32 local = 0, crc = 0, special = 0;
+            U8 pcode = 0, material = 0, click = 0;
+            LLVector3 scale, rot;
+            LLUUID owner_id;
+            if (!dp.unpackUUID(r.mId, "ID") || !dp.unpackU32(local, "LocalID") || !dp.unpackU8(pcode, "PCode")
+                || !dp.unpackU32(crc, "CRC") || !dp.unpackU8(material, "Material") || !dp.unpackU8(click, "ClickAction")
+                || !dp.unpackVector3(scale, "Scale") || !dp.unpackVector3(r.mPos, "Pos") || !dp.unpackVector3(rot, "Rot")
+                || !dp.unpackU32(special, "SpecialCode") || !dp.unpackUUID(owner_id, "Owner")) continue;
+            if (owner.notNull() && owner_id != owner) continue;
+            r.mLocal = e->getLocalID();
+            out.push_back(r);
+        }
+        return out;
+    }
+
 
     // Source: wolffloaterbuildinggen.cpp:77-95 yardError - the service's own words first, else a plain line per status
     std::string serviceError(S32 status, const LLSD& reply, const std::string& transport)
@@ -2349,6 +2392,22 @@ size_t WolfFloaterTrack::piecesNear(const Item& item) const
             }
         if (hit) ++n_near;
     }
+    // and the ones still only in the region's object cache (matchPieces, the same)
+    for (const CachedRoot& c : cachedRoots(rgn, gAgent.getID()))
+    {
+        if (mNotOurs.count(c.mId)) continue;
+        if (LLViewerObject* o = gObjectList.findObject(c.mId); o && !o->isDead()) continue;   // counted above
+        const S32 cx = (S32)floorf(c.mPos.mV[VX]), cy = (S32)floorf(c.mPos.mV[VY]);
+        bool hit = false;
+        for (S32 dy = -1; dy <= 1 && !hit; ++dy)
+            for (S32 dx = -1; dx <= 1 && !hit; ++dx)
+            {
+                auto cell = cells.find({ cx + dx, cy + dy });
+                if (cell == cells.end()) continue;
+                for (size_t i : cell->second) if (dist_vec(item.mObjects[i].mRoot, c.mPos) <= MATCH_M) { hit = true; break; }
+            }
+        if (hit) ++n_near;
+    }
     return n_near;
 }
 
@@ -2403,6 +2462,35 @@ size_t WolfFloaterTrack::matchPieces(const Item& item, std::vector<std::pair<std
             }
         }
         if (near_any && !known) props.want(o);
+    }
+    // [live test 14 Nov 15:14Z] the pieces the viewer has not made into objects (after a relog they wait in the region's
+    // object cache until the camera takes them in) are read from the cache itself, read only: nothing is loaded or changed.
+    // A name is asked for only of an object (wolfobjectprops.h want), so a cached piece is matched by its place - this
+    // agent's, new since the rez, a root within MATCH_M of an expected root - unless its name is known already.
+    for (const CachedRoot& c : cachedRoots(rgn, gAgent.getID()))
+    {
+        if (mBefore.count(c.mId) || mNotOurs.count(c.mId)) continue;
+        if (LLViewerObject* o = gObjectList.findObject(c.mId); o && !o->isDead()) continue;   // looked at above
+        const S32 cx = (S32)floorf(c.mPos.mV[VX]), cy = (S32)floorf(c.mPos.mV[VY]);
+        bool done = false;
+        const WolfObjectProps::Props* known = props.get(c.mId);
+        for (S32 dy = -1; dy <= 1 && !done; ++dy)
+        {
+            for (S32 dx = -1; dx <= 1 && !done; ++dx)
+            {
+                auto cell = cells.find({ cx + dx, cy + dy });
+                if (cell == cells.end()) continue;
+                for (size_t i : cell->second)
+                {
+                    if (taken[i] || dist_vec(item.mObjects[i].mRoot, c.mPos) > MATCH_M) continue;
+                    if (known && known->mName != item.mObjects[i].mName) continue;
+                    taken[i] = true;
+                    matched.emplace_back(item.mObjects[i].mName, c.mId);
+                    done = true;
+                    break;
+                }
+            }
+        }
     }
     return matched.size();
 }
@@ -2503,6 +2591,8 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
                 LLViewerObject* o = gObjectList.getObject(i);
                 if (o && !o->isDead() && o->isRoot()) f->mBefore.insert(o->getID());
             }
+            // and the agent's roots still only in the object cache (never taken as a new piece either)
+            for (const CachedRoot& c : cachedRoots(gAgent.getRegion(), gAgent.getID())) f->mBefore.insert(c.mId);
             f->mRezAlert.clear();
             f->mRezRegion = item.mRegion;
             LL_INFOS("WolfTrack") << "rez " << item.mItem << " in " << where << " at " << item.mRayEnd << " (" << item.mObjects.size()
@@ -2754,30 +2844,42 @@ void WolfFloaterTrack::removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, L
         f->updateControls();
         return;
     }
-    // exactly these objects, the ones this viewer has (a uuid it does not have cannot be deleted from here)
-    std::vector<LLViewerObject*> objs;
-    std::vector<LLUUID> sent;
-    size_t missing = 0;
+    // exactly these objects: the ones this viewer has made, and [live test 14 Nov 15:14Z] the ones it holds only in the region's
+    // object cache (after a relog, everything out of the camera's view) - DeRezObject needs only the local id
+    // (llselectmgr.cpp:5882-5886 packObjectLocalID), which a cache entry has (llvocache.h:125 getLocalID)
+    std::map<LLUUID, U32> cached;
+    for (const CachedRoot& c : cachedRoots(rgn, gAgent.getID())) cached[c.mId] = c.mLocal;   // read only: this agent's roots
+    std::vector<U32> locals;
+    std::vector<std::pair<LLUUID, U32>> sent;
+    size_t missing = 0, from_cache = 0;
     for (const LLUUID& id : uuids)
     {
         LLViewerObject* o = gObjectList.findObject(id);
-        if (o && !o->isDead() && o->getRegion() == rgn) { objs.push_back(o); sent.push_back(id); }
-        else ++missing;
+        if (o && !o->isDead() && o->getRegion() == rgn) { locals.push_back(o->getLocalID()); sent.emplace_back(id, o->getLocalID()); continue; }
+        auto c = cached.find(id);
+        if (c != cached.end()) { locals.push_back(c->second); sent.emplace_back(id, c->second); ++from_cache; continue; }
+        ++missing;
     }
-    f->setStatus(llformat("Taking %d pieces away (they go to your Trash)...", (S32)objs.size()), false);
-    LL_INFOS("WolfTrack") << "delete " << objs.size() << " pieces (" << missing << " not in view) in " << rgn->getName() << LL_ENDL;
-    deRezToTrash(objs);
-    objs.clear();   // the pointers are not kept over a wait
+    f->setStatus(llformat("Taking %d pieces away (they go to your Trash)...", (S32)locals.size()), false);
+    LL_INFOS("WolfTrack") << "delete " << locals.size() << " pieces (" << from_cache << " of them from the object cache, " << missing
+                          << " not known to this viewer) in " << rgn->getName() << LL_ENDL;
+    deRezToTrash(rgn, locals);
+    const U64 handle = rgn->getHandle();
     size_t standing = sent.size();
     for (S32 t = 0; t < GONE_WAIT_S * 2 && standing > 0; ++t)
     {
         llcoro::suspendUntilTimeout(0.5f);
         if (!self()) return;
+        // gone = no object and no cache entry left: the region's KillObject kills both (llviewermessage.cpp
+        // process_kill_object -> killObject, and killCacheEntry(local_id) when VO cache culling is on)
+        LLViewerRegion* now = gAgent.getRegion();
+        const bool same = now && now->getHandle() == handle;
         standing = 0;
-        for (const LLUUID& id : sent)
+        for (const auto& s : sent)
         {
-            LLViewerObject* o = gObjectList.findObject(id);
-            if (o && !o->isDead()) ++standing;
+            LLViewerObject* o = gObjectList.findObject(s.first);
+            if (o && !o->isDead()) { ++standing; continue; }
+            if (same && LLViewerRegion::sVOCacheCullingEnabled && now->getCacheEntry(s.second)) ++standing;
         }
     }
     f = self();
@@ -2923,6 +3025,77 @@ LLSD WolfFloaterTrack::pickedLayout() const
     return mMine[i];
 }
 
+void WolfFloaterTrack::loadDrawing(const LLSD& req)
+{
+    // DESIGN.md 10 REQ: lines, stations, signals, turntables (a stored request has no ground or others: the server keeps only
+    // the drawing, track_tool_lib.php tt_lay_insert, so they are always gathered again by buildRequest)
+    mLines.clear();
+    mStations.clear();
+    mSignals.clear();
+    mTurntables.clear();
+    mEditTurntable = -1;
+    mCurLine = mCurStation = mEditStation = -1;
+    auto gp = [](const LLSD& v) { GP p; readXY(v, p.x, p.y); return p; };
+    for (const LLSD& e : llsd::inArray(arr(req["lines"])))
+    {
+        Line ln;
+        ln.mBranch = e["kind"].asString() == "branch";
+        if (ln.mBranch) ln.mStart = gp(e["start"]);
+        for (const LLSD& c : llsd::inArray(arr(e["clicks"]))) ln.mClicks.push_back(gp(c));
+        ln.mClosed = e["closed"].asBoolean();
+        ln.mStamp = nextStamp();
+        mLines.push_back(ln);
+    }
+    for (const LLSD& e : llsd::inArray(arr(req["stations"])))
+    {
+        Station s;
+        s.mA = gp(e["a"]);
+        s.mB = gp(e["b"]);
+        s.mHasB = true;
+        s.mSide = e["side"].asString();
+        s.mStyle = e["style"].asString();
+        s.mName = e["name"].asString();
+        s.mStamp = nextStamp();
+        mStations.push_back(s);
+    }
+    for (const LLSD& e : llsd::inArray(arr(req["signals"]))) { Signal s; s.mAt = gp(e); s.mStamp = nextStamp(); mSignals.push_back(s); }
+    for (const LLSD& e : llsd::inArray(arr(req["turntables"])))
+    {
+        Turntable t;
+        t.mAt = gp(e["at"]);
+        t.mSize = e["size"].asInteger();
+        t.mRoads = e["roads"].asInteger();
+        t.mSpread = e.has("spread") ? ll_round((F32)e["spread"].asReal()) : t.mSpread;
+        t.mShed = e["shed"].asBoolean();
+        t.mStamp = nextStamp();
+        mTurntables.push_back(t);
+    }
+}
+
+bool WolfFloaterTrack::requestFor(const LLSD& stored, const std::vector<LLUUID>& own_laid, LLSD& req, std::string& why)
+{
+    // the drawing in the window is kept as it is: the stored one is put in its place only while its REQ is made
+    const std::vector<Line> lines = mLines;
+    const std::vector<Station> stations = mStations;
+    const std::vector<Signal> signals = mSignals;
+    const std::vector<Turntable> turntables = mTurntables;
+    const std::vector<LLUUID> replace_laid = mReplaceLaid;
+    const S32 cur_line = mCurLine, cur_station = mCurStation, edit_station = mEditStation, edit_tt = mEditTurntable;
+    loadDrawing(stored);
+    mReplaceLaid = own_laid;   // its own pieces are not "someone else's railway"
+    const bool ok = buildRequest(req, why);
+    mLines = lines;
+    mStations = stations;
+    mSignals = signals;
+    mTurntables = turntables;
+    mReplaceLaid = replace_laid;
+    mCurLine = cur_line;
+    mCurStation = cur_station;
+    mEditStation = edit_station;
+    mEditTurntable = edit_tt;
+    return ok;
+}
+
 void WolfFloaterTrack::onShow()
 {
     const LLSD l = pickedLayout();
@@ -2941,7 +3114,24 @@ void WolfFloaterTrack::onShow()
     post("get", LLSD().with("layout", id), [name, id](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
     {
         if (!ok) { f->setStatus("That railway could not be fetched: " + error, true); return; }
-        f->post("plan", LLSD().with("request", reply["request"]), [name, id](WolfFloaterTrack* f2, bool ok2, const LLSD& r2, const std::string& e2)
+        // [live test 14 Nov] the stored request has no ground and no others (track_tool_lib.php tt_lay_insert keeps only the
+        // drawing), and the planner refuses a request without them (tracktool/plan.py parse "ground"): the REQ is made here
+        // again from the stored drawing, with the ground and the guide-shaped objects this viewer has now, as Lay does
+        std::vector<LLUUID> own;
+        const LLSD& laid = reply["layout"]["laid"];
+        if (laid.isMap())
+        {
+            for (LLSD::map_const_iterator it = laid.beginMap(); it != laid.endMap(); ++it)
+                for (const LLSD& u : llsd::inArray(arr(it->second))) own.push_back(u.asUUID());
+        }
+        LLSD req;
+        std::string why;
+        if (!f->requestFor(reply["request"], own, req, why))
+        {
+            f->setStatus("That railway could not be drawn: " + (why.empty() ? std::string("it has no line to draw.") : why), true);
+            return;
+        }
+        f->post("plan", LLSD().with("request", req), [name, id](WolfFloaterTrack* f2, bool ok2, const LLSD& r2, const std::string& e2)
         {
             if (!ok2) { f2->setStatus("That railway could not be drawn: " + e2, true); return; }
             f2->applyPlan(r2["plan"], f2->mShown);
@@ -2962,48 +3152,7 @@ void WolfFloaterTrack::onChange()
         {
             if (!ok) { f->setStatus("That railway could not be fetched: " + error, true); return; }
             if (f->busy()) return;
-            const LLSD& req = reply["request"];
-            f->mLines.clear();
-            f->mStations.clear();
-            f->mSignals.clear();
-            f->mTurntables.clear();
-            f->mEditTurntable = -1;
-            f->mCurLine = f->mCurStation = f->mEditStation = -1;
-            auto gp = [](const LLSD& v) { GP p; readXY(v, p.x, p.y); return p; };
-            for (const LLSD& e : llsd::inArray(arr(req["lines"])))
-            {
-                Line ln;
-                ln.mBranch = e["kind"].asString() == "branch";
-                if (ln.mBranch) ln.mStart = gp(e["start"]);
-                for (const LLSD& c : llsd::inArray(arr(e["clicks"]))) ln.mClicks.push_back(gp(c));
-                ln.mClosed = e["closed"].asBoolean();
-                ln.mStamp = f->nextStamp();
-                f->mLines.push_back(ln);
-            }
-            for (const LLSD& e : llsd::inArray(arr(req["stations"])))
-            {
-                Station s;
-                s.mA = gp(e["a"]);
-                s.mB = gp(e["b"]);
-                s.mHasB = true;
-                s.mSide = e["side"].asString();
-                s.mStyle = e["style"].asString();
-                s.mName = e["name"].asString();
-                s.mStamp = f->nextStamp();
-                f->mStations.push_back(s);
-            }
-            for (const LLSD& e : llsd::inArray(arr(req["signals"]))) { Signal s; s.mAt = gp(e); s.mStamp = f->nextStamp(); f->mSignals.push_back(s); }
-            for (const LLSD& e : llsd::inArray(arr(req["turntables"])))
-            {
-                Turntable t;
-                t.mAt = gp(e["at"]);
-                t.mSize = e["size"].asInteger();
-                t.mRoads = e["roads"].asInteger();
-                t.mSpread = e.has("spread") ? ll_round((F32)e["spread"].asReal()) : t.mSpread;
-                t.mShed = e["shed"].asBoolean();
-                t.mStamp = f->nextStamp();
-                f->mTurntables.push_back(t);
-            }
+            f->loadDrawing(reply["request"]);
             // DESIGN.md 10: Change = a new layout that replaces this one once it is laid everywhere; until then both stand, and
             // this one's pieces are not counted as someone else's railway in the plan
             const LLSD& layout = reply["layout"];

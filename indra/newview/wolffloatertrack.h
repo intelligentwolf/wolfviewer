@@ -243,6 +243,10 @@ private:
     void fillMineList();
     LLSD pickedLayout() const;          // the picked row's LAYOUT, or undefined
     void onShow();
+    /** Put a stored REQ's drawing (lines, stations, signals, turntables) into the window's drawing. */
+    void loadDrawing(const LLSD& req);
+    /** A full REQ (ground and others gathered now) for a stored drawing, the window's own drawing left as it was. */
+    bool requestFor(const LLSD& stored, const std::vector<LLUUID>& own_laid, LLSD& req, std::string& why);
     void onChange();
     void onLayPart();
     void onRemove();

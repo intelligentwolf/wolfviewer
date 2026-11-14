@@ -3217,8 +3217,11 @@ void WolfFloaterTrack::setTextIfChanged(LLTextBox* box, const std::string& text)
 
 void WolfFloaterTrack::relayout()
 {
-    // the floater's height in floater_wolf_track.xml, and the Your railways panel under it when it is open
-    constexpr S32 CLOSED_H = 624;
+    // the floater's height in floater_wolf_track.xml, and the Your railways panel under it when it is open. The skin's
+    // header pushes every child ~22 px below its XUI top, so the closed height leaves room under the Your railways
+    // check box (top 600 + 18): at 624 it drew below the floater and a click on it fell through to the world (live
+    // test 14 Nov 14:22Z: the click started a new line instead of opening Your railways)
+    constexpr S32 CLOSED_H = 652;
     const bool open = mMineCheck && mMineCheck->get();
     if (mMinePanel) mMinePanel->setVisible(open);
     const S32 h = CLOSED_H + (open ? (S32)MINE_PANEL_H : 0);

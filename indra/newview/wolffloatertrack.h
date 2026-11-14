@@ -137,7 +137,7 @@ private:
         U32 mStamp = 0;
     };
     enum EMode { MODE_LINE = 0, MODE_BRANCH = 1, MODE_STATION = 2, MODE_SIGNAL = 3, MODE_TURNTABLE = 4 };
-    enum ERefKind { REF_LINE_START, REF_LINE_CLICK, REF_STATION_A, REF_STATION_B, REF_SIGNAL, REF_TURNTABLE };
+    enum ERefKind { REF_LINE_START, REF_LINE_CLICK, REF_STATION_A, REF_STATION_B, REF_SIGNAL };
     struct Ref { ERefKind mKind; size_t mItem; size_t mPoint; };
 
     // ---- the plan (php/track_tool.php "plan": DESIGN.md 10 PLAN) ----

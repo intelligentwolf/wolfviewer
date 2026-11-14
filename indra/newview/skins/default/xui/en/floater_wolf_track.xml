@@ -70,7 +70,7 @@
     <panel follows="left|top" height="72" layout="topleft" left="0" name="turntable_panel" top="186" visible="false" width="500">
         <text follows="left|top" height="20" layout="topleft" left="16" name="tt_size_label" top="4" width="86">Deck length:</text>
         <combo_box follows="left|top" height="22" layout="topleft" left="104" name="tt_size" top="2" width="84"
-         tool_tip="How long the turning deck is. A train can be turned if it is shorter than the deck by a metre.">
+         tool_tip="How long the turning deck is. A train can be turned if it is at least a metre shorter than the deck.">
             <combo_box.item label="15 m" name="15" value="15" />
             <combo_box.item label="20 m" name="20" value="20" />
             <combo_box.item label="24 m" name="24" value="24" />
@@ -91,7 +91,7 @@
         <scroll_list.columns name="what" relative_width="1" />
     </scroll_list>
     <button follows="left|top" height="26" label="Take out" layout="topleft" left="404" name="track_take_out" top="280" width="80"
-     tool_tip="Take the line, branch, station or signal picked in the list out of the drawing" />
+     tool_tip="Take the line, branch, station, signal or turntable picked in the list out of the drawing" />
     <text follows="left|top" height="34" layout="topleft" left="16" name="track_summary" top="366" width="468" word_wrap="true" />
     <text follows="left|top" height="52" layout="topleft" left="16" name="track_problems" top="400" width="468" word_wrap="true" />
     <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="lay_heading" top="456" width="468">2. Lay it</text>

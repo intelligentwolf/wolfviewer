@@ -880,12 +880,7 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
     if (busy() || k < 0 || (size_t)k >= mFlatRefs.size()) return;
     const Ref& r = mFlatRefs[k];
     GP g = toGrid(x, y);
-    if (r.mKind == REF_TURNTABLE)
-    {
-        GP end;
-        if (lineEnd(g, ON_LINE_M, end)) g = end;   // a turntable stays at the end of a line
-    }
-    else if (r.mKind == REF_LINE_CLICK && (r.mPoint == 0 || r.mPoint + 1 == mLines[r.mItem].mClicks.size()))
+    if (r.mKind == REF_LINE_CLICK && (r.mPoint == 0 || r.mPoint + 1 == mLines[r.mItem].mClicks.size()))
     {
         // a turntable at this line end goes with it
         const GP was = mLines[r.mItem].mClicks[r.mPoint];
@@ -915,7 +910,6 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
         case REF_STATION_A: mStations[r.mItem].mA = g; break;
         case REF_STATION_B: mStations[r.mItem].mB = g; break;
         case REF_SIGNAL: mSignals[r.mItem].mAt = g; break;
-        case REF_TURNTABLE: mTurntables[r.mItem].mAt = g; break;
     }
     changed();
 }
@@ -1029,11 +1023,6 @@ void WolfFloaterTrack::removeClick(S32 k)
             mSignals.erase(mSignals.begin() + (std::ptrdiff_t)r.mItem);
             setStatus("The signal was taken out.", false);
             break;
-        case REF_TURNTABLE:
-            mTurntables.erase(mTurntables.begin() + (std::ptrdiff_t)r.mItem);
-            mEditTurntable = -1;
-            setStatus("The turntable was taken out.", false);
-            break;
     }
     changed();
 }
@@ -1145,6 +1134,11 @@ void WolfFloaterTrack::onPickItem()
     const LLScrollListItem* it = mItemsList->getFirstSelected();
     if (!it) return;
     const std::string v = it->getValue().asString();
+    if (v.size() > 2 && (v[0] == 'L' || v[0] == 'G'))
+    {
+        mEditTurntable = -1;
+        mEditStation = -1;
+    }
     if (v.size() > 2 && v[0] == 'T')
     {
         const S32 i = atoi(v.c_str() + 2);
@@ -1177,7 +1171,7 @@ void WolfFloaterTrack::onTakeOut()
 {
     if (busy()) return;
     const LLScrollListItem* it = mItemsList->getFirstSelected();
-    if (!it) { setStatus("Pick a line, branch, station or signal in the list first.", true); return; }
+    if (!it) { setStatus("Pick a line, branch, station, signal or turntable in the list first.", true); return; }
     const std::string v = it->getValue().asString();
     if (v.size() < 3) return;
     const size_t i = (size_t)atoi(v.c_str() + 2);
@@ -1266,9 +1260,8 @@ void WolfFloaterTrack::rebuildFlat()
     mFlatRefs.clear();
     LLViewerRegion* rgn = gAgent.getRegion();
     mFlatRegion = rgn ? rgn->getHandle() : 0;
-    // turntables first: each stands on a line's end marker, and the pen picks the LAST marker under the pointer
-    // (wolffloatertunnels.cpp pickMarker: px <= best_px), so a drag there moves the line's end - and the turntable with it
-    for (size_t i = 0; i < mTurntables.size(); ++i) { mFlat.push_back(toRegion(mTurntables[i].mAt)); mFlatRefs.push_back({ REF_TURNTABLE, i, 0 }); }
+    // a turntable has no marker of its own: it stands on a line's end, whose marker is its handle (a drag of the end takes
+    // the turntable with it: moveClick), and it is changed or taken out from the list
     for (size_t i = 0; i < mLines.size(); ++i)
     {
         const Line& l = mLines[i];
@@ -1289,6 +1282,24 @@ void WolfFloaterTrack::changed()
     mCurLine = mCurLine >= (S32)mLines.size() ? -1 : mCurLine;
     mCurStation = mCurStation >= (S32)mStations.size() ? -1 : mCurStation;
     mEditStation = mEditStation >= (S32)mStations.size() ? -1 : mEditStation;
+    // a turntable stands on a line's end (tracktool/layout.py add_turntable: within 6 m): one whose end was taken away goes
+    // with it (the planner would refuse it), and one loaded within 6 m of an end (Change) is put on the end exactly
+    size_t dropped = 0;
+    for (size_t i = mTurntables.size(); i-- > 0;)
+    {
+        GP end;
+        if (lineEnd(mTurntables[i].mAt, 6.0, end)) { mTurntables[i].mAt = end; continue; }
+        mTurntables.erase(mTurntables.begin() + (std::ptrdiff_t)i);
+        if (mEditTurntable == (S32)i) mEditTurntable = -1;
+        else if (mEditTurntable > (S32)i) --mEditTurntable;
+        ++dropped;
+    }
+    if (dropped > 0 && mStatus)
+    {
+        const std::string said = mStatus->getText();
+        setStatus(said + (said.empty() ? "" : " ") + (dropped == 1 ? std::string("The turntable at that end was taken out too.")
+                                                                  : llformat("The %d turntables at those ends were taken out too.", (S32)dropped)), false);
+    }
     mEditTurntable = mEditTurntable >= (S32)mTurntables.size() ? -1 : mEditTurntable;
     mPlanDirty = true;
     ++mPlanSerial;
@@ -1322,7 +1333,6 @@ std::string WolfFloaterTrack::markerLabel(size_t k) const
             return mStations[r.mItem].mName.empty() ? std::string("Platform") : mStations[r.mItem].mName;
         case REF_STATION_B: return "Platform end";
         case REF_SIGNAL: return "Signal";
-        case REF_TURNTABLE: return "Turntable";
     }
     return std::string();
 }
@@ -2426,6 +2436,15 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
         // direct contents - the new folder comes with them). Then the new folder is fetched the same way until the item shows.
         LLViewerInventoryItem* inv = nullptr;
         const LLUUID objects = gInventory.findCategoryUUIDForType(LLFolderType::FT_OBJECT);
+        if (!gInventory.getCategory(item.mFolder) && (objects.isNull() || !gInventory.getCategory(objects)))
+        {
+            // nothing to ask for: the railway's folder is new and the inventory has no Objects folder loaded to find it in
+            LL_WARNS("WolfTrack") << "the railway's folder " << item.mFolder << " is not known and Objects (" << objects
+                                  << ") is not in the inventory model: cannot fetch it" << LL_ENDL;
+            fail("Your railway was made and is in your inventory (Objects), but this viewer has not loaded your Objects folder yet. "
+                 "Open your inventory, wait for it to finish loading, then press Lay the next part.");
+            return;
+        }
         bool folder_logged = false;
         for (S32 i = 0; i < FETCH_TRIES && !inv; ++i)
         {
@@ -3224,7 +3243,7 @@ void WolfFloaterTrack::updateControls()
     // the turntable's choices take the station row's place while a turntable is being put down or is picked
     const bool tt_edit = mEditTurntable >= 0 && (size_t)mEditTurntable < mTurntables.size();
     const S32 mode_now = mMode->getSelectedIndex();
-    const bool show_tt = mode_now == MODE_TURNTABLE || (tt_edit && mode_now != MODE_STATION);
+    const bool show_tt = mode_now == MODE_TURNTABLE || (tt_edit && !station_edit);   // the last one picked shows
     mTTPanel->setVisible(show_tt);
     for (LLView* v : { (LLView*)mSide, (LLView*)mStyle, (LLView*)mName }) v->setVisible(!show_tt);
     if (LLView* lbl = findChild<LLView>("station_label")) lbl->setVisible(!show_tt);

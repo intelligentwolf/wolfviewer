@@ -380,14 +380,25 @@ void WolfFarTerrain::refresh()
     // the regions to draw: the connected ones at their own size, then the rest of the map. A map block carries the
     // size as a U16 (llworldmapmessage.cpp MapBlockReply SizeX/SizeY), so a region past 65,535 m (Ireland, 460,800 m)
     // arrives wrapped, and a huge region's map block is only fetched when the camera is near its corner
-    struct FarRegion { U64 mHandle; U32 mX, mY, mW, mH; bool mConnected; };
+    struct FarRegion { U32 mX, mY, mW, mH; };
     std::vector<FarRegion> regions;
+    // <WolfViewer 2026-11-14> only the regions that reach into the reach box (the world map keeps every region it has
+    // ever been told about; the draw pass below walks each one from the z8 tiles)
+    auto add_region = [&](U32 ox, U32 oy, U32 w_cells, U32 h_cells) {
+        const FarRegion fr{ ox / CELL_M, oy / CELL_M, w_cells, h_cells };
+        if ((F64)(fr.mX + fr.mW) * CELL_M <= x0 || (F64)fr.mX * CELL_M >= x1
+            || (F64)(fr.mY + fr.mH) * CELL_M <= y0 || (F64)fr.mY * CELL_M >= y1)
+        {
+            return;
+        }
+        regions.push_back(fr);
+    };
     for (LLViewerRegion* r : LLWorld::getInstance()->getRegionList())
     {
         U32 ox = 0, oy = 0;
         from_region_handle(r->getHandle(), &ox, &oy);
         const U32 cells = llmax((U32)r->getWidth(), CELL_M) / CELL_M;
-        regions.push_back({ r->getHandle(), ox / CELL_M, oy / CELL_M, cells, cells, true });
+        add_region(ox, oy, cells, cells);
     }
     for (const auto& kv : LLWorldMap::getInstance()->getRegionMap())
     {
@@ -398,8 +409,7 @@ void WolfFarTerrain::refresh()
         }
         U32 ox = 0, oy = 0;
         from_region_handle(kv.first, &ox, &oy);
-        regions.push_back({ kv.first, ox / CELL_M, oy / CELL_M,
-                            llmax((U32)info->getSizeX(), CELL_M) / CELL_M, llmax((U32)info->getSizeY(), CELL_M) / CELL_M, false });
+        add_region(ox, oy, llmax((U32)info->getSizeX(), CELL_M) / CELL_M, llmax((U32)info->getSizeY(), CELL_M) / CELL_M);
     }
 
     // <WolfViewer 2026-11-14> ticket 853 (Benny Moonstone, flying slowly with a 4,096 m draw distance: blocky
@@ -408,9 +418,9 @@ void WolfFarTerrain::refresh()
     // four, or four merged into one, that ground went: a hole, or WolfFarGround's flat map tile (a slab, the skirts of
     // the pieces round it standing up as walls) until the new tiles came. Now:
     //  1. the wanted tiles (the leaves) are fetched, meshed and pictured BEFORE they are drawn (mPrepare);
-    //  2. what is drawn falls back, region by region: a tile whose quarters are not all ready keeps its own piece, and
-    //     a leaf not ready itself shows its four quarters when they are. A tile's piece and its quarters' are never
-    //     drawn together (both lie on the same lower envelope and would fight for the same depth).
+    //  2. what is drawn falls back, region by region: a tile whose quarters cannot all be drawn keeps its own piece,
+    //     and a leaf not ready itself shows the finer pieces that are ready below it. A tile's piece and any piece
+    //     inside it are never drawn together (both lie on the same lower envelope and would fight for the same depth).
     mDraw.clear();
     mPrepare.clear();
     mCovered.clear();
@@ -482,6 +492,46 @@ void WolfFarTerrain::refresh()
         const U32 half = 1u << (z - 2);
         return std::array<std::pair<U32, U32>, 4>{ { { tx, ty }, { tx + half, ty }, { tx, ty + half }, { tx + half, ty + half } } };
     };
+    // Below a leaf whose own piece is not ready (flying away, or a jump of more than one level): whatever finer pieces
+    // are ready, at any depth. complete_below: they cover this tile's part of the region whole; show_below: draw them.
+    std::function<bool(const FarRegion&, S32, U32, U32)> complete_below = [&](const FarRegion& fr, S32 z, U32 tx, U32 ty) -> bool {
+        if (!overlaps(fr, z, tx, ty) || tile_dist(z, tx, ty) > reach || drawable(PieceKey(fr.mX, fr.mY, z, tx, ty)))
+        {
+            return true;
+        }
+        if (z <= Z_MIN)
+        {
+            return false;
+        }
+        for (const auto& [qx, qy] : quarters(z, tx, ty))
+        {
+            if (!complete_below(fr, z - 1, qx, qy))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    std::function<void(const FarRegion&, S32, U32, U32)> show_below = [&](const FarRegion& fr, S32 z, U32 tx, U32 ty) {
+        if (!overlaps(fr, z, tx, ty) || tile_dist(z, tx, ty) > reach)
+        {
+            return;
+        }
+        const PieceKey key(fr.mX, fr.mY, z, tx, ty);
+        if (drawable(key))
+        {
+            show(fr, key);
+            return;
+        }
+        if (z <= Z_MIN)
+        {
+            return;
+        }
+        for (const auto& [qx, qy] : quarters(z, tx, ty))
+        {
+            show_below(fr, z - 1, qx, qy);
+        }
+    };
     // can this tile's part of the region be drawn whole (by the same rules as visit below)?
     std::function<bool(const FarRegion&, S32, U32, U32)> complete = [&](const FarRegion& fr, S32 z, U32 tx, U32 ty) -> bool {
         if (!overlaps(fr, z, tx, ty))
@@ -504,9 +554,7 @@ void WolfFarTerrain::refresh()
         const bool split = d < SPLIT * tileMetres(z);
         for (const auto& [qx, qy] : quarters(z, tx, ty))
         {
-            if (split ? !complete(fr, z - 1, qx, qy)
-                      : (overlaps(fr, z - 1, qx, qy) && tile_dist(z - 1, qx, qy) <= reach
-                         && !drawable(PieceKey(fr.mX, fr.mY, z - 1, qx, qy))))
+            if (split ? !complete(fr, z - 1, qx, qy) : !complete_below(fr, z - 1, qx, qy))
             {
                 return false;
             }
@@ -527,36 +575,9 @@ void WolfFarTerrain::refresh()
         const bool split = z > Z_MIN && d < SPLIT * tileMetres(z);
         if (!split)
         {
-            // a leaf: its own piece, else its four quarters once all of them are ready (flying away: the finer
-            // pieces stay until the coarser one comes)
-            if (drawable(key))
-            {
-                show(fr, key);
-            }
-            else if (z > Z_MIN)
-            {
-                bool all = true;
-                for (const auto& [qx, qy] : quarters(z, tx, ty))
-                {
-                    if (overlaps(fr, z - 1, qx, qy) && tile_dist(z - 1, qx, qy) <= reach
-                        && !drawable(PieceKey(fr.mX, fr.mY, z - 1, qx, qy)))
-                    {
-                        all = false;
-                        break;
-                    }
-                }
-                if (all)
-                {
-                    for (const auto& [qx, qy] : quarters(z, tx, ty))
-                    {
-                        const PieceKey q(fr.mX, fr.mY, z - 1, qx, qy);
-                        if (overlaps(fr, z - 1, qx, qy) && tile_dist(z - 1, qx, qy) <= reach)
-                        {
-                            show(fr, q);
-                        }
-                    }
-                }
-            }
+            // a leaf: its own piece, else the finer pieces that are ready below it, at any depth (flying away: they
+            // stay until the coarser one comes; where none is ready, WolfFarGround's tile shows as before)
+            show_below(fr, z, tx, ty);
             return;
         }
         // finer wanted here: the quarters when every one of them can be drawn whole, else this tile's own piece

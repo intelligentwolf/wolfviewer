@@ -13,6 +13,7 @@
 
 #include "llbutton.h"
 #include "llfloaterreg.h"
+#include "llscrollcontainer.h"   // [HUDS TILES 2 2026-11-14/] tiles_scroll
 #include "lltextbox.h"
 #include "lluicolortable.h"
 #include "wolfdrive.h"
@@ -35,7 +36,8 @@ namespace
         "greedy", "roleplay", "compass", "speed",   // [W104 FEATFIX 2026-11-11]
         "fishing",   // [FISHING HUD 2026-11-11/]
         "train",   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml tile_train / state_train
-        "weatherprops", "tutorials"   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml row 6
+        "weatherprops", "tutorials",   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml row 6
+        "trainbuilder", "track"   // [HUDS TILES 2 2026-11-14/] floater_wolf_huds.xml tile_trainbuilder (row 6 right) / tile_track (row 7)
     };
 
     // [W104 FEATFIX 2026-11-11 A7] each tile's name as floater_wolf_huds.xml name_<id> shows it, for the status line
@@ -46,7 +48,8 @@ namespace
         "Greedy", "The Roleplay console", "Tessa's Compass", "Xenon's WolfSpeed",
         "Fishing",   // [W104 MERGE 2026-11-11] floater_wolf_huds.xml name_fishing
         "The Train Cab",   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml name_train
-        "Weather Props", "Tutorial Videos"   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml name_weatherprops / name_tutorials
+        "Weather Props", "Tutorial Videos",   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml name_weatherprops / name_tutorials
+        "The Train Builder", "Lay Railway Track"   // [HUDS TILES 2 2026-11-14/] floater_wolf_huds.xml name_trainbuilder / name_track
     };
 
     // [W104 FEATFIX 2026-11-11] Wolf Territories only, as their menu items (menu_viewer.xml on_visible WolfGrid.IsOnWolfTerritories);
@@ -57,7 +60,8 @@ namespace
         true, true, false, true,
         true,   // [W104 MERGE 2026-11-11] Fishing: Wolf Territories only, as its menu item (menu_viewer.xml WolfWorldFishing on_visible WolfGrid.IsOnWolfTerritories)
         true,   // [HUDS TRAIN 2026-11-13] the Train Cab: Wolf Territories only, as its menu item (menu_viewer.xml WolfTrainCab on_visible WolfGrid.IsOnWolfTerritories) and WolfTrain::onWolf (wolftraincab.cpp)
-        true, true   // [WEATHER PROPS / TUTORIALS 2026-11-13] Wolf Territories only, as their menu items (menu_viewer.xml WolfWeatherProps / WolfTutorials on_visible WolfGrid.IsOnWolfTerritories)
+        true, true,   // [WEATHER PROPS / TUTORIALS 2026-11-13] Wolf Territories only, as their menu items (menu_viewer.xml WolfWeatherProps / WolfTutorials on_visible WolfGrid.IsOnWolfTerritories)
+        true, true   // [HUDS TILES 2 2026-11-14] Wolf Territories only, as their menu items (menu_viewer.xml WolfWorldTrainBuilder / WolfVehiclesTrainBuilder / WolfWorldTrack on_visible WolfGrid.IsOnWolfTerritories)
     };
 
     // [W104 FEATFIX 2026-11-11] the windows these tiles show and hide (menu_viewer.xml WolfRoleplay / WolfCompass / WolfSpeed:
@@ -71,6 +75,10 @@ namespace
             case WolfFloaterHuds::T_SPEED:    return "wolf_speed";
             case WolfFloaterHuds::T_WEATHERPROPS: return "wolf_weather_props";   // [WEATHER PROPS 2026-11-13/] menu_viewer.xml WolfWeatherProps
             case WolfFloaterHuds::T_TUTORIALS:    return "wolf_tutorials";       // [TUTORIALS 2026-11-13/] menu_viewer.xml WolfTutorials
+            // [HUDS TILES 2 2026-11-14/] menu_viewer.xml WolfWorldTrainBuilder / WolfWorldTrack Floater.Show parameters
+            // (llviewerfloaterreg.cpp "wolf_train_builder" WolfFloaterTrainBuilder, "wolf_track" WolfFloaterTrack)
+            case WolfFloaterHuds::T_TRAINBUILDER: return "wolf_train_builder";
+            case WolfFloaterHuds::T_TRACK:        return "wolf_track";
             default:                          return nullptr;
         }
     }
@@ -101,6 +109,23 @@ bool WolfFloaterHuds::postBuild()
         mStates[i] = getChild<LLTextBox>(std::string("state_") + TILE_IDS[i]);
     }
     mStatus = getChild<LLTextBox>("status");
+    // [HUDS TILES 2 2026-11-14] the tiles scroll (floater_wolf_huds.xml tiles_scroll / tiles_panel). Tabbing to a tile below
+    // the fold brings it into view, as Wolf Experiences' cards (wolffloaterexperiences.cpp): a tile's rect is in tiles_panel's
+    // coordinates, which are the scroll's document coordinates (llscrollcontainer.cpp scrollToShowRect).
+    mScroll = getChild<LLScrollContainer>("tiles_scroll");
+    mFullHeight = getRect().getHeight();
+    LLHandle<LLFloater> fh = getHandle();
+    for (S32 i = 0; i < T_COUNT; ++i)
+    {
+        LLButton* tile = mTiles[i];
+        tile->setFocusReceivedCallback([fh, tile](LLFocusableElement*)
+        {
+            if (WolfFloaterHuds* self = static_cast<WolfFloaterHuds*>(fh.get()))
+            {
+                if (self->mScroll) self->mScroll->scrollToShowRect(tile->getRect());
+            }
+        });
+    }
     refreshTiles();
     return true;
 }
@@ -110,6 +135,10 @@ void WolfFloaterHuds::onOpen(const LLSD& key)
     LLFloater::onOpen(key);
     mNote.clear();   // [A7/]
     refreshTiles();
+    // [HUDS TILES 2 2026-11-14] from the top every time (as WolfStorm's window), fitted to the floaters' area as it is now
+    if (mScroll) mScroll->goToTop();
+    mFitRoom = -1;
+    fitToArea();
     // Keyboard: Tab moves between the tiles, Enter or Space presses one (LLButton::handleKeyHere). No tile is given focus
     // on open: in the WolfViewer skins a focused button is drawn green, which would read as "this one is on".
 }
@@ -119,7 +148,40 @@ void WolfFloaterHuds::draw()
     // The HUDs change from everywhere (their own close buttons, the Wolf World menu, a seat, leaving Wolf): read them
     // every frame while this shows, as lltoolbarview.cpp draw() lit the old icons.
     refreshTiles();
+    // [HUDS TILES 2 2026-11-14] the floaters' area changed while this shows (the viewer window resized, the UI size changed,
+    // a toolbar shown or hidden): fit again
+    if (gFloaterView && gFloaterView->getSnapRect().getHeight() != mFitRoom)
+    {
+        fitToArea();
+    }
     LLFloater::draw();
+}
+
+// [HUDS TILES 2 2026-11-14] With seven rows the window (floater_wolf_huds.xml, 920 high in UI units) is taller than the
+// floaters' area on many screens at a larger UI size. LLFloaterView::adjustToFitScreen (llfloater.cpp:3242-3307) only
+// shrinks resizable floaters and this one is not, so it is done here: never taller than the area (getSnapRect, the space
+// between the toolbars, in the same UI units as this window's rect, so it follows the UI size), never shorter than the
+// intro, one row of tiles and the status line (64 + 108 + 52, floater_wolf_huds.xml), and never taller than every tile
+// needs. The tiles scroll inside (tiles_scroll follows all; the status line follows the bottom). Then the window is brought
+// wholly inside the area (adjustToFitScreen, allow_partial_outside false, snap_in_toolbars true, as wolffloaterbuilder.cpp).
+void WolfFloaterHuds::fitToArea()
+{
+    if (!gFloaterView || getParent() != gFloaterView || isMinimized() || mFullHeight <= 0)
+    {
+        return;
+    }
+    const S32 room = gFloaterView->getSnapRect().getHeight();
+    mFitRoom = room;
+    constexpr S32 MIN_HEIGHT = 64 + 108 + 52;
+    const S32 want = llmax(MIN_HEIGHT, llmin(room, mFullHeight));
+    const LLRect r = getRect();
+    if (want != r.getHeight())
+    {
+        LLRect fitted;
+        fitted.setLeftTopAndSize(r.mLeft, r.mTop, r.getWidth(), want);   // the top stays where it is
+        setShape(fitted);
+    }
+    gFloaterView->adjustToFitScreen(this, false, true);
 }
 
 // Source: lltoolbarview.cpp draw() before 2026-11-10 - each icon's setToggleState test, unchanged.
@@ -155,7 +217,9 @@ bool WolfFloaterHuds::tileOn(ETile t)
         case T_SPEED:     return LLFloaterReg::instanceVisible(floaterOf(t));   // as their menu ticks (Floater.Visible)
         // [WEATHER PROPS / TUTORIALS 2026-11-13] lit while their window shows, as the three above
         case T_WEATHERPROPS:
-        case T_TUTORIALS: return LLFloaterReg::instanceVisible(floaterOf(t));
+        case T_TUTORIALS:
+        case T_TRAINBUILDER:   // [HUDS TILES 2 2026-11-14/] lit while its window shows, as the two above
+        case T_TRACK:     return LLFloaterReg::instanceVisible(floaterOf(t));
         // [FISHING HUD 2026-11-11] on while the Fishing HUD shows (wolffishingoverlay.cpp)
         case T_FISHING:   return WolfFishingSession::instanceExists() && WolfFishingSession::instance().hudWanted();   // (on, or waiting for a vehicle panel)
         // [HUDS TRAIN 2026-11-13] on while the Train Cab shows, as its menu tick (llviewermenu.cpp WolfTrain.IsShown ->
@@ -202,7 +266,11 @@ void WolfFloaterHuds::onTile(ETile t)
         case T_SPEED:     LLFloaterReg::toggleInstance(floaterOf(t)); break;   // Floater.Toggle, as the menu
         // [WEATHER PROPS / TUTORIALS 2026-11-13] their windows, as Wolf World > Sky & Weather > Weather Props... / Tutorial Videos...
         case T_WEATHERPROPS:
-        case T_TUTORIALS: LLFloaterReg::toggleInstance(floaterOf(t)); break;
+        case T_TUTORIALS:
+        // [HUDS TILES 2 2026-11-14] their windows: on opens it, as Floater.Show of their menu items (menu_viewer.xml
+        // WolfWorldTrainBuilder / WolfWorldTrack); off (the tile lit, the window showing) hides it, as the tiles above
+        case T_TRAINBUILDER:
+        case T_TRACK:     LLFloaterReg::toggleInstance(floaterOf(t)); break;
         // [FISHING HUD 2026-11-11] the same as Wolf World > Fishing (on) and the HUD's CLOSE (off: the rod's touch menu)
         case T_FISHING:   WolfFishingSession::toggleHud(); break;   // on; off; or, while waiting, cancel the wait
         // [HUDS TRAIN 2026-11-13] the same as Wolf World > Vehicles & Travel > Train Cab (llviewermenu.cpp WolfTrain.Toggle ->

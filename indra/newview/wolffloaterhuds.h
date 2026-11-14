@@ -13,6 +13,7 @@
 #include "llfloater.h"
 
 class LLButton;
+class LLScrollContainer;
 class LLTextBox;
 
 // [HUDS BUTTON 2026-11-10] Paul: "on the bottom left of the screen all those tiny buttons look messy - have a Huds button
@@ -35,11 +36,14 @@ public:
     // that should be": + Greedy, the Roleplay console, Tessa's Compass and Xenon's WolfSpeed (each a window shown and hidden
     // from the Wolf World menu). A new tile goes before T_COUNT, with its TILE_IDS / TILE_NAMES / TILE_WOLF_ONLY entries,
     // tileOn and onTile cases and its XML block (floater_wolf_huds.xml: the next free slot of the 3-wide grid).
+    // [HUDS TILES 2 2026-11-14] the tiles are in tiles_panel inside tiles_scroll: a new row grows tiles_panel, the scroll, the
+    // window by 116 and moves the status line 116 down; fitToArea keeps the window inside the floaters' area.
     enum ETile { T_GAME = 0, T_CAR, T_SKIS, T_PLANE, T_SPACESHIP, T_BOAT, T_SHIP, T_SPEEDBOAT, T_SUBMARINE,
                  T_GREEDY, T_ROLEPLAY, T_COMPASS, T_SPEED,
                  T_FISHING,   // [FISHING HUD 2026-11-11] Paul: the HUDs window lists every on-screen HUD ([W104 MERGE 2026-11-11] after featfix's tiles)
                  T_TRAIN,     // [HUDS TRAIN 2026-11-13] Paul (W106 test build): "the train hud is not on the huds menu?" - the Train Cab (wolftraincab.h)
                  T_WEATHERPROPS, T_TUTORIALS,   // [WEATHER PROPS / TUTORIALS 2026-11-13] ticket 847: their windows (row 6)
+                 T_TRAINBUILDER, T_TRACK,       // [HUDS TILES 2 2026-11-14] the Train Builder and Lay Railway Track windows (row 6 right, row 7)
                  T_COUNT };
 
     /** Lit as its old icon was (the HUD shows). */
@@ -48,10 +52,14 @@ public:
 private:
     void onTile(ETile t);
     void refreshTiles();
+    void fitToArea();   // [HUDS TILES 2 2026-11-14] no taller than the floaters' area; the tiles scroll inside
 
     LLButton*  mTiles[T_COUNT] = { nullptr };
     LLTextBox* mStates[T_COUNT] = { nullptr };
     LLTextBox* mStatus = nullptr;
+    LLScrollContainer* mScroll = nullptr;   // [HUDS TILES 2 2026-11-14] floater_wolf_huds.xml tiles_scroll
+    S32 mFullHeight = 0;                    // [HUDS TILES 2 2026-11-14] the XML height: every tile showing, no scroll bar
+    S32 mFitRoom = -1;                      // [HUDS TILES 2 2026-11-14] the floaters' area height fitToArea last fitted to
     std::string mNote;   // [W104 FEATFIX 2026-11-11 A7] the status line's words after a press that did not switch a HUD on
 };
 

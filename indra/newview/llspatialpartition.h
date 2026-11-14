@@ -356,6 +356,15 @@ public:
     }
     // </WolfViewer>
 
+    // <WolfViewer 2026-11-14> [W107 STATIC BATCH] wolfstaticshadowbatch.h: the shadow passes draw this group's static
+    // opaque casters from a shared buffer. mWolfGeomVersion changes whenever the draw map is emptied (clearDrawMap) or the
+    // vertex data behind it is rewritten in place (LLVolumeGeometryManager::rebuildMesh); the copy in the shared buffer
+    // is used only while the version it was made from is still the group's. mWolfStaticBatch is that module's record of
+    // this group (null: none), released by the group's destructor.
+    U32 mWolfGeomVersion = 0;
+    void* mWolfStaticBatch = nullptr;
+    // </WolfViewer>
+
      //LISTENER FUNCTIONS
     virtual void handleInsertion(const TreeNode* node, LLViewerOctreeEntry* face);
     virtual void handleRemoval(const TreeNode* node, LLViewerOctreeEntry* face);

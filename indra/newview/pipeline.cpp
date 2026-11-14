@@ -154,6 +154,7 @@
 #include "wolfleaves.h"      // [FALLING LEAVES 2026-11-10/] ticket 718
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfshadowbatch.h"   // [W107 SHADOW BATCH 2026-11-14/] the shadow pass joins neighbouring untextured draws
+#include "wolfstaticshadowbatch.h"   // [W107 STATIC BATCH 2026-11-14/] the shadow pass draws static casters from shared buffers
 #include "wolfterrainlevels.h"   // [WOLF SKY LEVELS 2026-11-05/]
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
 #include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12/] the Wolf Environment's clouds, fog and zones
@@ -767,6 +768,7 @@ void LLPipeline::cleanup()
 
     releaseGLBuffers();
     WolfEnvironmentRender::destroyGL();   // [WOLF ENV TAKRAM 2026-10-12] the atmosphere's tables as well
+    WolfStaticShadowBatch::releaseAll();   // [W107 STATIC BATCH 2026-11-14/] the shared shadow caster buffers
 
     mFaceSelectImagep = NULL;
 
@@ -3880,10 +3882,19 @@ void LLPipeline::postSort(LLCamera &camera)
             group->rebuildGeom();
         }
 
+        // [W107 STATIC BATCH 2026-11-14] in a shadow pass that uses the shared buffers (wolfstaticshadowbatch.h), a group
+        // whose static opaque casters are in them is drawn by WolfStaticShadowBatch::drawPass: its draw infos of those
+        // pass types stay out of the render maps (they would be drawn twice). False everywhere else.
+        const bool wolf_batched = WolfStaticShadowBatch::takeGroup(group);
+
         for (LLSpatialGroup::draw_map_t::iterator j = group->mDrawMap.begin(); j != group->mDrawMap.end(); ++j)
         {
             LLSpatialGroup::drawmap_elem_t &src_vec = j->second;
             if (!hasRenderType(j->first))
+            {
+                continue;
+            }
+            if (wolf_batched && WolfStaticShadowBatch::isBatchedType(j->first))
             {
                 continue;
             }
@@ -10968,6 +10979,11 @@ namespace
         U64 mStaticBufferChanges = 0;
         U64 mGLTFInfos = 0;
         U64 mGLTFDraws = 0;
+        // [W107 STATIC BATCH 2026-11-14] WolfStaticShadowBatch::PassCounts, summed
+        U64 mBatchGroups = 0;
+        U64 mBatchCommands = 0;
+        U64 mBatchCalls = 0;
+        U64 mBatchStockGroups = 0;
     };
     // Source: pipeline.cpp generateSunShadow() - for (j = 0; j < (gCubeSnapshot ? 2 : 4); j++); pipeline.h shadow[4]
     constexpr S32 WOLF_SUN_CASCADES = 4;
@@ -11011,6 +11027,11 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
     LLGLDepthTest depth_test(GL_TRUE, GL_TRUE, GL_LESS);
 
     updateCull(shadow_cam, result);
+
+    // [W107 STATIC BATCH 2026-11-14] from here to endPass() below, postSort (in stateSort) hands the static volume groups
+    // whose opaque casters are in the shared buffers to WolfStaticShadowBatch instead of the render maps
+    WolfStaticShadowBatch::beginPass();
+    WolfStaticShadowBatch::PassCounts wolf_batch;
 
     stateSort(shadow_cam, result);
 
@@ -11064,6 +11085,13 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
         LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("shadow simple"); //LL_RECORD_BLOCK_TIME(FTM_SHADOW_SIMPLE);
         LL_PROFILE_GPU_ZONE("shadow simple");
         gGL.getTexUnit(0)->disable();
+
+        if (!rigged)
+        {
+            // [W107 STATIC BATCH 2026-11-14] the groups postSort handed over, in the state the stock draws below get
+            // (gDeferredShadowProgram bound, colour mask set, texture unit 0 off); the shader is bound again on return
+            WolfStaticShadowBatch::drawPass(wolf_batch);
+        }
 
         // [W107 SHADOW BATCH 2026-11-14] WolfShadowBatchJoin off: the stock path below, exactly as before (A/B comparison)
         static LLCachedControl<bool> wolf_join(gSavedSettings, "WolfShadowBatchJoin", true);
@@ -11226,7 +11254,12 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
         c.mStaticBufferChanges += wolf_static.mBufferChanges;
         c.mGLTFInfos += wolf_gltf.mInfos;
         c.mGLTFDraws += wolf_gltf.mDraws;
+        c.mBatchGroups += wolf_batch.mGroups;
+        c.mBatchCommands += wolf_batch.mCommands;
+        c.mBatchCalls += wolf_batch.mCalls;
+        c.mBatchStockGroups += wolf_batch.mStockGroups;
     }
+    WolfStaticShadowBatch::endPass();   // [W107 STATIC BATCH 2026-11-14/]
 
     // reset occlusion culling flag
     sUseOcclusion = saved_occlusion;
@@ -11498,6 +11531,7 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
 {
     if (!sRenderDeferred || RenderShadowDetail <= 0)
     {
+        WolfStaticShadowBatch::releaseAll();   // [W107 STATIC BATCH 2026-11-14/] no shadow pass: its buffers are not kept
         return;
     }
 
@@ -11726,6 +11760,7 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
     }
     else
     {
+        bool wolf_self_tested = false;   // [W107 STATIC BATCH 2026-11-14/] a cascade of this frame was self tested
         for (S32 j = 0; j < (gCubeSnapshot ? 2 : 4); j++)
         {
             if (!hasRenderDebugMask(RENDER_DEBUG_SHADOW_FRUSTA) && !gCubeSnapshot)
@@ -12086,6 +12121,31 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
             {
                 static LLCullResult result[4];
                 renderShadow(view[j], proj[j], shadow_cam, result[j], true);
+
+                // [W107 STATIC BATCH 2026-11-14] self test (WolfStaticShadowBatchSelfTest frames to go): the cascade
+                // again down the stock path into the same cleared target, and the two depth maps compared texel by
+                // texel. The second render is the stock one, so a tested frame shows stock's shadows.
+                if (!gCubeSnapshot && WolfStaticShadowBatch::selfTestWanted())
+                {
+                    static std::vector<F32> wolf_depth_batched;
+                    static std::vector<F32> wolf_depth_stock;
+                    const U32 wolf_w = mRT->shadow[j].getWidth();
+                    const U32 wolf_h = mRT->shadow[j].getHeight();
+                    const bool wolf_read = WolfStaticShadowBatch::selfTestReadDepth(wolf_w, wolf_h, wolf_depth_batched);
+                    mRT->shadow[j].clear();
+                    WolfStaticShadowBatch::selfTestForceStock(true);
+                    renderShadow(view[j], proj[j], shadow_cam, result[j], true);
+                    WolfStaticShadowBatch::selfTestForceStock(false);
+                    if (wolf_read && WolfStaticShadowBatch::selfTestReadDepth(wolf_w, wolf_h, wolf_depth_stock))
+                    {
+                        WolfStaticShadowBatch::selfTestReport(j, wolf_depth_batched, wolf_depth_stock);
+                    }
+                    else
+                    {
+                        LL_WARNS("WolfShadows") << "static shadow batch self test: cascade " << j << " depth could not be read" << LL_ENDL;
+                    }
+                    wolf_self_tested = true;
+                }
             }
 
             mRT->shadow[j].flush();
@@ -12094,6 +12154,10 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
             {
                 mShadowCamera[j+4] = shadow_cam;
             }
+        }
+        if (wolf_self_tested)
+        {
+            WolfStaticShadowBatch::selfTestFrameDone();   // [W107 STATIC BATCH 2026-11-14/]
         }
     }
 
@@ -12133,10 +12197,17 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
                      << " -> " << llformat("%.0f", (F64)c.mStaticDraws / n)
                      << " (" << llformat("%.0f", (F64)c.mStaticBufferChanges / n) << " buffers)"
                      << ", gltf " << llformat("%.0f", (F64)c.mGLTFInfos / n)
-                     << " -> " << llformat("%.0f", (F64)c.mGLTFDraws / n) << ";";
+                     << " -> " << llformat("%.0f", (F64)c.mGLTFDraws / n)
+                     // [W107 STATIC BATCH 2026-11-14] not in the counts before it: groups drawn from the shared buffers,
+                     // their draw commands, the multi-draw calls that carried them, groups sent the stock way after all
+                     << ", shared " << llformat("%.0f", (F64)c.mBatchGroups / n) << " groups / "
+                     << llformat("%.0f", (F64)c.mBatchCommands / n) << " commands in "
+                     << llformat("%.1f", (F64)c.mBatchCalls / n) << " calls (+"
+                     << llformat("%.1f", (F64)c.mBatchStockGroups / n) << " stale);";
                 c = WolfShadowCascadeCounts();
             }
             LL_INFOS("WolfShadows") << line.str() << LL_ENDL;
+            LL_INFOS("WolfShadows") << WolfStaticShadowBatch::logLine() << LL_ENDL;
         }
     }
 
@@ -12282,6 +12353,29 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
                 RenderSpotLight = drawable;
 
                 renderShadow(view[i + 4], proj[i + 4], shadow_cam, result[i], false);
+
+                // [W107 STATIC BATCH 2026-11-14] the self test of the sun cascades above, for a projector's shadow map
+                // (reported as cascade 4 + i); the frame count is taken down by the sun pass of the frame
+                if (WolfStaticShadowBatch::selfTestWanted())
+                {
+                    static std::vector<F32> wolf_depth_batched;
+                    static std::vector<F32> wolf_depth_stock;
+                    const U32 wolf_w = mSpotShadow[i].getWidth();
+                    const U32 wolf_h = mSpotShadow[i].getHeight();
+                    const bool wolf_read = WolfStaticShadowBatch::selfTestReadDepth(wolf_w, wolf_h, wolf_depth_batched);
+                    mSpotShadow[i].clear();
+                    WolfStaticShadowBatch::selfTestForceStock(true);
+                    renderShadow(view[i + 4], proj[i + 4], shadow_cam, result[i], false);
+                    WolfStaticShadowBatch::selfTestForceStock(false);
+                    if (wolf_read && WolfStaticShadowBatch::selfTestReadDepth(wolf_w, wolf_h, wolf_depth_stock))
+                    {
+                        WolfStaticShadowBatch::selfTestReport(4 + i, wolf_depth_batched, wolf_depth_stock);
+                    }
+                    else
+                    {
+                        LL_WARNS("WolfShadows") << "static shadow batch self test: projector " << i << " depth could not be read" << LL_ENDL;
+                    }
+                }
 
                 RenderSpotLight = nullptr;
 

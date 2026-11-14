@@ -1030,6 +1030,7 @@ set(viewer_SOURCE_FILES
     wolfframegovernor.cpp
     wolfsubpixelcull.cpp
     wolfshadowbatch.cpp
+    wolfstaticshadowbatch.cpp
     wolfradiostations.cpp
     wolffloaterradio.cpp
     wolffloaterroleplay.cpp
@@ -2092,6 +2093,7 @@ set(viewer_HEADER_FILES
     wolfframegovernor.h
     wolfsubpixelcull.h
     wolfshadowbatch.h
+    wolfstaticshadowbatch.h
     wolfradiostations.h
     wolffloaterradio.h
     wolffloaterroleplay.h

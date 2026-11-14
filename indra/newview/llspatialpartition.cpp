@@ -28,6 +28,7 @@
 
 #include "llspatialpartition.h"
 #include "wolfsubpixelcull.h"   // [W107 FARPERF 2026-11-14/] static prims and mesh under one pixel across
+#include "wolfstaticshadowbatch.h"   // [W107 STATIC BATCH 2026-11-14/] releaseGroup: the group's part of the shared shadow buffers
 
 #include "llappviewer.h"
 #include "lltexturecache.h"
@@ -137,11 +138,18 @@ LLSpatialGroup::~LLSpatialGroup()
     sNodeCount--;
 
     clearDrawMap();
+    WolfStaticShadowBatch::releaseGroup(this);   // [W107 STATIC BATCH 2026-11-14/]
 }
 
 void LLSpatialGroup::clearDrawMap()
 {
     mDrawMap.clear();
+    // [W107 STATIC BATCH 2026-11-14] llspatialpartition.h: a copy of the old draw map's casters is out of date
+    ++mWolfGeomVersion;
+    if (mWolfStaticBatch)
+    {
+        WolfStaticShadowBatch::dropCopy(this);
+    }
 }
 
 bool LLSpatialGroup::isHUDGroup()

@@ -227,6 +227,7 @@ extern LLGLSLShader         gWolfSurfCurlProgram;   // [SURF 2026-09-07 phase 2]
 extern LLGLSLShader         gWolfGodRaysProgram;
 extern LLGLSLShader         gWolfCloudDeckProgram;   // <WolfViewer 2026-10-07/> the cloud layer to fly through
 extern LLGLSLShader         gWolfUnderSeaProgram;    // [UNDERSEA 2026-11-09] wolfundersea.cpp: the swaying sea plants
+extern LLGLSLShader         gWolfShadowBatchProgram; // [W107 STATIC BATCH 2026-11-14] wolfstaticshadowbatch.cpp: shadow casters from shared buffers
 // [WOLF ENV 2026-10-12] the Wolf Environment's own sky, clouds and fog (wolfenvironmentrender.cpp)
 extern LLGLSLShader         gWolfAuroraLUTProgram;   // [WOLF AURORA 2026-10-12] wolfaurora.cpp
 extern LLGLSLShader         gWolfEnvSkyProgram;            // [WOLF ENV TAKRAM 2026-10-12] wolftk/skyF.glsl

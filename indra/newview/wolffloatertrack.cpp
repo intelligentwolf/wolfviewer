@@ -48,6 +48,7 @@
 #include "llradiogroup.h"
 #include "llrender.h"
 #include "llscrolllistctrl.h"
+#include "llspinctrl.h"
 #include "llsdjson.h"
 #include "llselectmgr.h"
 #include "llsurface.h"
@@ -78,7 +79,11 @@ namespace
     constexpr F32 STATUS_EVERY_S = 2.f;        // the brief: "poll status every 2 s ONLY while a job is queued/running"
     constexpr S32 LOOK_S = 60;                 // DESIGN.md 10: wait up to 60 s for the pieces
     constexpr F32 MATCH_M = 0.05f;             // DESIGN.md 10: roots within 0.05 m
-    constexpr S32 FETCH_TRIES = 20;            // wolfcave.cpp:941 rezExact: the item's folder is fetched once a second, 20 times
+    // wolfcave.cpp:941 rezExact waits 20 s for an item in a folder the viewer knows; here the folder itself is new (the worker makes
+    // "Railway <code> - <name>" under Objects through Robust: deliver.py:76-78), so two fetches in turn - Objects, then the new
+    // folder - each re-asked at most every FOLDER_REASK_S: 30 s (CHOSEN) leaves room for both
+    constexpr S32 FETCH_TRIES = 30;
+    constexpr S32 FOLDER_REASK_S = 5;          // CHOSEN: a folder not seen yet is asked for again this often (wolffloaterlifts.cpp:996-1006 every 5 s)
     constexpr S32 GONE_WAIT_S = 30;            // CHOSEN: after a delete, the pieces are waited for this long to go
     // DESIGN.md 5.1 / 10: the ground box is the drawing's box plus 60 m all round, 4 m apart, 8 m when that is over 256 a side
     constexpr F64 GROUND_MARGIN_M = 60.0;
@@ -87,6 +92,9 @@ namespace
     constexpr size_t OTHERS_MAX = 2000;        // tracktool/plan.py:19 MAX_OTHERS
     // tracktool/plan.py:14-18 the planner's limits (a request over them is refused as bad)
     constexpr size_t MAX_REGIONS = 4, MAX_LINES = 12, MAX_CLICKS = 40, MAX_STATIONS = 8, MAX_SIGNALS = 40;
+    constexpr size_t MAX_TURNTABLES = 4;       // DESIGN.md 10 REQ turntables: at most 4 (tracktool/plan.py turntables > 4: refused)
+    constexpr F64 TT_PIT_EXTRA_M = 0.3;        // DESIGN.md 10 / tracktool/layout.py:47 TT_PIT_EXTRA: the pit ring at size / 2 + 0.3
+    constexpr S32 TT_SPARE_M = 1;              // DESIGN.md 10: the longest train a deck turns is the deck less 1 m (Turntable.cs TT_SPARE_M)
     constexpr size_t STATION_NAME_MAX = 24;            // tracktool/plan.py:93 / layout.py:39 NAME_OK: 24 characters
     // DESIGN.md 4.1: a guide is a 0.5 x 0.5 x 0.2 box (build_loops.py:61); DESIGN.md 5.1: +-0.01
     const LLVector3 GUIDE_SIZE(0.5f, 0.5f, 0.2f);
@@ -117,6 +125,7 @@ namespace
     const LLColor4 COL_PROBLEM(1.f, 0.2f, 0.15f, 1.f);
     const LLColor4 COL_SHOWN(0.45f, 0.9f, 1.f, 0.9f);
     const LLColor4 COL_DRAWN(1.f, 1.f, 1.f, 0.85f);
+    const LLColor4 COL_TURNTABLE(1.f, 0.65f, 0.25f, 1.f);
 
     bool onWolf() { return WolfGrid::isOnWolfTerritories(); }
 
@@ -385,6 +394,12 @@ bool WolfFloaterTrack::postBuild()
     mSide = getChild<LLComboBox>("station_side");
     mStyle = getChild<LLComboBox>("station_style");
     mName = getChild<LLLineEditor>("station_name");
+    mTTPanel = getChild<LLPanel>("turntable_panel");
+    mTTSize = mTTPanel->getChild<LLComboBox>("tt_size");
+    mTTRoads = mTTPanel->getChild<LLSpinCtrl>("tt_roads");
+    mTTSpread = mTTPanel->getChild<LLSpinCtrl>("tt_spread");
+    mTTShed = mTTPanel->getChild<LLCheckBoxCtrl>("tt_shed");
+    mTTTurns = mTTPanel->getChild<LLTextBox>("tt_turns");
     mItemsList = getChild<LLScrollListCtrl>("track_items");
     mTakeOutBtn = getChild<LLButton>("track_take_out");
     mSummary = getChild<LLTextBox>("track_summary");
@@ -426,6 +441,16 @@ bool WolfFloaterTrack::postBuild()
     mName->setKeystrokeCallback([this](LLLineEditor*, void*) { onStationControls(); }, nullptr);
     mName->setCommitCallback([this](LLUICtrl*, const LLSD&) { onStationControls(); });
     mItemsList->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPickItem(); });
+    // a new turntable's choices until the resident changes them (DESIGN.md 10: spread default 20)
+    const Turntable tt_defaults;
+    mTTSize->setValue(llformat("%d", tt_defaults.mSize));
+    mTTRoads->setValue(tt_defaults.mRoads);
+    mTTSpread->setValue(tt_defaults.mSpread);
+    mTTShed->set(tt_defaults.mShed);
+    mTTSize->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTurntableControls(); });
+    mTTRoads->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTurntableControls(); });
+    mTTSpread->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTurntableControls(); });
+    mTTShed->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTurntableControls(); });
     mTakeOutBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onTakeOut(); });
     mLayBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onLay(); });
     mNextPartBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { layHere(); });
@@ -580,7 +605,7 @@ bool WolfFloaterTrack::routeEditing() const
 
 bool WolfFloaterTrack::drawingEmpty() const
 {
-    return mLines.empty() && mStations.empty() && mSignals.empty();
+    return mLines.empty() && mStations.empty() && mSignals.empty() && mTurntables.empty();
 }
 
 S32 WolfFloaterTrack::usableLines() const
@@ -641,6 +666,43 @@ bool WolfFloaterTrack::onALine(const GP& p, F64 within, GP& snapped, S32 exclude
         if (l.mClosed && pts.size() >= 3) seg(pts.back().x, pts.back().y, pts.front().x, pts.front().y);
     }
     return found;
+}
+
+bool WolfFloaterTrack::lineEnd(const GP& p, F64 within, GP& end) const
+{
+    // tracktool/layout.py add_turntable: a main line's or branch's end that is not a loop (its first or last click; a
+    // branch's first end is its points, so only its last); the planner then checks that the end has a buffer stop
+    F64 best = within;
+    bool found = false;
+    auto consider = [&](const GP& e)
+    {
+        const F64 d = sqrt((e.x - p.x) * (e.x - p.x) + (e.y - p.y) * (e.y - p.y));
+        if (d <= best) { best = d; end = e; found = true; }
+    };
+    for (const Line& l : mLines)
+    {
+        if (l.mClosed || l.mClicks.empty()) continue;
+        if (!l.mBranch) consider(l.mClicks.front());
+        if (!l.mJoins) consider(l.mClicks.back());   // a branch that joins a line has no end there
+    }
+    // the end is taken exactly, so "at" is well within the planner's 6 m of it (tracktool/layout.py add_turntable d <= 6.0)
+    return found;
+}
+
+void WolfFloaterTrack::onTurntableControls()
+{
+    if (busy() || mEditTurntable < 0 || (size_t)mEditTurntable >= mTurntables.size()) return;
+    Turntable& t = mTurntables[mEditTurntable];
+    const S32 size = mTTSize->getValue().asInteger(), roads = mTTRoads->getValue().asInteger(), spread = mTTSpread->getValue().asInteger();
+    const bool shed = mTTShed->get();
+    if (size == t.mSize && roads == t.mRoads && spread == t.mSpread && shed == t.mShed) return;
+    t.mSize = size;
+    t.mRoads = roads;
+    t.mSpread = spread;
+    t.mShed = shed;
+    t.mStamp = nextStamp();
+    setStatus(std::string(), false);
+    changed();
 }
 
 void WolfFloaterTrack::clickAt(F32 x, F32 y)
@@ -724,6 +786,38 @@ void WolfFloaterTrack::clickAt(F32 x, F32 y)
         changed();
         return;
     }
+    if (mode == MODE_TURNTABLE)
+    {
+        if (mTurntables.size() >= MAX_TURNTABLES)
+        {
+            setStatus(llformat("That is the most turntables one railway can have (%d).", (S32)MAX_TURNTABLES), true);
+            return;
+        }
+        GP end;
+        if (!lineEnd(g, ON_LINE_M, end))
+        {
+            setStatus("Click right on the end of a line - the turntable goes where a line stops.", true);
+            return;
+        }
+        for (const Turntable& t : mTurntables)
+        {
+            if (dist(t.mAt, end) < SAME_CLICK_M) { setStatus("There is a turntable at this end already.", true); return; }
+        }
+        Turntable t;
+        t.mAt = end;
+        t.mSize = mTTSize->getValue().asInteger();
+        t.mRoads = mTTRoads->getValue().asInteger();
+        t.mSpread = mTTSpread->getValue().asInteger();
+        t.mShed = mTTShed->get();
+        t.mStamp = nextStamp();
+        mTurntables.push_back(t);
+        mEditTurntable = (S32)mTurntables.size() - 1;
+        mEditStation = -1;
+        setStatus("A turntable was put at the end of the line. Choose its deck, roads and shed in the window; the stall roads fan "
+                  "out beyond the end of the line.", false);
+        changed();
+        return;
+    }
     GP on;
     if (!onALine(g, ON_LINE_M, on))
     {
@@ -761,6 +855,7 @@ void WolfFloaterTrack::clickAt(F32 x, F32 y)
         mStations.push_back(s);
         mCurStation = (S32)mStations.size() - 1;
         mEditStation = mCurStation;
+        mEditTurntable = -1;
         mName->setText(LLStringUtil::null);
         setStatus("Now click on the line where the platform ends.", false);
         changed();
@@ -785,6 +880,20 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
     if (busy() || k < 0 || (size_t)k >= mFlatRefs.size()) return;
     const Ref& r = mFlatRefs[k];
     GP g = toGrid(x, y);
+    if (r.mKind == REF_TURNTABLE)
+    {
+        GP end;
+        if (lineEnd(g, ON_LINE_M, end)) g = end;   // a turntable stays at the end of a line
+    }
+    else if (r.mKind == REF_LINE_CLICK && (r.mPoint == 0 || r.mPoint + 1 == mLines[r.mItem].mClicks.size()))
+    {
+        // a turntable at this line end goes with it
+        const GP was = mLines[r.mItem].mClicks[r.mPoint];
+        for (Turntable& t : mTurntables)
+        {
+            if (fabs(t.mAt.x - was.x) < 1e-6 && fabs(t.mAt.y - was.y) < 1e-6) t.mAt = g;
+        }
+    }
     if (r.mKind == REF_LINE_START || r.mKind == REF_STATION_A || r.mKind == REF_STATION_B || r.mKind == REF_SIGNAL)
     {
         // these stay on a line: a drag puts them on the nearest one (the planner refuses them off a line anyway)
@@ -806,6 +915,7 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
         case REF_STATION_A: mStations[r.mItem].mA = g; break;
         case REF_STATION_B: mStations[r.mItem].mB = g; break;
         case REF_SIGNAL: mSignals[r.mItem].mAt = g; break;
+        case REF_TURNTABLE: mTurntables[r.mItem].mAt = g; break;
     }
     changed();
 }
@@ -821,6 +931,7 @@ void WolfFloaterTrack::undoPoint()
     for (size_t i = 0; i < mLines.size(); ++i) if (mLines[i].mStamp > best) { best = mLines[i].mStamp; kind = 0; at = i; }
     for (size_t i = 0; i < mStations.size(); ++i) if (mStations[i].mStamp > best) { best = mStations[i].mStamp; kind = 1; at = i; }
     for (size_t i = 0; i < mSignals.size(); ++i) if (mSignals[i].mStamp > best) { best = mSignals[i].mStamp; kind = 2; at = i; }
+    for (size_t i = 0; i < mTurntables.size(); ++i) if (mTurntables[i].mStamp > best) { best = mTurntables[i].mStamp; kind = 3; at = i; }
     if (kind < 0)
     {
         setStatus("There is nothing to take back - click on the ground to draw a line.", false);
@@ -867,10 +978,16 @@ void WolfFloaterTrack::undoPoint()
             setStatus("The station was taken out.", false);
         }
     }
-    else
+    else if (kind == 2)
     {
         mSignals.erase(mSignals.begin() + (std::ptrdiff_t)at);
         setStatus("The signal was taken out.", false);
+    }
+    else
+    {
+        mTurntables.erase(mTurntables.begin() + (std::ptrdiff_t)at);
+        mEditTurntable = -1;
+        setStatus("The turntable was taken out.", false);
     }
     changed();
 }
@@ -911,6 +1028,11 @@ void WolfFloaterTrack::removeClick(S32 k)
         case REF_SIGNAL:
             mSignals.erase(mSignals.begin() + (std::ptrdiff_t)r.mItem);
             setStatus("The signal was taken out.", false);
+            break;
+        case REF_TURNTABLE:
+            mTurntables.erase(mTurntables.begin() + (std::ptrdiff_t)r.mItem);
+            mEditTurntable = -1;
+            setStatus("The turntable was taken out.", false);
             break;
     }
     changed();
@@ -970,7 +1092,8 @@ void WolfFloaterTrack::startOver()
     mLines.clear();
     mStations.clear();
     mSignals.clear();
-    mCurLine = mCurStation = mEditStation = -1;
+    mTurntables.clear();
+    mCurLine = mCurStation = mEditStation = mEditTurntable = -1;
     mReplaces = LLSD();
     mReplaceLaid.clear();
     mReplaceName.clear();
@@ -1022,11 +1145,25 @@ void WolfFloaterTrack::onPickItem()
     const LLScrollListItem* it = mItemsList->getFirstSelected();
     if (!it) return;
     const std::string v = it->getValue().asString();
+    if (v.size() > 2 && v[0] == 'T')
+    {
+        const S32 i = atoi(v.c_str() + 2);
+        if (i >= 0 && (size_t)i < mTurntables.size())
+        {
+            mEditTurntable = i;
+            mEditStation = -1;
+            mTTSize->setValue(llformat("%d", mTurntables[i].mSize));
+            mTTRoads->setValue(mTurntables[i].mRoads);
+            mTTSpread->setValue(mTurntables[i].mSpread);
+            mTTShed->set(mTurntables[i].mShed);
+        }
+    }
     if (v.size() > 2 && v[0] == 'S')
     {
         const S32 i = atoi(v.c_str() + 2);
         if (i >= 0 && (size_t)i < mStations.size())
         {
+            mEditTurntable = -1;
             mEditStation = i;
             mSide->setValue(mStations[i].mSide);
             mStyle->setValue(mStations[i].mStyle);
@@ -1060,6 +1197,12 @@ void WolfFloaterTrack::onTakeOut()
     {
         mSignals.erase(mSignals.begin() + (std::ptrdiff_t)i);
         setStatus("The signal was taken out.", false);
+    }
+    else if (v[0] == 'T' && i < mTurntables.size())
+    {
+        mTurntables.erase(mTurntables.begin() + (std::ptrdiff_t)i);
+        mEditTurntable = -1;
+        setStatus("The turntable was taken out.", false);
     }
     changed();
 }
@@ -1107,7 +1250,13 @@ void WolfFloaterTrack::fillItemList()
         row(llformat("S:%d", (S32)i), t);
     }
     for (size_t i = 0; i < mSignals.size(); ++i) row(llformat("G:%d", (S32)i), llformat("Signal %d", (S32)i + 1));
-    if (mLines.empty() && mStations.empty() && mSignals.empty()) row(std::string(), "Nothing yet - click on the ground to start a line.");
+    for (size_t i = 0; i < mTurntables.size(); ++i)
+    {
+        const Turntable& t = mTurntables[i];
+        row(llformat("T:%d", (S32)i), llformat("Turntable %d - %d m deck, ", (S32)i + 1, t.mSize) + plural(t.mRoads, "stall road", "stall roads")
+            + llformat(" %d degrees apart", t.mSpread) + (t.mShed ? ", engine shed" : ""));
+    }
+    if (drawingEmpty()) row(std::string(), "Nothing yet - click on the ground to start a line.");
     if (picked.isDefined() && !picked.asString().empty()) mItemsList->selectByValue(picked);
 }
 
@@ -1117,6 +1266,9 @@ void WolfFloaterTrack::rebuildFlat()
     mFlatRefs.clear();
     LLViewerRegion* rgn = gAgent.getRegion();
     mFlatRegion = rgn ? rgn->getHandle() : 0;
+    // turntables first: each stands on a line's end marker, and the pen picks the LAST marker under the pointer
+    // (wolffloatertunnels.cpp pickMarker: px <= best_px), so a drag there moves the line's end - and the turntable with it
+    for (size_t i = 0; i < mTurntables.size(); ++i) { mFlat.push_back(toRegion(mTurntables[i].mAt)); mFlatRefs.push_back({ REF_TURNTABLE, i, 0 }); }
     for (size_t i = 0; i < mLines.size(); ++i)
     {
         const Line& l = mLines[i];
@@ -1137,6 +1289,7 @@ void WolfFloaterTrack::changed()
     mCurLine = mCurLine >= (S32)mLines.size() ? -1 : mCurLine;
     mCurStation = mCurStation >= (S32)mStations.size() ? -1 : mCurStation;
     mEditStation = mEditStation >= (S32)mStations.size() ? -1 : mEditStation;
+    mEditTurntable = mEditTurntable >= (S32)mTurntables.size() ? -1 : mEditTurntable;
     mPlanDirty = true;
     ++mPlanSerial;
     mChangedAt = LLFrameTimer::getElapsedSeconds();
@@ -1169,6 +1322,7 @@ std::string WolfFloaterTrack::markerLabel(size_t k) const
             return mStations[r.mItem].mName.empty() ? std::string("Platform") : mStations[r.mItem].mName;
         case REF_STATION_B: return "Platform end";
         case REF_SIGNAL: return "Signal";
+        case REF_TURNTABLE: return "Turntable";
     }
     return std::string();
 }
@@ -1201,6 +1355,7 @@ std::string WolfFloaterTrack::routeHint() const
         return mCurStation >= 0 ? "Click on the line where the platform ENDS." : "Click on a line where the platform STARTS.";
     }
     if (mode == MODE_SIGNAL) return "Click on a line to put a signal there.";
+    if (mode == MODE_TURNTABLE) return "Click on the END of a line to put a turntable there.";
     if (mCurLine < 0) return mLines.empty() ? "Click on the ground where your line STARTS." : "Click on the ground to start another line.";
     const Line& l = mLines[mCurLine];
     if (l.mClicks.size() < 2) return "Click at each bend, then where the line ends. Too far to click? Alt + drag moves the camera.";
@@ -1248,6 +1403,19 @@ bool WolfFloaterTrack::buildRequest(LLSD& req, std::string& why) const
     }
     LLSD signals = LLSD::emptyArray();
     for (const Signal& s : mSignals) { signals.append(xy(s.mAt.x, s.mAt.y)); grow(s.mAt); }
+    // DESIGN.md 10 REQ turntables: [{at, size 15|20|24, roads 1..10, spread degrees, shed}]
+    LLSD turntables = LLSD::emptyArray();
+    for (const Turntable& t : mTurntables)
+    {
+        LLSD e;
+        e["at"] = xy(t.mAt.x, t.mAt.y);
+        e["size"] = t.mSize;
+        e["roads"] = t.mRoads;
+        e["spread"] = t.mSpread;
+        e["shed"] = t.mShed;
+        turntables.append(e);
+        grow(t.mAt);
+    }
 
     // the ground box (DESIGN.md 10 "Ground box"; the planner's own test requests: test/fixtures.py request())
     F64 step = 4.0;
@@ -1379,6 +1547,7 @@ bool WolfFloaterTrack::buildRequest(LLSD& req, std::string& why) const
     req["lines"] = lines;
     req["stations"] = stations;
     req["signals"] = signals;
+    req["turntables"] = turntables;
     req["others"] = others;
     return true;
 }
@@ -1629,6 +1798,34 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
         out.mOutline.v.emplace_back(x, y, z + 4.0);
         out.mOutline.c.push_back(COL_POINTS);
         out.mLabels.push_back({ LLVector3d(x, y, z + 4.0), "Points " + p["name"].asString(), COL_POINTS });
+    }
+    // turntables (DESIGN.md 10 PLAN layout.turntables): the deck circle (diameter = size) and the pit ring (size / 2 + 0.3);
+    // the stall roads are ordinary lines of kind "stall", drawn above with the rest
+    for (const LLSD& t : llsd::inArray(arr(layout["turntables"])))
+    {
+        F64 x, y, z;
+        if (!readXY(t["at"], x, y)) continue;
+        if (!nearestZ(x, y, z)) z = groundZ(x, y);
+        const F64 r_deck = t["size"].asReal() * 0.5;
+        for (F64 r : { r_deck, r_deck + TT_PIT_EXTRA_M })
+        {
+            std::vector<LLVector3d> ring;
+            for (S32 i = 0; i <= 48; ++i)
+            {
+                const F64 a = (F64)i / 48.0 * F_TWO_PI;
+                ring.emplace_back(x + cos(a) * r, y + sin(a) * r, z + 0.05);
+            }
+            outline(ring, COL_TURNTABLE);
+        }
+        // the deck's own length across it, so it reads as a turning bridge (along the first road's compass bearing)
+        const LLSD& roads = t["roads"];
+        F64 bearing = 0.0;
+        if (roads.isArray() && roads.size() > 0) bearing = roads[0]["compass"].asReal() * DEG_TO_RAD;   // clockwise from north
+        const F64 dx = sin(bearing) * r_deck, dy = cos(bearing) * r_deck;
+        out.mOutline.v.emplace_back(x - dx, y - dy, z + 0.05);
+        out.mOutline.v.emplace_back(x + dx, y + dy, z + 0.05);
+        out.mOutline.c.push_back(COL_TURNTABLE);
+        out.mLabels.push_back({ LLVector3d(x, y, z + 3.0), "Turntable " + t["name"].asString(), COL_TURNTABLE });
     }
     // buffer stops: a bar across the line's end and two posts
     for (const LLSD& b : llsd::inArray(arr(layout["buffers"])))
@@ -2217,12 +2414,34 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
     {
         f->setStatus("Laying your track: placing it on your land (3 of 3)...", false);
         // Source: wolfcave.cpp:938-954 WolfCaves::rezExact - the service made the item through Robust (no
-        // BulkUpdateInventory from the region), so its folder is fetched until the item shows, finished
+        // BulkUpdateInventory from the region), so its folder is fetched until the item shows, finished.
+        // [live test 14 Nov 13:14Z] The item's folder is NEW (deliver.py:76-78 makes it under Objects through Robust), and a
+        // folder the inventory model has never seen cannot be fetched: fetchDescendentsOf returns at once with "Asked to fetch
+        // descendents of non-existent folder" (llinventorymodel.cpp:2500-2512) and getCategory is null. So, as the Lifts window
+        // waits for a kit folder the grid has just made (wolffloaterlifts.cpp:991-1006), its parent - Objects
+        // (findCategoryUUIDForType FT_OBJECT, wolffloaterlifts.cpp:162) - is asked for again until the new folder appears:
+        // version set unknown, then LLViewerInventoryCategory::fetch (llviewerinventory.cpp:741-762: it asks only when the
+        // version is unknown and its timer has run out, so the timer is set to FOLDER_REASK_S; it starts
+        // LLInventoryModelBackgroundFetch::start(id, false), llinventorymodelbackgroundfetch.cpp:287-298, the folder and its
+        // direct contents - the new folder comes with them). Then the new folder is fetched the same way until the item shows.
         LLViewerInventoryItem* inv = nullptr;
+        const LLUUID objects = gInventory.findCategoryUUIDForType(LLFolderType::FT_OBJECT);
+        bool folder_logged = false;
         for (S32 i = 0; i < FETCH_TRIES && !inv; ++i)
         {
-            if (LLViewerInventoryCategory* cat = gInventory.getCategory(item.mFolder)) cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
-            gInventory.fetchDescendentsOf(item.mFolder);
+            LLViewerInventoryCategory* cat = gInventory.getCategory(item.mFolder);
+            LLViewerInventoryCategory* parent = cat ? nullptr : gInventory.getCategory(objects);
+            if (!cat && parent && i % FOLDER_REASK_S == 0)
+            {
+                parent->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
+                parent->fetch(FOLDER_REASK_S);
+            }
+            if (cat)
+            {
+                if (!folder_logged) { LL_INFOS("WolfTrack") << "the railway's folder " << item.mFolder << " is known after " << i << " s" << LL_ENDL; folder_logged = true; }
+                if (i % FOLDER_REASK_S == 0) cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
+                cat->fetch(FOLDER_REASK_S);
+            }
             llcoro::suspendUntilTimeout(1.f);
             if (!self()) return;
             inv = gInventory.getItem(item.mItem);
@@ -2400,17 +2619,22 @@ void WolfFloaterTrack::afterSaved(const LLSD& layout)
     else if (all || state == "laid")
     {
         mItemsFromDrawing = false;
+        // the switch-on note goes with every word about this lay (the old railway's removal says more later)
+        mLaidNote = mTurntables.empty() ? std::string()
+            : std::string(" The turntable switches itself on when it is laid. If the region cannot switch it on yet, its deck tells you "
+                          "why - touch the deck and choose Switch on to try again.");
         mLines.clear();
         mStations.clear();
         mSignals.clear();
-        mCurLine = mCurStation = mEditStation = -1;
+        mTurntables.clear();
+        mCurLine = mCurStation = mEditStation = mEditTurntable = -1;
         mPlan.clear();
         mPlannedReq = LLSD();
         const LLSD replaces = layout["replaces"];
         mReplaces = LLSD();
         mReplaceName.clear();
         changed();
-        setStatus("Your railway is laid! Rez a train on it from Build a Train...", false);
+        setStatus("Your railway is laid! Rez a train on it from Build a Train..." + mLaidNote, false);
         // DESIGN.md 10: the old railway of a Change goes only now that the new one is laid everywhere
         if (replaces.isDefined() && !(replaces.isString() && replaces.asString().empty())) replaceOld(replaces);
         else mReplaceLaid.clear();
@@ -2467,7 +2691,7 @@ void WolfFloaterTrack::replaceOld(const LLSD& old_id)
                    + " is still there. Go there, open Your railways and press Remove on it.";
             }
         }
-        f->setStatus(t, false);
+        f->setStatus(t + f->mLaidNote, false);
     });
 }
 
@@ -2590,7 +2814,11 @@ void WolfFloaterTrack::sendRemoved(const LLSD& layout, const LLUUID& region, boo
                                : " The part in " + f->regionName(LLUUID(it->first)) + " is still there. Go there and press Remove again.";
             }
         }
-        if (replacing) f->mReplaceLaid.clear();
+        if (replacing)
+        {
+            f->mReplaceLaid.clear();
+            t += f->mLaidNote;
+        }
         f->mShown.clear();
         f->setStatus(t, false);
         f->refreshMine();
@@ -2713,6 +2941,8 @@ void WolfFloaterTrack::onChange()
             f->mLines.clear();
             f->mStations.clear();
             f->mSignals.clear();
+            f->mTurntables.clear();
+            f->mEditTurntable = -1;
             f->mCurLine = f->mCurStation = f->mEditStation = -1;
             auto gp = [](const LLSD& v) { GP p; readXY(v, p.x, p.y); return p; };
             for (const LLSD& e : llsd::inArray(arr(req["lines"])))
@@ -2738,6 +2968,17 @@ void WolfFloaterTrack::onChange()
                 f->mStations.push_back(s);
             }
             for (const LLSD& e : llsd::inArray(arr(req["signals"]))) { Signal s; s.mAt = gp(e); s.mStamp = f->nextStamp(); f->mSignals.push_back(s); }
+            for (const LLSD& e : llsd::inArray(arr(req["turntables"])))
+            {
+                Turntable t;
+                t.mAt = gp(e["at"]);
+                t.mSize = e["size"].asInteger();
+                t.mRoads = e["roads"].asInteger();
+                t.mSpread = e.has("spread") ? ll_round((F32)e["spread"].asReal()) : t.mSpread;
+                t.mShed = e["shed"].asBoolean();
+                t.mStamp = f->nextStamp();
+                f->mTurntables.push_back(t);
+            }
             // DESIGN.md 10: Change = a new layout that replaces this one once it is laid everywhere; until then both stand, and
             // this one's pieces are not counted as someone else's railway in the plan
             const LLSD& layout = reply["layout"];
@@ -2958,7 +3199,7 @@ void WolfFloaterTrack::setTextIfChanged(LLTextBox* box, const std::string& text)
 void WolfFloaterTrack::relayout()
 {
     // the floater's height in floater_wolf_track.xml, and the Your railways panel under it when it is open
-    constexpr S32 CLOSED_H = 584;
+    constexpr S32 CLOSED_H = 624;
     const bool open = mMineCheck && mMineCheck->get();
     if (mMinePanel) mMinePanel->setVisible(open);
     const S32 h = CLOSED_H + (open ? (S32)MINE_PANEL_H : 0);
@@ -2980,6 +3221,19 @@ void WolfFloaterTrack::updateControls()
     mFinishBtn->setEnabled(!b && mCurLine >= 0);
     mStartOverBtn->setEnabled(!b && !drawingEmpty() && !mAsking);
     const bool station_edit = mEditStation >= 0 && (size_t)mEditStation < mStations.size();
+    // the turntable's choices take the station row's place while a turntable is being put down or is picked
+    const bool tt_edit = mEditTurntable >= 0 && (size_t)mEditTurntable < mTurntables.size();
+    const S32 mode_now = mMode->getSelectedIndex();
+    const bool show_tt = mode_now == MODE_TURNTABLE || (tt_edit && mode_now != MODE_STATION);
+    mTTPanel->setVisible(show_tt);
+    for (LLView* v : { (LLView*)mSide, (LLView*)mStyle, (LLView*)mName }) v->setVisible(!show_tt);
+    if (LLView* lbl = findChild<LLView>("station_label")) lbl->setVisible(!show_tt);
+    mTTPanel->setEnabled(!b);
+    {
+        // DESIGN.md 10: the longest train a deck turns is the deck less 1 m (15 / 20 / 24 m: 14 / 19 / 23)
+        const S32 size = mTTSize->getValue().asInteger();
+        setTextIfChanged(mTTTurns, llformat("Turns trains up to %d m long.", size - TT_SPARE_M));
+    }
     const bool station_ctrls = !b && (mMode->getSelectedIndex() == MODE_STATION || station_edit);
     mSide->setEnabled(station_ctrls);
     mStyle->setEnabled(station_ctrls);

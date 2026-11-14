@@ -14,7 +14,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="584"
+ height="624"
  layout="topleft"
  name="wolf_track"
  help_topic="wolf_track"
@@ -26,14 +26,16 @@
     <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="draw_heading" top="68" width="468">1. Draw your railway - what do your clicks make?</text>
     <radio_group follows="left|top" height="22" layout="topleft" left="16" name="track_mode" top="90" width="468"
      tool_tip="Each choice makes something different with your next clicks on the ground. The words at the top of the world view say what to click.">
-        <radio_item height="20" label="A line" layout="topleft" left="0" name="line" top="0" value="line" width="100"
+        <radio_item height="20" label="A line" layout="topleft" left="0" name="line" top="0" value="line" width="70"
          tool_tip="Click where the line starts, at each bend, and where it ends. Click the first point again to make a loop." />
-        <radio_item height="20" label="A branch" layout="topleft" left="110" name="branch" top="0" value="branch" width="110"
+        <radio_item height="20" label="A branch" layout="topleft" left="74" name="branch" top="0" value="branch" width="84"
          tool_tip="Click on a line where the branch leaves it, then its bends and its end. End it on a line to join that line." />
-        <radio_item height="20" label="A station" layout="topleft" left="230" name="station" top="0" value="station" width="110"
+        <radio_item height="20" label="A station" layout="topleft" left="162" name="station" top="0" value="station" width="88"
          tool_tip="Click on a line where the platform starts, then where it ends." />
-        <radio_item height="20" label="A signal" layout="topleft" left="350" name="signal" top="0" value="signal" width="110"
+        <radio_item height="20" label="A signal" layout="topleft" left="254" name="signal" top="0" value="signal" width="80"
          tool_tip="Click on a line to put a signal there. Signals are also put in by themselves." />
+        <radio_item height="20" label="A turntable" layout="topleft" left="338" name="turntable" top="0" value="turntable" width="96"
+         tool_tip="Click on the end of a line to put a turntable there, with stall roads round it." />
     </radio_group>
     <button follows="left|top" height="26" label="Undo last point" layout="topleft" left="16" name="track_undo" top="118" width="128"
      tool_tip="Take the last point you clicked back (Backspace)" />
@@ -63,28 +65,49 @@
     </combo_box>
     <line_editor follows="left|top" height="22" label="Station name" layout="topleft" left="356" max_length_chars="24" name="station_name" top="190" width="128"
      tool_tip="The station's name, up to 24 letters, digits, spaces, apostrophes or hyphens - for example Badger Hill" />
-    <text follows="left|top" height="18" layout="topleft" left="16" name="drawn_heading" top="220" width="380">What you have drawn (pick one to change or take it out):</text>
-    <scroll_list draw_heading="false" follows="left|top" height="80" layout="topleft" left="16" name="track_items" top="240" width="380">
+    <!-- [TRACK TOOL 2026-11-14] the turntable's choices (DESIGN.md 10 REQ turntables, 4.7), in place of the station's while a
+         turntable is being put down or is picked in the list -->
+    <panel follows="left|top" height="72" layout="topleft" left="0" name="turntable_panel" top="186" visible="false" width="500">
+        <text follows="left|top" height="20" layout="topleft" left="16" name="tt_size_label" top="4" width="86">Deck length:</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="104" name="tt_size" top="2" width="84"
+         tool_tip="How long the turning deck is. A train can be turned if it is shorter than the deck by a metre.">
+            <combo_box.item label="15 m" name="15" value="15" />
+            <combo_box.item label="20 m" name="20" value="20" />
+            <combo_box.item label="24 m" name="24" value="24" />
+        </combo_box>
+        <text follows="left|top" height="20" layout="topleft" left="208" name="tt_roads_label" top="4" width="84">Stall roads:</text>
+        <spinner decimal_digits="0" follows="left|top" height="22" increment="1" label_width="0" layout="topleft" left="294" max_val="10"
+         min_val="1" name="tt_roads" top="2" width="60" tool_tip="How many tracks fan out from the turntable for engines to stand on (1 to 10)" />
+        <text follows="left|top" height="20" layout="topleft" left="16" name="tt_spread_label" top="30" width="150">Angle between roads:</text>
+        <spinner decimal_digits="0" follows="left|top" height="22" increment="1" label_width="0" layout="topleft" left="168" max_val="30"
+         min_val="15" name="tt_spread" top="28" width="60" tool_tip="How many degrees apart the stall roads are (15 to 30)" />
+        <text follows="left|top" height="20" layout="topleft" left="232" name="tt_degrees" top="30" width="60">degrees</text>
+        <check_box follows="left|top" height="20" label="Engine shed over the roads" layout="topleft" left="300" name="tt_shed" top="30" width="190"
+         tool_tip="Build an engine shed over the stall roads" />
+        <text follows="left|top" height="18" layout="topleft" left="16" name="tt_turns" top="54" width="468" />
+    </panel>
+    <text follows="left|top" height="18" layout="topleft" left="16" name="drawn_heading" top="260" width="380">What you have drawn (pick one to change or take it out):</text>
+    <scroll_list draw_heading="false" follows="left|top" height="80" layout="topleft" left="16" name="track_items" top="280" width="380">
         <scroll_list.columns name="what" relative_width="1" />
     </scroll_list>
-    <button follows="left|top" height="26" label="Take out" layout="topleft" left="404" name="track_take_out" top="240" width="80"
+    <button follows="left|top" height="26" label="Take out" layout="topleft" left="404" name="track_take_out" top="280" width="80"
      tool_tip="Take the line, branch, station or signal picked in the list out of the drawing" />
-    <text follows="left|top" height="34" layout="topleft" left="16" name="track_summary" top="326" width="468" word_wrap="true" />
-    <text follows="left|top" height="52" layout="topleft" left="16" name="track_problems" top="360" width="468" word_wrap="true" />
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="lay_heading" top="416" width="468">2. Lay it</text>
-    <button follows="left|top" font="SansSerifLarge" height="34" label="Lay track" layout="topleft" left="16" name="track_lay" top="438" width="180"
+    <text follows="left|top" height="34" layout="topleft" left="16" name="track_summary" top="366" width="468" word_wrap="true" />
+    <text follows="left|top" height="52" layout="topleft" left="16" name="track_problems" top="400" width="468" word_wrap="true" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="lay_heading" top="456" width="468">2. Lay it</text>
+    <button follows="left|top" font="SansSerifLarge" height="34" label="Lay track" layout="topleft" left="16" name="track_lay" top="478" width="180"
      tool_tip="Make the track, stations and signals and put them on your land (free)" />
-    <progress_bar color_bar="0.3 0.85 0.4 1" follows="left|top" height="10" layout="topleft" left="208" name="track_progress" top="450" visible="false" width="276" />
-    <button follows="left|top" height="26" label="Lay the next part" layout="topleft" left="16" name="track_next_part" top="478" visible="false" width="180"
+    <progress_bar color_bar="0.3 0.85 0.4 1" follows="left|top" height="10" layout="topleft" left="208" name="track_progress" top="490" visible="false" width="276" />
+    <button follows="left|top" height="26" label="Lay the next part" layout="topleft" left="16" name="track_next_part" top="518" visible="false" width="180"
      tool_tip="Put the part of your railway that is in the region you are in now on the land" />
-    <button follows="left|top" height="26" label="Look again" layout="topleft" left="204" name="track_look_again" top="478" visible="false" width="120"
+    <button follows="left|top" height="26" label="Look again" layout="topleft" left="204" name="track_look_again" top="518" visible="false" width="120"
      tool_tip="Look again for the pieces that have not appeared yet" />
-    <button follows="left|top" height="26" label="Take away what was placed" layout="topleft" left="330" name="track_take_away" top="478" visible="false" width="154"
+    <button follows="left|top" height="26" label="Take away what was placed" layout="topleft" left="330" name="track_take_away" top="518" visible="false" width="154"
      tool_tip="Take away the pieces that did appear (the railway stays in your inventory, in Objects)" />
-    <text follows="left|top" height="46" layout="topleft" left="16" name="track_status" top="508" width="468" word_wrap="true" />
-    <check_box follows="left|top" height="18" label="Your railways in this region" layout="topleft" left="16" name="track_mine_check" top="560" width="300"
+    <text follows="left|top" height="46" layout="topleft" left="16" name="track_status" top="548" width="468" word_wrap="true" />
+    <check_box follows="left|top" height="18" label="Your railways in this region" layout="topleft" left="16" name="track_mine_check" top="600" width="300"
      tool_tip="Show the railways you have laid in this region, to show, change or remove them" />
-    <panel follows="left|top" height="140" layout="topleft" left="0" name="track_mine_panel" top="582" visible="false" width="500">
+    <panel follows="left|top" height="140" layout="topleft" left="0" name="track_mine_panel" top="622" visible="false" width="500">
         <scroll_list follows="left|top" height="96" layout="topleft" left="16" name="track_mine_list" top="0" width="468">
             <scroll_list.columns label="Railway" name="name" relative_width="0.5" />
             <scroll_list.columns label="State" name="state" relative_width="0.3" />

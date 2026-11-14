@@ -39,6 +39,7 @@ class LLPanel;
 class LLProgressBar;
 class LLRadioGroup;
 class LLScrollListCtrl;
+class LLSpinCtrl;
 class LLTextBox;
 class LLViewerRegion;
 
@@ -125,8 +126,18 @@ private:
         GP mAt;
         U32 mStamp = 0;
     };
-    enum EMode { MODE_LINE = 0, MODE_BRANCH = 1, MODE_STATION = 2, MODE_SIGNAL = 3 };
-    enum ERefKind { REF_LINE_START, REF_LINE_CLICK, REF_STATION_A, REF_STATION_B, REF_SIGNAL };
+    /** [TRACK TOOL 2026-11-14] Paul: "can we add the turntable to our track drawing tool please" (DESIGN.md 4.7, 10 REQ). */
+    struct Turntable
+    {
+        GP mAt;                       // the end of a line: the deck's centre
+        S32 mSize = 20;               // deck length, m: 15, 20 or 24
+        S32 mRoads = 3;               // stall roads, 1-10
+        S32 mSpread = 20;             // degrees between roads, 15-30
+        bool mShed = false;           // an engine shed over the roads
+        U32 mStamp = 0;
+    };
+    enum EMode { MODE_LINE = 0, MODE_BRANCH = 1, MODE_STATION = 2, MODE_SIGNAL = 3, MODE_TURNTABLE = 4 };
+    enum ERefKind { REF_LINE_START, REF_LINE_CLICK, REF_STATION_A, REF_STATION_B, REF_SIGNAL, REF_TURNTABLE };
     struct Ref { ERefKind mKind; size_t mItem; size_t mPoint; };
 
     // ---- the plan (php/track_tool.php "plan": DESIGN.md 10 PLAN) ----
@@ -185,6 +196,9 @@ private:
     void finishLine();
     void onMode();
     void onStationControls();
+    void onTurntableControls();
+    /** The end of a drawn line (not a loop; a branch's far end) within `within` of p: that end exactly, else false. */
+    bool lineEnd(const GP& p, F64 within, GP& end) const;
     void onTakeOut();
     void onPickItem();
     void fillItemList();
@@ -263,6 +277,11 @@ private:
     LLButton *mAskYes = nullptr, *mAskNo = nullptr;
     LLComboBox *mSide = nullptr, *mStyle = nullptr;
     LLLineEditor* mName = nullptr;
+    LLPanel* mTTPanel = nullptr;
+    LLComboBox* mTTSize = nullptr;
+    LLSpinCtrl *mTTRoads = nullptr, *mTTSpread = nullptr;
+    LLCheckBoxCtrl* mTTShed = nullptr;
+    LLTextBox* mTTTurns = nullptr;
     LLScrollListCtrl* mItemsList = nullptr;
     LLButton* mTakeOutBtn = nullptr;
     LLButton *mLayBtn = nullptr, *mNextPartBtn = nullptr, *mLookAgainBtn = nullptr, *mTakeAwayBtn = nullptr;
@@ -276,6 +295,8 @@ private:
     std::vector<Line> mLines;
     std::vector<Station> mStations;
     std::vector<Signal> mSignals;
+    std::vector<Turntable> mTurntables;
+    S32 mEditTurntable = -1;           // the turntable the turntable controls change
     S32 mCurLine = -1;                 // the line the next click adds to (-1: the next click starts one)
     S32 mCurStation = -1;              // a station waiting for its platform's end
     S32 mEditStation = -1;             // the station the Station controls change
@@ -313,6 +334,7 @@ private:
     bool mItemsFromDrawing = false;    // mItems came from laying the drawing (laying them all clears the drawing)
     U32 mLaySerial = 0;                // mPlanSerial when the drawing was last laid
     bool mLayAnyway = false;           // the resident said: lay this drawing as another railway
+    std::string mLaidNote;             // said after "laid" (the turntable switch-on words), and after the old railway goes
     bool mPartialShown = false;        // "Only N of M pieces appeared" with Look again / Take away what was placed
     std::vector<std::pair<std::string, LLUUID>> mMatched;   // name, uuid of every piece found
     Item mPartial;                     // the item whose pieces did not all appear

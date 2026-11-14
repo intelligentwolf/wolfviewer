@@ -85,6 +85,11 @@ namespace
     // folder - each re-asked at most every FOLDER_REASK_S: 30 s (CHOSEN) leaves room for both
     constexpr S32 FETCH_TRIES = 30;
     constexpr S32 FOLDER_REASK_S = 5;          // CHOSEN: a folder not seen yet is asked for again this often (wolffloaterlifts.cpp:996-1006 every 5 s)
+    // DESIGN.md 10 "Removal by the server": the window polls the job's status every 2-3 s until done or failed
+    constexpr F32 REMOVE_POLL_S = 2.5f;
+    constexpr S32 REMOVE_POLL_FAILS = 5;       // CHOSEN: as statusCoro, five unanswered asks in a row and the window stops waiting
+    // DESIGN.md 10: the confirmation for pieces the region deleted (permanently, not to the Trash; the item stays in Objects)
+    const char* SERVER_GONE_WORDS = "Its pieces are taken away; your railway stays in your inventory (Objects) to lay again.";
     constexpr S32 GONE_WAIT_S = 30;            // CHOSEN: after a delete, the pieces are waited for this long to go
     // DESIGN.md 5.1 / 10: the ground box is the drawing's box plus 60 m all round, 4 m apart, 8 m when that is over 256 a side
     constexpr F64 GROUND_MARGIN_M = 60.0;
@@ -2595,6 +2600,7 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
     f->mPartialShown = false;
     for (Item& it : f->mItems) if (it.mRegion == item.mRegion && it.mItem == item.mItem) it.mLaid = true;
     LL_INFOS("WolfTrack") << "saved " << matched.size() << " pieces in " << where << LL_ENDL;
+    f->mLaidThisSession.insert(layout.asString());   // every piece of it is in view this session: Remove starts nearby
     f->afterSaved(reply["layout"]);
 }
 
@@ -2693,7 +2699,7 @@ void WolfFloaterTrack::replaceOld(const LLSD& old_id)
         if (rgn) for (const LLSD& u : llsd::inArray(arr(laid[rgn->getRegionID().asString()]))) here.push_back(u.asUUID());
         if (rgn && !here.empty())
         {
-            f->removePart(old_id, rgn->getRegionID(), here, true);
+            f->removePart(old_id, rgn->getRegionID(), here, true, true);   // nearby first, the server for what is out of reach
             return;
         }
         bool elsewhere = false;
@@ -2722,7 +2728,7 @@ void WolfFloaterTrack::replaceOld(const LLSD& old_id)
 
 // ---- removing (DESIGN.md 10 remove / removed) -----------------------------------------------------------------------------------
 
-void WolfFloaterTrack::removePart(const LLSD& layout, const LLUUID& region, const std::vector<LLUUID>& uuids, bool replacing)
+void WolfFloaterTrack::removePart(const LLSD& layout, const LLUUID& region, const std::vector<LLUUID>& uuids, bool replacing, bool server_after)
 {
     if (busy())
     {
@@ -2732,12 +2738,16 @@ void WolfFloaterTrack::removePart(const LLSD& layout, const LLUUID& region, cons
     mRemoving = true;
     LLHandle<LLFloater> h = getHandle();
     const U32 gen = mGen;
-    LLCoros::instance().launch("WolfTrackRemove", [h, gen, layout, region, uuids, replacing]() { removeCoro(h, gen, layout, region, uuids, replacing); });
+    LLCoros::instance().launch("WolfTrackRemove", [h, gen, layout, region, uuids, replacing, server_after]()
+    {
+        removeCoro(h, gen, layout, region, uuids, replacing, server_after);
+    });
     updateControls();
 }
 
 // static
-void WolfFloaterTrack::removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, LLUUID region, std::vector<LLUUID> uuids, bool replacing)
+void WolfFloaterTrack::removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, LLUUID region, std::vector<LLUUID> uuids, bool replacing,
+                                  bool server_after)
 {
     auto self = [&h, gen]() -> WolfFloaterTrack*
     {
@@ -2814,16 +2824,24 @@ void WolfFloaterTrack::removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, L
     }
     if (standing > 0)
     {
-        f->setStatus(llformat("%d pieces were not taken away (the region did not allow it). Press Remove again, or delete them "
-                              "by hand.", (S32)standing), true);
+        f->setStatus(f->takeLead() + llformat("%d pieces were not taken away (the region did not allow it). Press Remove again, or "
+                                              "delete them by hand.", (S32)standing), true);
         f->updateControls();
+        return;
+    }
+    if (missing > 0 && server_after)
+    {
+        // DESIGN.md 10: right after a lay or for a Change's old railway, nearby first (the region saves new pieces only 60-600 s
+        // after they were placed, so the server would not find them yet); the server then takes what was out of reach
+        f->mRemoveLead = f->takeLead() + llformat("%d taken away from here. ", (S32)taken_now);
+        f->serverRemove(layout, region, replacing, false);
         return;
     }
     if (missing > 0)
     {
         // never "removed" while pieces may still stand: the resident says whether they are gone already. Only the ones still
         // left are counted (e.g. "38 taken away; 61 were taken away earlier; 61 are still out of reach.")
-        std::string t = llformat("%d taken away", (S32)taken_now);
+        std::string t = f->takeLead() + llformat("%d taken away", (S32)taken_now);
         if (before > 0) t += llformat("; %d %s taken away earlier", (S32)before, before == 1 ? "was" : "were");
         t += llformat("; %d %s still out of reach. Come closer to them and press Remove again. If you took them away yourself, "
                       "press Forget them.", (S32)missing, missing == 1 ? "is" : "are");
@@ -2848,7 +2866,7 @@ void WolfFloaterTrack::sendRemoved(const LLSD& layout, const LLUUID& region, boo
             f->setStatus("The pieces were taken away, but the record could not be updated: " + error + " Press Remove again.", true);
             return;
         }
-        std::string t = replacing ? "Your changed railway is laid, and the old one was taken away here." : "The railway was taken away here.";
+        std::string t = f->takeLead() + (replacing ? "Your changed railway is laid, and the old one was taken away here." : "The railway was taken away here.");
         const LLSD laid = reply["layout"]["laid"];
         if (laid.isMap())
         {
@@ -3116,36 +3134,202 @@ void WolfFloaterTrack::onRemove()
     const LLSD l = pickedLayout();
     if (!l.isMap() || busy()) return;
     const std::string name = l["name"].asString().empty() ? std::string("this railway") : l["name"].asString();
-    ask("Take " + name + " away from this region? Its pieces go to your Trash.", "Remove it", [this, l]()
+    ask("Take " + name + " away from this region?", "Remove it", [this, l]()
     {
-        post("remove", LLSD().with("layout", l["id"]), [l](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
+        LLViewerRegion* rgn = gAgent.getRegion();
+        if (!rgn) return;
+        // DESIGN.md 10 "Removal by the server": the region deletes its recorded pieces, so they need not be in view - except a
+        // railway laid in this session, whose pieces the region may not have saved yet (60-600 s): those are taken from
+        // nearby first, and the server takes what was out of reach
+        if (mLaidThisSession.count(l["id"].asString())) nearbyRemove(l["id"], rgn->getRegionID(), false, true);
+        else serverRemove(l["id"], rgn->getRegionID(), false, true);
+    });
+}
+
+std::string WolfFloaterTrack::takeLead()
+{
+    std::string lead;
+    lead.swap(mRemoveLead);
+    return lead;
+}
+
+void WolfFloaterTrack::nearbyRemove(const LLSD& layout, const LLUUID& region, bool replacing, bool server_after)
+{
+    // the pieces on record for this region ("remove" returns the layout with laid), deleted from nearby (removePart)
+    post("remove", LLSD().with("layout", layout), [layout, region, replacing, server_after](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (!ok) { f->setStatus(f->takeLead() + "The railway was not taken away: " + error, true); return; }
+        LLViewerRegion* rgn = gAgent.getRegion();
+        if (!rgn || rgn->getRegionID() != region) { f->setStatus(f->takeLead() + "Go to " + f->regionName(region) + " to take that part away.", true); return; }
+        const LLSD laid = reply["layout"]["laid"];
+        std::vector<LLUUID> here;
+        for (const LLSD& u : llsd::inArray(arr(laid[region.asString()]))) here.push_back(u.asUUID());
+        if (!here.empty()) { f->removePart(layout, region, here, replacing, server_after); return; }
+        bool elsewhere = false;
+        if (laid.isMap())
         {
-            if (!ok) { f->setStatus("The railway was not taken away: " + error, true); return; }
-            LLViewerRegion* rgn = gAgent.getRegion();
-            if (!rgn) return;
-            const LLSD laid = reply["layout"]["laid"];
-            std::vector<LLUUID> here;
-            for (const LLSD& u : llsd::inArray(arr(laid[rgn->getRegionID().asString()]))) here.push_back(u.asUUID());
-            if (!here.empty()) { f->removePart(l["id"], rgn->getRegionID(), here, false); return; }
-            bool elsewhere = false;
-            if (laid.isMap())
+            for (LLSD::map_const_iterator it = laid.beginMap(); it != laid.endMap(); ++it) elsewhere = elsewhere || arr(it->second).size() > 0;
+        }
+        if (elsewhere)
+        {
+            std::string t = f->takeLead() + "This railway has no pieces in this region.";
+            for (LLSD::map_const_iterator it = laid.beginMap(); it != laid.endMap(); ++it)
             {
-                for (LLSD::map_const_iterator it = laid.beginMap(); it != laid.endMap(); ++it) elsewhere = elsewhere || arr(it->second).size() > 0;
+                if (arr(it->second).size() == 0) continue;
+                t += " The part in " + f->regionName(LLUUID(it->first)) + " is still there. Go there and press Remove again.";
             }
-            if (elsewhere)
+            f->setStatus(t, false);
+            f->refreshMine();
+            return;
+        }
+        f->sendRemoved(layout, region, replacing);   // nothing on record: only the record goes
+    });
+}
+
+void WolfFloaterTrack::serverRemove(const LLSD& layout, const LLUUID& region, bool replacing, bool nearby_after)
+{
+    if (busy())
+    {
+        setStatus("The window is busy with your railway just now - wait until it has finished, then press Remove again.", true);
+        return;
+    }
+    mRemoving = true;
+    LLHandle<LLFloater> h = getHandle();
+    const U32 gen = mGen;
+    LLCoros::instance().launch("WolfTrackServerRemove", [h, gen, layout, region, replacing, nearby_after]()
+    {
+        serverRemoveCoro(h, gen, layout, region, replacing, nearby_after);
+    });
+    updateControls();
+}
+
+// static
+void WolfFloaterTrack::serverRemoveCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, LLUUID region, bool replacing, bool nearby_after)
+{
+    auto self = [&h, gen]() -> WolfFloaterTrack*
+    {
+        WolfFloaterTrack* f = dynamic_cast<WolfFloaterTrack*>(h.get());
+        return f && f->mGen == gen ? f : nullptr;
+    };
+    WolfFloaterTrack* f = self();
+    if (!f) return;
+    // the in-view way, as before: when the server cannot (or was asked first and could not), or for what it left
+    auto nearby = [&](const std::string& lead)
+    {
+        f->mRemoving = false;
+        f->mProgress->setVisible(false);
+        f->mRemoveLead += lead;
+        f->nearbyRemove(layout, region, replacing, false);
+    };
+    auto finish = [&](const std::string& text, bool error)
+    {
+        f->mRemoving = false;
+        f->mProgress->setVisible(false);
+        f->setStatus(f->takeLead() + text, error);
+        f->updateControls();
+    };
+    f->setStatus(f->mRemoveLead + "Asking the region to take your railway away...", false);
+    LLSD reply;
+    std::string error;
+    // DESIGN.md 10: remove_server {layout, region} -> job (kind "remove"); refusals with a code (HTTP 200), or 429 when too many
+    bool ok = callNow("remove_server", LLSD().with("layout", layout).with("region", region.asString()), reply, error);
+    f = self();
+    if (!f) return;
+    if (!ok)
+    {
+        const std::string code = reply.isMap() ? reply["code"].asString() : std::string();
+        LL_INFOS("WolfTrack") << "remove_server refused (" << code << "): " << error << LL_ENDL;
+        if (nearby_after) { nearby(std::string()); return; }
+        if (code == "none_found" || code == "nothing_laid")
+        {
+            // after nearby: what is still on record was not found in the region either (DESIGN.md 10 wording)
+            const S32 n = code == "none_found" ? reply["not_found"].asInteger() : 0;
+            if (n <= 0) { finish("The railway was taken away here.", false); f->refreshMine(); return; }
+            finish(llformat("%d pieces were not found in the region: they were taken away already, or were laid in the last 10 "
+                            "minutes and the region has not saved them yet (wait a few minutes and press Remove again).", n), true);
+            f->ask(llformat("Forget the %d pieces that were not found?", n), "Forget them",
+                   [f, layout, region, replacing]() { f->sendRemoved(layout, region, replacing); });
+            return;
+        }
+        finish("The region could not take the rest away: " + error + " Come closer to the rest and press Remove again.", true);
+        return;
+    }
+    LLSD job = reply["job"];
+    const LLSD job_id = job["id"];
+    S32 fails = 0;
+    while (job["state"].asString() != "done" && job["state"].asString() != "failed")
+    {
+        const std::string progress = job["progress"].asString();
+        f->mProgress->setVisible(true);
+        f->setStatus(f->mRemoveLead + "Taking your railway away: " + (progress.empty() ? std::string("waiting for its turn") : progress), false);
+        llcoro::suspendUntilTimeout(REMOVE_POLL_S);
+        f = self();
+        if (!f) return;
+        LLSD r;
+        std::string e;
+        if (!callNow("status", LLSD().with("job", job_id), r, e))
+        {
+            f = self();
+            if (!f) return;
+            if (++fails >= REMOVE_POLL_FAILS)
             {
-                std::string t = "This railway has no pieces in this region.";
-                for (LLSD::map_const_iterator it = laid.beginMap(); it != laid.endMap(); ++it)
-                {
-                    if (arr(it->second).size() == 0) continue;
-                    t += " The part in " + f->regionName(LLUUID(it->first)) + " is still there. Go there and press Remove again.";
-                }
-                f->setStatus(t, false);
+                finish("This window has stopped waiting for the region to take your railway away: " + e + " Open Your railways "
+                       "in a while to see what is left.", true);
                 return;
             }
-            f->sendRemoved(l["id"], rgn->getRegionID(), false);   // never laid: only the record goes
-        });
-    });
+            continue;
+        }
+        f = self();
+        if (!f) return;
+        fails = 0;
+        job = r["job"];
+    }
+    const LLSD& res = job["result"];
+    const S32 deleted = res["deleted"].asInteger(), not_found = res["not_found"].asInteger();
+    const S32 still_there = res["still_there"].asInteger(), left = res["left"].asInteger(), laid_left = res["laid_left"].asInteger();
+    LL_INFOS("WolfTrack") << "remove_server " << job["state"].asString() << " (" << job["code"].asString() << "): deleted " << deleted
+                          << ", not found " << not_found << ", still there " << still_there << ", not looked at " << left
+                          << ", on record here " << laid_left << LL_ENDL;
+    if (replacing && deleted > 0) f->mShown.clear();
+    if (job["state"].asString() == "failed")
+    {
+        const std::string code = job["code"].asString();
+        const std::string said = deleted > 0 ? llformat("%d pieces were taken away by the region first. ", deleted) : std::string();
+        // DESIGN.md 10: no_server_remove - that region's server cannot do it: remove from nearby
+        if (nearby_after && (code == "no_server_remove" || code == "region_unreachable")) { nearby(said); return; }
+        const std::string err = job["error"].asString();
+        finish(said + "The region could not take your railway away" + (err.empty() ? std::string(".") : ": " + err)
+               + " Come closer to it and press Remove again.", true);
+        f->refreshMine();
+        return;
+    }
+    const std::string took = deleted > 0 ? llformat("%d pieces taken away by the region. ", deleted) : std::string();
+    if (laid_left <= 0)
+    {
+        std::string t = replacing ? "Your changed railway is laid, and the old one was taken away here. " : "The railway was taken away here. ";
+        t += SERVER_GONE_WORDS;
+        if (replacing) f->mReplaceLaid.clear();
+        if (res["state"].asString() == "partly_removed") t += " Its part in another region is still there: go there and press Remove again.";
+        finish(took + t, false);
+        f->refreshMine();
+        return;
+    }
+    std::string lead = took + (deleted > 0 ? std::string(SERVER_GONE_WORDS) + " " : std::string());
+    if (not_found > 0 && still_there == 0 && left == 0)
+    {
+        lead += llformat("%d pieces were not found in the region: they were taken away already, or were laid in the last 10 minutes "
+                         "and the region has not saved them yet. ", not_found);
+    }
+    if (nearby_after) { nearby(lead); return; }   // what is still in view goes from here; the counts then say what is left
+    std::string t = lead;
+    if (still_there > 0 || left > 0) t += llformat("%d %s still there - press Remove again.", still_there + left, still_there + left == 1 ? "is" : "are");
+    finish(t, still_there + left > 0);
+    if (not_found > 0 && still_there == 0 && left == 0)
+    {
+        f->ask(llformat("Forget the %d pieces that were not found?", not_found), "Forget them",
+               [f, layout, region, replacing]() { f->sendRemoved(layout, region, replacing); });
+    }
+    f->refreshMine();
 }
 
 // ---- the camera (wolffloaterlifts.cpp:1076-1128 lookFromAbove / giveCameraBack, over the whole drawing) ---------------------------
@@ -3354,7 +3538,7 @@ void WolfFloaterTrack::updateControls()
     for (const Item& it : mItems) items_unlaid = items_unlaid || !it.mLaid;
     mLayBtn->setEnabled(!b && mMayLay && mPlan.mOk && !mPlanDirty && !mPlanInFlight && mPlannedReq.isMap() && onWolf()
                         && !(mItemsFromDrawing && items_unlaid && mLaySerial == mPlanSerial));
-    mProgress->setVisible(mLaying || mRezzing);
+    mProgress->setVisible(mLaying || mRezzing || (mRemoving && mProgress->getVisible()));
     LLViewerRegion* rgn = gAgent.getRegion();
     bool unlaid = false, here = false;
     for (const Item& it : mItems)

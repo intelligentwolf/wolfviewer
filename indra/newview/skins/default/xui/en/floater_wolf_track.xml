@@ -22,7 +22,6 @@
  single_instance="true"
  title="Lay Railway Track"
  width="500">
-    <floater.string name="title_change">Lay Railway Track - changing a railway</floater.string>
     <text follows="left|top" font="SansSerifBold" height="40" layout="topleft" left="16" name="track_hint" top="26" width="468" word_wrap="true" />
     <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="draw_heading" top="68" width="468">1. Draw your railway - what do your clicks make?</text>
     <radio_group follows="left|top" height="22" layout="topleft" left="16" name="track_mode" top="90" width="468"

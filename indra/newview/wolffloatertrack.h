@@ -219,6 +219,9 @@ private:
      *  distinct object, name equal and root within MATCH_M); asks for names not known yet. -> how many matched. */
     size_t matchPieces(const Item& item, std::vector<std::pair<std::string, LLUUID>>& matched) const;
     static std::vector<Item> readItems(const LLSD& items);
+    std::set<LLUUID> laidByOthers() const;
+    /** How many of this agent's root objects stand at the item's roots (within MATCH_M), names not checked. */
+    size_t piecesNear(const Item& item) const;
 
     // your railways
     void onMineCheck();
@@ -255,7 +258,6 @@ private:
 
     // controls
     LLTextBox *mHint = nullptr, *mSummary = nullptr, *mProblems = nullptr, *mStatus = nullptr, *mAskText = nullptr;
-    LLTextBox* mStationLabel = nullptr;
     LLRadioGroup* mMode = nullptr;
     LLButton *mUndoBtn = nullptr, *mFinishBtn = nullptr, *mStartOverBtn = nullptr, *mTopViewBtn = nullptr;
     LLButton *mAskYes = nullptr, *mAskNo = nullptr;
@@ -291,6 +293,7 @@ private:
     LLSD mPlannedReq;                  // the REQ the shown plan answers (Lay sends it again; the server plans it again)
     Plan mShown;                       // Your railways > Show: a laid railway's plan, drawn apart from the drawing
     std::string mShownName;
+    LLSD mShownId;
 
     // laying
     bool mLaying = false;              // a job is queued or running
@@ -306,6 +309,10 @@ private:
     LLUUID mRezRegion;
     std::string mRezAlert;             // the region's words when it refused the rez
     std::set<LLUUID> mBefore;          // the root objects there were before the rez (never taken as a piece)
+    std::set<LLUUID> mNotOurs;         // pieces of the resident's other railways here (never taken as a piece)
+    bool mItemsFromDrawing = false;    // mItems came from laying the drawing (laying them all clears the drawing)
+    U32 mLaySerial = 0;                // mPlanSerial when the drawing was last laid
+    bool mLayAnyway = false;           // the resident said: lay this drawing as another railway
     bool mPartialShown = false;        // "Only N of M pieces appeared" with Look again / Take away what was placed
     std::vector<std::pair<std::string, LLUUID>> mMatched;   // name, uuid of every piece found
     Item mPartial;                     // the item whose pieces did not all appear

@@ -266,7 +266,15 @@ namespace
         }
     }
 
-    LLSD xy(F64 x, F64 y) { return LLSD().with(0, LLSD(x)).with(1, LLSD(y)); }
+    // [x, y] - appended, never LLSD::with(index): ImplArray::insert resizes to index + 1 and then inserts, so with(0, x)
+    // .with(1, y) is [x, y, null] (llcommon/llsd.cpp:680-691 ImplArray::insert), which the planner refuses (tracktool/plan.py _pt: len(v) != 2)
+    LLSD xy(F64 x, F64 y)
+    {
+        LLSD a = LLSD::emptyArray();
+        a.append(x);
+        a.append(y);
+        return a;
+    }
 
     std::string plural(S32 n, const char* one, const char* many) { return llformat("%d %s", n, n == 1 ? one : many); }
 
@@ -374,7 +382,6 @@ bool WolfFloaterTrack::postBuild()
     mAskText = getChild<LLTextBox>("track_ask_text");
     mAskYes = getChild<LLButton>("track_ask_yes");
     mAskNo = getChild<LLButton>("track_ask_no");
-    mStationLabel = getChild<LLTextBox>("station_label");
     mSide = getChild<LLComboBox>("station_side");
     mStyle = getChild<LLComboBox>("station_style");
     mName = getChild<LLLineEditor>("station_name");
@@ -613,7 +620,9 @@ bool WolfFloaterTrack::onALine(const GP& p, F64 within, GP& snapped, S32 exclude
             exclude_id = llformat("L%d", n + 1);
         }
     }
-    for (size_t li = 0; li < mPlan.mLines.size(); ++li)
+    // a plan of an older drawing (the drawing changed since it was asked for) is not used: its line numbers may have moved
+    const bool plan_current = !mPlanDirty && !mPlanInFlight;
+    for (size_t li = 0; plan_current && li < mPlan.mLines.size(); ++li)
     {
         if (!exclude_id.empty() && mPlan.mLines[li].mId == exclude_id) continue;
         const std::vector<LLVector3d>& P = mPlan.mLines[li].mP;
@@ -785,7 +794,15 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
     switch (r.mKind)
     {
         case REF_LINE_START: mLines[r.mItem].mStart = g; break;
-        case REF_LINE_CLICK: mLines[r.mItem].mClicks[r.mPoint] = g; break;
+        case REF_LINE_CLICK:
+        {
+            Line& l = mLines[r.mItem];
+            l.mClicks[r.mPoint] = g;
+            // a branch's last click joins a line when it is on one (tracktool/layout.py:137-151): said again for where it is now
+            GP on;
+            if (l.mBranch && r.mPoint + 1 == l.mClicks.size()) l.mJoins = l.mClicks.size() >= 2 && onALine(g, JOIN_M, on, (S32)r.mItem);
+            break;
+        }
         case REF_STATION_A: mStations[r.mItem].mA = g; break;
         case REF_STATION_B: mStations[r.mItem].mB = g; break;
         case REF_SIGNAL: mSignals[r.mItem].mAt = g; break;
@@ -827,9 +844,10 @@ void WolfFloaterTrack::undoPoint()
         }
         else
         {
+            const bool was_branch = l.mBranch;
             mLines.erase(mLines.begin() + (std::ptrdiff_t)at);
             mCurLine = -1;
-            setStatus(l.mBranch ? "The branch was taken out." : "The line was taken out.", false);
+            setStatus(was_branch ? "The branch was taken out." : "The line was taken out.", false);
         }
     }
     else if (kind == 1)
@@ -877,6 +895,7 @@ void WolfFloaterTrack::removeClick(S32 k)
                 setStatus("A line needs its ends - drag them instead, or pick the line in the window and press Take out.", true);
                 return;
             }
+            if (r.mPoint + 1 == l.mClicks.size()) l.mJoins = false;
             l.mClicks.erase(l.mClicks.begin() + (std::ptrdiff_t)r.mPoint);
             if (l.mClosed && l.mClicks.size() < 3) l.mClosed = false;
             setStatus("That point was taken out.", false);
@@ -1048,6 +1067,9 @@ void WolfFloaterTrack::onTakeOut()
 void WolfFloaterTrack::fillItemList()
 {
     if (!mItemsList) return;
+    // the picked row stays picked (this runs after every change, a drag or a letter typed in the name too)
+    const LLScrollListItem* was = mItemsList->getFirstSelected();
+    const LLSD picked = was ? was->getValue() : LLSD();
     mItemsList->deleteAllItems();
     auto row = [&](const std::string& value, const std::string& text)
     {
@@ -1086,6 +1108,7 @@ void WolfFloaterTrack::fillItemList()
     }
     for (size_t i = 0; i < mSignals.size(); ++i) row(llformat("G:%d", (S32)i), llformat("Signal %d", (S32)i + 1));
     if (mLines.empty() && mStations.empty() && mSignals.empty()) row(std::string(), "Nothing yet - click on the ground to start a line.");
+    if (picked.isDefined() && !picked.asString().empty()) mItemsList->selectByValue(picked);
 }
 
 void WolfFloaterTrack::rebuildFlat()
@@ -1855,6 +1878,21 @@ void WolfFloaterTrack::onLay()
 {
     if (busy() || !mPlan.mOk || mPlanDirty || mPlanInFlight || !mPlannedReq.isMap() || !onWolf()) return;
     endAsk();
+    // the last lay of this drawing still has parts to put down: the drawing has to change first (else the same railway is
+    // made twice), and when some of it is laid already the resident says that this is to be another railway
+    bool unlaid = false, laid = false;
+    for (const Item& it : mItems) { unlaid = unlaid || !it.mLaid; laid = laid || it.mLaid; }
+    if (mItemsFromDrawing && unlaid && mLaySerial == mPlanSerial) return;
+    if (mItemsFromDrawing && unlaid && laid && !mLayAnyway)
+    {
+        ask("Part of your last railway is laid already. Lay this drawing as another railway?", "Lay it", [this]()
+        {
+            mLayAnyway = true;
+            onLay();
+        });
+        return;
+    }
+    mLayAnyway = false;
     // DESIGN.md 10: the name is the first station's, else "Railway"
     std::string name = "Railway";
     for (const Station& s : mStations)
@@ -1867,6 +1905,7 @@ void WolfFloaterTrack::onLay()
     body["name"] = name;
     mLaying = true;
     mPartialShown = false;
+    mLaySerial = mPlanSerial;
     mProgress->setValue(0.f);
     setStatus("Laying your track: sending your drawing...", false);
     LL_INFOS("WolfTrack") << "lay '" << name << "'" << (mReplaces.isDefined() ? " (replacing a railway)" : "") << LL_ENDL;
@@ -1875,6 +1914,14 @@ void WolfFloaterTrack::onLay()
         if (!ok)
         {
             f->mLaying = false;
+            // DESIGN.md 10: "lay" plans again first and refuses with the plan's first refusal (bad_request + that sentence):
+            // it is shown as a plan problem, and the drawing must change before Lay track is offered again
+            if (reply.isMap() && reply["code"].asString() == "bad_request")
+            {
+                f->mPlan.mOk = false;
+                f->mPlan.mRefused = true;
+                f->mPlan.mProblemText = "Cannot lay: " + error;
+            }
             f->setStatus("Your railway was not laid: " + error, true);
             f->updateControls();
             return;
@@ -1904,6 +1951,8 @@ void WolfFloaterTrack::statusCoro(LLHandle<LLFloater> h, U32 gen)
         return f && f->mGen == gen ? f : nullptr;
     };
     // only while a job is queued or running and the window is open (paul-think-of-scale: no polling while idle)
+    S32 failures = 0;
+    constexpr S32 MAX_FAILURES = 5;   // CHOSEN: five answers in a row that are not the job's (10 s): the window stops waiting
     while (true)
     {
         llcoro::suspendUntilTimeout(STATUS_EVERY_S);
@@ -1918,10 +1967,20 @@ void WolfFloaterTrack::statusCoro(LLHandle<LLFloater> h, U32 gen)
         if (!f) return;
         if (!ok)
         {
-            // kept on: the next ask may get through; the words stay until it does
+            if (++failures >= MAX_FAILURES)
+            {
+                f->mLaying = false;
+                f->mPolling = false;
+                f->mJobId = LLSD();
+                f->setStatus("This window has stopped waiting for your railway: " + error + " It may still be made - open Your "
+                             "railways to see, and lay it from there.", true);
+                f->updateControls();
+                return;
+            }
             f->setStatus("The railway service did not answer about your railway (it is still being made): " + error, true);
             continue;
         }
+        failures = 0;
         f->onJob(reply["job"]);
         if (!f->mLaying) { f->mPolling = false; return; }
     }
@@ -1950,6 +2009,7 @@ void WolfFloaterTrack::onJob(const LLSD& job)
     {
         const LLSD& result = job["result"];
         mItems = readItems(result["items"]);
+        mItemsFromDrawing = true;
         mLayLayout = result["layout"];
         for (const Item& it : mItems) if (!it.mRegionName.empty()) mRegionNames[it.mRegion] = it.mRegionName;
         mProgress->setValue(100.f * 2.f / 3.f);
@@ -1987,7 +2047,8 @@ void WolfFloaterTrack::partsMessage(const std::string& lead)
         if (mItems[i].mLaid) continue;
         if (!t.empty()) t += " ";
         t += llformat("Part %d of %d is for ", (S32)i + 1, (S32)n) + regionName(mItems[i].mRegion)
-           + ": go there and press Lay the next part. Lay it before you run trains over the border.";
+           + ": walk or fly into it and press Lay the next part. Lay the part in " + regionName(mItems[i].mRegion)
+           + " before you run trains over the border.";
     }
     setStatus(t, false);
 }
@@ -2024,6 +2085,53 @@ void WolfFloaterTrack::onRezAlert(const std::string& message)
     LL_INFOS("WolfTrack") << "the region refused the rez: " << message << LL_ENDL;
 }
 
+std::set<LLUUID> WolfFloaterTrack::laidByOthers() const
+{
+    // the railway being replaced, and every other railway of this resident here (DESIGN.md 10 "open" LAYOUT laid)
+    std::set<LLUUID> out(mReplaceLaid.begin(), mReplaceLaid.end());
+    for (const LLSD& l : llsd::inArray(arr(mMine)))
+    {
+        if (mLayLayout.isDefined() && l["id"].asString() == mLayLayout.asString()) continue;
+        const LLSD& laid = l["laid"];
+        if (!laid.isMap()) continue;
+        for (LLSD::map_const_iterator it = laid.beginMap(); it != laid.endMap(); ++it)
+            for (const LLSD& u : llsd::inArray(arr(it->second))) out.insert(u.asUUID());
+    }
+    return out;
+}
+
+size_t WolfFloaterTrack::piecesNear(const Item& item) const
+{
+    // names are not known yet at this point (they are asked for one by one: wolfobjectprops.h), so any object of this agent's
+    // whose root is within MATCH_M of one of the part's roots counts
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn || rgn->getRegionID() != item.mRegion) return 0;
+    std::map<std::pair<S32, S32>, std::vector<size_t>> cells;
+    for (size_t i = 0; i < item.mObjects.size(); ++i)
+    {
+        const LLVector3& r = item.mObjects[i].mRoot;
+        cells[{ (S32)floorf(r.mV[VX]), (S32)floorf(r.mV[VY]) }].push_back(i);
+    }
+    size_t n_near = 0;
+    for (S32 n = 0, count = gObjectList.getNumObjects(); n < count; ++n)
+    {
+        LLViewerObject* o = gObjectList.getObject(n);
+        if (!o || o->isDead() || !o->isRoot() || o->getRegion() != rgn || !o->permYouOwner() || mNotOurs.count(o->getID())) continue;
+        const LLVector3 p = o->getPositionRegion();
+        const S32 cx = (S32)floorf(p.mV[VX]), cy = (S32)floorf(p.mV[VY]);
+        bool hit = false;
+        for (S32 dy = -1; dy <= 1 && !hit; ++dy)
+            for (S32 dx = -1; dx <= 1 && !hit; ++dx)
+            {
+                auto c = cells.find({ cx + dx, cy + dy });
+                if (c == cells.end()) continue;
+                for (size_t i : c->second) if (dist_vec(item.mObjects[i].mRoot, p) <= MATCH_M) { hit = true; break; }
+            }
+        if (hit) ++n_near;
+    }
+    return n_near;
+}
+
 size_t WolfFloaterTrack::matchPieces(const Item& item, std::vector<std::pair<std::string, LLUUID>>& matched) const
 {
     matched.clear();
@@ -2036,14 +2144,13 @@ size_t WolfFloaterTrack::matchPieces(const Item& item, std::vector<std::pair<std
         const LLVector3& r = item.mObjects[i].mRoot;
         cells[{ (S32)floorf(r.mV[VX]), (S32)floorf(r.mV[VY]) }].push_back(i);
     }
-    const std::set<LLUUID> old(mReplaceLaid.begin(), mReplaceLaid.end());
     std::vector<bool> taken(item.mObjects.size(), false);
     WolfObjectProps& props = WolfObjectProps::instance();
     for (S32 n = 0, count = gObjectList.getNumObjects(); n < count; ++n)
     {
         LLViewerObject* o = gObjectList.getObject(n);
         if (!o || o->isDead() || !o->isRoot() || o->getRegion() != rgn || !o->permYouOwner()) continue;
-        if (mBefore.count(o->getID()) || old.count(o->getID())) continue;
+        if (mBefore.count(o->getID()) || mNotOurs.count(o->getID())) continue;
         const LLVector3 p = o->getPositionRegion();
         const S32 cx = (S32)floorf(p.mV[VX]), cy = (S32)floorf(p.mV[VY]);
         bool near_any = false;
@@ -2123,17 +2230,30 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
             fail("This part is for " + where + ", and you are not there now. Go there and press Lay the next part.");
             return;
         }
+        // never a second copy: pieces of this part that already stand (an earlier rez whose window was closed, or a viewer
+        // restarted since) are looked for first - any one there and the part is only looked for, not rezzed again. Pieces of
+        // the resident's other railways here (Your railways' laid lists) and of the one being replaced never count.
+        f->mNotOurs = f->laidByOthers();
         f->mBefore.clear();
-        for (S32 i = 0, n = gObjectList.getNumObjects(); i < n; ++i)
+        const size_t standing = f->piecesNear(item);
+        if (standing > 0)
         {
-            LLViewerObject* o = gObjectList.getObject(i);
-            if (o && !o->isDead() && o->isRoot()) f->mBefore.insert(o->getID());
+            LL_INFOS("WolfTrack") << standing << " objects of this agent already stand at this part's roots: looking, not rezzing" << LL_ENDL;
+            f->setStatus("Some pieces of this part are on the land already - looking for the rest.", false);
         }
-        f->mRezAlert.clear();
-        f->mRezRegion = item.mRegion;
-        LL_INFOS("WolfTrack") << "rez " << item.mItem << " in " << where << " at " << item.mRayEnd << " (" << item.mObjects.size()
-                              << " pieces)" << LL_ENDL;
-        rezAt(inv, item.mRayEnd);
+        else
+        {
+            for (S32 i = 0, n = gObjectList.getNumObjects(); i < n; ++i)
+            {
+                LLViewerObject* o = gObjectList.getObject(i);
+                if (o && !o->isDead() && o->isRoot()) f->mBefore.insert(o->getID());
+            }
+            f->mRezAlert.clear();
+            f->mRezRegion = item.mRegion;
+            LL_INFOS("WolfTrack") << "rez " << item.mItem << " in " << where << " at " << item.mRayEnd << " (" << item.mObjects.size()
+                                  << " pieces)" << LL_ENDL;
+            rezAt(inv, item.mRayEnd);
+        }
     }
     f->mPartial = item;
     // look for the pieces as they stream in: up to LOOK_S, every half second
@@ -2170,9 +2290,12 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
     {
         f->mMatched = matched;
         f->mPartialShown = true;
+        // DESIGN.md 5.3: OpenSim can refuse the whole rez with no alert at all (the first piece's parcel, or a prim limit
+        // counting every piece against it: InventoryAccessModule.cs:1017-1029)
         fail(matched.empty()
-            ? std::string("No pieces of your railway appeared. Check that you may build on this land (About Land), then press Look "
-                          "again - a slow connection can take longer.")
+            ? std::string("Nothing was placed. The region did not let your railway in - check that you may build on this land and "
+                          "that the parcel has room for more objects. If you think it did place it, press Look again (a slow "
+                          "connection can take longer).")
             : llformat("Only %d of %d pieces appeared. Press Look again to keep looking (a slow connection can take longer), or "
                        "Take away what was placed.", (S32)matched.size(), (S32)want));
         return;
@@ -2194,13 +2317,22 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
     if (!ok)
     {
         f->mPartialShown = true;
+        if (reply.isMap() && reply["code"].asString() == "already_laid")
+        {
+            // DESIGN.md 10: this part is laid already (by an earlier window): it is never rezzed or saved twice
+            f->mPartialShown = false;
+            for (Item& it : f->mItems) if (it.mRegion == item.mRegion && it.mItem == item.mItem) it.mLaid = true;
+            fail("This part of your railway is laid already - it is there.");
+            return;
+        }
         if (reply.isMap() && reply["code"].asString() == "incomplete")
         {
             const S32 missing = (S32)arr(reply["missing"]).size();
             fail(llformat("Only %d of %d pieces were found. Press Look again, or Take away what was placed.", (S32)want - missing, (S32)want));
             return;
         }
-        fail("Your railway is on the land, but it could not be saved as yours: " + error + " Press Look again to try saving it again.");
+        fail("The region let your railway in, but its pieces could not be saved as yours: " + error + " Press Look again to try "
+             "saving them again.");
         return;
     }
     f->mRezzing = false;
@@ -2249,8 +2381,13 @@ void WolfFloaterTrack::afterSaved(const LLSD& layout)
     bool all = true;
     for (const Item& it : mItems) all = all && it.mLaid;
     const std::string state = layout["state"].asString();
-    if (all || state == "laid")
+    if ((all || state == "laid") && !mItemsFromDrawing)
     {
+        setStatus("That railway is laid in full now.", false);
+    }
+    else if (all || state == "laid")
+    {
+        mItemsFromDrawing = false;
         mLines.clear();
         mStations.clear();
         mSignals.clear();
@@ -2270,7 +2407,9 @@ void WolfFloaterTrack::afterSaved(const LLSD& layout)
     {
         S32 laid = 0;
         for (const Item& it : mItems) laid += it.mLaid ? 1 : 0;
-        partsMessage(llformat("Part %d of %d is laid.", laid, (S32)mItems.size()));
+        // DESIGN.md 5.3: "Part 1 of 2 is laid in Badger Vale. Walk or fly into Otter Brook and press Lay the next part."
+        LLViewerRegion* rgn = gAgent.getRegion();
+        partsMessage(llformat("Part %d of %d is laid", laid, (S32)mItems.size()) + (rgn ? " in " + rgn->getName() + "." : std::string(".")));
     }
     if (mMineCheck->get()) refreshMine();
     updateControls();
@@ -2296,6 +2435,16 @@ void WolfFloaterTrack::replaceOld(const LLSD& old_id)
             f->removePart(old_id, rgn->getRegionID(), here, true);
             return;
         }
+        bool elsewhere = false;
+        if (laid.isMap())
+        {
+            for (LLSD::map_const_iterator it = laid.beginMap(); it != laid.endMap(); ++it) elsewhere = elsewhere || arr(it->second).size() > 0;
+        }
+        if (!elsewhere && rgn)
+        {
+            f->sendRemoved(old_id, rgn->getRegionID(), true);   // nothing of it stands anywhere: only the record goes
+            return;
+        }
         std::string t = "Your changed railway is laid.";
         if (laid.isMap())
         {
@@ -2314,7 +2463,11 @@ void WolfFloaterTrack::replaceOld(const LLSD& old_id)
 
 void WolfFloaterTrack::removePart(const LLSD& layout, const LLUUID& region, const std::vector<LLUUID>& uuids, bool replacing)
 {
-    if (busy()) return;
+    if (busy())
+    {
+        setStatus("The window is busy with your railway just now - wait until it has finished, then press Remove again.", true);
+        return;
+    }
     mRemoving = true;
     LLHandle<LLFloater> h = getHandle();
     const U32 gen = mGen;
@@ -2510,22 +2663,25 @@ void WolfFloaterTrack::onShow()
     const LLSD l = pickedLayout();
     if (!l.isMap() || busy()) return;
     const std::string name = l["name"].asString();
-    if (mShownName == name && !mShown.mLines.empty())
+    if (mShownId.isDefined() && mShownId.asString() == l["id"].asString() && !mShown.mLines.empty())
     {
         mShown.clear();
         mShownName.clear();
+        mShownId = LLSD();
         setStatus("The railway is not shown any more.", false);
         return;
     }
     setStatus("Fetching " + name + "...", false);
-    post("get", LLSD().with("layout", l["id"]), [name](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
+    const LLSD id = l["id"];
+    post("get", LLSD().with("layout", id), [name, id](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
     {
         if (!ok) { f->setStatus("That railway could not be fetched: " + error, true); return; }
-        f->post("plan", LLSD().with("request", reply["request"]), [name](WolfFloaterTrack* f2, bool ok2, const LLSD& r2, const std::string& e2)
+        f->post("plan", LLSD().with("request", reply["request"]), [name, id](WolfFloaterTrack* f2, bool ok2, const LLSD& r2, const std::string& e2)
         {
             if (!ok2) { f2->setStatus("That railway could not be drawn: " + e2, true); return; }
             f2->applyPlan(r2["plan"], f2->mShown);
             f2->mShownName = name;
+            f2->mShownId = id;
             f2->setStatus(name + " is drawn in the world in light blue. Press Show again to hide it.", false);
         });
     });
@@ -2602,6 +2758,7 @@ void WolfFloaterTrack::onLayPart()
         if (!ok) { f->setStatus("That railway could not be fetched: " + error, true); return; }
         if (f->busy()) return;
         f->mItems = readItems(reply["items"]);
+        f->mItemsFromDrawing = false;   // another railway's parts: the drawing is not touched when it is laid
         f->mLayLayout = reply["layout"]["id"];
         for (const Item& it : f->mItems) if (!it.mRegionName.empty()) f->mRegionNames[it.mRegion] = it.mRegionName;
         f->layHere();
@@ -2747,6 +2904,16 @@ void WolfFloaterTrack::draw()
         closeFloater();
         return;
     }
+    // one pen at a time, the window opened last keeps it: the Tunnels, Terraform or Lifts window opened after this one puts
+    // this one away (as this one puts them away in onOpen); the drawing is kept for the next open
+    for (const char* other : { "wolf_tunnels", "wolf_terraform", "wolf_lifts" })
+    {
+        if (!mStartPending && LLFloaterReg::instanceVisible(other) && !busy())
+        {
+            closeFloater();
+            return;
+        }
+    }
     if (mStartPending && !LLApp::isExiting())
     {
         // here and not in onOpen: the Build window's focus would put the pen down at once (wolffloaterlifts.cpp:1158-1169)
@@ -2821,7 +2988,10 @@ void WolfFloaterTrack::updateControls()
     mProblems->setColor(LLUIColorTable::instance().getColor(mPlan.mRefused || !mMayLay ? "AlertCautionTextColor" : "LabelTextColor"));
 
     mLayBtn->setLabel(mReplaces.isDefined() ? std::string("Lay the changed railway") : std::string("Lay track"));
-    mLayBtn->setEnabled(!b && mMayLay && mPlan.mOk && !mPlanDirty && !mPlanInFlight && mPlannedReq.isMap() && onWolf());
+    bool items_unlaid = false;
+    for (const Item& it : mItems) items_unlaid = items_unlaid || !it.mLaid;
+    mLayBtn->setEnabled(!b && mMayLay && mPlan.mOk && !mPlanDirty && !mPlanInFlight && mPlannedReq.isMap() && onWolf()
+                        && !(mItemsFromDrawing && items_unlaid && mLaySerial == mPlanSerial));
     mProgress->setVisible(mLaying || mRezzing);
     LLViewerRegion* rgn = gAgent.getRegion();
     bool unlaid = false, here = false;
@@ -2831,9 +3001,8 @@ void WolfFloaterTrack::updateControls()
         unlaid = true;
         here = here || (rgn && it.mRegion == rgn->getRegionID());
     }
-    // after a rez whose pieces were not all found, Look again comes first; only when none appeared at all may the part be
-    // rezzed again (never a second copy beside pieces that are there)
-    mNextPartBtn->setVisible(unlaid && !b && (!mPartialShown || mMatched.empty()));
+    // after a rez whose pieces were not all found, Look again (never a second copy beside pieces that may be streaming in)
+    mNextPartBtn->setVisible(unlaid && !b && !mPartialShown);
     mNextPartBtn->setEnabled(here);
     mLookAgainBtn->setVisible(mPartialShown && !b);
     mTakeAwayBtn->setVisible(mPartialShown && !b && !mMatched.empty());
@@ -2844,5 +3013,4 @@ void WolfFloaterTrack::updateControls()
     mChangeBtn->setEnabled(!b && picked.isMap() && st != "building" && st != "failed");
     mLayPartBtn->setEnabled(!b && picked.isMap() && (st == "built" || st == "partly_laid"));
     mRemoveBtn->setEnabled(!b && picked.isMap() && st != "building");
-    if (!mAsking && mAskText->getVisible()) endAsk();
 }

@@ -65,11 +65,6 @@ namespace WolfTrackTool
 {
     /** Every AlertMessage (llviewermessage.cpp process_alert_core): a "Can't rez object" refusal is kept for the window. */
     void onAlert(const std::string& message);
-    /** The Far (metres) the AgentUpdate asks the region for while the window looks for the pieces it placed, or 0 for none
-     *  (llviewermessage.cpp send_agent_update takes the larger of this and the draw distance). It lapses by itself. */
-    F32 farWanted();
-    /** Ask for objects as far as `far_m` (at most 1024 m) for the next `for_s` seconds; 0 ends it now. Never saved. */
-    void setFar(F32 far_m, F64 for_s);
 }
 
 class WolfFloaterTrack : public LLFloater, public WolfRouteHost

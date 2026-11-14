@@ -35,6 +35,7 @@
 #include "llhudicon.h" // <FS:Ansariel> Changed to get the attached icon
 #include "llinventory.h"
 #include "llrefcount.h"
+#include "wolfprefetch.h"   // [W107 PIPELINE 2026-11-14/] wolfPrefetchForLights
 #include "llprimitive.h"
 #include "lluuid.h"
 #include "llvoinventorylistener.h"
@@ -847,6 +848,21 @@ public:
     // Associated GLTF Asset
     std::shared_ptr<LL::GLTF::Asset> mGLTFAsset;
     bool mIsGLTFAssetMissing = false;
+
+    // [W107 PIPELINE 2026-11-14] A hint to start loading what the light loops read of this object (wolfprefetch.h;
+    // LLPipeline::calcNearbyLights, calc_light_dist and the local light loop of renderDeferredLighting): the prim code
+    // (LLDrawable::getVOVolume), the light parameters' pointer, the drawable and control avatar pointers
+    // (getRenderPosition, getAvatar), and the region, dead / selected / attachment flags and cached positions
+    // (getPositionAgent, isSelected, isAttachment). Reads nothing.
+    void wolfPrefetchForLights() const
+    {
+        wolf_prefetch(&mPrimitiveCode);
+        wolf_prefetch(&mLightParams);
+        wolf_prefetch(&mDrawable);
+        wolf_prefetch(&mControlAvatar);
+        wolf_prefetch(&mRegionp);
+        wolf_prefetch(&mPositionAgent);
+    }
 
     // Pipeline classes
     LLPointer<LLDrawable> mDrawable;

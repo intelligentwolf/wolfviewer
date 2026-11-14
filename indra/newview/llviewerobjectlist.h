@@ -29,6 +29,7 @@
 
 #include <map>
 #include <set>
+#include <unordered_map>   // [W107 PIPELINE 2026-11-14/] mUUIDObjectMap
 
 // common includes
 #include "llstring.h"
@@ -235,7 +236,14 @@ protected:
     uuid_multiset_t   mDeadObjects;
     // </FS:Beq>
 
-    std::map<LLUUID, LLPointer<LLViewerObject> > mUUIDObjectMap;
+    // [W107 PIPELINE 2026-11-14] A hash map instead of the stock std::map. Source: every use of the map is a lookup by
+    // key, an insert, an erase by key or clear() (llviewerobjectlist.cpp:138, 1543, 2222, 2245, 2298 and findObject
+    // below); nothing walks it, so its order is never seen. Measured at Paddington Station, RenderFarClip 4096 (41,000
+    // objects): a std::map lookup walks about 15 tree nodes, each a cache miss (LLUUID::operator< 6.6 % of the main
+    // thread's samples, most of it under findObject and the WolfObjectProps maps); the hash (std::hash<LLUUID>,
+    // lluuid.h:232) reaches the entry in one or two.
+    //std::map<LLUUID, LLPointer<LLViewerObject> > mUUIDObjectMap;
+    std::unordered_map<LLUUID, LLPointer<LLViewerObject> > mUUIDObjectMap;
 
     //set of objects that need to update their cost
     uuid_set_t   mStaleObjectCost;

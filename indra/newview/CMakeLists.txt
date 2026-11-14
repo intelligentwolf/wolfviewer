@@ -1987,6 +1987,7 @@ set(viewer_HEADER_FILES
     wolfgrid.h
     wolfobjectprops.h
     wolfobjectsweep.h
+    wolfprefetch.h                 # [W107 PIPELINE 2026-11-14] cache prefetch hint (the light loops)
     wolffloatermeshupload.h
     wolffloaterlagdetector.h
     wolffloatercompass.h   # [WOLF COMPASS 2026-10-16]

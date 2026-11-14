@@ -73,7 +73,6 @@ void WolfObjectProps::want(LLViewerObject* objectp, bool keep_fresh)
         return;
     }
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    auto rec = mAsked.find(id);
 
     Want w;
     if (mProps.count(id))
@@ -83,8 +82,9 @@ void WolfObjectProps::want(LLViewerObject* objectp, bool keep_fresh)
         // nothing new wanted.
         if (!keep_fresh)
         {
-            return;
+            return;   // [W107 PIPELINE 2026-11-14/] before the ask record is looked up: nearly every call ends here
         }
+        auto rec = mAsked.find(id);
         if (rec != mAsked.end() && (now - rec->second.mSentAt) < REFRESH_SECS)
         {
             return;
@@ -95,6 +95,7 @@ void WolfObjectProps::want(LLViewerObject* objectp, bool keep_fresh)
     {
         // Never answered. Give up after MAX_TRIES unanswered attempts — the request goes
         // out reliable, so silence means the object is gone, not that the packet was lost.
+        auto rec = mAsked.find(id);
         if (rec != mAsked.end() && rec->second.mTries >= MAX_TRIES)
         {
             return;
@@ -141,49 +142,56 @@ void WolfObjectProps::pruneDeadObjects()
     prune(mProps);
     prune(mAsked);
     prune(mWants);
-    mPruneNextProps.setNull();
-    mPruneNextAsked.setNull();
+    mPruneNextProps = 0;
+    mPruneNextAsked = 0;
 }
 
 // [FAR DRAW PERF 2026-11-14] See the header. The same test as pruneDeadObjects, a share of each map a frame.
+// [W107 PIPELINE 2026-11-14] The maps are hash maps now, so the place the last frame stopped is a bucket index and a frame's
+// share is counted in buckets: bucket_count x this frame's time / SWEEP_INTERVAL_SECS of them (at least one), so the whole
+// table - every entry - is still looked at about once every SWEEP_INTERVAL_SECS. A rehash between two frames moves the
+// entries to other buckets: that round may then look at an entry twice or reach it one round late, which is the same
+// "up to SWEEP_INTERVAL_SECS later" the header already describes.
 void WolfObjectProps::pruneSlice()
 {
     const F32 dt = LLFrameTimer::getFrameDeltaTimeF32();
-    const auto slice = [dt](auto& entries, LLUUID& next)
+    std::vector<LLUUID> dead;
+    const auto slice = [dt, &dead](auto& entries, size_t& next)
     {
-        const size_t size = entries.size();
-        if (size == 0)
+        if (entries.empty())
         {
-            next.setNull();
+            next = 0;
             return;
         }
-        // entries this frame: the share of the map that keeps the whole cycle at SWEEP_INTERVAL_SECS, at least one
-        const F64 share = (F64)size * (F64)llmax(dt, 0.f) / SWEEP_INTERVAL_SECS;
-        size_t count = (size_t)llclamp(ceil(share), 1.0, (F64)size);
-        auto it = entries.lower_bound(next);   // UUIDs order the map; the null UUID is never a key (note / want refuse it)
-        while (count-- > 0 && !entries.empty())
+        // Source: std::unordered_map - erase() never rehashes, so bucket_count() holds for the whole loop.
+        const size_t buckets = entries.bucket_count();
+        const F64 share = (F64)buckets * (F64)llmax(dt, 0.f) / SWEEP_INTERVAL_SECS;
+        size_t count = (size_t)llclamp(ceil(share), 1.0, (F64)buckets);
+        if (next >= buckets)
         {
-            if (it == entries.end())
-            {
-                it = entries.begin();   // round again
-            }
-            LLViewerObject* objectp = gObjectList.findObject(it->first);
-            if (!objectp || objectp->isDead())
-            {
-                it = entries.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
+            next = 0;   // the table was rebuilt smaller
         }
-        if (it == entries.end())
+        while (count-- > 0)
         {
-            next.setNull();
-        }
-        else
-        {
-            next = it->first;
+            // the dead keys of this bucket first, erased after its walk: erasing an element ends the iterators to it,
+            // and the bucket's own iterator would be standing on it
+            dead.clear();
+            for (auto it = entries.begin(next); it != entries.end(next); ++it)
+            {
+                LLViewerObject* objectp = gObjectList.findObject(it->first);
+                if (!objectp || objectp->isDead())
+                {
+                    dead.push_back(it->first);
+                }
+            }
+            for (const LLUUID& id : dead)
+            {
+                entries.erase(id);
+            }
+            if (++next >= buckets)
+            {
+                next = 0;   // round again
+            }
         }
     };
     slice(mProps, mPruneNextProps);

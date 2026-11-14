@@ -41,6 +41,7 @@
 #include "llviewerobject.h"
 #include "llrect.h"
 #include "llappviewer.h" // for gFrameTimeSeconds
+#include "wolfprefetch.h"   // [W107 PIPELINE 2026-11-14/]
 #include "llvieweroctree.h"
 #include <unordered_set>
 
@@ -289,6 +290,15 @@ public:
     F32             mDistanceWRTCamera;
 
     static F32 sCurPixelAngle; //current pixels per radian
+
+    // [W107 PIPELINE 2026-11-14] A hint to start loading what the light loops read of this drawable (wolfprefetch.h):
+    // its state and object pointer (isState, getVOVolume) and its octree entry pointer (setVisible). Reads nothing.
+    void wolfPrefetchForLights() const
+    {
+        wolf_prefetch(&mState);
+        wolf_prefetch(&mVObjp);
+        wolf_prefetch(&mEntry);
+    }
 
 private:
     U32             mState;

@@ -18,6 +18,7 @@
 
 #include <map>
 #include <string>
+#include <unordered_map>   // [W107 PIPELINE 2026-11-14/] mProps, mAsked
 
 #include "llsingleton.h"
 #include "lluuid.h"
@@ -158,7 +159,7 @@ private:
     void pruneDeadObjects();
     /**
      * [FAR DRAW PERF 2026-11-14] Paddington Station at 4096 m (W107 perf: pruneDeadObjects 1.0 % of the main thread, in one frame
-     * every 1.5 s): gObjectList.findObject is a std::map lookup (llviewerobjectlist.h mUUIDObjectMap), and the answers and ask
+     * every 1.5 s): gObjectList.findObject was a std::map lookup then (llviewerobjectlist.h mUUIDObjectMap; a hash map since W107 PIPELINE), and the answers and ask
      * records hold tens of thousands of objects. They are now checked a share a frame - each map's size x this frame's time /
      * SWEEP_INTERVAL_SECS entries, from where the last frame stopped - so every entry is still looked at about once every
      * SWEEP_INTERVAL_SECS, as the whole prune before each drain did, without the hitch. The interest list (small: what was
@@ -166,6 +167,8 @@ private:
      * What changes: an answer whose object went is dropped up to SWEEP_INTERVAL_SECS later than its drain-time prune would
      * have; an object that comes back with the same UUID inside that time keeps its answer (as one back inside the old 1.5 s
      * did), and the log line's "answered" / "asked" counts may include those few.
+     * [W107 PIPELINE 2026-11-14] The two maps are hash maps now and the share is counted in buckets (wolfobjectprops.cpp
+     * pruneSlice): the same once-every-SWEEP_INTERVAL_SECS round, in bucket order instead of UUID order.
      */
     void pruneSlice();
     void pruneWants();
@@ -186,17 +189,26 @@ private:
         S32 mPriority = PRIORITY_ROOT;
     };
 
+    // [W107 PIPELINE 2026-11-14] The answers and the ask records are hash maps now (std::hash<LLUUID>, lluuid.h:232).
+    // Paddington Station at RenderFarClip 4096: the object pass calls want() / get() for about 40,000 prims a second for
+    // each feature, and each std::map lookup walked about 15 tree nodes (want() 5.7 % of the main thread's samples, nearly
+    // all of it LLUUID::operator< on a node not in the cache). Nothing depended on their order except pruneSlice's
+    // cursor, which is a bucket index now. A pointer from get() stays good as before: std::unordered_map never moves an
+    // element (only erasing that element ends it). mWants stays a std::map: it is small (what was wanted since the last
+    // drain), and drain() builds its queue in this map's order before a sort that is not stable, so the order requests
+    // go out in is exactly what it was.
     /** object id -> what the sim last said. */
-    std::map<LLUUID, Props> mProps;
+    std::unordered_map<LLUUID, Props> mProps;
     /** object id -> when we last asked, and how many times running. */
-    std::map<LLUUID, Ask> mAsked;
+    std::unordered_map<LLUUID, Ask> mAsked;
     /** Interest registered since the last drain. */
     std::map<LLUUID, Want> mWants;
 
     F64 mNextDrain = 0.0;
-    // [FAR DRAW PERF 2026-11-14] where pruneSlice stopped in each map (the next key to look at; null = the start)
-    LLUUID mPruneNextProps;
-    LLUUID mPruneNextAsked;
+    // [FAR DRAW PERF 2026-11-14] where pruneSlice stopped in each map
+    // [W107 PIPELINE 2026-11-14/] the next BUCKET to look at (the maps are hash maps now; 0 = the start)
+    size_t mPruneNextProps = 0;
+    size_t mPruneNextAsked = 0;
     F64 mNextStatsLog = 0.0;
     U64 mRegionHandle = 0;
 

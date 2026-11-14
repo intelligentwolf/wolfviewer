@@ -47,6 +47,7 @@
 #include "llviewerparceloverlay.h"
 #include "llviewerregion.h"
 #include "llviewertexture.h"
+#include "llviewercontrol.h"   // [W107 PIPELINE 2026-11-14/] gSavedSettings (WolfPipelineSelfTest)
 #include "llworld.h"
 #include "llworldmap.h"        // <WolfViewer 2026-09-26/> map tiles under the painter on huge regions
 #include "llworldmipmap.h"
@@ -437,6 +438,11 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U6
             mByHandle[rec.mHandle] = old != previous.end() && old->second.mVersion > rec.mVersion ? old->second : rec;
         }
     }
+    // [W107 PIPELINE 2026-11-14/] kept automatic layouts (autoZones) of regions no longer in the reply go with them
+    for (auto it = mAutoMemo.begin(); it != mAutoMemo.end();)
+    {
+        it = mByHandle.count(it->first) ? std::next(it) : mAutoMemo.erase(it);
+    }
     mLastError.clear();
     mLastFetchAt = LLFrameTimer::getElapsedSeconds();
     LL_INFOS("WolfWaveZones") << "layouts for " << mByHandle.size() << " regions" << LL_ENDL;
@@ -470,7 +476,8 @@ WolfWaveZones::Source WolfWaveZones::sourceFor(const Region& r) const
 {
     Source src;
     src.mTiles = paintedFor(r);
-    src.mAuto = defaultZones(r);
+    //src.mAuto = defaultZones(r);
+    src.mAuto = autoZones(r);   // [W107 PIPELINE 2026-11-14/] the same string, kept while its inputs stand
     src.mAutoW = r.w();
     src.mAutoCell = r.mCell;
     src.mW = r.pw();
@@ -497,6 +504,49 @@ WolfWaveZones::Source WolfWaveZones::sourceFor(const Region& r) const
 // [2026-09-10, Paul] "a lake in a region doesn't have waves unless they define it" (the white
 // foamy lake in Jimmy Olsen's screenshot), "the water is flat and boring" (first cut: all
 // off), "water enclosed by land also needs character and direction" (second cut: flat lakes).
+// [W107 PIPELINE 2026-11-14] See the header. The key is read from exactly the places defaultZones (below) reads its
+// inputs from: gAgent.getRegion() and WolfWaterField::get() for the exposure (defaultZones' fld; get() answers nullptr
+// for a field that is not ready or was baked for another region, and exposureAt then gives 1 everywhere),
+// LLWorld::getRegionFromHandle(r.mHandle) for the land and the water height.
+const std::string& WolfWaveZones::autoZones(const Region& r) const
+{
+    AutoKey key;
+    key.mW = r.w();
+    key.mH = r.h();
+    key.mCell = r.mCell;
+    LLViewerRegion* agent_rgn = gAgent.getRegion();
+    const WolfWaterField::Field* fld = agent_rgn ? WolfWaterField::instance().get(agent_rgn) : nullptr;
+    key.mAgentHandle = agent_rgn ? agent_rgn->getHandle() : 0;
+    key.mExpoSerial = fld ? fld->mExpoSerial : 0;
+    LLViewerRegion* rgn = LLWorld::getInstance()->getRegionFromHandle(r.mHandle);
+    if (rgn)
+    {
+        key.mHasRegion = true;
+        key.mRegionID = rgn->getRegionID();
+        key.mTerrainRevision = rgn->getLand().getTerrainRevision();
+        key.mWaterHeight = rgn->getWaterHeight();
+    }
+    AutoMemo& memo = mAutoMemo[r.mHandle];
+    if (memo.mZones.empty() || !(memo.mKey == key))
+    {
+        memo.mZones = defaultZones(r);
+        memo.mKey = key;
+    }
+    else
+    {
+        // self test (WolfPipelineSelfTest above 0; the nearby lights' test counts it down): the kept copy against a fresh one
+        static LLCachedControl<S32> self_test_frames(gSavedSettings, "WolfPipelineSelfTest", 0);
+        if (self_test_frames > 0)
+        {
+            const bool same = defaultZones(r) == memo.mZones;
+            LL_INFOS("WolfPipeline") << "automatic wave layout self test: " << r.mName << " (" << key.mW << "x" << key.mH
+                                     << " cells): the kept copy is " << (same ? "the same as a fresh one" : "DIFFERENT")
+                                     << LL_ENDL;
+        }
+    }
+    return memo.mZones;
+}
+
 std::string WolfWaveZones::defaultZones(const Region& r) const
 {
     static constexpr F32 COAST_REACH_M = 96.f;

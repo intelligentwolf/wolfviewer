@@ -1144,6 +1144,7 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     // Keep both bakes on the CPU for wolfboatrock.cpp's wave sampler.
     f.mDepth = mDepthData;
     f.mExpo = mExpoData;
+    f.mExpoSerial = ++mExpoClock;   // [W107 PIPELINE 2026-11-14/] new exposure data (wolfwaterfield.h Field::mExpoSerial)
     f.mReady = true;
 }
 
@@ -1690,13 +1691,51 @@ void WolfWaterClearance::visit(LLViewerObject* o)
 
 void WolfWaterClearance::endPass()
 {
+    // [W107 PIPELINE 2026-11-14] A pass that read exactly what the last one read - the same prim boxes, bit for bit and in
+    // the same order, with the same agent origins, for the same region - asks for no rebuild. The rebuild it would have
+    // started (rasterObjects, then two solves a level and an upload of every level: idle, advanceStage) takes its prims
+    // from mPrims / mPrimOrigins alone and everything else from the land and the level origins, whose changes rebuild at
+    // once on their own (idle: `changed`), so it would have produced the levels that are already there (or, if the
+    // rebuild from the last pass is still pending or under way, the ones it is producing). A still scene re-made them
+    // once every OBJECT_INTERVAL_SECS: 2.3 % of the main thread's samples at Paddington Station (WolfWaterClearance::idle)
+    // and the levels' texture rows sent again each time (uploadLevels: uploadRows(0, N * LEVELS, ...)). Anything different
+    // at all - a prim moved, came, went, or the object list's order changed - and the pass is taken as before.
+    const bool same = mHavePass && mPassRegion == mPrimsRegion
+        && mPassPrims.size() == mPrims.size() && mPassOrigins.size() == mPrimOrigins.size()
+        && (mPrims.empty() || memcmp(mPassPrims.data(), mPrims.data(), mPrims.size() * sizeof(PrimSource)) == 0)
+        && (mPrimOrigins.empty() || memcmp(mPassOrigins.data(), mPrimOrigins.data(), mPrimOrigins.size() * sizeof(LLVector3d)) == 0);
     mPrims.swap(mPassPrims);
     mPrimOrigins.swap(mPassOrigins);
     mPassPrims.clear();
     mPassOrigins.clear();
-    mPrimsFresh = true;
+    //mPrimsFresh = true;
+    if (!same)
+    {
+        mPrimsFresh = true;
+    }
     mHavePass = true;
     mPrimsRegion = mPassRegion;
+    // self test (WolfPipelineSelfTest above 0; the nearby lights' test counts it down): a pass that was passed over,
+    // with the levels standing as built from the last pass - make them again the old way and compare every texel's bits
+    static LLCachedControl<S32> self_test_frames(gSavedSettings, "WolfPipelineSelfTest", 0);
+    if (same && self_test_frames > 0 && mObjectsValid && !mPrimsFresh && mStage < 0)
+    {
+        rasterObjects();   // fills mSrcAll / mSrcDry from mPrims: scratch for the solves, and the same values as they hold
+        size_t differ = 0;
+        std::vector<F32> s_all, d_all, s_dry;
+        const size_t bytes = (size_t)N * N * sizeof(F32);
+        for (S32 k = 0; k < LEVELS; ++k)
+        {
+            solve(k, mSrcAll[k], s_all, &d_all);
+            solve(k, mSrcDry[k], s_dry, nullptr);
+            if (s_all.size() != mS[k].size() || memcmp(s_all.data(), mS[k].data(), bytes) != 0) ++differ;
+            if (d_all.size() != mD[k].size() || memcmp(d_all.data(), mD[k].data(), bytes) != 0) ++differ;
+            if (s_dry.size() != mSDry[k].size() || memcmp(s_dry.data(), mSDry[k].data(), bytes) != 0) ++differ;
+        }
+        LL_INFOS("WolfPipeline") << "water clearance self test: a pass with the same " << mPrims.size()
+                                 << " prims was passed over; the levels made again are "
+                                 << (differ ? "DIFFERENT" : "the same, every texel bit for bit") << LL_ENDL;
+    }
 }
 
 // The prim sources, every level at once: each prim's box (scale, render rotation) as an agent-space AABB, a source

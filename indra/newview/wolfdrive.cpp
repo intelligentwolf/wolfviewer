@@ -624,6 +624,13 @@ bool WolfDrive::joystickStep(LLViewerJoystick* js)
 // watches only - every key goes on to its own binding unchanged. Unmodified keys only.
 void WolfDrive::noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool key_level, bool repeat)
 {
+    // [wolf-rail 1.3, stage V] the one modified key watched: Shift+F7 UNCOUPLE while driving a train (wolftraincab.h
+    // isCabShiftKey; like every key here only watched, it goes on to its own binding - Shift+F7 has none)
+    if (mask == MASK_SHIFT && mSeated && onWolf() && WolfTrain::isCabShiftKey(key) && WolfTrain::instance().driving())
+    {
+        WolfTrain::instance().noteShiftKey(key, key_down, repeat);
+        return;
+    }
     // [WOLF ONLY] off Wolf no key is watched at all (H, L, Z... are stock Firestorm's there)
     if (mask != MASK_NONE || !mSeated || !onWolf())
     {

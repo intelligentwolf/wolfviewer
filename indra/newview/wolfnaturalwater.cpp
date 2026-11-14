@@ -386,7 +386,8 @@ void WolfNaturalWater::rasterizeObject(LLViewerObject* obj, const LLVector3& ori
     const F32 minz = ext[0][2] - origin.mV[VZ], maxz = ext[1][2] - origin.mV[VZ];
     const S32 x0 = llclamp((S32)floorf(minx * oo), 0, n - 1), x1 = llclamp((S32)ceilf(maxx * oo), 0, n - 1);
     const S32 y0 = llclamp((S32)floorf(miny * oo), 0, n - 1), y1 = llclamp((S32)ceilf(maxy * oo), 0, n - 1);
-    if (maxx < 0.f || maxy < 0.f || minx > n * mpg || miny > n * mpg)
+    const F32 span = (F32)n * mpg;   // explicit S32 -> F32 (same value): -Wconversion / MSVC /WX clean
+    if (maxx < 0.f || maxy < 0.f || minx > span || miny > span)
     {
         return;
     }

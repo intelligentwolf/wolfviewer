@@ -37,6 +37,8 @@
 #include "SDL2/SDL_syswm.h"
 #if LL_X11
 # include <X11/Xatom.h>
+# include "wolfx11selection.h"   // <WolfViewer 2026-11-14/> ticket 856, INCR clipboard reads
+# include "wolfpastestatus.h"
 #endif
 #include "llkeyboardsdl.h"
 
@@ -283,7 +285,93 @@ namespace
         return 1;
     }
 
-    bool grab_property(Display* display, Window window, Atom selection, Atom target)
+    // <WolfViewer 2026-11-14> Ticket 856. Reading the clipboard means waiting on SDL's queue for
+    // X events (SelectionNotify, then INCR PropertyNotify pieces), which reach us only as
+    // SDL_SYSWMEVENTs (SDL 2.28 SDL_x11events.c X11_DispatchEvent sends every X event as one while
+    // SDL_SYSWMEVENT is enabled; initialiseX11Clipboard() enables it). Everything met on the way
+    // used to be thrown away (keys, mouse, the raw X key events gatherInput() reads from
+    // SDL_SYSWMEVENT), and SDL_WaitEvent had no timeout. HeldEvents keeps them and restore() puts
+    // them back in their original order: it first takes out whatever is still queued (newer than
+    // anything held), then pushes held + newer, because SDL_PushEvent appends at the tail
+    // (SDL_events.c SDL_PushEvent -> SDL_PeepEvents(SDL_ADDEVENT)).
+    // - SelectionRequest/SelectionClear are not put back: SDL already ran our event filter
+    //   (x11_clipboard_filter) on them as it queued them (SDL_events.c SDL_PushEvent ->
+    //   SDL_EventOK), which is how we still answer requests while we wait; pushing them again
+    //   would answer twice.
+    // - A SYSWM message lives only until the next poll (SDL_events.c SDL_PeepEventsInternal
+    //   recycles wmmsg_used), so each held one is copied; SDL_AddEvent copies it again on push.
+    // - SDL_POLLSENTINEL events are left where they are (SDL counts them, SDL_sentinel_pending);
+    //   restored events land behind one, so gatherInput() handles them on its next frame.
+    class HeldEvents
+    {
+    public:
+        ~HeldEvents() { restore(); }
+
+        // Next X event within timeout_ms, or false.
+        bool waitX(XEvent& out, unsigned int timeout_ms)
+        {
+            const Uint32 end = SDL_GetTicks() + timeout_ms;
+            for (;;)
+            {
+                const Uint32 now = SDL_GetTicks();
+                if (SDL_TICKS_PASSED(now, end))
+                {
+                    return false;
+                }
+                SDL_Event event {};
+                if (!SDL_WaitEventTimeout(&event, (int)(end - now)))
+                {
+                    return false;
+                }
+                if (event.type == SDL_SYSWMEVENT)
+                {
+                    out = event.syswm.msg->msg.x11.event;
+                    hold(event);
+                    return true;
+                }
+                hold(event);
+            }
+        }
+
+        void restore()
+        {
+            SDL_Event event {};
+            while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_POLLSENTINEL - 1) > 0
+                || SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_POLLSENTINEL + 1, SDL_LASTEVENT) > 0)
+            {
+                hold(event);
+            }
+            for (auto& entry : mHeld)
+            {
+                if (entry.first.type == SDL_SYSWMEVENT)
+                {
+                    entry.first.syswm.msg = &entry.second;
+                }
+                SDL_PushEvent(&entry.first);
+            }
+            mHeld.clear();
+        }
+
+    private:
+        void hold(const SDL_Event& event)
+        {
+            SDL_SysWMmsg msg {};
+            if (event.type == SDL_SYSWMEVENT)
+            {
+                msg = *event.syswm.msg;
+                const int type = msg.msg.x11.event.type;
+                if (type == SelectionRequest || type == SelectionClear)
+                {
+                    return;
+                }
+            }
+            mHeld.emplace_back(event, msg);
+        }
+
+        std::vector<std::pair<SDL_Event, SDL_SysWMmsg>> mHeld;
+    };
+
+    bool grab_property(Display* display, Window window, Atom selection, Atom target, HeldEvents& held)
     {
         if( !display )
             return false;
@@ -298,30 +386,22 @@ namespace
         // Unlock the connection so that the SDL event loop may function
         maybe_unlock_display();
 
-        const auto start{ SDL_GetTicks() };
-        const auto end{ start + 1000 };
-
+        // Up to 1 s for the owner's answer, as before (now a real deadline: the old loop used
+        // SDL_WaitEvent, which could block past it until some event arrived).
+        const Uint32 end = SDL_GetTicks() + 1000;
         XEvent xevent {};
-        bool response = false;
-
-        do
+        for (;;)
         {
-            SDL_Event event {};
-
-            // Wait for an event
-            SDL_WaitEvent(&event);
-
-            // If the event is a window manager event
-            if (event.type == SDL_SYSWMEVENT)
+            const Uint32 now = SDL_GetTicks();
+            if (SDL_TICKS_PASSED(now, end) || !held.waitX(xevent, end - now))
             {
-                xevent = event.syswm.msg->msg.x11.event;
-
-                if (xevent.type == SelectionNotify && xevent.xselection.requestor == window)
-                    response = true;
+                return false;
             }
-        } while (!response && SDL_GetTicks() < end );
-
-        return response && xevent.xselection.property != None;
+            if (xevent.type == SelectionNotify && xevent.xselection.requestor == window)
+            {
+                return xevent.xselection.property != None;
+            }
+        }
     }
 }
 
@@ -358,45 +438,47 @@ bool LLWindowSDL::getSelectionText( Atom aSelection, Atom aType, LLWString &text
     if( !mSDL_Display )
         return false;
 
-    if( !grab_property(mSDL_Display, mSDL_XWindowID, aSelection,aType ) )
-        return false;
+    // <WolfViewer 2026-11-14> Ticket 856: large selections arrive by INCR (ICCCM 2.7.2), which the
+    // single read that was here could not follow - it turned the INCR size number into "text", so
+    // a 64,511-character script never pasted. wolfx11selection.h has the whole story and sources;
+    // the two-step size-then-data read of phoenix-firestorm 48282c7fea (FIRE-31976) is kept there.
+    HeldEvents held;   // see HeldEvents above; its destructor puts the events back
+    if( !grab_property(mSDL_Display, mSDL_XWindowID, aSelection, aType, held ) )
+        return false;   // the owner refused this target (or did not answer): try the next
 
-    maybe_lock_display();
+    std::string utf8;
+    const wolfx11::ReadResult result = wolfx11::readSelectionProperty(
+        mSDL_Display, mSDL_XWindowID, PVT_PASTE_BUFFER,
+        [&held](XEvent& event, unsigned int timeout_ms) { return held.waitX(event, timeout_ms); },
+        [] { maybe_lock_display(); }, [] { maybe_unlock_display(); }, utf8);
 
-    Atom type;
-    int format {};
-    unsigned long len {}, size {};
-    unsigned char* data = nullptr;
-
-    // get type and size of the clipboard contents first
-    XGetWindowProperty( mSDL_Display, mSDL_XWindowID,
-                        PVT_PASTE_BUFFER, 0, 0, False,
-                        AnyPropertyType, &type, &format, &len,
-                        &size, &data);
-    XFree(data);
-
-    // now get the real data, we don't really have a size limit here, but we need
-    // to tell the X11 clipboard how much space we have, which happens to be exactly
-    // the size of the current clipboard contents
-    unsigned long remaining {};
-    int res = XGetWindowProperty(mSDL_Display, mSDL_XWindowID,
-                                 PVT_PASTE_BUFFER, 0, size, False,
-                                 AnyPropertyType, &type, &format, &len,
-                                 &remaining, &data);
-    if (data && len)
+    if (result != wolfx11::READ_OK)
     {
-        text = LLWString(
-                utf8str_to_wstring(reinterpret_cast< char const *>( data ) )
-                );
-        XFree(data);
+        LL_WARNS("Window") << "Could not read the " << (aSelection == XA_PRIMARY ? "primary selection" : "clipboard")
+                           << " as target " << aType << ": " << wolfx11::describe(result) << LL_ENDL;
+        if (result != wolfx11::READ_NO_PROPERTY)
+        {
+            wolfpaste::setLastReadFailed();   // text was on offer and the transfer broke
+        }
+        return false;
     }
 
-    maybe_unlock_display();
-    return res == Success;
+    // The old read handed the data over as a C string, so it ended at the first NUL; some owners
+    // send one at the end (this file's own XStoreBytes(utf8.length() + 1) in setSelectionText).
+    // Keep that, rather than pasting a NUL character.
+    const size_t nul = utf8.find('\0');
+    if (nul != std::string::npos)
+    {
+        utf8.resize(nul);
+    }
+
+    text = utf8str_to_wstring(utf8);
+    return true;
 }
 
 bool LLWindowSDL::getSelectionText(Atom selection, LLWString& text)
 {
+    wolfpaste::clearLastReadFailed();   // <WolfViewer 2026-11-14/> ticket 856, see wolfpastestatus.h
     if (!mSDL_Display)
         return false;
 
@@ -423,6 +505,8 @@ bool LLWindowSDL::getSelectionText(Atom selection, LLWString& text)
     {
         if(getSelectionText(selection, atom, text ) )
             return true;
+        if (wolfpaste::lastReadFailed())
+            return false;   // <WolfViewer 2026-11-14/> a broken transfer: other targets would only repeat it
     }
 
     return false;

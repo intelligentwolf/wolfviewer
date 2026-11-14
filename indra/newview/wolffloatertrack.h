@@ -251,18 +251,19 @@ private:
     void onLayPart();
     void onRemove();
     /** Delete exactly `uuids` (the objects of `layout` in the agent's region) and then send "removed" for that region. */
-    /** server_after: pieces out of reach are then left to the server (remove_server) rather than asked about. */
-    void removePart(const LLSD& layout, const LLUUID& region, const std::vector<LLUUID>& uuids, bool replacing, bool server_after = false);
-    static void removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, LLUUID region, std::vector<LLUUID> uuids, bool replacing,
-                           bool server_after);
-    /** The pieces on record for `region` ("remove"), deleted from nearby (removePart). */
-    void nearbyRemove(const LLSD& layout, const LLUUID& region, bool replacing, bool server_after);
-    /** DESIGN.md 10 "Removal by the server": remove_server, then its job's status until done or failed; nearby_after: the
-     *  in-view way for what it cannot do or left. */
-    void serverRemove(const LLSD& layout, const LLUUID& region, bool replacing, bool nearby_after);
-    static void serverRemoveCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, LLUUID region, bool replacing, bool nearby_after);
-    /** The words said so far by an earlier step of this removal, for the next message (cleared). */
-    std::string takeLead();
+    /** What one nearby delete did (nearbyStep). */
+    struct NearResult
+    {
+        size_t taken = 0, stayed = 0, out_of_reach = 0;
+        std::vector<LLUUID> gone;
+    };
+    static bool nearbyStep(const std::function<WolfFloaterTrack*()>& self, const LLUUID& region, const std::vector<LLUUID>& uuids,
+                           NearResult& out);
+    /** Take away what was placed (a lay whose pieces did not all appear): nearby only, nothing recorded. */
+    void takeAwayPart(const LLUUID& region, const std::vector<LLUUID>& uuids);
+    /** Remove (and a Change's take-away of the old railway): one removal of `layout`'s part in `region` (removalCoro). */
+    void startRemoval(const LLSD& layout, const LLUUID& region, bool replacing, bool nearby_first);
+    static void removalCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, LLUUID region, bool replacing, bool nearby_first);
     void sendRemoved(const LLSD& layout, const LLUUID& region, bool replacing);
 
     // transport (WolfCaves::serviceRequest, as wolffloaterbuildinggen.cpp requestCoro)
@@ -345,7 +346,6 @@ private:
     std::string mRezAlert;             // the region's words when it refused the rez
     std::map<std::string, std::set<LLUUID>> mRemovedEarlier;   // layout id -> pieces this window took away (this session)
     std::set<std::string> mLaidThisSession;   // layouts laid in this session (their pieces may not be saved by the region yet)
-    std::string mRemoveLead;           // takeLead
     std::set<LLUUID> mBefore;          // the root objects there were before the rez (never taken as a piece)
     std::set<LLUUID> mNotOurs;         // pieces of the resident's other railways here (never taken as a piece)
     bool mItemsFromDrawing = false;    // mItems came from laying the drawing (laying them all clears the drawing)

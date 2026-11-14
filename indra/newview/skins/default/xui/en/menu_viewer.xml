@@ -2449,6 +2449,12 @@
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_lifts" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
+            <!-- [TRACK TOOL 2026-11-14] Paul: "a track laying tool so people can lay tracks with points just by drawing" (wolffloatertrack.cpp):
+             draw a line on your land, add stations, branches and signals, Lay track. Wolf Territories only, as the Lifts. -->
+            <menu_item_call label="Lay Railway Track..." name="WolfWorldTrack">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_track" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <menu_item_call label="Terraform..." name="WolfWorldTerraform">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_terraform" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />

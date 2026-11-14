@@ -35,6 +35,7 @@
 #include "wolffloatergreedy.h"   // [GREEDY WINDOW 2026-11-10/] a Greedy table's "WolfGreedy1|" lines
 #include "wolfair.h"             // <WolfViewer 2026-11-01/> Wolf Air: the flight deck's dogfight band hears its plane
 #include "wolffloaterlifts.h"    // [WOLF LIFTS 2026-11-10/] the lift kit's "WolfLift1|" lines
+#include "wolffloatertrack.h"    // [TRACK TOOL 2026-11-14/] WolfTrackTool::onAlert
 #include "wolffloaterfishing.h"   // [WOLF FISHING 2026-11-10/] the fishing rod's "WolfFish1|" lines
 #include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
@@ -6893,6 +6894,9 @@ void process_alert_core(const std::string& message, bool modal)
     {
         WolfBorder::instance().onAlert(message);
     }
+    // [TRACK TOOL 2026-11-14] a region refusing the track's rez (InventoryAccessModule.cs:1192-1195 "Can't rez object ..."): the
+    // Lay Railway Track window keeps the region's words for its own message (it never swallows the alert)
+    WolfTrackTool::onAlert(message);
     if (WolfFlight::instanceExists() && WolfFlight::instance().onCrossingRefused(message))
     {
         return;

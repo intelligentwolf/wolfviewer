@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [TRACK TOOL 2026-11-14] Lay Railway Track (wolffloatertrack.cpp). Paul, 13 Nov: "a track laying tool so people can lay
+     tracks with points just by drawing"; 14 Nov: "dont forget to add stations as well... allow them to draw where a station
+     should be". Design: firestorm/region-terrain-work/track-tool-2026-11-14/DESIGN.md (sections 1, 5, 10).
+     Persona: a resident aged 35-65 who owns some land and has never built a railway.
+     Story: "I draw a line on my land, see the track along it, add a station and a branch, press Lay track, and run my train."
+     Flow: the window opens drawing (camera from above, the Tunnel tool's pen) -> 1. pick what the next clicks make (a line, a
+     branch, a station, a signal) and click on the ground; the plan shows in the world at once, with any problem as a red mark
+     and in the window -> 2. Lay track. Your railways (closed) lists what is laid here: Show, Change, Remove.
+     The hint says the next step; the line under the drawing says the length, curves and stations, or what is wrong; the
+     status line under Lay track says what is happening. No codes, no countdowns; failures stay in the caution colour until
+     the next action; questions are asked inside the window (Start over, Remove). -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="584"
+ layout="topleft"
+ name="wolf_track"
+ help_topic="wolf_track"
+ save_rect="true"
+ single_instance="true"
+ title="Lay Railway Track"
+ width="500">
+    <floater.string name="title_change">Lay Railway Track - changing a railway</floater.string>
+    <text follows="left|top" font="SansSerifBold" height="40" layout="topleft" left="16" name="track_hint" top="26" width="468" word_wrap="true" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="draw_heading" top="68" width="468">1. Draw your railway - what do your clicks make?</text>
+    <radio_group follows="left|top" height="22" layout="topleft" left="16" name="track_mode" top="90" width="468"
+     tool_tip="Each choice makes something different with your next clicks on the ground. The words at the top of the world view say what to click.">
+        <radio_item height="20" label="A line" layout="topleft" left="0" name="line" top="0" value="line" width="100"
+         tool_tip="Click where the line starts, at each bend, and where it ends. Click the first point again to make a loop." />
+        <radio_item height="20" label="A branch" layout="topleft" left="110" name="branch" top="0" value="branch" width="110"
+         tool_tip="Click on a line where the branch leaves it, then its bends and its end. End it on a line to join that line." />
+        <radio_item height="20" label="A station" layout="topleft" left="230" name="station" top="0" value="station" width="110"
+         tool_tip="Click on a line where the platform starts, then where it ends." />
+        <radio_item height="20" label="A signal" layout="topleft" left="350" name="signal" top="0" value="signal" width="110"
+         tool_tip="Click on a line to put a signal there. Signals are also put in by themselves." />
+    </radio_group>
+    <button follows="left|top" height="26" label="Undo last point" layout="topleft" left="16" name="track_undo" top="118" width="128"
+     tool_tip="Take the last point you clicked back (Backspace)" />
+    <button follows="left|top" height="26" label="Finish this line" layout="topleft" left="150" name="track_finish" top="118" width="128"
+     tool_tip="End the line you are drawing here; your next click starts a new line" />
+    <button follows="left|top" height="26" label="Start over" layout="topleft" left="284" name="track_start_over" top="118" width="96"
+     tool_tip="Clear the whole drawing (the window asks first)" />
+    <button follows="left|top" height="26" label="Look down" layout="topleft" left="386" name="track_top_view" top="118" width="98"
+     tool_tip="Turn the camera to look down on your drawing, so a click lands where you point" />
+    <!-- the window's own question (Start over, Remove, Forget pieces): in the window, never a modal box -->
+    <text follows="left|top" font="SansSerifBold" height="34" layout="topleft" left="16" name="track_ask_text" top="150" visible="false" width="320" word_wrap="true" />
+    <button follows="left|top" height="26" label="Yes" layout="topleft" left="344" name="track_ask_yes" top="152" visible="false" width="64" />
+    <button follows="left|top" height="26" label="No" layout="topleft" left="420" name="track_ask_no" top="152" visible="false" width="64" />
+    <text follows="left|top" height="20" layout="topleft" left="16" name="station_label" top="192" width="60">Station:</text>
+    <combo_box follows="left|top" height="22" layout="topleft" left="76" name="station_side" top="190" width="142"
+     tool_tip="Which side of the line the platform is on, looking the way you drew the line. Island: the line splits round a platform in the middle.">
+        <combo_box.item label="On the left" name="left" value="left" />
+        <combo_box.item label="On the right" name="right" value="right" />
+        <combo_box.item label="Both sides" name="both" value="both" />
+        <combo_box.item label="Island (in the middle)" name="island" value="island" />
+    </combo_box>
+    <combo_box follows="left|top" height="22" layout="topleft" left="224" name="station_style" top="190" width="126"
+     tool_tip="How the station looks">
+        <combo_box.item label="Country halt" name="halt" value="halt" />
+        <combo_box.item label="Town station" name="town" value="town" />
+        <combo_box.item label="Modern" name="modern" value="modern" />
+    </combo_box>
+    <line_editor follows="left|top" height="22" label="Station name" layout="topleft" left="356" max_length_chars="24" name="station_name" top="190" width="128"
+     tool_tip="The station's name, up to 24 letters, digits, spaces, apostrophes or hyphens - for example Badger Hill" />
+    <text follows="left|top" height="18" layout="topleft" left="16" name="drawn_heading" top="220" width="380">What you have drawn (pick one to change or take it out):</text>
+    <scroll_list draw_heading="false" follows="left|top" height="80" layout="topleft" left="16" name="track_items" top="240" width="380">
+        <scroll_list.columns name="what" relative_width="1" />
+    </scroll_list>
+    <button follows="left|top" height="26" label="Take out" layout="topleft" left="404" name="track_take_out" top="240" width="80"
+     tool_tip="Take the line, branch, station or signal picked in the list out of the drawing" />
+    <text follows="left|top" height="34" layout="topleft" left="16" name="track_summary" top="326" width="468" word_wrap="true" />
+    <text follows="left|top" height="52" layout="topleft" left="16" name="track_problems" top="360" width="468" word_wrap="true" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="lay_heading" top="416" width="468">2. Lay it</text>
+    <button follows="left|top" font="SansSerifLarge" height="34" label="Lay track" layout="topleft" left="16" name="track_lay" top="438" width="180"
+     tool_tip="Make the track, stations and signals and put them on your land (free)" />
+    <progress_bar color_bar="0.3 0.85 0.4 1" follows="left|top" height="10" layout="topleft" left="208" name="track_progress" top="450" visible="false" width="276" />
+    <button follows="left|top" height="26" label="Lay the next part" layout="topleft" left="16" name="track_next_part" top="478" visible="false" width="180"
+     tool_tip="Put the part of your railway that is in the region you are in now on the land" />
+    <button follows="left|top" height="26" label="Look again" layout="topleft" left="204" name="track_look_again" top="478" visible="false" width="120"
+     tool_tip="Look again for the pieces that have not appeared yet" />
+    <button follows="left|top" height="26" label="Take away what was placed" layout="topleft" left="330" name="track_take_away" top="478" visible="false" width="154"
+     tool_tip="Take away the pieces that did appear (the railway stays in your inventory, in Objects)" />
+    <text follows="left|top" height="46" layout="topleft" left="16" name="track_status" top="508" width="468" word_wrap="true" />
+    <check_box follows="left|top" height="18" label="Your railways in this region" layout="topleft" left="16" name="track_mine_check" top="560" width="300"
+     tool_tip="Show the railways you have laid in this region, to show, change or remove them" />
+    <panel follows="left|top" height="140" layout="topleft" left="0" name="track_mine_panel" top="582" visible="false" width="500">
+        <scroll_list follows="left|top" height="96" layout="topleft" left="16" name="track_mine_list" top="0" width="468">
+            <scroll_list.columns label="Railway" name="name" relative_width="0.5" />
+            <scroll_list.columns label="State" name="state" relative_width="0.3" />
+            <scroll_list.columns label="Laid" name="date" relative_width="0.2" />
+        </scroll_list>
+        <button follows="left|top" height="26" label="Show" layout="topleft" left="16" name="track_show" top="104" width="80"
+         tool_tip="Draw this railway's plan in the world" />
+        <button follows="left|top" height="26" label="Change" layout="topleft" left="102" name="track_change" top="104" width="90"
+         tool_tip="Load this railway into the drawing. Lay track then lays the changed railway, and the old one is taken away once the new one is in place." />
+        <button follows="left|top" height="26" label="Lay its part here" layout="topleft" left="198" name="track_lay_part" top="104" width="136"
+         tool_tip="Put the part of this railway that is in the region you are in on the land" />
+        <button follows="left|top" height="26" label="Remove" layout="topleft" left="404" name="track_remove" top="104" width="80"
+         tool_tip="Take this railway's pieces away from the region you are in (the window asks first)" />
+    </panel>
+</floater>

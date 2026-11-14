@@ -4679,6 +4679,8 @@ void WolfToolTunnel::draw()
     if (!rgn) return;
     // [WOLF TERRAFORM 2026-10-23] another window's drawing (the Terraform window): its markers' names and what to do next
     WolfRouteHost* other = host();
+    // [TRACK TOOL 2026-11-14] the window's own words beside its preview (WolfRouteHost::drawRouteExtras; none by default)
+    if (other && !dynamic_cast<WolfFloaterTunnels*>(other) && shown()) other->drawRouteExtras(rgn);
     if (other && !dynamic_cast<WolfFloaterTunnels*>(other) && shown() && other->routeEditing())
     {
         const LLFontGL* font = LLFontGL::getFontSansSerif();

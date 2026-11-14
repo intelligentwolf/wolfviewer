@@ -6325,10 +6325,15 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
         }
 
         // UPDATE THE EXISTING NEARBY LIGHTS
+        // [W107 FARPERF 2026-11-14] The kept lights' set nodes are moved into the new set (std::set::extract, C++17)
+        // and the sets swapped, instead of a new node per light plus a copy of the whole set every frame. Same lights,
+        // same distances, same fades, same order (Light::compare); measured at Paddington Station (RenderFarClip
+        // 4096) this function was 8% of the main thread's samples, the set copy, inserts and frees about 15% of that.
         light_set_t cur_nearby_lights;
-        for (light_set_t::iterator iter = mNearbyLights.begin();
-            iter != mNearbyLights.end(); iter++)
+        for (light_set_t::iterator iter = mNearbyLights.begin(), next = iter;
+            iter != mNearbyLights.end(); iter = next)
         {
+            next = std::next(iter);
             const Light* light = &(*iter);
             LLDrawable* drawable = light->drawable;
             const LLViewerObject *vobj = light->drawable->getVObj();
@@ -6388,9 +6393,12 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
                     fade -= LIGHT_FADE_TIME;
                 }
             }
-            cur_nearby_lights.insert(Light(drawable, dist, fade));
+            light_set_t::node_type node = mNearbyLights.extract(iter);
+            node.value().dist = dist;
+            node.value().fade = fade;
+            cur_nearby_lights.insert(std::move(node));
         }
-        mNearbyLights = cur_nearby_lights;
+        mNearbyLights.swap(cur_nearby_lights);   // the lights dropped above stay in the old set, freed at the end of this block
 
         // FIND NEW LIGHTS THAT ARE IN RANGE
         light_set_t new_nearby_lights;

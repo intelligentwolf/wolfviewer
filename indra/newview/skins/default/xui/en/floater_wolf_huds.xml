@@ -18,122 +18,150 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="804"
+ height="920"
  layout="topleft"
  name="wolf_huds"
  save_rect="true"
  single_instance="true"
  title="Wolf HUDs"
- width="808">
+ width="824">
     <text follows="left|top" font="SansSerifLarge" height="28" layout="topleft" left="12" name="intro" top="30" width="784" wrap="true">Press a picture to show or hide that HUD. A green dot and ON mean it is showing.</text>
-    <!-- Game Mode -->
-    <button follows="left|top" layout="topleft" left="12" top="64" width="256" height="108" name="tile_game" is_toggle="true" label="" tab_stop="true" tool_tip="Game Mode: Your character, actions and bag across the bottom of the screen." />
-    <icon follows="left|top" layout="topleft" left="22" top="78" width="80" height="80" name="pic_game" image_name="WolfHuds_game" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="112" top="74" width="148" height="20" name="name_game" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Game Mode</text>
-    <text follows="left|top" layout="topleft" left="112" top="96" width="148" height="46" name="desc_game" font="SansSerif" wrap="true" mouse_opaque="false">Your character, actions and bag across the bottom of the screen.</text>
-    <text follows="left|top" layout="topleft" left="112" top="146" width="148" height="18" name="state_game" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Car Dashboard -->
-    <button follows="left|top" layout="topleft" left="276" top="64" width="256" height="108" name="tile_car" is_toggle="true" label="" tab_stop="true" tool_tip="Car Dashboard: Speedometer, gears and a steering wheel for a car, truck or bike." />
-    <icon follows="left|top" layout="topleft" left="286" top="78" width="80" height="80" name="pic_car" image_name="WolfHuds_car" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="376" top="74" width="148" height="20" name="name_car" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Car Dashboard</text>
-    <text follows="left|top" layout="topleft" left="376" top="96" width="148" height="46" name="desc_car" font="SansSerif" wrap="true" mouse_opaque="false">Speedometer, gears and a steering wheel for a car, truck or bike.</text>
-    <text follows="left|top" layout="topleft" left="376" top="146" width="148" height="18" name="state_car" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Winter Fun -->
-    <button follows="left|top" layout="topleft" left="540" top="64" width="256" height="108" name="tile_skis" is_toggle="true" label="" tab_stop="true" tool_tip="Winter Fun: Skis, a snowboard, a sledge or a snow disc for the snowy hills." />
-    <icon follows="left|top" layout="topleft" left="550" top="78" width="80" height="80" name="pic_skis" image_name="WolfHuds_skis" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="640" top="74" width="148" height="20" name="name_skis" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Winter Fun</text>
-    <text follows="left|top" layout="topleft" left="640" top="96" width="148" height="46" name="desc_skis" font="SansSerif" wrap="true" mouse_opaque="false">Skis, a snowboard, a sledge or a snow disc for the snowy hills.</text>
-    <text follows="left|top" layout="topleft" left="640" top="146" width="148" height="18" name="state_skis" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Flight Deck -->
-    <button follows="left|top" layout="topleft" left="12" top="180" width="256" height="108" name="tile_plane" is_toggle="true" label="" tab_stop="true" tool_tip="Flight Deck: Flying instruments and the autopilot for aeroplanes." />
-    <icon follows="left|top" layout="topleft" left="22" top="194" width="80" height="80" name="pic_plane" image_name="WolfHuds_plane" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="112" top="190" width="148" height="20" name="name_plane" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Flight Deck</text>
-    <text follows="left|top" layout="topleft" left="112" top="212" width="148" height="46" name="desc_plane" font="SansSerif" wrap="true" mouse_opaque="false">Flying instruments and the autopilot for aeroplanes.</text>
-    <text follows="left|top" layout="topleft" left="112" top="262" width="148" height="18" name="state_plane" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Spaceship -->
-    <button follows="left|top" layout="topleft" left="276" top="180" width="256" height="108" name="tile_spaceship" is_toggle="true" label="" tab_stop="true" tool_tip="Spaceship: Instruments for spaceships and rockets." />
-    <icon follows="left|top" layout="topleft" left="286" top="194" width="80" height="80" name="pic_spaceship" image_name="WolfHuds_spaceship" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="376" top="190" width="148" height="20" name="name_spaceship" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Spaceship</text>
-    <text follows="left|top" layout="topleft" left="376" top="212" width="148" height="46" name="desc_spaceship" font="SansSerif" wrap="true" mouse_opaque="false">Instruments for spaceships and rockets.</text>
-    <text follows="left|top" layout="topleft" left="376" top="262" width="148" height="18" name="state_spaceship" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Sailing Deck -->
-    <button follows="left|top" layout="topleft" left="540" top="180" width="256" height="108" name="tile_boat" is_toggle="true" label="" tab_stop="true" tool_tip="Sailing Deck: Sailing instruments and the autopilot for boats." />
-    <icon follows="left|top" layout="topleft" left="550" top="194" width="80" height="80" name="pic_boat" image_name="WolfHuds_boat" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="640" top="190" width="148" height="20" name="name_boat" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Sailing Deck</text>
-    <text follows="left|top" layout="topleft" left="640" top="212" width="148" height="46" name="desc_boat" font="SansSerif" wrap="true" mouse_opaque="false">Sailing instruments and the autopilot for boats.</text>
-    <text follows="left|top" layout="topleft" left="640" top="262" width="148" height="18" name="state_boat" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Captain's Helm -->
-    <button follows="left|top" layout="topleft" left="12" top="296" width="256" height="108" name="tile_ship" is_toggle="true" label="" tab_stop="true" tool_tip="Captain's Helm: The tall ship's wheel, sails, compass, wind and guns." />
-    <icon follows="left|top" layout="topleft" left="22" top="310" width="80" height="80" name="pic_ship" image_name="WolfHuds_ship" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="112" top="306" width="148" height="20" name="name_ship" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Captain's Helm</text>
-    <text follows="left|top" layout="topleft" left="112" top="328" width="148" height="46" name="desc_ship" font="SansSerif" wrap="true" mouse_opaque="false">The tall ship's wheel, sails, compass, wind and guns.</text>
-    <text follows="left|top" layout="topleft" left="112" top="378" width="148" height="18" name="state_ship" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Speedboat -->
-    <button follows="left|top" layout="topleft" left="276" top="296" width="256" height="108" name="tile_speedboat" is_toggle="true" label="" tab_stop="true" tool_tip="Speedboat: Instruments for a fast motor boat." />
-    <icon follows="left|top" layout="topleft" left="286" top="310" width="80" height="80" name="pic_speedboat" image_name="WolfHuds_speedboat" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="376" top="306" width="148" height="20" name="name_speedboat" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Speedboat</text>
-    <text follows="left|top" layout="topleft" left="376" top="328" width="148" height="46" name="desc_speedboat" font="SansSerif" wrap="true" mouse_opaque="false">Instruments for a fast motor boat.</text>
-    <text follows="left|top" layout="topleft" left="376" top="378" width="148" height="18" name="state_speedboat" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Submarine -->
-    <button follows="left|top" layout="topleft" left="540" top="296" width="256" height="108" name="tile_submarine" is_toggle="true" label="" tab_stop="true" tool_tip="Submarine: Instruments and sonar for going under the sea." />
-    <icon follows="left|top" layout="topleft" left="550" top="310" width="80" height="80" name="pic_submarine" image_name="WolfHuds_submarine" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="640" top="306" width="148" height="20" name="name_submarine" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Submarine</text>
-    <text follows="left|top" layout="topleft" left="640" top="328" width="148" height="46" name="desc_submarine" font="SansSerif" wrap="true" mouse_opaque="false">Instruments and sonar for going under the sea.</text>
-    <text follows="left|top" layout="topleft" left="640" top="378" width="148" height="18" name="state_submarine" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Greedy [W104 FEATFIX 2026-11-11] -->
-    <button follows="left|top" layout="topleft" left="12" top="412" width="256" height="108" name="tile_greedy" is_toggle="true" label="" tab_stop="true" tool_tip="Greedy: The dice game on the screen: play while you walk round the grid." />
-    <icon follows="left|top" layout="topleft" left="22" top="426" width="80" height="80" name="pic_greedy" image_name="WolfHuds_greedy" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="112" top="422" width="148" height="20" name="name_greedy" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Greedy</text>
-    <text follows="left|top" layout="topleft" left="112" top="444" width="148" height="46" name="desc_greedy" font="SansSerif" wrap="true" mouse_opaque="false">The dice game on the screen: play while you walk round the grid.</text>
-    <text follows="left|top" layout="topleft" left="112" top="494" width="148" height="18" name="state_greedy" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Roleplay [W104 FEATFIX 2026-11-11] -->
-    <button follows="left|top" layout="topleft" left="276" top="412" width="256" height="108" name="tile_roleplay" is_toggle="true" label="" tab_stop="true" tool_tip="Roleplay: The game console: your hero, stats, bag, pets and the game&apos;s pages." />
-    <icon follows="left|top" layout="topleft" left="286" top="426" width="80" height="80" name="pic_roleplay" image_name="WolfHuds_roleplay" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="376" top="422" width="148" height="20" name="name_roleplay" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Roleplay</text>
-    <text follows="left|top" layout="topleft" left="376" top="444" width="148" height="46" name="desc_roleplay" font="SansSerif" wrap="true" mouse_opaque="false">The game console: your hero, stats, bag and pets.</text>
-    <text follows="left|top" layout="topleft" left="376" top="494" width="148" height="18" name="state_roleplay" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- Tessa's Compass [W104 FEATFIX 2026-11-11] -->
-    <button follows="left|top" layout="topleft" left="540" top="412" width="256" height="108" name="tile_compass" is_toggle="true" label="" tab_stop="true" tool_tip="Tessa&apos;s Compass: A mariner&apos;s compass: North, where you look and where you go." />
-    <icon follows="left|top" layout="topleft" left="550" top="426" width="80" height="80" name="pic_compass" image_name="WolfHuds_compass" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="640" top="422" width="148" height="20" name="name_compass" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Tessa's Compass</text>
-    <text follows="left|top" layout="topleft" left="640" top="444" width="148" height="46" name="desc_compass" font="SansSerif" wrap="true" mouse_opaque="false">A mariner's compass: North, where you look and where you go.</text>
-    <text follows="left|top" layout="topleft" left="640" top="494" width="148" height="18" name="state_compass" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- WolfSpeed [W104 FEATFIX 2026-11-11] -->
-    <button follows="left|top" layout="topleft" left="12" top="528" width="256" height="108" name="tile_speed" is_toggle="true" label="" tab_stop="true" tool_tip="WolfSpeed: Xenon&apos;s WolfSpeed: a speed dial to walk, run, go fast or super fast." />
-    <icon follows="left|top" layout="topleft" left="22" top="542" width="80" height="80" name="pic_speed" image_name="WolfHuds_speed" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="112" top="538" width="148" height="20" name="name_speed" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">WolfSpeed</text>
-    <text follows="left|top" layout="topleft" left="112" top="560" width="148" height="46" name="desc_speed" font="SansSerif" wrap="true" mouse_opaque="false">Xenon's WolfSpeed: a speed dial to walk, run, go fast or super fast.</text>
-    <text follows="left|top" layout="topleft" left="112" top="610" width="148" height="18" name="state_speed" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- [W104 FEATFIX 2026-11-11] rows 4 and 5 (116 apart, as rows 1-3); row 5's middle (left 276, top 528) is the Fishing tile
-         [W104 MERGE 2026-11-11] and its right-hand slot (left 540) is the Train Cab tile [HUDS TRAIN 2026-11-13]: the grid is
-         full, the next tile starts row 6 (top 644, the status line and the window 116 lower). Status line under row 5, 36 high: two lines fit. -->
-    <!-- [FISHING HUD 2026-11-11] Fishing: the Fishing HUD (wolffishingoverlay.cpp), as Wolf World > Fishing.
-         [W104 MERGE 2026-11-11] in the slot featfix kept for it: row 5 middle. -->
-    <button follows="left|top" layout="topleft" left="276" top="528" width="256" height="108" name="tile_fishing" is_toggle="true" label="" tab_stop="true" tool_tip="Fishing: Cast and Reel in buttons, your catch and your week across the bottom of the screen." />
-    <icon follows="left|top" layout="topleft" left="286" top="542" width="80" height="80" name="pic_fishing" image_name="WolfHuds_fishing" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="376" top="538" width="148" height="20" name="name_fishing" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Fishing</text>
-    <text follows="left|top" layout="topleft" left="376" top="560" width="148" height="46" name="desc_fishing" font="SansSerif" wrap="true" mouse_opaque="false">Cast, reel in, your catch and your week, across the bottom.</text>
-    <text follows="left|top" layout="topleft" left="376" top="610" width="148" height="18" name="state_fishing" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- [HUDS TRAIN 2026-11-13] Paul (W106 test build): "the train hud is not on the huds menu?" - the Train Cab
-         (wolftraincab.cpp), as Wolf World > Vehicles & Travel > Train Cab (Wolf Rail). Row 5's right-hand slot (left 540),
-         the one the Fishing merge left free. Picture: region-terrain-work/huds-train-2026-11-13/make_hud_art_train.py. -->
-    <button follows="left|top" layout="topleft" left="540" top="528" width="256" height="108" name="tile_train" is_toggle="true" label="" tab_stop="true" tool_tip="Train Cab: The driver&apos;s levers, speed and the next stop for a Wolf Rail train. Sit in an engine&apos;s cab to drive it." />
-    <icon follows="left|top" layout="topleft" left="550" top="542" width="80" height="80" name="pic_train" image_name="WolfHuds_train" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="640" top="538" width="148" height="20" name="name_train" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Train Cab</text>
-    <text follows="left|top" layout="topleft" left="640" top="560" width="148" height="46" name="desc_train" font="SansSerif" wrap="true" mouse_opaque="false">The driver's levers, speed and next stop for a Wolf Rail train.</text>
-    <text follows="left|top" layout="topleft" left="640" top="610" width="148" height="18" name="state_train" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <!-- [WEATHER PROPS / TUTORIALS 2026-11-13] ticket 847: row 6 (top 644, as the note above says; the status line and the
-         window 116 lower). Each opens its window, as the Roleplay / Compass / WolfSpeed tiles (lit while it shows). Pictures:
-         region-terrain-work/weather-props-tutorials-2026-11-13/make_art.py. -->
-    <button follows="left|top" layout="topleft" left="12" top="644" width="256" height="108" name="tile_weatherprops" is_toggle="true" label="" tab_stop="true" tool_tip="Weather Props: An umbrella in the rain, a snow shovel in the snow and a leaf rake in autumn, for your avatar." />
-    <icon follows="left|top" layout="topleft" left="22" top="658" width="80" height="80" name="pic_weatherprops" image_name="WolfHuds_weatherprops" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="112" top="654" width="148" height="20" name="name_weatherprops" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Weather Props</text>
-    <text follows="left|top" layout="topleft" left="112" top="676" width="148" height="46" name="desc_weatherprops" font="SansSerif" wrap="true" mouse_opaque="false">An umbrella in the rain, a shovel in snow, a rake in autumn.</text>
-    <text follows="left|top" layout="topleft" left="112" top="726" width="148" height="18" name="state_weatherprops" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <button follows="left|top" layout="topleft" left="276" top="644" width="256" height="108" name="tile_tutorials" is_toggle="true" label="" tab_stop="true" tool_tip="Tutorial Videos: Short &quot;How to ...&quot; videos that open in your web browser." />
-    <icon follows="left|top" layout="topleft" left="286" top="658" width="80" height="80" name="pic_tutorials" image_name="WolfHuds_tutorials" mouse_opaque="false" />
-    <text follows="left|top" layout="topleft" left="376" top="654" width="148" height="20" name="name_tutorials" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Tutorial Videos</text>
-    <text follows="left|top" layout="topleft" left="376" top="676" width="148" height="46" name="desc_tutorials" font="SansSerif" wrap="true" mouse_opaque="false">Short "How to ..." videos for the Wolf features.</text>
-    <text follows="left|top" layout="topleft" left="376" top="726" width="148" height="18" name="state_tutorials" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <text follows="left|top" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="760" width="784" wrap="true" />
+    <!-- [HUDS TILES 2 2026-11-14] the tiles scroll. Seven rows (804 high) no longer fit every screen: 920 tall at UI size 1.0
+         is more than the floaters' area of a 1080-high screen at a larger UI size (llfloater.cpp LLFloaterView::adjustToFitScreen
+         only shrinks resizable floaters, and this one is not). So the tiles sit in tiles_panel inside tiles_scroll, and
+         wolffloaterhuds.cpp fitToArea makes the window no taller than the floaters' area (LLFloaterView::getSnapRect, in UI
+         units, so it follows the UI size), the tiles scrolling inside. Panel coordinates are the old floater ones less 64
+         (the scroll's top). The window is 16 wider (824) so the vertical scroll bar (settings.xml UIScrollbarSize 15) never
+         covers a tile nor brings a horizontal one (tiles_panel is 796 wide, the right edge of the last column; 824 less a bar of
+         up to 28 still leaves it room). -->
+    <scroll_container follows="all" layout="topleft" left="0" top="64" width="824" height="804" name="tiles_scroll" opaque="false" border_visible="false" reserve_scroll_corner="false">
+    <panel follows="left|top" layout="topleft" left="0" top="0" width="796" height="804" name="tiles_panel" background_visible="false" mouse_opaque="false">
+        <!-- Game Mode -->
+        <button follows="left|top" layout="topleft" left="12" top="0" width="256" height="108" name="tile_game" is_toggle="true" label="" tab_stop="true" tool_tip="Game Mode: Your character, actions and bag across the bottom of the screen." />
+        <icon follows="left|top" layout="topleft" left="22" top="14" width="80" height="80" name="pic_game" image_name="WolfHuds_game" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="112" top="10" width="148" height="20" name="name_game" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Game Mode</text>
+        <text follows="left|top" layout="topleft" left="112" top="32" width="148" height="46" name="desc_game" font="SansSerif" wrap="true" mouse_opaque="false">Your character, actions and bag across the bottom of the screen.</text>
+        <text follows="left|top" layout="topleft" left="112" top="82" width="148" height="18" name="state_game" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Car Dashboard -->
+        <button follows="left|top" layout="topleft" left="276" top="0" width="256" height="108" name="tile_car" is_toggle="true" label="" tab_stop="true" tool_tip="Car Dashboard: Speedometer, gears and a steering wheel for a car, truck or bike." />
+        <icon follows="left|top" layout="topleft" left="286" top="14" width="80" height="80" name="pic_car" image_name="WolfHuds_car" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="376" top="10" width="148" height="20" name="name_car" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Car Dashboard</text>
+        <text follows="left|top" layout="topleft" left="376" top="32" width="148" height="46" name="desc_car" font="SansSerif" wrap="true" mouse_opaque="false">Speedometer, gears and a steering wheel for a car, truck or bike.</text>
+        <text follows="left|top" layout="topleft" left="376" top="82" width="148" height="18" name="state_car" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Winter Fun -->
+        <button follows="left|top" layout="topleft" left="540" top="0" width="256" height="108" name="tile_skis" is_toggle="true" label="" tab_stop="true" tool_tip="Winter Fun: Skis, a snowboard, a sledge or a snow disc for the snowy hills." />
+        <icon follows="left|top" layout="topleft" left="550" top="14" width="80" height="80" name="pic_skis" image_name="WolfHuds_skis" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="640" top="10" width="148" height="20" name="name_skis" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Winter Fun</text>
+        <text follows="left|top" layout="topleft" left="640" top="32" width="148" height="46" name="desc_skis" font="SansSerif" wrap="true" mouse_opaque="false">Skis, a snowboard, a sledge or a snow disc for the snowy hills.</text>
+        <text follows="left|top" layout="topleft" left="640" top="82" width="148" height="18" name="state_skis" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Flight Deck -->
+        <button follows="left|top" layout="topleft" left="12" top="116" width="256" height="108" name="tile_plane" is_toggle="true" label="" tab_stop="true" tool_tip="Flight Deck: Flying instruments and the autopilot for aeroplanes." />
+        <icon follows="left|top" layout="topleft" left="22" top="130" width="80" height="80" name="pic_plane" image_name="WolfHuds_plane" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="112" top="126" width="148" height="20" name="name_plane" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Flight Deck</text>
+        <text follows="left|top" layout="topleft" left="112" top="148" width="148" height="46" name="desc_plane" font="SansSerif" wrap="true" mouse_opaque="false">Flying instruments and the autopilot for aeroplanes.</text>
+        <text follows="left|top" layout="topleft" left="112" top="198" width="148" height="18" name="state_plane" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Spaceship -->
+        <button follows="left|top" layout="topleft" left="276" top="116" width="256" height="108" name="tile_spaceship" is_toggle="true" label="" tab_stop="true" tool_tip="Spaceship: Instruments for spaceships and rockets." />
+        <icon follows="left|top" layout="topleft" left="286" top="130" width="80" height="80" name="pic_spaceship" image_name="WolfHuds_spaceship" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="376" top="126" width="148" height="20" name="name_spaceship" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Spaceship</text>
+        <text follows="left|top" layout="topleft" left="376" top="148" width="148" height="46" name="desc_spaceship" font="SansSerif" wrap="true" mouse_opaque="false">Instruments for spaceships and rockets.</text>
+        <text follows="left|top" layout="topleft" left="376" top="198" width="148" height="18" name="state_spaceship" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Sailing Deck -->
+        <button follows="left|top" layout="topleft" left="540" top="116" width="256" height="108" name="tile_boat" is_toggle="true" label="" tab_stop="true" tool_tip="Sailing Deck: Sailing instruments and the autopilot for boats." />
+        <icon follows="left|top" layout="topleft" left="550" top="130" width="80" height="80" name="pic_boat" image_name="WolfHuds_boat" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="640" top="126" width="148" height="20" name="name_boat" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Sailing Deck</text>
+        <text follows="left|top" layout="topleft" left="640" top="148" width="148" height="46" name="desc_boat" font="SansSerif" wrap="true" mouse_opaque="false">Sailing instruments and the autopilot for boats.</text>
+        <text follows="left|top" layout="topleft" left="640" top="198" width="148" height="18" name="state_boat" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Captain's Helm -->
+        <button follows="left|top" layout="topleft" left="12" top="232" width="256" height="108" name="tile_ship" is_toggle="true" label="" tab_stop="true" tool_tip="Captain's Helm: The tall ship's wheel, sails, compass, wind and guns." />
+        <icon follows="left|top" layout="topleft" left="22" top="246" width="80" height="80" name="pic_ship" image_name="WolfHuds_ship" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="112" top="242" width="148" height="20" name="name_ship" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Captain's Helm</text>
+        <text follows="left|top" layout="topleft" left="112" top="264" width="148" height="46" name="desc_ship" font="SansSerif" wrap="true" mouse_opaque="false">The tall ship's wheel, sails, compass, wind and guns.</text>
+        <text follows="left|top" layout="topleft" left="112" top="314" width="148" height="18" name="state_ship" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Speedboat -->
+        <button follows="left|top" layout="topleft" left="276" top="232" width="256" height="108" name="tile_speedboat" is_toggle="true" label="" tab_stop="true" tool_tip="Speedboat: Instruments for a fast motor boat." />
+        <icon follows="left|top" layout="topleft" left="286" top="246" width="80" height="80" name="pic_speedboat" image_name="WolfHuds_speedboat" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="376" top="242" width="148" height="20" name="name_speedboat" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Speedboat</text>
+        <text follows="left|top" layout="topleft" left="376" top="264" width="148" height="46" name="desc_speedboat" font="SansSerif" wrap="true" mouse_opaque="false">Instruments for a fast motor boat.</text>
+        <text follows="left|top" layout="topleft" left="376" top="314" width="148" height="18" name="state_speedboat" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Submarine -->
+        <button follows="left|top" layout="topleft" left="540" top="232" width="256" height="108" name="tile_submarine" is_toggle="true" label="" tab_stop="true" tool_tip="Submarine: Instruments and sonar for going under the sea." />
+        <icon follows="left|top" layout="topleft" left="550" top="246" width="80" height="80" name="pic_submarine" image_name="WolfHuds_submarine" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="640" top="242" width="148" height="20" name="name_submarine" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Submarine</text>
+        <text follows="left|top" layout="topleft" left="640" top="264" width="148" height="46" name="desc_submarine" font="SansSerif" wrap="true" mouse_opaque="false">Instruments and sonar for going under the sea.</text>
+        <text follows="left|top" layout="topleft" left="640" top="314" width="148" height="18" name="state_submarine" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Greedy [W104 FEATFIX 2026-11-11] -->
+        <button follows="left|top" layout="topleft" left="12" top="348" width="256" height="108" name="tile_greedy" is_toggle="true" label="" tab_stop="true" tool_tip="Greedy: The dice game on the screen: play while you walk round the grid." />
+        <icon follows="left|top" layout="topleft" left="22" top="362" width="80" height="80" name="pic_greedy" image_name="WolfHuds_greedy" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="112" top="358" width="148" height="20" name="name_greedy" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Greedy</text>
+        <text follows="left|top" layout="topleft" left="112" top="380" width="148" height="46" name="desc_greedy" font="SansSerif" wrap="true" mouse_opaque="false">The dice game on the screen: play while you walk round the grid.</text>
+        <text follows="left|top" layout="topleft" left="112" top="430" width="148" height="18" name="state_greedy" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Roleplay [W104 FEATFIX 2026-11-11] -->
+        <button follows="left|top" layout="topleft" left="276" top="348" width="256" height="108" name="tile_roleplay" is_toggle="true" label="" tab_stop="true" tool_tip="Roleplay: The game console: your hero, stats, bag, pets and the game&apos;s pages." />
+        <icon follows="left|top" layout="topleft" left="286" top="362" width="80" height="80" name="pic_roleplay" image_name="WolfHuds_roleplay" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="376" top="358" width="148" height="20" name="name_roleplay" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Roleplay</text>
+        <text follows="left|top" layout="topleft" left="376" top="380" width="148" height="46" name="desc_roleplay" font="SansSerif" wrap="true" mouse_opaque="false">The game console: your hero, stats, bag and pets.</text>
+        <text follows="left|top" layout="topleft" left="376" top="430" width="148" height="18" name="state_roleplay" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- Tessa's Compass [W104 FEATFIX 2026-11-11] -->
+        <button follows="left|top" layout="topleft" left="540" top="348" width="256" height="108" name="tile_compass" is_toggle="true" label="" tab_stop="true" tool_tip="Tessa&apos;s Compass: A mariner&apos;s compass: North, where you look and where you go." />
+        <icon follows="left|top" layout="topleft" left="550" top="362" width="80" height="80" name="pic_compass" image_name="WolfHuds_compass" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="640" top="358" width="148" height="20" name="name_compass" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Tessa's Compass</text>
+        <text follows="left|top" layout="topleft" left="640" top="380" width="148" height="46" name="desc_compass" font="SansSerif" wrap="true" mouse_opaque="false">A mariner's compass: North, where you look and where you go.</text>
+        <text follows="left|top" layout="topleft" left="640" top="430" width="148" height="18" name="state_compass" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- WolfSpeed [W104 FEATFIX 2026-11-11] -->
+        <button follows="left|top" layout="topleft" left="12" top="464" width="256" height="108" name="tile_speed" is_toggle="true" label="" tab_stop="true" tool_tip="WolfSpeed: Xenon&apos;s WolfSpeed: a speed dial to walk, run, go fast or super fast." />
+        <icon follows="left|top" layout="topleft" left="22" top="478" width="80" height="80" name="pic_speed" image_name="WolfHuds_speed" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="112" top="474" width="148" height="20" name="name_speed" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">WolfSpeed</text>
+        <text follows="left|top" layout="topleft" left="112" top="496" width="148" height="46" name="desc_speed" font="SansSerif" wrap="true" mouse_opaque="false">Xenon's WolfSpeed: a speed dial to walk, run, go fast or super fast.</text>
+        <text follows="left|top" layout="topleft" left="112" top="546" width="148" height="18" name="state_speed" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- [W104 FEATFIX 2026-11-11] rows 4 and 5 (116 apart, as rows 1-3); row 5's middle (left 276, top 528) is the Fishing tile
+             [W104 MERGE 2026-11-11] and its right-hand slot (left 540) is the Train Cab tile [HUDS TRAIN 2026-11-13]: the grid is
+             full, the next tile starts row 6 (top 644, the status line and the window 116 lower). Status line under row 5, 36 high: two lines fit. -->
+        <!-- [FISHING HUD 2026-11-11] Fishing: the Fishing HUD (wolffishingoverlay.cpp), as Wolf World > Fishing.
+             [W104 MERGE 2026-11-11] in the slot featfix kept for it: row 5 middle. -->
+        <button follows="left|top" layout="topleft" left="276" top="464" width="256" height="108" name="tile_fishing" is_toggle="true" label="" tab_stop="true" tool_tip="Fishing: Cast and Reel in buttons, your catch and your week across the bottom of the screen." />
+        <icon follows="left|top" layout="topleft" left="286" top="478" width="80" height="80" name="pic_fishing" image_name="WolfHuds_fishing" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="376" top="474" width="148" height="20" name="name_fishing" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Fishing</text>
+        <text follows="left|top" layout="topleft" left="376" top="496" width="148" height="46" name="desc_fishing" font="SansSerif" wrap="true" mouse_opaque="false">Cast, reel in, your catch and your week, across the bottom.</text>
+        <text follows="left|top" layout="topleft" left="376" top="546" width="148" height="18" name="state_fishing" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- [HUDS TRAIN 2026-11-13] Paul (W106 test build): "the train hud is not on the huds menu?" - the Train Cab
+             (wolftraincab.cpp), as Wolf World > Vehicles & Travel > Train Cab (Wolf Rail). Row 5's right-hand slot (left 540),
+             the one the Fishing merge left free. Picture: region-terrain-work/huds-train-2026-11-13/make_hud_art_train.py. -->
+        <button follows="left|top" layout="topleft" left="540" top="464" width="256" height="108" name="tile_train" is_toggle="true" label="" tab_stop="true" tool_tip="Train Cab: The driver&apos;s levers, speed and the next stop for a Wolf Rail train. Sit in an engine&apos;s cab to drive it." />
+        <icon follows="left|top" layout="topleft" left="550" top="478" width="80" height="80" name="pic_train" image_name="WolfHuds_train" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="640" top="474" width="148" height="20" name="name_train" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Train Cab</text>
+        <text follows="left|top" layout="topleft" left="640" top="496" width="148" height="46" name="desc_train" font="SansSerif" wrap="true" mouse_opaque="false">The driver's levers, speed and next stop for a Wolf Rail train.</text>
+        <text follows="left|top" layout="topleft" left="640" top="546" width="148" height="18" name="state_train" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- [WEATHER PROPS / TUTORIALS 2026-11-13] ticket 847: row 6 (top 644, as the note above says; the status line and the
+             window 116 lower). Each opens its window, as the Roleplay / Compass / WolfSpeed tiles (lit while it shows). Pictures:
+             region-terrain-work/weather-props-tutorials-2026-11-13/make_art.py. -->
+        <button follows="left|top" layout="topleft" left="12" top="580" width="256" height="108" name="tile_weatherprops" is_toggle="true" label="" tab_stop="true" tool_tip="Weather Props: An umbrella in the rain, a snow shovel in the snow and a leaf rake in autumn, for your avatar." />
+        <icon follows="left|top" layout="topleft" left="22" top="594" width="80" height="80" name="pic_weatherprops" image_name="WolfHuds_weatherprops" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="112" top="590" width="148" height="20" name="name_weatherprops" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Weather Props</text>
+        <text follows="left|top" layout="topleft" left="112" top="612" width="148" height="46" name="desc_weatherprops" font="SansSerif" wrap="true" mouse_opaque="false">An umbrella in the rain, a shovel in snow, a rake in autumn.</text>
+        <text follows="left|top" layout="topleft" left="112" top="662" width="148" height="18" name="state_weatherprops" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <button follows="left|top" layout="topleft" left="276" top="580" width="256" height="108" name="tile_tutorials" is_toggle="true" label="" tab_stop="true" tool_tip="Tutorial Videos: Short &quot;How to ...&quot; videos that open in your web browser." />
+        <icon follows="left|top" layout="topleft" left="286" top="594" width="80" height="80" name="pic_tutorials" image_name="WolfHuds_tutorials" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="376" top="590" width="148" height="20" name="name_tutorials" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Tutorial Videos</text>
+        <text follows="left|top" layout="topleft" left="376" top="612" width="148" height="46" name="desc_tutorials" font="SansSerif" wrap="true" mouse_opaque="false">Short "How to ..." videos for the Wolf features.</text>
+        <text follows="left|top" layout="topleft" left="376" top="662" width="148" height="18" name="state_tutorials" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- [HUDS TILES 2 2026-11-14] the Train Builder (wolffloatertrainbuilder.cpp) and Lay Railway Track (wolffloatertrack.cpp)
+             windows, which opened only from menus: Build > / Wolf World > Build &amp; Land > / Vehicles &amp; Travel > Train Builder... and
+             Wolf World > Build &amp; Land > Lay Railway Track... (menu_viewer.xml WolfWorldTrainBuilder / WolfWorldTrack). Each opens
+             its window, as the Weather Props / Tutorial Videos tiles (lit while it shows). The Train Builder in row 6's right-hand
+             slot (left 540), Lay Railway Track starts row 7 (left 12). Pictures: region-terrain-work/huds-tiles2-2026-11-14/
+             make_hud_art_trainbuilder_track.py. -->
+        <button follows="left|top" layout="topleft" left="540" top="580" width="256" height="108" name="tile_trainbuilder" is_toggle="true" label="" tab_stop="true" tool_tip="Train Builder: Choose a train, its carriages and its colours, and the yard builds it for you." />
+        <icon follows="left|top" layout="topleft" left="550" top="594" width="80" height="80" name="pic_trainbuilder" image_name="WolfHuds_trainbuilder" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="640" top="590" width="148" height="20" name="name_trainbuilder" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Train Builder</text>
+        <text follows="left|top" layout="topleft" left="640" top="612" width="148" height="46" name="desc_trainbuilder" font="SansSerif" wrap="true" mouse_opaque="false">Choose a train, its carriages and colours; we build it.</text>
+        <text follows="left|top" layout="topleft" left="640" top="662" width="148" height="18" name="state_trainbuilder" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <button follows="left|top" layout="topleft" left="12" top="696" width="256" height="108" name="tile_track" is_toggle="true" label="" tab_stop="true" tool_tip="Lay Railway Track: Draw a railway on your land, with stations, branches and signals, then lay it." />
+        <icon follows="left|top" layout="topleft" left="22" top="710" width="80" height="80" name="pic_track" image_name="WolfHuds_track" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="112" top="706" width="148" height="20" name="name_track" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Lay Railway Track</text>
+        <text follows="left|top" layout="topleft" left="112" top="728" width="148" height="46" name="desc_track" font="SansSerif" wrap="true" mouse_opaque="false">Draw a railway on your land, then lay it.</text>
+        <text follows="left|top" layout="topleft" left="112" top="778" width="148" height="18" name="state_track" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    </panel>
+    </scroll_container>
+    <text follows="left|bottom" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="876" width="784" wrap="true" />
 </floater>

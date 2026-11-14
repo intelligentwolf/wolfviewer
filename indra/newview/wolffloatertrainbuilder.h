@@ -74,7 +74,8 @@ private:
     std::shared_ptr<const Mesh> mMesh;
     std::map<std::string, LLColor4> mColours;
     std::vector<LLColor4> mPalette;            // per group of mMesh, built from mColours when either changes
-    F32 mYaw = 0.6f;
+    F32 mYaw = 0.5f;          // the middle of the swing (a drag moves it); 0 = side on, the train's +X to the right
+    F32 mPhase = 0.f;         // where in its swing the picture is (draw)
     bool mDragging = false;
     S32 mLastX = 0;
     LLFrameTimer mTurn;

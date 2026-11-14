@@ -59,7 +59,10 @@ namespace
     constexpr F32 TIMEOUT_S = 60.f, PREVIEW_TIMEOUT_S = 120.f;
     // Source: wolffloaterplanebuilder.cpp POLL_S ("polls status every 5 s, only while open and queued or running").
     constexpr F32 POLL_S = 5.f;
+    // a train is long and low: turned right round it is seen end-on half the time, a few pixels wide (WolfStorm's window, 14 Nov
+    // live run). The picture swings SWING_RAD either side of a three-quarter side view, one swing in 30 s; a drag moves the middle.
     constexpr F32 TURN_RAD_PER_S = F_TWO_PI / 30.f;
+    constexpr F32 SWING_RAD = 0.55f;
     constexpr F32 ELEVATION_RAD = 15.f * DEG_TO_RAD;    // a train is long and low: seen from a little above
     // Source: tb_classes.py TRAIN_NAME_CHARS 24, COMPANY_CHARS 32; trainbuilder_lib.php TB_NAME_MAX / TB_COMPANY_MAX
     constexpr S32 TRAIN_NAME_CHARS = 24, COMPANY_CHARS = 32;
@@ -267,14 +270,15 @@ void WolfTrainPreview::draw()
     }
     if (!mDragging)
     {
-        mYaw += TURN_RAD_PER_S * llmin(mTurn.getElapsedTimeF32(), 0.1f);
+        mPhase += TURN_RAD_PER_S * llmin(mTurn.getElapsedTimeF32(), 0.1f);
         mTurn.reset();
-        if (mYaw > F_TWO_PI) mYaw -= F_TWO_PI;
+        if (mPhase > F_TWO_PI) mPhase -= F_TWO_PI;
     }
+    const F32 yaw = mYaw + SWING_RAD * sinf(mPhase);
     const Mesh& m = *mMesh;
     const F32 px_per_m = 0.47f * (F32)llmin(r.getWidth(), r.getHeight()) / m.radius * 1.6f;   // a long train: fill the width
     const F32 cx = (F32)r.getCenterX(), cy = (F32)r.getCenterY();
-    const F32 ca = cosf(mYaw), sa = sinf(mYaw), ce = cosf(ELEVATION_RAD), se = sinf(ELEVATION_RAD);
+    const F32 ca = cosf(yaw), sa = sinf(yaw), ce = cosf(ELEVATION_RAD), se = sinf(ELEVATION_RAD);
     mProj.resize(m.verts.size());
     for (size_t i = 0; i < m.verts.size(); ++i)
     {

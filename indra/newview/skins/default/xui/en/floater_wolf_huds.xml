@@ -18,7 +18,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="688"
+ height="804"
  layout="topleft"
  name="wolf_huds"
  save_rect="true"
@@ -122,5 +122,18 @@
     <text follows="left|top" layout="topleft" left="640" top="538" width="148" height="20" name="name_train" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Train Cab</text>
     <text follows="left|top" layout="topleft" left="640" top="560" width="148" height="46" name="desc_train" font="SansSerif" wrap="true" mouse_opaque="false">The driver's levers, speed and next stop for a Wolf Rail train.</text>
     <text follows="left|top" layout="topleft" left="640" top="610" width="148" height="18" name="state_train" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
-    <text follows="left|top" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="644" width="784" wrap="true" />
+    <!-- [WEATHER PROPS / TUTORIALS 2026-11-13] ticket 847: row 6 (top 644, as the note above says; the status line and the
+         window 116 lower). Each opens its window, as the Roleplay / Compass / WolfSpeed tiles (lit while it shows). Pictures:
+         region-terrain-work/weather-props-tutorials-2026-11-13/make_art.py. -->
+    <button follows="left|top" layout="topleft" left="12" top="644" width="256" height="108" name="tile_weatherprops" is_toggle="true" label="" tab_stop="true" tool_tip="Weather Props: An umbrella in the rain, a snow shovel in the snow and a leaf rake in autumn, for your avatar." />
+    <icon follows="left|top" layout="topleft" left="22" top="658" width="80" height="80" name="pic_weatherprops" image_name="WolfHuds_weatherprops" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="112" top="654" width="148" height="20" name="name_weatherprops" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Weather Props</text>
+    <text follows="left|top" layout="topleft" left="112" top="676" width="148" height="46" name="desc_weatherprops" font="SansSerif" wrap="true" mouse_opaque="false">An umbrella in the rain, a shovel in snow, a rake in autumn.</text>
+    <text follows="left|top" layout="topleft" left="112" top="726" width="148" height="18" name="state_weatherprops" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <button follows="left|top" layout="topleft" left="276" top="644" width="256" height="108" name="tile_tutorials" is_toggle="true" label="" tab_stop="true" tool_tip="Tutorial Videos: Short &quot;How to ...&quot; videos that open in your web browser." />
+    <icon follows="left|top" layout="topleft" left="286" top="658" width="80" height="80" name="pic_tutorials" image_name="WolfHuds_tutorials" mouse_opaque="false" />
+    <text follows="left|top" layout="topleft" left="376" top="654" width="148" height="20" name="name_tutorials" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Tutorial Videos</text>
+    <text follows="left|top" layout="topleft" left="376" top="676" width="148" height="46" name="desc_tutorials" font="SansSerif" wrap="true" mouse_opaque="false">Short "How to ..." videos for the Wolf features.</text>
+    <text follows="left|top" layout="topleft" left="376" top="726" width="148" height="18" name="state_tutorials" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+    <text follows="left|top" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="760" width="784" wrap="true" />
 </floater>

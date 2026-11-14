@@ -920,6 +920,7 @@ set(viewer_SOURCE_FILES
     wolfsealife.cpp   # [SEA LIFE 2026-11-03] ticket 499
     wolfundersea.cpp   # [UNDERSEA 2026-11-09] ticket 652
     wolfleaves.cpp   # [FALLING LEAVES 2026-11-10] ticket 718
+    wolfweatherprops.cpp   # [WEATHER PROPS 2026-11-13] ticket 847
     wolfboatrock.cpp
     wolfflight.cpp
     wolfflightdeck.cpp
@@ -1064,6 +1065,8 @@ set(viewer_SOURCE_FILES
     wolfskihud.cpp   # [SKIS 2026-11-06]
     wolffloaterskis.cpp   # [SKIS 2026-11-06]
     wolffloaterhuds.cpp   # [HUDS BUTTON 2026-11-10]
+    wolffloatertutorials.cpp   # [TUTORIALS 2026-11-13] ticket 847
+    wolffloaterweatherprops.cpp   # [WEATHER PROPS 2026-11-13] ticket 847
     wolfai.cpp
     wolfairports.cpp
     wolflslcomplete.cpp
@@ -2115,6 +2118,9 @@ set(viewer_HEADER_FILES
     wolfskihud.h   # [SKIS 2026-11-06]
     wolffloaterskis.h   # [SKIS 2026-11-06]
     wolffloaterhuds.h   # [HUDS BUTTON 2026-11-10]
+    wolffloatertutorials.h   # [TUTORIALS 2026-11-13] ticket 847
+    wolffloaterweatherprops.h   # [WEATHER PROPS 2026-11-13] ticket 847
+    wolfweatherprops.h   # [WEATHER PROPS 2026-11-13] ticket 847
     wolfai.h
     wolfpaint.h  # [LOOK 2026-10-20] the painting kit of the Upload Model and Create with AI windows
     wolfairports.h

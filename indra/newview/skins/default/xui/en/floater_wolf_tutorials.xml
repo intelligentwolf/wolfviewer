@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [TUTORIALS 2026-11-13] Ticket 847 (IndigoQueen King, Paul: "yeah go ahead"): Tutorial Videos (wolffloatertutorials.cpp;
+     design region-terrain-work/weather-props-tutorials-2026-11-13/DESIGN.md s2). Who and why: a resident wants to learn how to
+     play Greedy, or make caves, and does not know our videos exist. Flow: open it (Wolf World > Tutorial Videos..., Help > Wolf
+     Tutorial Videos..., the Wolf HUDs tile); big cards, newest first, each a "How to ..." title, one line and a Watch button
+     that opens the video in the web browser; "All our videos on YouTube" at the bottom. The list comes from our server
+     (php/wolftutorials.php), so new videos appear without a viewer release. The cards are built in code inside cards_scroll
+     (panel_wolf_tutorial_card.xml), as Wolf Experiences builds its cards. Same words as WolfStorm floater_wolf_tutorials.js.
+     Wolf Territories only (the window closes itself elsewhere). -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="600"
+ layout="topleft"
+ name="wolf_tutorials"
+ save_rect="true"
+ single_instance="true"
+ title="Tutorial Videos"
+ width="560">
+    <text follows="left|top" font="SansSerifLarge" height="26" layout="topleft" left="14" name="intro" top="28" width="532" wrap="true">Short videos that show you how. Press Watch to see one in your web browser.</text>
+    <scroll_container
+     follows="all"
+     height="470"
+     layout="topleft"
+     left="10"
+     name="cards_scroll"
+     opaque="false"
+     reserve_scroll_corner="false"
+     top="60"
+     width="540" />
+    <text follows="left|top" font="SansSerifLarge" height="60" layout="topleft" left="20" mouse_opaque="false" name="status" top="70" width="520" wrap="true">Finding the videos...</text>
+    <button follows="left|top" height="28" label="Try again" layout="topleft" left="20" name="retry" top="136" visible="false" width="120" />
+    <button follows="left|top" font="SansSerifLarge" height="32" label="All our videos on YouTube" layout="topleft" left="14" name="channel" top="548" width="300"
+     tool_tip="Opens the Wolf Territories channel in your web browser." />
+</floater>

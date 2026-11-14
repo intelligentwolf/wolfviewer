@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [TUTORIALS 2026-11-13] One Tutorial Videos card (wolffloatertutorials.cpp buildCards): a picture, the "How to ..." title,
+     one line about the video, and Watch. The code sets the card's rect; this file holds the looks (as
+     panel_wolf_experience_card.xml). Picture: our own play badge, textures/icons/wolf_huds_tutorials.png (make_art.py). -->
+<panel
+ background_opaque="false"
+ background_visible="true"
+ bg_alpha_color="DkGray2"
+ bg_opaque_color="DkGray2"
+ follows="left|top"
+ height="96"
+ layout="topleft"
+ left="0"
+ name="tutorial_card"
+ top="0"
+ width="520">
+    <icon follows="left|top" height="72" image_name="WolfHuds_tutorials" layout="topleft" left="8" mouse_opaque="false" name="picture" scale_image="true" top="12" width="72" />
+    <text follows="left|top" font="SansSerifLarge" font.style="BOLD" height="44" layout="topleft" left="92" name="title" parse_urls="false" text_color="White" top="8" use_ellipses="true" width="312" wrap="true" />
+    <text follows="left|top" height="36" layout="topleft" left="92" name="about" parse_urls="false" top="54" use_ellipses="true" width="312" wrap="true" />
+    <button follows="left|top" font="SansSerifLarge" height="36" label="Watch" layout="topleft" left="416" name="watch" top="30" width="96" />
+</panel>

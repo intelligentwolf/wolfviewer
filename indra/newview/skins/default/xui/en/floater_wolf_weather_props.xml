@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WEATHER PROPS 2026-11-13] Ticket 847 (IndigoQueen King, Paul: "yeah go ahead"): Weather Props (wolffloaterweatherprops.cpp,
+     the rules in wolfweatherprops.cpp; design region-terrain-work/weather-props-tutorials-2026-11-13/DESIGN.md s1).
+     Who and why: a resident (35-65, perhaps with weaker eyesight) wants their avatar to carry an umbrella in the rain without
+     digging in the inventory. Flow: one big switch; three ticks with pictures (all on); one line that says what is happening
+     now (errors in the caution colour, with Try again). Opened from Wolf World > Sky & Weather > Weather Props... and the Wolf
+     HUDs tile. Pictures: our own artwork, textures/icons/wolf_huds_prop_<key>.png (make_art.py). Same words as WolfStorm
+     floater_wolf_weather_props.js. Wolf Territories only (the window closes itself elsewhere). -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="500"
+ layout="topleft"
+ name="wolf_weather_props"
+ save_rect="true"
+ single_instance="true"
+ title="Weather Props"
+ width="520">
+    <text follows="left|top" font="SansSerifLarge" height="46" layout="topleft" left="14" name="intro" top="28" width="492" wrap="true">Your avatar carries an umbrella when it rains, a snow shovel when it snows and a leaf rake in autumn. Everyone can see them.</text>
+    <check_box follows="left|top" height="24" layout="topleft" left="14" name="switch" top="84" width="492" control_name="WolfViewerWeatherProps"
+     font="SansSerifLarge" label="Carry weather props" tool_tip="On: the right prop goes in your right hand when the weather calls for it. Off: none, and any prop Weather Props put on comes off." />
+    <!-- the three props: a picture and a tick each (each tick is its own setting) -->
+    <icon follows="left|top" height="64" layout="topleft" left="34" mouse_opaque="false" name="pic_umbrella" image_name="WolfHuds_prop_umbrella" top="122" width="64" />
+    <check_box follows="left|top" height="22" layout="topleft" left="110" name="tick_umbrella" top="142" width="390" control_name="WolfViewerWeatherPropsUmbrella"
+     font="SansSerifLarge" label="An umbrella when it rains" />
+    <icon follows="left|top" height="64" layout="topleft" left="34" mouse_opaque="false" name="pic_shovel" image_name="WolfHuds_prop_shovel" top="194" width="64" />
+    <check_box follows="left|top" height="22" layout="topleft" left="110" name="tick_shovel" top="214" width="390" control_name="WolfViewerWeatherPropsShovel"
+     font="SansSerifLarge" label="A snow shovel when it snows" />
+    <icon follows="left|top" height="64" layout="topleft" left="34" mouse_opaque="false" name="pic_rake" image_name="WolfHuds_prop_rake" top="266" width="64" />
+    <check_box follows="left|top" height="22" layout="topleft" left="110" name="tick_rake" top="286" width="390" control_name="WolfViewerWeatherPropsRake"
+     font="SansSerifLarge" label="A leaf rake in autumn" />
+    <text follows="left|top" font="SansSerifLarge" height="62" layout="topleft" left="14" name="status" top="344" width="492" wrap="true" />
+    <button follows="left|top" height="28" label="Try again" layout="topleft" left="14" name="retry" top="410" visible="false" width="120" />
+    <text follows="left|top" font="SansSerif" height="32" layout="topleft" left="14" name="note" top="446" width="492" wrap="true">Props follow the weather of the land you are on. They go in your right hand, never instead of something you hold. They are free, in Objects &gt; Weather Props.</text>
+</floater>

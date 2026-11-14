@@ -87,6 +87,7 @@ namespace
     constexpr S32 FETCH_TRIES = 30;
     constexpr S32 FOLDER_REASK_S = 5;          // CHOSEN: a folder not seen yet is asked for again this often (wolffloaterlifts.cpp:996-1006 every 5 s)
     constexpr S32 GONE_WAIT_S = 30;            // CHOSEN: after a delete, the pieces are waited for this long to go
+    constexpr F64 CACHE_SCAN_S = 2.0;          // CHOSEN: the region's object cache is read at most this often during a look
     // DESIGN.md 5.1 / 10: the ground box is the drawing's box plus 60 m all round, 4 m apart, 8 m when that is over 256 a side
     constexpr F64 GROUND_MARGIN_M = 60.0;
     constexpr S32 GROUND_MAX = 256;            // tracktool/plan.py:20 GRID_MAX
@@ -256,46 +257,6 @@ namespace
         if (open) msg->sendReliable(rgn->getHost());
     }
 
-    /** A root object the region told this viewer about that is still only an entry of its object cache (after a relog the
-     *  viewer makes the object only when the camera takes it in: llviewerregion.cpp updateVisibleEntries / createVisibleObjects). */
-    struct CachedRoot
-    {
-        LLUUID mId;
-        U32 mLocal = 0;
-        LLVector3 mPos;              // region metres
-    };
-
-    /** The region's valid root cache entries owned by `owner` (any owner when null). The entry's data is read with a packer of
-     *  its own over the entry's buffer (the entry's own cursor is left alone), in the order the viewer reads it: ID, LocalID,
-     *  PCode (llviewerobjectlist.cpp:353-356 processObjectUpdateFromCache), then CRC, Material, ClickAction, Scale, Pos, Rot,
-     *  SpecialCode, Owner (llviewerobject.cpp:1799-1823, OUT_FULL_CACHED). A root's Pos is region metres; only roots
-     *  (llvocache.h:143 getParentID 0) and valid entries (llviewerregion.cpp getCacheEntry: the region has confirmed them). */
-    std::vector<CachedRoot> cachedRoots(LLViewerRegion* rgn, const LLUUID& owner)
-    {
-        std::vector<CachedRoot> out;
-        if (!rgn) return out;
-        for (const auto& kv : rgn->getCacheEntries())
-        {
-            LLVOCacheEntry* e = kv.second.get();
-            if (!e || !e->isValid() || e->getParentID() != 0) continue;
-            LLDataPackerBinaryBuffer* src = e->getDP();
-            if (!src || src->getBufferSize() <= 0) continue;
-            LLDataPackerBinaryBuffer dp(const_cast<U8*>(src->getBuffer()), src->getBufferSize());
-            CachedRoot r;
-            U32 local = 0, crc = 0, special = 0;
-            U8 pcode = 0, material = 0, click = 0;
-            LLVector3 scale, rot;
-            LLUUID owner_id;
-            if (!dp.unpackUUID(r.mId, "ID") || !dp.unpackU32(local, "LocalID") || !dp.unpackU8(pcode, "PCode")
-                || !dp.unpackU32(crc, "CRC") || !dp.unpackU8(material, "Material") || !dp.unpackU8(click, "ClickAction")
-                || !dp.unpackVector3(scale, "Scale") || !dp.unpackVector3(r.mPos, "Pos") || !dp.unpackVector3(rot, "Rot")
-                || !dp.unpackU32(special, "SpecialCode") || !dp.unpackUUID(owner_id, "Owner")) continue;
-            if (owner.notNull() && owner_id != owner) continue;
-            r.mLocal = e->getLocalID();
-            out.push_back(r);
-        }
-        return out;
-    }
 
 
     // Source: wolffloaterbuildinggen.cpp:77-95 yardError - the service's own words first, else a plain line per status
@@ -405,6 +366,25 @@ namespace
 }
 
 // ---- WolfTrackTool ----------------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // [review of 27827b4a38] the region's KillObject for a piece the viewer holds only in its object cache: process_kill_object
+    // (llviewermessage.cpp) looks the local id up in the local->uuid map, which only an object made by the viewer is in
+    // (llviewerobjectlist.cpp:226 setUUIDAndLocal), and for any other local id it goes on to the next one before
+    // killCacheEntry - so the entry stays valid. The window is told of exactly those unknown kills, for the local ids it
+    // deleted and is waiting for (nothing else is kept), and so knows the region really took them away.
+    std::map<U64, std::set<U32>> sKillWatch;   // region handle -> local ids deleted from the cache only, still waited for
+    std::map<U64, std::set<U32>> sKilled;      // ... and the ones the region's KillObject named
+}
+
+void WolfTrackTool::onUnknownKill(U64 region_handle, U32 local_id)
+{
+    if (sKillWatch.empty()) return;
+    auto w = sKillWatch.find(region_handle);
+    if (w == sKillWatch.end() || !w->second.erase(local_id)) return;
+    sKilled[region_handle].insert(local_id);
+}
 
 void WolfTrackTool::onAlert(const std::string& message)
 {
@@ -2363,6 +2343,60 @@ std::set<LLUUID> WolfFloaterTrack::laidByOthers() const
     return out;
 }
 
+// [live test 14 Nov 15:14Z] A root object the region told this viewer about that is still only an entry of its object cache
+// (after a relog the viewer makes the object only when the camera takes its entry in: llviewerregion.cpp updateVisibleEntries /
+// createVisibleObjects). Read only: nothing in the cache or the render pipeline is changed.
+// The region's valid root entries owned by `owner` (any owner when null). Each entry's data is read with a packer of its own
+// over the entry's buffer (the entry's own cursor is left alone), in the order the viewer reads it: ID, LocalID, PCode
+// (llviewerobjectlist.cpp:353-356 processObjectUpdateFromCache), then CRC, Material, ClickAction, Scale, Pos, Rot, SpecialCode,
+// Owner (llviewerobject.cpp:1799-1823, OUT_FULL_CACHED). A root's Pos is region metres. Only roots (llvocache.h:143 getParentID
+// 0) and valid entries (the region has confirmed them: llviewerregion.cpp getCacheEntry), both tested before the data is read.
+// static
+void WolfFloaterTrack::readCachedRoots(LLViewerRegion* rgn, const LLUUID& owner, std::vector<CachedRoot>& out)
+{
+    out.clear();
+    if (!rgn) return;
+    for (const auto& kv : rgn->getCacheEntries())
+    {
+        LLVOCacheEntry* e = kv.second.get();
+        if (!e || !e->isValid() || e->getParentID() != 0) continue;
+        LLDataPackerBinaryBuffer* src = e->getDP();
+        if (!src || src->getBufferSize() <= 0) continue;
+        LLDataPackerBinaryBuffer dp(const_cast<U8*>(src->getBuffer()), src->getBufferSize());
+        CachedRoot r;
+        U32 local = 0, crc = 0, special = 0;
+        U8 pcode = 0, material = 0, click = 0;
+        LLVector3 scale, rot;
+        LLUUID owner_id;
+        if (!dp.unpackUUID(r.mId, "ID") || !dp.unpackU32(local, "LocalID") || !dp.unpackU8(pcode, "PCode")
+            || !dp.unpackU32(crc, "CRC") || !dp.unpackU8(material, "Material") || !dp.unpackU8(click, "ClickAction")
+            || !dp.unpackVector3(scale, "Scale") || !dp.unpackVector3(r.mPos, "Pos") || !dp.unpackVector3(rot, "Rot")
+            || !dp.unpackU32(special, "SpecialCode") || !dp.unpackUUID(owner_id, "Owner")) continue;
+        if (owner.notNull() && owner_id != owner) continue;
+        r.mLocal = e->getLocalID();
+        out.push_back(r);
+    }
+}
+
+const std::vector<WolfFloaterTrack::CachedRoot>& WolfFloaterTrack::cachedRoots() const
+{
+    // (review of 27827b4a38) the whole cache is read at most every CACHE_SCAN_S on a look, not on every call: the cheap
+    // fields (isValid, getParentID) are tested before an entry's data is read (readCachedRoots)
+    LLViewerRegion* rgn = gAgent.getRegion();
+    const U64 handle = rgn ? rgn->getHandle() : 0;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (handle != mCachedRegion || mCachedAt < 0.0 || now - mCachedAt >= CACHE_SCAN_S)
+    {
+        readCachedRoots(rgn, gAgent.getID(), mCached);
+        // pieces this window deleted and the region confirmed gone stay out (the viewer keeps their entries: below)
+        mCached.erase(std::remove_if(mCached.begin(), mCached.end(), [this](const CachedRoot& c) { return mDeadCached.count(c.mId) > 0; }),
+                      mCached.end());
+        mCachedRegion = handle;
+        mCachedAt = now;
+    }
+    return mCached;
+}
+
 size_t WolfFloaterTrack::piecesNear(const Item& item) const
 {
     // names are not known yet at this point (they are asked for one by one: wolfobjectprops.h), so any object of this agent's
@@ -2393,7 +2427,7 @@ size_t WolfFloaterTrack::piecesNear(const Item& item) const
         if (hit) ++n_near;
     }
     // and the ones still only in the region's object cache (matchPieces, the same)
-    for (const CachedRoot& c : cachedRoots(rgn, gAgent.getID()))
+    for (const CachedRoot& c : cachedRoots())
     {
         if (mNotOurs.count(c.mId)) continue;
         if (LLViewerObject* o = gObjectList.findObject(c.mId); o && !o->isDead()) continue;   // counted above
@@ -2467,7 +2501,7 @@ size_t WolfFloaterTrack::matchPieces(const Item& item, std::vector<std::pair<std
     // object cache until the camera takes them in) are read from the cache itself, read only: nothing is loaded or changed.
     // A name is asked for only of an object (wolfobjectprops.h want), so a cached piece is matched by its place - this
     // agent's, new since the rez, a root within MATCH_M of an expected root - unless its name is known already.
-    for (const CachedRoot& c : cachedRoots(rgn, gAgent.getID()))
+    for (const CachedRoot& c : cachedRoots())
     {
         if (mBefore.count(c.mId) || mNotOurs.count(c.mId)) continue;
         if (LLViewerObject* o = gObjectList.findObject(c.mId); o && !o->isDead()) continue;   // looked at above
@@ -2592,7 +2626,8 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
                 if (o && !o->isDead() && o->isRoot()) f->mBefore.insert(o->getID());
             }
             // and the agent's roots still only in the object cache (never taken as a new piece either)
-            for (const CachedRoot& c : cachedRoots(gAgent.getRegion(), gAgent.getID())) f->mBefore.insert(c.mId);
+            f->mCachedAt = -1.0;   // read the cache now
+            for (const CachedRoot& c : f->cachedRoots()) f->mBefore.insert(c.mId);
             f->mRezAlert.clear();
             f->mRezRegion = item.mRegion;
             LL_INFOS("WolfTrack") << "rez " << item.mItem << " in " << where << " at " << item.mRayEnd << " (" << item.mObjects.size()
@@ -2848,7 +2883,8 @@ void WolfFloaterTrack::removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, L
     // object cache (after a relog, everything out of the camera's view) - DeRezObject needs only the local id
     // (llselectmgr.cpp:5882-5886 packObjectLocalID), which a cache entry has (llvocache.h:125 getLocalID)
     std::map<LLUUID, U32> cached;
-    for (const CachedRoot& c : cachedRoots(rgn, gAgent.getID())) cached[c.mId] = c.mLocal;   // read only: this agent's roots
+    f->mCachedAt = -1.0;   // read the cache now
+    for (const CachedRoot& c : f->cachedRoots()) cached[c.mId] = c.mLocal;   // read only: this agent's roots
     std::vector<U32> locals;
     std::vector<std::pair<LLUUID, U32>> sent;
     size_t missing = 0, from_cache = 0;
@@ -2865,25 +2901,45 @@ void WolfFloaterTrack::removeCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, L
                           << " not known to this viewer) in " << rgn->getName() << LL_ENDL;
     deRezToTrash(rgn, locals);
     const U64 handle = rgn->getHandle();
+    // the cache-only ones are watched for the region's KillObject (onUnknownKill above), sent before the delete goes out
+    std::set<U32> cache_only;
+    for (const auto& s : sent)
+    {
+        LLViewerObject* o = gObjectList.findObject(s.first);
+        if (!o || o->isDead()) cache_only.insert(s.second);
+    }
+    sKillWatch[handle] = cache_only;
+    sKilled.erase(handle);
+    struct KillWatchEnd { U64 h; ~KillWatchEnd() { sKillWatch.erase(h); sKilled.erase(h); } } kill_watch_end{ handle };
+    deRezToTrash(rgn, locals);
     size_t standing = sent.size();
+    std::vector<LLUUID> cache_gone;
     for (S32 t = 0; t < GONE_WAIT_S * 2 && standing > 0; ++t)
     {
         llcoro::suspendUntilTimeout(0.5f);
         if (!self()) return;
-        // gone = no object and no cache entry left: the region's KillObject kills both (llviewermessage.cpp
-        // process_kill_object -> killObject, and killCacheEntry(local_id) when VO cache culling is on)
+        // gone: an object - no object left (the region's KillObject: process_kill_object -> killObject); a piece held only in
+        // the cache - the region's KillObject named its local id (onUnknownKill), or its entry is gone (it became an object
+        // meanwhile and was killed the ordinary way, killCacheEntry when VO cache culling is on)
         LLViewerRegion* now = gAgent.getRegion();
         const bool same = now && now->getHandle() == handle;
+        const std::set<U32>& killed = sKilled[handle];
         standing = 0;
+        cache_gone.clear();
         for (const auto& s : sent)
         {
             LLViewerObject* o = gObjectList.findObject(s.first);
             if (o && !o->isDead()) { ++standing; continue; }
-            if (same && LLViewerRegion::sVOCacheCullingEnabled && now->getCacheEntry(s.second)) ++standing;
+            if (!cache_only.count(s.second)) continue;
+            if (killed.count(s.second) || (same && !now->getCacheEntry(s.second))) { cache_gone.push_back(s.first); continue; }
+            ++standing;
         }
     }
     f = self();
     if (!f) return;
+    // their entries stay valid in the viewer (above): never counted or matched as standing pieces again
+    for (const LLUUID& id : cache_gone) f->mDeadCached.insert(id);
+    f->mCachedAt = -1.0;
     f->mRemoving = false;
     if (!layout.isDefined())
     {

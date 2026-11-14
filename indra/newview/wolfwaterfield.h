@@ -25,6 +25,7 @@
 #include "lluuid.h"   // [BASIC WOLF SEA 2026-10-19/] Field::mRegionID
 #include "v2math.h"   // [DRY BUILDS 2026-10-26/] WolfWaterClearance
 #include "v3dmath.h"
+#include "wolfobjectsweep.h"   // [FAR DRAW PERF 2026-11-14/] WolfWaterClearance reads its prims in the shared object pass
 
 class LLViewerRegion;
 
@@ -313,7 +314,7 @@ private:
  * Mirrors, keep in step: waterV.glsl wolfClearSample() / the [DRY BUILDS] cap / the swash, waterF.glsl
  * the per-pixel land rule, wolfboatrock.cpp waveHeight().
  */
-class WolfWaterClearance : public LLSingleton<WolfWaterClearance>
+class WolfWaterClearance : public LLSingleton<WolfWaterClearance>, public WolfObjectSweep::Client
 {
     LLSINGLETON(WolfWaterClearance);
     ~WolfWaterClearance();
@@ -332,6 +333,19 @@ public:
     static constexpr F32 OPEN_NEAR_M = 100.f;         // through-water distance from the open sea: fully open below this...
     static constexpr F32 OPEN_FAR_M = 300.f;          // ...inland water past this
     static constexpr F32 OPEN_ONTO_LAND_M = 8.f;      // the open weight carried onto the beach beside open water
+    // [FAR DRAW PERF 2026-11-14] Now how often a shared object pass is asked for (wolfobjectsweep.h). The prims are read in that
+    // pass (visit: the old rasterObjects' filter and box, kept as a PrimSource), and when it ends the levels are rebuilt from them
+    // over the next 2 x LEVELS + 2 frames (raster, one solve a frame, upload: the same functions on the same inputs, published
+    // together). So a prim's cap shows up to one pass + 2 x LEVELS + 2 frames after the old 1 s, and the passes come every
+    // max(1 s, one pass). Within what the field already lives with: only prims that stand still count (MOVING_MPS), the rocked
+    // hulls are left out, and the margins (e, the dead zone) do not depend on how fresh the prims are. A recentre or a terrain
+    // change still rebuilds at once, in that frame, from the last finished pass's prims (no object walk any more).
+    // [review 2] Where the last pass cannot be trusted to hold the prims round the camera - no pass yet (the first frame,
+    // after reset()) or the agent in another region than the one that pass began in (a teleport, a crossing) - the prims are
+    // read by ONE whole walk of the object list in that frame (WolfObjectSweep::walkNow, the old behaviour and its one-time
+    // cost) and every level rebuilt at once, so the field is ready with correct caps at once, as before. What a resident can
+    // still see: a prim that rezzes or moves into a region already walked gets its cap up to one pass + 2 x LEVELS + 2 frames
+    // later than the old 1 s.
     static constexpr F64 OBJECT_INTERVAL_SECS = 1.0;  // prims are re-rastered this often
     static constexpr F64 TERRAIN_INTERVAL_SECS = 1.0; // a terrain change is re-rastered at most this often
     static constexpr F32 MOVING_MPS = 0.5f;           // faster linksets (vehicles under way) are not sources
@@ -359,6 +373,11 @@ public:
     /** Every frame from WolfWaterField::idle() on every grid that shows the Wolf sea. */
     void idle();
     void reset();
+    // [FAR DRAW PERF 2026-11-14] the prim sources are read in the shared object pass (wolfobjectsweep.h)
+    void beginPass() override;
+    void beginSlice() override;
+    void visit(LLViewerObject* objectp) override;
+    void endPass() override;
     bool isReady() const { return mReady; }
     U32 texture() const { return mTex; }
     /** Level k's texel-grid corner in agent space this frame (the grid is held in global space). */
@@ -391,6 +410,8 @@ private:
     void rasterTerrainMax(S32 b);
     void classifyOpen(S32 k);
     void rasterObjects();
+    /** [FAR DRAW PERF 2026-11-14] One step of the staged rebuild (mStage): a solve into the pending arrays, or the publish. */
+    void advanceStage();
     void solve(S32 k, const std::vector<F32>& src, std::vector<F32>& S, std::vector<F32>* D);
     void uploadRows(S32 row0, S32 rows, const F32* data);
     void uploadLevels();
@@ -422,6 +443,26 @@ private:
     bool mObjectsValid = false;
     F32 mMinZ = 20.f;
     F64 mNextObjects = 0.0;
+    // [FAR DRAW PERF 2026-11-14] A prim source as visit() found it: its box's x / y extent in the agent frame of the frame it
+    // was read in, that frame's agent origin (an index into the origins list) and its cap - what rasterObjects needs, so the
+    // raster gives exactly what the old one-frame walk gave for the same prims.
+    struct PrimSource
+    {
+        F32 mLoX, mLoY, mHiX, mHiY;
+        F32 mCap;
+        U32 mOrigin;
+    };
+    std::vector<PrimSource> mPrims, mPassPrims;          // the last finished pass's, the pass under way
+    std::vector<LLVector3d> mPrimOrigins, mPassOrigins;  // the agent origins those were read in
+    LLVector3d mSliceOrigin;
+    const class WolfBoatRock* mSliceRocker = nullptr;
+    bool mPrimsFresh = false;      // a pass finished and is not rastered yet
+    bool mHavePass = false;        // a pass has finished since reset()
+    U64 mPassRegion = 0;           // [review 2] the agent's region when the pass under way began
+    U64 mPrimsRegion = 0;          // [review 2] ... and when the one in mPrims began
+    bool mLevelsHavePass = false;  // the levels uploaded were rastered from a finished pass
+    S32 mStage = -1;               // the staged rebuild: -1 none, 0 .. 2 LEVELS - 1 the solves, 2 LEVELS the publish
+    std::vector<F32> mSPend[LEVELS], mDPend[LEVELS], mSDryPend[LEVELS];
 };
 
 #endif // WOLF_WATERFIELD_H

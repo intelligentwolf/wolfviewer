@@ -26,6 +26,7 @@
 #include "llviewerpartsource.h"
 #include "wolfweatherprofile.h"
 #include "wolfweatherstate.h"
+#include "wolfobjectsweep.h"   // [FAR DRAW PERF 2026-11-14/] the parcel sweep is a client of the shared object pass
 
 // Source: wolfstorm/js/world/wolfweather.js + environment_manager.js rain/snow (2026-09-10).
 //
@@ -157,7 +158,7 @@ private:
     F32  mWaterFloor = -1.e9f;
 };
 
-class WolfWeather : public LLSingleton<WolfWeather>
+class WolfWeather : public LLSingleton<WolfWeather>, public WolfObjectSweep::Client
 {
     LLSINGLETON(WolfWeather);
     ~WolfWeather();
@@ -165,6 +166,13 @@ class WolfWeather : public LLSingleton<WolfWeather>
 public:
     using Mode = WolfWeatherPartSource::Mode;
 
+    // [FAR DRAW PERF 2026-11-14] Now how often a shared object pass is asked for (wolfobjectsweep.h): the parcel sweep takes
+    // that pass's frames, so a weather prim's word is acted on up to one pass later and sweeps come every max(2 s, one pass).
+    // Within what this feature tolerates: the description is re-asked only every REFRESH_SECS (120 s, wolfobjectprops.h) and
+    // drained every 1.5 s, and a region change already waits up to COVER_SETTLE_MAX_SECS (15 s) for a sweep. A pass is never
+    // used across a change of the agent's region or parcel (beginSlice spoils it; a fresh one is asked for at once).
+    // [review 2] Two spoiled in a row (a resident walking along parcel edges) and the next sweep is one whole walk in one
+    // frame (WolfObjectSweep::walkNow: the old sweep), so the parcel weather can never stay stale.
     static constexpr F64 SWEEP_INTERVAL_SECS = 2.0;
     static constexpr F64 STATS_INTERVAL_SECS = 30.0;
     static const std::string KEYWORD_RAIN;
@@ -285,6 +293,12 @@ public:
     }
     /** Every frame from LLAppViewer::idle(): the parcel sweep and the emitter's mode. */
     void idle();
+    // [FAR DRAW PERF 2026-11-14] The parcel sweep as a client of the shared object pass: the old sweep()'s loop body is
+    // visit(), its tail endPass().
+    void beginPass() override;
+    void beginSlice() override;
+    void visit(LLViewerObject* objectp) override;
+    void endPass() override;
     /** [LIGHTNING 2026-09-13] The emitter's roof test at the camera; false when nothing falls. */
     bool cameraUnderRoof() const { return mSource.notNull() && !mSource->isDead() && mSource->cameraUnderRoof(); }
 
@@ -292,7 +306,8 @@ private:
     Mode effective() const { return mForced != Mode::NONE ? mForced : mUser; }
     S32  effectiveLevel() const { return mForced != Mode::NONE ? mForcedLevel : (mUser == Mode::RAIN ? mUserRainLevel : mUserSnowLevel); }
     void apply();
-    void sweep();
+    /** [FAR DRAW PERF 2026-11-14] The agent's region handle (0 = none) and parcel local id: what inAgentParcel tests against. */
+    static void parcelKey(U64& region, S32& parcel);
 
     WolfWeatherProfile mActive;          ///< what is falling right now, whole
     std::string        mActiveSource;    ///< "preview" / "parcel" / "region" / "menu" / "hurricane" (the region's storm, apply())
@@ -311,6 +326,19 @@ private:
     bool mForcedFound = false;
     F64  mNextSweep = 0.0;
     F64  mNextStats = 0.0;
+    // [FAR DRAW PERF 2026-11-14] the pass in progress: what the old sweep() kept in locals, and this frame's camera
+    bool mPassFound = false;
+    WolfWeatherProfile mPassProfile;
+    S32  mPassInRange = 0;
+    S32  mPassKnown = 0;
+    U64  mPassRegion = 0;
+    S32  mPassParcel = 0;
+    bool mPassSpoiled = false;
+    S32  mSpoiledRun = 0;   // [review 2] passes spoiled in a row; at 2 the next sweep is one whole walk (walkNow)
+    LLVector3 mSliceCamera;
+    F32  mSliceRangeSq = 0.f;
+    class WolfObjectProps* mSliceProps = nullptr;
+    class LLViewerParcelMgr* mSliceParcels = nullptr;
     LLPointer<WolfWeatherPartSource> mSource;
     // <WolfViewer 2026-09-18> snow cover state (see the note above)
     void updateSnowCover(F64 now);

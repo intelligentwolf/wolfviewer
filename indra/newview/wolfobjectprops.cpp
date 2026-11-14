@@ -18,6 +18,7 @@
 #include "wolfobjectprops.h"
 
 #include <algorithm>
+#include <cmath>   // [FAR DRAW PERF 2026-11-14/] ceil (pruneSlice)
 #include <vector>
 
 #include "llagent.h"
@@ -140,6 +141,70 @@ void WolfObjectProps::pruneDeadObjects()
     prune(mProps);
     prune(mAsked);
     prune(mWants);
+    mPruneNextProps.setNull();
+    mPruneNextAsked.setNull();
+}
+
+// [FAR DRAW PERF 2026-11-14] See the header. The same test as pruneDeadObjects, a share of each map a frame.
+void WolfObjectProps::pruneSlice()
+{
+    const F32 dt = LLFrameTimer::getFrameDeltaTimeF32();
+    const auto slice = [dt](auto& entries, LLUUID& next)
+    {
+        const size_t size = entries.size();
+        if (size == 0)
+        {
+            next.setNull();
+            return;
+        }
+        // entries this frame: the share of the map that keeps the whole cycle at SWEEP_INTERVAL_SECS, at least one
+        const F64 share = (F64)size * (F64)llmax(dt, 0.f) / SWEEP_INTERVAL_SECS;
+        size_t count = (size_t)llclamp(ceil(share), 1.0, (F64)size);
+        auto it = entries.lower_bound(next);   // UUIDs order the map; the null UUID is never a key (note / want refuse it)
+        while (count-- > 0 && !entries.empty())
+        {
+            if (it == entries.end())
+            {
+                it = entries.begin();   // round again
+            }
+            LLViewerObject* objectp = gObjectList.findObject(it->first);
+            if (!objectp || objectp->isDead())
+            {
+                it = entries.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        if (it == entries.end())
+        {
+            next.setNull();
+        }
+        else
+        {
+            next = it->first;
+        }
+    };
+    slice(mProps, mPruneNextProps);
+    slice(mAsked, mPruneNextAsked);
+}
+
+// [FAR DRAW PERF 2026-11-14] The interest list only (pruneDeadObjects' third map), whole, before each drain.
+void WolfObjectProps::pruneWants()
+{
+    for (auto it = mWants.begin(); it != mWants.end();)
+    {
+        LLViewerObject* objectp = gObjectList.findObject(it->first);
+        if (!objectp || objectp->isDead())
+        {
+            it = mWants.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
 }
 
 void WolfObjectProps::idle()
@@ -155,13 +220,17 @@ void WolfObjectProps::idle()
         mRegionHandle = agent_region->getHandle();
     }
 
+    // [FAR DRAW PERF 2026-11-14] the answers and ask records a share a frame (pruneSlice, see the header); the interest list
+    // whole before each drain, as before
+    pruneSlice();
+
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (now < mNextDrain)
     {
         return;
     }
     mNextDrain = now + SWEEP_INTERVAL_SECS;
-    pruneDeadObjects();
+    pruneWants();
     drain();
 
     // One line every STATS_INTERVAL_SECS, so "the name never arrived" can be told apart

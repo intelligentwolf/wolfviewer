@@ -135,6 +135,17 @@ public:
     void updateAvatarVisibility();
 
     inline S32 getNumObjects() { return (S32) mObjects.size(); }
+    // [FAR DRAW PERF 2026-11-14] Every entry's raw pointer (dead ones included), WITHOUT reading any object: LLPointer::get()
+    // only. WolfObjectSweep's per-pass snapshot (wolfobjectsweep.h); cleanDeadObjects / killAllObjects tell it before an
+    // entry's reference is dropped, so it never reads a freed one.
+    void copyObjectPointers(std::vector<LLViewerObject*>& out) const
+    {
+        out.resize(mObjects.size());
+        for (size_t i = 0; i < mObjects.size(); ++i)
+        {
+            out[i] = mObjects[i].get();
+        }
+    }
     inline S32 getNumActiveObjects() { return (S32) mActiveObjects.size(); }
     // <WolfViewer 2026-09-06> the moving set, for the wake field (wolfwakefield.cpp) — never a
     // full object scan.

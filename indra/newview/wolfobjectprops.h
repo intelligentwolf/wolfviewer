@@ -156,6 +156,19 @@ public:
 private:
     void drain();
     void pruneDeadObjects();
+    /**
+     * [FAR DRAW PERF 2026-11-14] Paddington Station at 4096 m (W107 perf: pruneDeadObjects 1.0 % of the main thread, in one frame
+     * every 1.5 s): gObjectList.findObject is a std::map lookup (llviewerobjectlist.h mUUIDObjectMap), and the answers and ask
+     * records hold tens of thousands of objects. They are now checked a share a frame - each map's size x this frame's time /
+     * SWEEP_INTERVAL_SECS entries, from where the last frame stopped - so every entry is still looked at about once every
+     * SWEEP_INTERVAL_SECS, as the whole prune before each drain did, without the hitch. The interest list (small: what was
+     * wanted since the last drain) is still pruned whole before each drain, so the request budget is never spent on the dead.
+     * What changes: an answer whose object went is dropped up to SWEEP_INTERVAL_SECS later than its drain-time prune would
+     * have; an object that comes back with the same UUID inside that time keeps its answer (as one back inside the old 1.5 s
+     * did), and the log line's "answered" / "asked" counts may include those few.
+     */
+    void pruneSlice();
+    void pruneWants();
 
     // Priority classes for the request queue, best first.
     static constexpr S32 PRIORITY_ROOT    = 0;
@@ -181,6 +194,9 @@ private:
     std::map<LLUUID, Want> mWants;
 
     F64 mNextDrain = 0.0;
+    // [FAR DRAW PERF 2026-11-14] where pruneSlice stopped in each map (the next key to look at; null = the start)
+    LLUUID mPruneNextProps;
+    LLUUID mPruneNextAsked;
     F64 mNextStatsLog = 0.0;
     U64 mRegionHandle = 0;
 

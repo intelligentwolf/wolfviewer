@@ -110,7 +110,13 @@ F32 WolfDryVolumes::HullProfile::halfWidth(F32 x, F32 z) const
 }
 
 WolfDryVolumes::WolfDryVolumes() = default;
-WolfDryVolumes::~WolfDryVolumes() = default;
+WolfDryVolumes::~WolfDryVolumes()
+{
+    if (WolfObjectSweep::instanceExists())
+    {
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/]
+    }
+}
 
 bool WolfDryVolumes::matches(const std::string& description_lower)
 {
@@ -201,6 +207,7 @@ void WolfDryVolumes::idle()
     {
         mTagged.clear();
         mHulls.clear();
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/] no sweep here, as before
         return;
     }
     // On a region change sweep at once. The set is kept, not cleared (FSWolfWater::idle clears its surfaces): it holds
@@ -210,6 +217,9 @@ void WolfDryVolumes::idle()
     {
         mRegionHandle = agent_region->getHandle();
         mNextSweep = 0.0;
+        // [FAR DRAW PERF 2026-11-14] "sweep at once": a pass under way began before the change, so it is dropped and a fresh
+        // one asked for below
+        WolfObjectSweep::instance().cancel(this);
     }
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (now < mNextSweep)
@@ -217,70 +227,84 @@ void WolfDryVolumes::idle()
         return;
     }
     mNextSweep = now + SWEEP_INTERVAL_SECS;
-    sweep();
+    // [FAR DRAW PERF 2026-11-14] the tag sweep: a new pass once the last one has finished (SWEEP_INTERVAL_SECS); a pass still
+    // under way when the interval runs is left to finish
+    if (!WolfObjectSweep::instance().busy(this))
+    {
+        WolfObjectSweep::instance().request(this);
+    }
     sweepHulls();
 }
 
-void WolfDryVolumes::sweep()
+// [FAR DRAW PERF 2026-11-14] The old sweep(), spread over the shared object pass (wolfobjectsweep.h): its loop body is visit(),
+// its tail endPass(). The shared pass already leaves out what this loop began by skipping (dead, avatars, attachments, HUD
+// attachments, anything not LL_PCODE_VOLUME).
+void WolfDryVolumes::beginPass()
+{
+    mPassFound.clear();
+}
+
+void WolfDryVolumes::beginSlice()
+{
+    // this frame's camera, in the same agent frame as the positions read in this frame's visits
+    mSliceCamera = LLViewerCamera::getInstance()->getOrigin();
+    static LLCachedControl<F32> draw_distance(gSavedSettings, "RenderFarClip", 128.f);
+    mSliceRangeSq = (F32)draw_distance * (F32)draw_distance;
+    // [FAR DRAW PERF 2026-11-14/] LLSingleton::instance() takes a lock: looked up once a frame, not once an object
+    mSliceProps = &WolfObjectProps::instance();
+}
+
+void WolfDryVolumes::visit(LLViewerObject* objectp)
 {
     // Source: fswolfwater.cpp FSWolfWater::sweep - the same walk, reach and harvester use; only prims of a usable shape
     // that reach below their region's water are asked about (anything higher holds no sea to clear).
-    const LLVector3 camera_pos = LLViewerCamera::getInstance()->getOrigin();
-    static LLCachedControl<F32> draw_distance(gSavedSettings, "RenderFarClip", 128.f);
-    const F32 range_sq = (F32)draw_distance * (F32)draw_distance;
-    WolfObjectProps& props = WolfObjectProps::instance();
+    if (!objectp->getRegion())
+    {
+        return;
+    }
+    const LLVector3 pos = objectp->getPositionAgent();
+    const F32 dist_sq = (pos - mSliceCamera).lengthSquared();
+    if (dist_sq > mSliceRangeSq)
+    {
+        return;
+    }
+    const LLVector3 scale = objectp->getScale();
+    const F32 longest = llmax(scale.mV[VX], llmax(scale.mV[VY], scale.mV[VZ]));
+    const F32 reach = NEAR_M + PER_METRE_M * longest;
+    if (dist_sq > reach * reach)
+    {
+        return;
+    }
+    // the lowest the prim can reach, whatever its turn: half its diagonal below its centre
+    if (pos.mV[VZ] - 0.5f * scale.length() >= objectp->getRegion()->getWaterHeight())
+    {
+        return;
+    }
+    Volume v;
+    if (!volumeOf(objectp, v))
+    {
+        return;
+    }
+    WolfObjectProps& props = *mSliceProps;
+    const LLUUID& id = objectp->getID();
+    const WolfObjectProps::Props* before = props.get(id);
+    props.want(objectp, before && matches(before->mDescriptionLower));   // a used one is kept fresh
+    const WolfObjectProps::Props* known = props.get(id);
+    if (known && matches(known->mDescriptionLower))
+    {
+        mPassFound.insert(id);
+    }
+}
 
-    std::set<LLUUID> found;
-    const S32 count = gObjectList.getNumObjects();
-    for (S32 i = 0; i < count; ++i)
-    {
-        LLViewerObject* objectp = gObjectList.getObject(i);
-        if (!objectp || objectp->isDead() || objectp->isAvatar() || objectp->isHUDAttachment() || objectp->isAttachment())
-        {
-            continue;
-        }
-        if (objectp->getPCode() != LL_PCODE_VOLUME || !objectp->getRegion())
-        {
-            continue;
-        }
-        const LLVector3 pos = objectp->getPositionAgent();
-        const F32 dist_sq = (pos - camera_pos).lengthSquared();
-        if (dist_sq > range_sq)
-        {
-            continue;
-        }
-        const LLVector3 scale = objectp->getScale();
-        const F32 longest = llmax(scale.mV[VX], llmax(scale.mV[VY], scale.mV[VZ]));
-        const F32 reach = NEAR_M + PER_METRE_M * longest;
-        if (dist_sq > reach * reach)
-        {
-            continue;
-        }
-        // the lowest the prim can reach, whatever its turn: half its diagonal below its centre
-        if (pos.mV[VZ] - 0.5f * scale.length() >= objectp->getRegion()->getWaterHeight())
-        {
-            continue;
-        }
-        Volume v;
-        if (!volumeOf(objectp, v))
-        {
-            continue;
-        }
-        const LLUUID& id = objectp->getID();
-        const WolfObjectProps::Props* before = props.get(id);
-        props.want(objectp, before && matches(before->mDescriptionLower));   // a used one is kept fresh
-        const WolfObjectProps::Props* known = props.get(id);
-        if (known && matches(known->mDescriptionLower))
-        {
-            found.insert(id);
-        }
-    }
+void WolfDryVolumes::endPass()
+{
     // logged only when the set changes (no per-sweep line: paul-no-eternal-logs)
-    if (found != mTagged)
+    if (mPassFound != mTagged)
     {
-        LL_INFOS("WolfDry") << "air-filled prims near you: " << found.size() << " (was " << mTagged.size() << ")" << LL_ENDL;
+        LL_INFOS("WolfDry") << "air-filled prims near you: " << mPassFound.size() << " (was " << mTagged.size() << ")" << LL_ENDL;
     }
-    mTagged.swap(found);
+    mTagged.swap(mPassFound);
+    mPassFound.clear();
 }
 
 void WolfDryVolumes::collect()

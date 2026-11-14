@@ -18,6 +18,7 @@
 #include "llpointer.h"
 #include "v3math.h"
 #include "llvowater.h"
+#include "wolfobjectsweep.h"   // [FAR DRAW PERF 2026-11-14/] the built mask is read in the shared object pass
 #include <map>
 #include <memory>
 #include <set>
@@ -38,7 +39,7 @@ class LLViewerRegion;
 // Purely rendered: the sim's heightmap is never touched. The analysis runs on the General
 // work queue and the objects are (re)created on the main thread whenever the terrain changes.
 // Setting WolfTerrainWater (own switch, independent of WolfTerrainLook; on by default since w9).
-class WolfNaturalWater : public LLSingleton<WolfNaturalWater>
+class WolfNaturalWater : public LLSingleton<WolfNaturalWater>, public WolfObjectSweep::Client
 {
     LLSINGLETON(WolfNaturalWater);
     ~WolfNaturalWater();
@@ -48,6 +49,14 @@ public:
     void idle();
     /** Kill every plane (region change, setting off). */
     void reset();
+
+    // [FAR DRAW PERF 2026-11-14] The built mask (the old rasterizeBuilt's walk of the object list) is this feature's share of
+    // the shared object pass (wolfobjectsweep.h): each prim of the checked region is rastered in visit(), and endPass() does
+    // what idle() did after rasterizeBuilt (the stamp, the settle wait, the analysis).
+    void beginPass() override;
+    void beginSlice() override;
+    void visit(LLViewerObject* objectp) override;
+    void endPass() override;
 
     struct Surface  // one water object: a conforming ribbon (stream) or a basin mesh (pool)
     {
@@ -68,6 +77,10 @@ public:
     };
 
 private:
+    // [FAR DRAW PERF 2026-11-14] A check now waits for its region's prims to be read in a shared object pass
+    // (wolfobjectsweep.h) before its stamp is taken, so a built-mask change is seen up to one pass later and the checks come
+    // every max(CHECK_INTERVAL_SECS / 2, one pass). Well inside what this feature already waits on purpose: a changed region is
+    // re-analysed only once its objects have been still for SETTLE_SECS (6 s), or after MAX_PENDING_SECS (30 s).
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
     // <WolfViewer 2026-10-07> Paul: water "jerky and horrible" at 4096 m draw distance while
     // Magical Fairies Pass rezzed. With ObjectsCullingByDistance the sims keep sending and killing
@@ -153,7 +166,7 @@ private:
     // basin gets no pool if anything built stands in it below the spill level — a prim on
     // the floor of a hollow proves the hollow is not a lake — and all of its cells are
     // blocked, so streams stop at its edge too. Prims are tested against the WATER level
-    // for this (the lowest prim bottom over each cell, from rasterizeBuilt), not only
+    // for this (the lowest prim bottom over each cell, from rasterizeObject), not only
     // against the ground: a jetty or a slab a metre up is still in the water.
     static constexpr S32 BUILT_DILATE_CELLS = 2;
     static constexpr F32 BUILT_SINK_M = 0.5f;
@@ -175,9 +188,12 @@ private:
     /** Hash of everything apply() would build from a result (any thread). */
     static U64 shapeHash(const Result& result);
     static void compute(Result& out, std::vector<F32> z, std::vector<U8> built, std::vector<F32> prim_floor, S32 grids, F32 mpg, F32 sea_level, F32 catchment_m2);
-    /** Main thread: one byte per grid point, 1 where a prim stands on (or in) the ground, and
-     *  per grid point the lowest bottom of any prim box over it that is not buried (+inf if none). */
-    static void rasterizeBuilt(LLViewerRegion* regionp, const std::vector<F32>& z, S32 grids, F32 mpg, std::vector<U8>& built, std::vector<F32>& prim_floor);
+    /** Main thread: one prim into the built mask - one byte per grid point, 1 where a prim stands on (or in) the ground, and
+     *  per grid point the lowest bottom of any prim box over it that is not buried (+inf if none). origin: the region's
+     *  origin in agent space THIS frame (the drawable's extents are read in the same frame). [FAR DRAW PERF 2026-11-14/] was
+     *  rasterizeBuilt, which walked the whole object list in one frame. */
+    static void rasterizeObject(LLViewerObject* obj, const LLVector3& origin, const std::vector<F32>& z, S32 grids, F32 mpg,
+                                std::vector<U8>& built, std::vector<F32>& prim_floor);
     /** Main thread: replace the live surfaces with the computed set. */
     void apply(std::shared_ptr<Result> result);
     static U64 terrainStamp(LLViewerRegion* regionp);
@@ -206,6 +222,21 @@ private:
     bool mAgentTurn{ true };
     size_t mNeighbourCursor{ 0 };
     std::set<U64> mLoggedDecimation;   // <WolfViewer 2026-09-10> regions told once about the coarse grid
+    // [FAR DRAW PERF 2026-11-14] the check whose prims the shared pass is reading: what idle() had in locals around
+    // rasterizeBuilt. mPassPending from the request to endPass (or reset). The region pointer is compared with the objects'
+    // own, never read without first finding it again by its handle (beginSlice); spoiled = it went during the pass.
+    bool mPassPending{ false };
+    bool mPassSpoiled{ false };
+    LLViewerRegion* mPassRegionp{ nullptr };
+    U64 mPassHandle{ 0 };
+    std::vector<F32> mPassZ;
+    S32 mPassGrids{ 0 };
+    F32 mPassMpg{ 1.f };
+    U64 mPassTerrainStamp{ 0 };
+    F32 mPassSea{ 0.f };
+    std::vector<U8> mPassBuilt;
+    std::vector<F32> mPassFloor;
+    LLVector3 mSliceOrigin;
 };
 
 #endif // WOLF_NATURALWATER_H

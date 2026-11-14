@@ -48,6 +48,9 @@ namespace
     // ── the trees ────────────────────────────────────────────────────────────────────────────────────────────────
     // The trees are looked for this often (as FSWolfWater's sweep, fswolfwater.cpp SWEEP_INTERVAL_SECS 1.5, a little slower:
     // a tree does not come and go).
+    // [FAR DRAW PERF 2026-11-14] Now how often a shared object pass is asked for (wolfobjectsweep.h); its result is applied in
+    // the next idle(), so a tree starts or stops dropping leaves up to one pass (+ a frame) later and the sweeps come every
+    // max(2 s, one pass) - within "a tree does not come and go" (the leaves themselves move every frame).
     constexpr F64 SWEEP_S = 2.0;
     // Trees whose box comes within this of the camera drop leaves. Source: fswolfwater.h NEAR_M (64 m) - every prim this
     // close is already asked about by the wolfwater sweep (inside the draw distance, as here), so the leaves add no requests
@@ -125,7 +128,13 @@ namespace
 }
 
 WolfLeaves::WolfLeaves() {}
-WolfLeaves::~WolfLeaves() {}
+WolfLeaves::~WolfLeaves()
+{
+    if (WolfObjectSweep::instanceExists())
+    {
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/]
+    }
+}
 
 // static
 bool WolfLeaves::matches(const std::string& description_lower)
@@ -140,6 +149,11 @@ void WolfLeaves::reset()
     mCarry.clear();
     mNextSweep = 0.0;
     mNextSeason = 0.0;
+    // [FAR DRAW PERF 2026-11-14] a pass under way, or one finished and not applied, belongs to what was just dropped
+    WolfObjectSweep::instance().cancel(this);
+    mPassHits.clear();
+    mResultHits.clear();
+    mResultReady = false;
 }
 
 void WolfLeaves::rebase(const LLVector3& delta)
@@ -190,39 +204,63 @@ void WolfLeaves::updateSeason(F64 now)
     }
 }
 
-void WolfLeaves::sweep(F64 now)
+// [FAR DRAW PERF 2026-11-14] The old sweep(now) in three parts: the loop is visit() (a slice a frame of the shared object pass,
+// which already leaves out what the loop began by skipping: dead, avatars, attachments, HUDs, anything not LL_PCODE_VOLUME),
+// endPass() keeps the hits, applySweep() is the tail.
+void WolfLeaves::beginPass()
 {
-    mNextSweep = now + SWEEP_S;
-    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    mPassHits.clear();
+    mPassSwept = 0;
+    mPassKnown = 0;
+}
+
+void WolfLeaves::beginSlice()
+{
+    mSliceCamera = LLViewerCamera::getInstance()->getOrigin();
     // Source: fswolfwater.cpp sweep - only what is inside the draw distance
     static LLCachedControl<F32> draw_distance(gSavedSettings, "RenderFarClip", 128.f);
-    const F32 reach = llmin(TREE_REACH_M, (F32)draw_distance);
-    WolfObjectProps& props = WolfObjectProps::instance();
+    mSliceReach = llmin(TREE_REACH_M, (F32)draw_distance);
+    // [FAR DRAW PERF 2026-11-14/] LLSingleton::instance() takes a lock: looked up once a frame, not once an object
+    mSliceProps = &WolfObjectProps::instance();
+}
 
-    struct Hit
+void WolfLeaves::visit(LLViewerObject* o)
+{
+    const F32 dist = dist_vec(o->getPositionAgent(), mSliceCamera) - o->getScale().length() * 0.5f;
+    if (dist > mSliceReach) return;
+    ++mPassSwept;
+    WolfObjectProps& props = *mSliceProps;
+    const WolfObjectProps::Props* p = props.get(o->getID());
+    const bool hit = p && matches(p->mDescriptionLower);
+    // want() is idempotent; a tree is kept fresh so a script or an edit that takes the word out stops it
+    props.want(o, hit);
+    if (p) ++mPassKnown;
+    if (hit)
     {
-        LLViewerObject* mObj;
-        F32 mDist;
-    };
-    std::vector<Hit> hits;
-    S32 swept = 0, known = 0;
-    const S32 count = gObjectList.getNumObjects();
-    for (S32 i = 0; i < count; ++i)
-    {
-        LLViewerObject* o = gObjectList.getObject(i);
-        // Source: fswolfwater.cpp sweep - prims only: not avatars, attachments, HUDs or the water planes it makes itself
-        if (!o || o->isDead() || o->isAvatar() || o->isHUDAttachment() || o->isAttachment()) continue;
-        if (o->getPCode() != LL_PCODE_VOLUME) continue;
-        const F32 dist = dist_vec(o->getPositionAgent(), cam) - o->getScale().length() * 0.5f;
-        if (dist > reach) continue;
-        ++swept;
-        const WolfObjectProps::Props* p = props.get(o->getID());
-        const bool hit = p && matches(p->mDescriptionLower);
-        // want() is idempotent; a tree is kept fresh so a script or an edit that takes the word out stops it
-        props.want(o, hit);
-        if (p) ++known;
-        if (hit) hits.push_back({ o, dist });
+        Hit h;
+        h.mObj = o;
+        h.mDist = dist;
+        mPassHits.push_back(h);
     }
+}
+
+void WolfLeaves::endPass()
+{
+    mResultHits.swap(mPassHits);
+    mPassHits.clear();
+    mResultSwept = mPassSwept;
+    mResultKnown = mPassKnown;
+    mResultReady = true;
+}
+
+void WolfLeaves::applySweep()
+{
+    std::vector<Hit> hits;
+    hits.swap(mResultHits);
+    const S32 swept = mResultSwept, known = mResultKnown;
+    // a tree that died since its visit is not one (the old one-frame sweep only ever saw live objects)
+    hits.erase(std::remove_if(hits.begin(), hits.end(), [](const Hit& h) { return h.mObj.isNull() || h.mObj->isDead(); }),
+               hits.end());
     std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.mDist < b.mDist; });
     if (hits.size() > MAX_TREES) hits.resize(MAX_TREES);
 
@@ -381,6 +419,11 @@ void WolfLeaves::idle()
     if (!on || !WolfGrid::showsWolfRegion() || teleporting || !gAgent.getRegion())
     {
         if (!mLeaves.empty() || !mTrees.empty()) reset();   // the resident's switch, a teleport, off Wolf: at once
+        // [FAR DRAW PERF 2026-11-14] and no tree sweep meanwhile, as before (reset() also does this when it runs)
+        WolfObjectSweep::instance().cancel(this);
+        mPassHits.clear();
+        mResultHits.clear();
+        mResultReady = false;
         return;
     }
     // The agent frame moves on a region crossing or a rebase (wolfswimbubbles.cpp idle, the same rule)
@@ -391,7 +434,18 @@ void WolfLeaves::idle()
         mLastOrigin = origin;
     }
     if (now >= mNextSeason) updateSeason(now);
-    if (now >= mNextSweep) sweep(now);
+    // [FAR DRAW PERF 2026-11-14] the tree sweep is a shared object pass now (SWEEP_S): a finished one is applied here, where the
+    // old sweep() ran, and the next is asked for when the interval has run and the last one has finished
+    if (mResultReady)
+    {
+        mResultReady = false;
+        applySweep();
+    }
+    if (now >= mNextSweep && !WolfObjectSweep::instance().busy(this))
+    {
+        mNextSweep = now + SWEEP_S;
+        WolfObjectSweep::instance().request(this);
+    }
 
     static LLCachedControl<S32> max_setting(gSavedSettings, "WolfViewerFallingLeavesMax", DEFAULT_MAX);
     const S32 cap = llclamp((S32)((F32)llclamp((S32)max_setting, 0, HARD_MAX) * WolfFrameGovernor::budget()), 0, HARD_MAX);

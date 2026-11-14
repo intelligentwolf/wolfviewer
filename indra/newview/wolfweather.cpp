@@ -38,6 +38,7 @@
 #include "llviewercontrol.h"
 #include "llviewerobjectlist.h"
 #include "llviewerparcelmgr.h"
+#include "llparcel.h"          // [FAR DRAW PERF 2026-11-14/] the agent parcel's local id (parcelKey)
 #include "llviewerpartsim.h"
 #include "llviewertexture.h"
 #include "llvoavatar.h"        // LLViewerPartSource holds an LLPointer<LLVOAvatar>: the destructor needs the complete type
@@ -445,7 +446,13 @@ void WolfWeatherPartSource::emit(const LLVector3& cam)
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
 WolfWeather::WolfWeather() {}
-WolfWeather::~WolfWeather() {}
+WolfWeather::~WolfWeather()
+{
+    if (WolfObjectSweep::instanceExists())
+    {
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/]
+    }
+}
 
 void WolfWeather::toggle(Mode m)
 {
@@ -748,11 +755,25 @@ void WolfWeather::idle()
 {
     WolfFrameGovernor::update();   // [HURRICANE 2026-10-30/] once a frame: the measured frame time and the budget
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (now >= mNextSweep)
+    // [FAR DRAW PERF 2026-11-14] the parcel sweep is a shared object pass now (wolfobjectsweep.h): asked for when the interval
+    // has run and the last one has finished; endPass() does what the old sweep() did after its loop and counts it
+    if (now >= mNextSweep && !WolfObjectSweep::instance().busy(this))
     {
         mNextSweep = now + SWEEP_INTERVAL_SECS;
-        sweep();
-        ++mSweepCount;   // <WolfViewer 2026-09-26/> snow cover region settle
+        if (!gAgent.getRegion())
+        {
+            ++mSweepCount;   // the old sweep() returned at once without a region, and was still counted
+        }
+        else if (mSpoiledRun >= 2)
+        {
+            // [review 2] twice spoiled by a parcel or region change: the old one-frame sweep now (one frame cannot change
+            // the parcel, so this one is never spoiled)
+            WolfObjectSweep::instance().walkNow(this);
+        }
+        else
+        {
+            WolfObjectSweep::instance().request(this);
+        }
     }
     // [WEATHER 2026-09-12] The region's own answer, and the sound that goes with the sky.
     WolfRegionWeather::instance().idle();
@@ -977,61 +998,107 @@ void WolfWeather::unbindSnowCover(LLGLSLShader* shader)
 }
 // </WolfViewer>
 
+// [FAR DRAW PERF 2026-11-14]
+void WolfWeather::parcelKey(U64& region, S32& parcel)
+{
+    LLViewerRegion* regionp = gAgent.getRegion();
+    region = regionp ? regionp->getHandle() : 0;
+    const LLParcel* agent_parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
+    parcel = agent_parcel ? agent_parcel->getLocalID() : 0;
+}
+
+namespace
+{
+    // The strongest keyword in the parcel wins (clear over rain over snow — see WolfWeatherProfile::fromDescription).
+    S32 weather_rank(WolfWeatherProfile::Kind k)
+    {
+        return k == WolfWeatherProfile::CLEAR ? 3 : (k == WolfWeatherProfile::RAIN ? 2 : 1);
+    }
+}
+
 // Source: fswolfwater.cpp sweep — every prim in draw distance is handed to the harvester,
 // answered descriptions are tested for the keyword. Here the prim must also stand in the
 // agent's parcel (LLViewerParcelMgr::inAgentParcel, the parcel bitmap test the sim gave us).
-void WolfWeather::sweep()
+// [FAR DRAW PERF 2026-11-14] The old sweep() spread over the shared object pass: its locals are mPass*, the loop body is
+// visit(), the tail endPass(). The shared pass already leaves out what the loop began by skipping (dead, avatars,
+// attachments, HUD attachments, anything not LL_PCODE_VOLUME).
+void WolfWeather::beginPass()
 {
-    if (!gAgent.getRegion()) return;
-    static LLCachedControl<F32> draw_distance(gSavedSettings, "RenderFarClip", 128.f);
-    const F32 range_sq = (F32)draw_distance * (F32)draw_distance;
-    const LLVector3 camera_pos = LLViewerCamera::getInstance()->getOrigin();
-    WolfObjectProps& props = WolfObjectProps::instance();
-    LLViewerParcelMgr* parcels = LLViewerParcelMgr::getInstance();
-
     // [WEATHER 2026-09-12] A prim in the parcel now carries a WHOLE profile, not just a level:
     //   wolfrain3 bright=60 col=#8fb4e6 move=180 dens=170 amb=thunder near=heavy vol=85
     // The strongest keyword in the parcel wins (clear over rain over snow — see
     // WolfWeatherProfile::fromDescription), and at equal kind the higher level wins, so a
     // builder can put a heavier prim in a corner without fighting the others.
-    bool found = false;
-    WolfWeatherProfile parcel_profile;
-    S32 n_in_range = 0, n_known = 0;
-    auto rank = [](WolfWeatherProfile::Kind k) -> S32
+    mPassFound = false;
+    mPassProfile = WolfWeatherProfile();
+    mPassInRange = 0;
+    mPassKnown = 0;
+    mPassSpoiled = false;
+    parcelKey(mPassRegion, mPassParcel);
+}
+
+void WolfWeather::beginSlice()
+{
+    // inAgentParcel tests against the agent's parcel of the moment: a pass that would mix two parcels (or two regions) is
+    // spoiled here, before this frame's visits, and not used (endPass asks for a fresh one at once)
+    U64 region = 0;
+    S32 parcel = 0;
+    parcelKey(region, parcel);
+    if (region == 0 || region != mPassRegion || parcel != mPassParcel)
     {
-        return k == WolfWeatherProfile::CLEAR ? 3 : (k == WolfWeatherProfile::RAIN ? 2 : 1);
-    };
-    const S32 count = gObjectList.getNumObjects();
-    for (S32 i = 0; i < count; ++i)
-    {
-        LLViewerObject* objectp = gObjectList.getObject(i);
-        if (!objectp || objectp->isDead() || objectp->isAvatar()) continue;
-        if (objectp->isHUDAttachment() || objectp->isAttachment()) continue;
-        if (objectp->getPCode() != LL_PCODE_VOLUME) continue;
-        if ((objectp->getPositionAgent() - camera_pos).lengthSquared() > range_sq) continue;
-        // <WolfViewer 2026-10-02> The parcel test FIRST: only a prim in the agent's parcel can
-        // set the weather, so only those are asked about — and kept fresh, because a weather
-        // prim is typically scripted (llSetObjectDesc). Asking about every prim in draw
-        // distance and filtering afterwards sent thousands of requests for nothing.
-        if (!parcels->inAgentParcel(objectp->getPositionGlobal())) continue;
-        ++n_in_range;
-        props.want(objectp, true);
-        const WolfObjectProps::Props* known = props.get(objectp->getID());
-        if (!known) continue;
-        ++n_known;
-        if (!matches(known->mDescriptionLower, KEYWORD_RAIN)
-            && !matches(known->mDescriptionLower, KEYWORD_SNOW)
-            && !matches(known->mDescriptionLower, KEYWORD_CLEAR)) continue;
-        WolfWeatherProfile candidate;
-        if (!candidate.fromDescription(known->mDescriptionLower)) continue;
-        if (!found
-            || rank(candidate.mKind) > rank(parcel_profile.mKind)
-            || (candidate.mKind == parcel_profile.mKind && candidate.mLevel > parcel_profile.mLevel))
-        {
-            parcel_profile = candidate;
-        }
-        found = true;
+        mPassSpoiled = true;
     }
+    static LLCachedControl<F32> draw_distance(gSavedSettings, "RenderFarClip", 128.f);
+    mSliceRangeSq = (F32)draw_distance * (F32)draw_distance;
+    mSliceCamera = LLViewerCamera::getInstance()->getOrigin();
+    // [FAR DRAW PERF 2026-11-14/] LLSingleton::instance() takes a lock: looked up once a frame, not once an object
+    mSliceProps = &WolfObjectProps::instance();
+    mSliceParcels = LLViewerParcelMgr::getInstance();
+}
+
+void WolfWeather::visit(LLViewerObject* objectp)
+{
+    if (mPassSpoiled) return;
+    if ((objectp->getPositionAgent() - mSliceCamera).lengthSquared() > mSliceRangeSq) return;
+    // <WolfViewer 2026-10-02> The parcel test FIRST: only a prim in the agent's parcel can
+    // set the weather, so only those are asked about — and kept fresh, because a weather
+    // prim is typically scripted (llSetObjectDesc). Asking about every prim in draw
+    // distance and filtering afterwards sent thousands of requests for nothing.
+    if (!mSliceParcels->inAgentParcel(objectp->getPositionGlobal())) return;
+    ++mPassInRange;
+    WolfObjectProps& props = *mSliceProps;
+    props.want(objectp, true);
+    const WolfObjectProps::Props* known = props.get(objectp->getID());
+    if (!known) return;
+    ++mPassKnown;
+    if (!matches(known->mDescriptionLower, KEYWORD_RAIN)
+        && !matches(known->mDescriptionLower, KEYWORD_SNOW)
+        && !matches(known->mDescriptionLower, KEYWORD_CLEAR)) return;
+    WolfWeatherProfile candidate;
+    if (!candidate.fromDescription(known->mDescriptionLower)) return;
+    if (!mPassFound
+        || weather_rank(candidate.mKind) > weather_rank(mPassProfile.mKind)
+        || (candidate.mKind == mPassProfile.mKind && candidate.mLevel > mPassProfile.mLevel))
+    {
+        mPassProfile = candidate;
+    }
+    mPassFound = true;
+}
+
+void WolfWeather::endPass()
+{
+    if (mPassSpoiled)
+    {
+        // the agent's parcel or region changed during the pass: not counted (the snow cover's region settle waits for a
+        // sweep that saw the new parcel throughout), asked for again at once
+        mNextSweep = 0.0;
+        ++mSpoiledRun;
+        return;
+    }
+    mSpoiledRun = 0;
+    const bool found = mPassFound;
+    const WolfWeatherProfile& parcel_profile = mPassProfile;
+    const S32 n_in_range = mPassInRange, n_known = mPassKnown;
     const Mode want = found ? modeOf(parcel_profile.mKind) : Mode::NONE;
     const S32 want_level = found ? parcel_profile.mLevel : 2;
     // A parcel prim's own look/sound settings travel with it, so re-applying on ANY change —
@@ -1056,4 +1123,5 @@ void WolfWeather::sweep()
         LL_INFOS("WolfWeather") << (effective() == Mode::RAIN ? "rain" : "snow") << (mForced != Mode::NONE ? " (parcel)" : " (menu)")
                                 << ", " << n_in_range << " prims in your parcel, " << n_known << " descriptions known" << LL_ENDL;
     }
+    ++mSweepCount;   // <WolfViewer 2026-09-26/> snow cover region settle (after the sweep, as before)
 }

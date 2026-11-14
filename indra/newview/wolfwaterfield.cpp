@@ -1199,6 +1199,27 @@ void WolfWaterClearance::reset()
     mReady = false;
     mObjectsValid = false;
     mNextObjects = 0.0;
+    // [FAR DRAW PERF 2026-11-14] the prims read and being read, and a rebuild under way, go with the rest
+    if (WolfObjectSweep::instanceExists())
+    {
+        WolfObjectSweep::instance().cancel(this);
+    }
+    mPrims.clear();
+    mPassPrims.clear();
+    mPrimOrigins.clear();
+    mPassOrigins.clear();
+    mPrimsFresh = false;
+    mHavePass = false;
+    mPassRegion = 0;
+    mPrimsRegion = 0;
+    mLevelsHavePass = false;
+    mStage = -1;
+    for (S32 k = 0; k < LEVELS; ++k)
+    {
+        mSPend[k].clear();
+        mDPend[k].clear();
+        mSDryPend[k].clear();
+    }
 }
 
 LLVector2 WolfWaterClearance::levelOriginAgent(S32 k) const
@@ -1602,6 +1623,82 @@ void WolfWaterClearance::classifyOpen(S32 k)
     w.swap(next);
 }
 
+// [FAR DRAW PERF 2026-11-14] The prims are read in the shared object pass (wolfobjectsweep.h): visit() is the old loop's
+// filter and box, kept as a PrimSource; rasterObjects() rasters the last finished pass's sources. The shared pass already
+// leaves out the dead, what is not LL_PCODE_VOLUME (avatars among them), attachments and HUD attachments.
+void WolfWaterClearance::beginPass()
+{
+    mPassPrims.clear();
+    mPassOrigins.clear();
+    mPassRegion = gAgent.getRegion() ? gAgent.getRegion()->getHandle() : 0;
+}
+
+void WolfWaterClearance::beginSlice()
+{
+    // the agent origin of this frame: the positions visit() reads are in this frame's agent space
+    mSliceOrigin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
+    if (mPassOrigins.empty() || mPassOrigins.back() != mSliceOrigin)
+    {
+        mPassOrigins.push_back(mSliceOrigin);
+    }
+    // [FAR DRAW PERF 2026-11-14/] LLSingleton::instance() takes a lock: looked up once a frame, not once an object
+    mSliceRocker = &WolfBoatRock::instance();
+}
+
+void WolfWaterClearance::visit(LLViewerObject* o)
+{
+    if (!o->getRegion())
+    {
+        return;
+    }
+    LLViewerObject* root = o->getRootEdit();
+    if (!root || root->isAvatar() || root->isAttachment() || root->isHUDAttachment())
+    {
+        return;   // a prim worn or sat on by an avatar
+    }
+    if (root->getVelocity().lengthSquared() > MOVING_MPS * MOVING_MPS || mSliceRocker->isRocking(root))
+    {
+        return;
+    }
+    const F32 water = o->getRegion()->getWaterHeight();
+    const LLVector3 c = o->getPositionAgent();
+    const LLVector3 half = o->getScale() * 0.5f;
+    const LLQuaternion rot = o->getRotationRegion();
+    LLVector3 lo(BIG, BIG, BIG), hi(-BIG, -BIG, -BIG);
+    for (S32 n = 0; n < 8; ++n)
+    {
+        const LLVector3 corner((n & 1) ? half.mV[VX] : -half.mV[VX],
+                               (n & 2) ? half.mV[VY] : -half.mV[VY],
+                               (n & 4) ? half.mV[VZ] : -half.mV[VZ]);
+        const LLVector3 p = c + corner * rot;
+        lo.set(llmin(lo.mV[VX], p.mV[VX]), llmin(lo.mV[VY], p.mV[VY]), llmin(lo.mV[VZ], p.mV[VZ]));
+        hi.set(llmax(hi.mV[VX], p.mV[VX]), llmax(hi.mV[VY], p.mV[VY]), llmax(hi.mV[VZ], p.mV[VZ]));
+    }
+    if (hi.mV[VZ] < water || lo.mV[VZ] > water + BAND_M)
+    {
+        return;   // under the water, or far above any crest
+    }
+    PrimSource src;
+    src.mLoX = lo.mV[VX];
+    src.mLoY = lo.mV[VY];
+    src.mHiX = hi.mV[VX];
+    src.mHiY = hi.mV[VY];
+    src.mCap = lo.mV[VZ] >= water ? lo.mV[VZ] : hi.mV[VZ];
+    src.mOrigin = (U32)(mPassOrigins.size() - 1);   // beginSlice pushed this frame's
+    mPassPrims.push_back(src);
+}
+
+void WolfWaterClearance::endPass()
+{
+    mPrims.swap(mPassPrims);
+    mPrimOrigins.swap(mPassOrigins);
+    mPassPrims.clear();
+    mPassOrigins.clear();
+    mPrimsFresh = true;
+    mHavePass = true;
+    mPrimsRegion = mPassRegion;
+}
+
 // The prim sources, every level at once: each prim's box (scale, render rotation) as an agent-space AABB, a source
 // where it reaches the waterline band. Its cap is its lowest point if it stands clear of the water, its highest if it
 // pierces it - water may lap a hull or a post up to its top, but never rise over a deck. Not sources: avatars and
@@ -1609,6 +1706,8 @@ void WolfWaterClearance::classifyOpen(S32 k)
 // boat rocker is floating (wolfboatrock.cpp) - they ride the waves, the waves do not stop at them.
 // Then the two source sets: every land texel (S_all), and only the land beside INLAND water (S_dry) - an open-sea
 // beach is held per pixel in waterF.glsl instead, so its waves can run up it.
+// [FAR DRAW PERF 2026-11-14] The prims are the last finished pass's (visit() above did the filter and the box); each is
+// placed with the agent origin of the frame it was read in, which is the agent origin the old loop read it with.
 void WolfWaterClearance::rasterObjects()
 {
     for (S32 k = 0; k < LEVELS; ++k)
@@ -1624,51 +1723,16 @@ void WolfWaterClearance::rasterObjects()
             }
         }
     }
-    const LLVector3d agent_origin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
-    const WolfBoatRock& rocker = WolfBoatRock::instance();
-    const S32 count = gObjectList.getNumObjects();
-    for (S32 i = 0; i < count; ++i)
+    for (const PrimSource& src : mPrims)
     {
-        LLViewerObject* o = gObjectList.getObject(i);
-        if (!o || o->isDead() || o->getPCode() != LL_PCODE_VOLUME || o->isAvatar()
-            || o->isAttachment() || o->isHUDAttachment() || !o->getRegion())
-        {
-            continue;
-        }
-        LLViewerObject* root = o->getRootEdit();
-        if (!root || root->isAvatar() || root->isAttachment() || root->isHUDAttachment())
-        {
-            continue;   // a prim worn or sat on by an avatar
-        }
-        if (root->getVelocity().lengthSquared() > MOVING_MPS * MOVING_MPS || rocker.isRocking(root))
-        {
-            continue;
-        }
-        const F32 water = o->getRegion()->getWaterHeight();
-        const LLVector3 c = o->getPositionAgent();
-        const LLVector3 half = o->getScale() * 0.5f;
-        const LLQuaternion rot = o->getRotationRegion();
-        LLVector3 lo(BIG, BIG, BIG), hi(-BIG, -BIG, -BIG);
-        for (S32 n = 0; n < 8; ++n)
-        {
-            const LLVector3 corner((n & 1) ? half.mV[VX] : -half.mV[VX],
-                                   (n & 2) ? half.mV[VY] : -half.mV[VY],
-                                   (n & 4) ? half.mV[VZ] : -half.mV[VZ]);
-            const LLVector3 p = c + corner * rot;
-            lo.set(llmin(lo.mV[VX], p.mV[VX]), llmin(lo.mV[VY], p.mV[VY]), llmin(lo.mV[VZ], p.mV[VZ]));
-            hi.set(llmax(hi.mV[VX], p.mV[VX]), llmax(hi.mV[VY], p.mV[VY]), llmax(hi.mV[VZ], p.mV[VZ]));
-        }
-        if (hi.mV[VZ] < water || lo.mV[VZ] > water + BAND_M)
-        {
-            continue;   // under the water, or far above any crest
-        }
-        const F32 cap = lo.mV[VZ] >= water ? lo.mV[VZ] : hi.mV[VZ];
+        const LLVector3d& agent_origin = mPrimOrigins[src.mOrigin];
+        const F32 cap = src.mCap;
         for (S32 k = 0; k < LEVELS; ++k)
         {
             const F32 t = TEXEL_M[k];
             const F64 ox = mOrigin[k].mdV[VX] - agent_origin.mdV[VX], oy = mOrigin[k].mdV[VY] - agent_origin.mdV[VY];
-            const S32 ti0 = llmax(0, (S32)floor((lo.mV[VX] - ox) / t)), ti1 = llmin(N - 1, (S32)floor((hi.mV[VX] - ox) / t));
-            const S32 tj0 = llmax(0, (S32)floor((lo.mV[VY] - oy) / t)), tj1 = llmin(N - 1, (S32)floor((hi.mV[VY] - oy) / t));
+            const S32 ti0 = llmax(0, (S32)floor((src.mLoX - ox) / t)), ti1 = llmin(N - 1, (S32)floor((src.mHiX - ox) / t));
+            const S32 tj0 = llmax(0, (S32)floor((src.mLoY - oy) / t)), tj1 = llmin(N - 1, (S32)floor((src.mHiY - oy) / t));
             for (S32 tj = tj0; tj <= tj1; ++tj)
             {
                 for (S32 ti = ti0; ti <= ti1; ++ti)
@@ -1681,6 +1745,38 @@ void WolfWaterClearance::rasterObjects()
         }
     }
     mObjectsValid = true;
+}
+
+// [FAR DRAW PERF 2026-11-14] The staged rebuild after a finished pass: rasterObjects() ran in the frame it began (mStage 0),
+// then one solve a frame into the pending arrays (solve() writes every texel of its output from src alone, so the result is
+// the one a single frame would give), then all levels published and uploaded together. Until then sample() and the shader
+// read the previous levels, whole and consistent. A recentre or terrain change in between rebuilds at once (idle) and drops
+// this one.
+void WolfWaterClearance::advanceStage()
+{
+    if (mStage < 2 * LEVELS)
+    {
+        const S32 k = mStage / 2;
+        if ((mStage & 1) == 0)
+        {
+            solve(k, mSrcAll[k], mSPend[k], &mDPend[k]);
+        }
+        else
+        {
+            solve(k, mSrcDry[k], mSDryPend[k], nullptr);
+        }
+        ++mStage;
+        return;
+    }
+    for (S32 k = 0; k < LEVELS; ++k)
+    {
+        mS[k].swap(mSPend[k]);
+        mD[k].swap(mDPend[k]);
+        mSDry[k].swap(mSDryPend[k]);
+    }
+    uploadLevels();
+    mLevelsHavePass = true;
+    mStage = -1;
 }
 
 // Two-pass weighted chamfer of S (and D when asked), then the margins folded in (wolfwaterfield.h).
@@ -1843,16 +1939,44 @@ void WolfWaterClearance::idle()
             changed = true;
         }
     }
-    if (changed || !mObjectsValid || now >= mNextObjects)
+    // [FAR DRAW PERF 2026-11-14] The prims come from the shared object pass (OBJECT_INTERVAL_SECS in wolfwaterfield.h). A
+    // recentre or a terrain change rebuilds every level at once, as before, from the last finished pass's prims (a staged
+    // rebuild under way was made for the old window or land and is dropped); a newly finished pass is rebuilt over the
+    // next frames (advanceStage).
+    // [review 2] no pass to trust round the camera yet (wolfwaterfield.h OBJECT_INTERVAL_SECS): one whole walk now and every
+    // level rebuilt from it, so the caps are right (and the field ready) at once
+    const bool walk = !mHavePass || gAgent.getRegion()->getHandle() != mPrimsRegion;
+    if (walk)
     {
+        WolfObjectSweep::instance().walkNow(this);
+    }
+    if (changed || !mObjectsValid || walk)
+    {
+        mStage = -1;
         rasterObjects();
-        mNextObjects = now + OBJECT_INTERVAL_SECS;
+        mPrimsFresh = false;
         for (S32 k = 0; k < LEVELS; ++k)
         {
             solve(k, mSrcAll[k], mS[k], &mD[k]);
             solve(k, mSrcDry[k], mSDry[k], nullptr);
         }
         uploadLevels();
+        mLevelsHavePass = mHavePass;
+    }
+    else if (mStage >= 0)
+    {
+        advanceStage();
+    }
+    else if (mPrimsFresh)
+    {
+        mPrimsFresh = false;
+        rasterObjects();
+        mStage = 0;
+    }
+    if (now >= mNextObjects && !WolfObjectSweep::instance().busy(this))
+    {
+        mNextObjects = now + OBJECT_INTERVAL_SECS;
+        WolfObjectSweep::instance().request(this);
     }
     // [OPEN SEA SHORES 2026-10-26] The terrain blocks: recentred like the levels, re-rastered when the terrain changes.
     bool terrain_uploaded = true;
@@ -1892,7 +2016,10 @@ void WolfWaterClearance::idle()
         {
             for (S32 b = 0; b < TBLOCKS; ++b) uploadTerrain(b);
         }
-        mReady = true;
+        // [FAR DRAW PERF 2026-11-14] ready once the levels hold a finished pass's prims: the shader draws no swell until then
+        // (lldrawpoolwater.cpp), so a deck or jetty is never washed over. [review 2] With the whole walk above that is the
+        // first frame again, as with the old one-frame walk.
+        mReady = mLevelsHavePass;
     }
 }
 

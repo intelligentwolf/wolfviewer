@@ -45,6 +45,11 @@ namespace
 {
     // How often the object list is swept for wolfwater prims and for descriptions worth
     // asking about.
+    // [FAR DRAW PERF 2026-11-14] Now the interval between asking for a shared object pass (wolfobjectsweep.h): a sweep is
+    // spread over that pass's frames, so a surface appears, is re-fitted or goes up to one pass later than with the old
+    // one-frame sweep, and the sweeps come every max(1.5 s, one pass). That is within what this feature already lives with:
+    // the description it acts on arrives through WolfObjectProps, which drains every 1.5 s and re-asks a matched prim only
+    // every REFRESH_SECS (120 s, wolfobjectprops.h), so a keyword change already took seconds to minutes to show.
     const F64 SWEEP_INTERVAL_SECS = 1.5;
     // Surfaces allowed at once. Past this a region is not a build, it is a griefing.
     const size_t MAX_SURFACES = 32;
@@ -114,6 +119,10 @@ FSWolfWater::~FSWolfWater()
     // Surfaces are LLPointer<LLVOWater> into the object list, which outlives this
     // singleton at shutdown; dropping the references is all that is wanted here.
     mSurfaces.clear();
+    if (WolfObjectSweep::instanceExists())
+    {
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/]
+    }
 }
 
 // [SWIM BUBBLES 2026-11-02]
@@ -150,6 +159,8 @@ void FSWolfWater::reset()
     }
     mSurfaces.clear();
     mNextSweep = 0.0;
+    // [FAR DRAW PERF 2026-11-14] a pass half way through belongs to what was just dropped: the next one starts afresh
+    WolfObjectSweep::instance().cancel(this);
     // NOT mRegionHandle: idle() sets that immediately after calling this, and clearing it
     // here would make an explicit reset() look like a region change on the next tick.
 }
@@ -163,12 +174,14 @@ void FSWolfWater::idle()
         {
             reset();
         }
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/] no sweep while switched off
         return;
     }
 
     LLViewerRegion* agent_region = gAgent.getRegion();
     if (!agent_region)
     {
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/] no sweep without a region, as before
         return;
     }
 
@@ -179,98 +192,95 @@ void FSWolfWater::idle()
     }
 
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (now < mNextSweep)
+    // [FAR DRAW PERF 2026-11-14] the next sweep is asked for once the interval has run AND the last one has finished (a pass
+    // takes several frames now; see SWEEP_INTERVAL_SECS)
+    if (now < mNextSweep || WolfObjectSweep::instance().busy(this))
     {
         return;
     }
     mNextSweep = now + SWEEP_INTERVAL_SECS;
 
-    sweep();
+    WolfObjectSweep::instance().request(this);
 }
 
-void FSWolfWater::sweep()
+// [FAR DRAW PERF 2026-11-14] The old sweep(), spread over the shared object pass: its locals are mPass*, its loop body is
+// visit(), its tail is endPass(). The filters the shared pass already applies (dead, not LL_PCODE_VOLUME - which is what
+// kept this class's own water planes out -, avatars, attachments, HUD attachments) are exactly the ones this loop began with.
+void FSWolfWater::beginPass()
 {
-    const F64 now = LLFrameTimer::getElapsedSeconds();
-    const LLVector3 camera_pos = LLViewerCamera::getInstance()->getOrigin();
+    mPassScanned = mPassInRange = mPassKnown = mPassMatched = 0;
+    // Which prims still want water this pass. Anything holding a surface that is not in
+    // here has been derezzed, has left the draw distance, or has had the keyword taken out
+    // of its description.
+    mPassWanted.clear();
+}
 
+void FSWolfWater::beginSlice()
+{
+    // The camera and the draw distance of THIS frame: object positions are read in this frame's agent space, so the two
+    // always agree (a region crossing during a pass moves both).
+    mSliceCamera = LLViewerCamera::getInstance()->getOrigin();
     // Only ask about, and only fit water to, what is inside the draw distance — beyond it
     // there is nothing to see and the request budget would be spent on it for nothing.
     static LLCachedControl<F32> draw_distance(gSavedSettings, "RenderFarClip", 128.f);
-    const F32 range_sq = (F32)draw_distance * (F32)draw_distance;
+    mSliceDrawDistance = (F32)draw_distance;
+    mSliceRangeSq = mSliceDrawDistance * mSliceDrawDistance;
+    // [FAR DRAW PERF 2026-11-14/] LLSingleton::instance() takes a lock: looked up once a frame, not once an object
+    mSliceProps = &WolfObjectProps::instance();
+}
 
-    S32 n_scanned = 0, n_in_range = 0, n_known = 0, n_matched = 0;
+void FSWolfWater::visit(LLViewerObject* objectp)
+{
+    WolfObjectProps& props = *mSliceProps;
+    ++mPassScanned;
 
-    // Which prims still want water this tick. Anything holding a surface that is not in
-    // here has been derezzed, has left the draw distance, or has had the keyword taken out
-    // of its description.
-    std::set<LLUUID> still_wanted;
-
-    WolfObjectProps& props = WolfObjectProps::instance();
-
-    const S32 count = gObjectList.getNumObjects();
-    for (S32 i = 0; i < count; ++i)
+    const LLVector3 delta = objectp->getPositionAgent() - mSliceCamera;
+    const F32 dist_sq = delta.lengthSquared();
+    if (dist_sq > mSliceRangeSq)
     {
-        LLViewerObject* objectp = gObjectList.getObject(i);
-        if (!objectp || objectp->isDead() || objectp->isAvatar())
-        {
-            continue;
-        }
-        if (objectp->isHUDAttachment() || objectp->isAttachment())
-        {
-            continue;
-        }
-        // A water plane this class made is itself an object in the list. Fitting water to
-        // water would be an unbounded loop of surfaces; skip anything in the water pcode.
-        if (objectp->getPCode() != LL_PCODE_VOLUME)
-        {
-            continue;
-        }
-        ++n_scanned;
+        return;
+    }
+    // <WolfViewer 2026-10-02> ...and big enough to be seen as water from here: within
+    // NEAR_M, plus PER_METRE_M for every metre of the prim's longest side (about 1.8
+    // degrees of view, ~35 px of a 1080p screen at 60 degrees FOV). A 10 m pool counts to
+    // 384 m, a 100 m lake to 3,264 m. Every prim in draw distance used to be asked about:
+    // 26,722 at Wolf Territories Home, all furniture too small to show water from afar.
+    const LLVector3 scale = objectp->getScale();
+    const F32 reach = NEAR_M + PER_METRE_M * llmax(scale.mV[VX], llmax(scale.mV[VY], scale.mV[VZ]));
+    if (dist_sq > reach * reach)
+    {
+        return;
+    }
+    ++mPassInRange;
 
-        const LLVector3 delta = objectp->getPositionAgent() - camera_pos;
-        const F32 dist_sq = delta.lengthSquared();
-        if (dist_sq > range_sq)
-        {
-            continue;
-        }
-        // <WolfViewer 2026-10-02> ...and big enough to be seen as water from here: within
-        // NEAR_M, plus PER_METRE_M for every metre of the prim's longest side (about 1.8
-        // degrees of view, ~35 px of a 1080p screen at 60 degrees FOV). A 10 m pool counts to
-        // 384 m, a 100 m lake to 3,264 m. Every prim in draw distance used to be asked about:
-        // 26,722 at Wolf Territories Home, all furniture too small to show water from afar.
-        const LLVector3 scale = objectp->getScale();
-        const F32 reach = NEAR_M + PER_METRE_M * llmax(scale.mV[VX], llmax(scale.mV[VY], scale.mV[VZ]));
-        if (dist_sq > reach * reach)
-        {
-            continue;
-        }
-        ++n_in_range;
+    const LLUUID& id = objectp->getID();
+    // Declare interest unconditionally. want() decides for itself whether this prim is
+    // already answered, in flight, or given up on, and only queues the rest; a prim that
+    // IS water is kept fresh, so a script that clears the keyword turns it back off.
+    // Source: wolfwater.js sweep — harvester.want(obj) for every prim in range.
+    const WolfObjectProps::Props* before = props.get(id);
+    props.want(objectp, before && matches(before->mDescriptionLower));
 
-        const LLUUID& id = objectp->getID();
-        // Declare interest unconditionally. want() decides for itself whether this prim is
-        // already answered, in flight, or given up on, and only queues the rest; a prim that
-        // IS water is kept fresh, so a script that clears the keyword turns it back off.
-        // Source: wolfwater.js sweep — harvester.want(obj) for every prim in range.
-        const WolfObjectProps::Props* before = props.get(id);
-        props.want(objectp, before && matches(before->mDescriptionLower));
-
-        const WolfObjectProps::Props* known = props.get(id);
-        if (known)
-        {
-            ++n_known;
-        }
-
-        if (known && matches(known->mDescriptionLower))
-        {
-            ++n_matched;
-            still_wanted.insert(id);
-            ensureSurface(objectp);
-        }
+    const WolfObjectProps::Props* known = props.get(id);
+    if (known)
+    {
+        ++mPassKnown;
     }
 
+    if (known && matches(known->mDescriptionLower))
+    {
+        ++mPassMatched;
+        mPassWanted.insert(id);
+        ensureSurface(objectp);
+    }
+}
+
+void FSWolfWater::endPass()
+{
+    const F64 now = LLFrameTimer::getElapsedSeconds();
     for (auto it = mSurfaces.begin(); it != mSurfaces.end(); )
     {
-        if (still_wanted.find(it->first) == still_wanted.end())
+        if (mPassWanted.find(it->first) == mPassWanted.end())
         {
             const LLUUID dying = it->first;
             ++it;
@@ -288,10 +298,10 @@ void FSWolfWater::sweep()
     if (now >= mNextStatsLog)
     {
         mNextStatsLog = now + STATS_INTERVAL_SECS;
-        LL_INFOS("WolfWater") << "sweep: " << n_scanned << " prims, " << n_in_range
-                              << " within " << (F32)draw_distance << "m draw distance and big enough to see, "
-                              << n_known << " descriptions known, "
-                              << n_matched << " matching \"" << KEYWORD << "\", "
+        LL_INFOS("WolfWater") << "sweep: " << mPassScanned << " prims, " << mPassInRange
+                              << " within " << mSliceDrawDistance << "m draw distance and big enough to see, "
+                              << mPassKnown << " descriptions known, "
+                              << mPassMatched << " matching \"" << KEYWORD << "\", "
                               << mSurfaces.size() << " water surface(s)" << LL_ENDL;
     }
 }

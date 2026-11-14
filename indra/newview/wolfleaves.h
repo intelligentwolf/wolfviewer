@@ -22,6 +22,7 @@
 #include "v3dmath.h"
 #include "v3math.h"
 #include "wolfleavesseason.h"
+#include "wolfobjectsweep.h"   // [FAR DRAW PERF 2026-11-14/] the tree sweep is a client of the shared object pass
 
 #include <map>
 #include <vector>
@@ -56,7 +57,7 @@ class LLVertexBuffer;
  *  COST     at most WolfViewerFallingLeavesMax (lowered by WolfFrameGovernor) leaves, one vertex buffer, one draw call in
  *           the deferred pass; the trees are looked for every SWEEP_S, nothing per frame but the leaves themselves.
  */
-class WolfLeaves : public LLSingleton<WolfLeaves>
+class WolfLeaves : public LLSingleton<WolfLeaves>, public WolfObjectSweep::Client
 {
     LLSINGLETON(WolfLeaves);
     ~WolfLeaves();
@@ -73,6 +74,13 @@ public:
     void renderDeferred();
     /** How many leaves there are now (for the log and tests). */
     S32 count() const { return (S32)mLeaves.size(); }
+
+    // [FAR DRAW PERF 2026-11-14] The tree sweep as a client of the shared object pass (wolfobjectsweep.h): the old sweep()'s
+    // loop is visit(), endPass() keeps the hits, applySweep() - from idle(), where sweep() ran - builds the trees.
+    void beginPass() override;
+    void beginSlice() override;
+    void visit(LLViewerObject* objectp) override;
+    void endPass() override;
 
 private:
     struct Tree
@@ -111,7 +119,12 @@ private:
 
     void reset();
     void rebase(const LLVector3& delta);
-    void sweep(F64 now);
+    void applySweep();
+    struct Hit
+    {
+        LLPointer<LLViewerObject> mObj;   // held: a pass spans frames
+        F32 mDist = 0.f;
+    };
     void updateSeason(F64 now);
     void spawn(const Tree& t);
     F32 groundAt(const LLVector3& p, F32 floor) const;
@@ -128,6 +141,13 @@ private:
     LLVector3d mLastOrigin;
     F64 mLastIdle = 0.0;
     F64 mNextSweep = 0.0;
+    // [FAR DRAW PERF 2026-11-14] the pass under way and the finished one (what the old sweep() kept in locals)
+    std::vector<Hit> mPassHits, mResultHits;
+    S32 mPassSwept = 0, mPassKnown = 0, mResultSwept = 0, mResultKnown = 0;
+    bool mResultReady = false;
+    LLVector3 mSliceCamera;
+    F32 mSliceReach = 0.f;
+    class WolfObjectProps* mSliceProps = nullptr;
     F64 mNextSeason = 0.0;
     F64 mLastLog = 0.0;
     S32 mLastSeasonKind = -1;

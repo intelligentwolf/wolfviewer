@@ -94,6 +94,7 @@
 #include "wolfdjplayer.h"       // [WOLF DJ 2026-10-04/] WolfDJPlayer::shutdown
 #include "wolfai.h"   // [AI CREDITS 2026-09-11] availability + balance   // [TERRAIN PAINT 2026-09-10]
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
+#include "wolfobjectsweep.h" // [FAR DRAW PERF 2026-11-14/] the shared object pass
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> Flight Mode
@@ -6494,6 +6495,12 @@ void LLAppViewer::idle()
     // Focus + zoom the shared face once its media exists (wolfscreenshare.cpp).
     { WolfVRScreen::SubPart wsp_("WolfScreenShare"); WolfScreenShare::instance().idle(); }
     { WolfVRScreen::SubPart wsp_("WolfWeather"); WolfWeather::instance().idle(); }   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
+    // [FAR DRAW PERF 2026-11-14] The ONE shared pass over the object list (wolfobjectsweep.h): a slice a frame, at most 1 ms,
+    // for every feature above that asked for one (FSWolfWater, WolfDryVolumes, WolfWeather, WolfBoatRock, WolfLeaves,
+    // WolfNaturalWater, WolfWaterClearance) and WolfCloudClearance (asked from the clouds' frame). After all their idle()s, so
+    // this frame's switches, resets and requests are in; still in the world-update phase (FSWolfWater makes LLVOWater planes
+    // in its visits, as its sweep did here before the frame is drawn).
+    { WolfVRScreen::SubPart wsp_("WolfObjectSweep"); WolfObjectSweep::instance().step(); }
     { WolfVRScreen::SubPart wsp_("WolfFX"); WolfFX::instance().idle(); }
     { WolfVRScreen::SubPart wsp_("WolfInvisible"); WolfInvisible::idle(); }            // <WolfViewer 2026-10-11/> Invisible Mode: the region arrived in, or the switch changed
     { WolfVRScreen::SubPart wsp_("WolfViewerKey"); WolfViewerKey::idle(); }            // [COPYBOT EXEMPT 2026-10-19/] fetch / renew the key, hand it to each Wolf region

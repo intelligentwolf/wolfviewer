@@ -345,7 +345,25 @@ void LLReflectionMapManager::update()
     }
 
     // update distance to camera for all probes
-    std::sort(mProbes.begin()+1, mProbes.end(), CompareProbeDistance());
+    // [W107 FARPERF 2026-11-14] Only the slots' range is sorted: std::nth_element puts the closest probes (by the
+    // distances the loop below left last frame, as before) in [1, mReflectionProbeCount) and std::sort orders just those;
+    // the rest stay unordered. Everything below that reads the order looks only at that range: the slot hand-out
+    // (i < count), oldestProbe (i < mReflectionProbeCount), closestDynamic and getReflectionMaps() (the first probes
+    // holding a slot - beyond the range only mUpdatingProbe can hold one, and it stays beyond it either way); past the
+    // range each probe is treated alike (its slot freed, its distance refreshed). At Paddington Station (2,929 probes)
+    // the whole list was sorted every frame.
+    {
+        const auto first = mProbes.begin() + 1;
+        const auto mid = mProbes.begin() + (std::ptrdiff_t)llmin((size_t)mReflectionProbeCount, mProbes.size());
+        if (mid > first && mid < mProbes.end())
+        {
+            std::nth_element(first, mid, mProbes.end(), CompareProbeDistance());
+        }
+        if (mid > first)
+        {
+            std::sort(first, mid, CompareProbeDistance());
+        }
+    }
     llassert(mProbes[0] == mDefaultProbe);
     llassert(mProbes[0]->mCubeArray == mTexture);
     llassert(mProbes[0]->mCubeIndex == 0);
@@ -1624,12 +1642,42 @@ void LLReflectionMapManager::doOcclusion()
     LLVector4a eye;
     eye.load3(LLViewerCamera::instance().getOrigin().mV);
 
+    // [W107 FARPERF 2026-11-14] Only probes holding a cube slot are asked about. Measured at Paddington Station
+    // (RenderFarClip 4096, 22 regions loaded: 64 automatic probes a region from LLViewerRegion::updateReflectionProbes
+    // plus one per 16 m octree node, registerSpatialGroup: 2,929 probes) this loop was 14% of the main thread's samples
+    // on OpenGL, about 12 ms a frame: every probe drew an occlusion box every frame, although only the closest
+    // mReflectionProbeCount (RenderReflectionProbeCount, 256) can hold a slot (update(): "first free any cube indices
+    // for distant probes"). The answer for a probe without a slot is used nowhere:
+    //  - getReflectionMaps() takes only probes with a slot, and the neighbour list (setUniforms) skips a probe with
+    //    no slot (mProbeIndex / mCubeIndex == -1) whatever mOccluded says;
+    //  - update() reads mOccluded only together with mComplete, and a probe loses mComplete when it loses its slot.
+    // A probe that gets a slot back (update() runs before this, llappviewer.cpp) is asked about the same frame; its
+    // first answer may come from the query it had before it lost the slot, but it is unused: the probe stays
+    // incomplete (mComplete false, so out of getReflectionMaps and the neighbour lists) until its faces are rendered
+    // again, several frames later, by when fresh answers have come. The picture is unchanged.
+    U32 queried = 0;
     for (auto& probe : mProbes)
     {
         if (probe != nullptr && probe != mDefaultProbe)
         {
+            if (probe->mCubeIndex == -1)
+            {
+                probe->mOccluded = false;
+                continue;
+            }
             probe->doOcclusion(eye);
+            ++queried;
         }
+    }
+
+    // the counts behind this, in the log every 10 s while WolfLogFrameRate (the frame-rate test switch) is on
+    static LLCachedControl<bool> log_rate(gSavedSettings, "WolfLogFrameRate", false);
+    static F64 next_log = 0.0;
+    if (log_rate && LLTimer::getTotalSeconds() >= next_log)
+    {
+        next_log = LLTimer::getTotalSeconds() + 10.0;
+        LL_INFOS("WolfReflectionProbes") << "reflection probes: " << mProbes.size() << " known, " << queried
+                                         << " with a cube slot asked about occlusion this frame (slots: " << mReflectionProbeCount << ")" << LL_ENDL;
     }
 }
 

@@ -84,6 +84,15 @@ namespace
     // "Railway <code> - <name>" under Objects through Robust: deliver.py:76-78), so two fetches in turn - Objects, then the new
     // folder - each re-asked at most every FOLDER_REASK_S: 30 s (CHOSEN) leaves room for both
     constexpr S32 FETCH_TRIES = 30;
+    // [live test 14 Nov 14:58Z] the region sends objects only within the AgentUpdate's Far (RenderFarClip 128 after a fresh
+    // login: 61 of 159 pieces seen). While the window looks, Far covers the farthest piece (WolfTrackTool::setFar).
+    constexpr F32 FAR_MAX_M = 1024.f;          // the brief / WolfStorm 02dcccc gTrackToolFar: at most 1024 m
+    constexpr F32 FAR_MARGIN_M = 32.f;         // past the farthest piece, as WolfStorm (02dcccc floater_wolf_track_tool.js: far + 32)
+    constexpr F32 FAR_STEP_M = 16.f;           // CHOSEN: rounded up to this, so a walking avatar does not change it each frame
+    // llviewermessage.cpp send_agent_update raises Far by a tenth of its target each second ("gradually increase draw
+    // distance", last_draw_disatance_step), so from 128 to 1024 m takes about ten keep-alive updates (one a second at least:
+    // MAX_AGENT_UPDATE_PERIOD 1 s); the check for pieces already standing waits this long after asking (CHOSEN)
+    constexpr F64 FAR_RAMP_S = 12.0;
     constexpr S32 FOLDER_REASK_S = 5;          // CHOSEN: a folder not seen yet is asked for again this often (wolffloaterlifts.cpp:996-1006 every 5 s)
     constexpr S32 GONE_WAIT_S = 30;            // CHOSEN: after a delete, the pieces are waited for this long to go
     // DESIGN.md 5.1 / 10: the ground box is the drawing's box plus 60 m all round, 4 m apart, 8 m when that is over 256 a side
@@ -363,6 +372,25 @@ namespace
 
 // ---- WolfTrackTool ----------------------------------------------------------------------------------------------------------
 
+namespace
+{
+    F32 sFarWanted = 0.f;    // WolfTrackTool::setFar: metres, 0 = none
+    F64 sFarUntil = 0.0;     // ... until this (LLFrameTimer::getElapsedSeconds): it lapses by itself
+}
+
+F32 WolfTrackTool::farWanted()
+{
+    if (sFarWanted <= 0.f) return 0.f;
+    if (LLFrameTimer::getElapsedSeconds() >= sFarUntil || !WolfGrid::isOnWolfTerritories()) { sFarWanted = 0.f; return 0.f; }
+    return sFarWanted;
+}
+
+void WolfTrackTool::setFar(F32 far_m, F64 for_s)
+{
+    sFarWanted = far_m > 0.f ? llmin(far_m, FAR_MAX_M) : 0.f;
+    sFarUntil = LLFrameTimer::getElapsedSeconds() + for_s;
+}
+
 void WolfTrackTool::onAlert(const std::string& message)
 {
     // InventoryAccessModule.cs:1192-1195 "Can't rez object '{0}' at <...> on parcel '{4}' in region {5}."; sent as a plain
@@ -499,6 +527,7 @@ void WolfFloaterTrack::onClose(bool app_quitting)
     if (WolfToolTunnel::instanceExists() && WolfToolTunnel::getInstance()->hostIs(this)) WolfToolTunnel::getInstance()->detach();
     mPenWanted = false;
     ++mGen;   // every coroutine of this window stops at its next wake-up (wolffloaterlifts.cpp mBoxGen, the same)
+    WolfTrackTool::setFar(0.f, 0.0);   // the wider Far for finding pieces ends with the window
     mPolling = false;
     mPlanInFlight = false;
     if (app_quitting) return;
@@ -2417,6 +2446,22 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
     };
     WolfFloaterTrack* f = self();
     if (!f) return;
+    // the region is asked for objects as far as this part's farthest piece while the window looks; it ends with this
+    // coroutine (every return), on close (onClose), and lapses by itself (setFar's time) if neither happens
+    struct FarGuard { ~FarGuard() { WolfTrackTool::setFar(0.f, 0.0); } } far_guard;
+    auto far_for = [&item]() -> F32
+    {
+        LLViewerRegion* r = gAgent.getRegion();
+        if (!r || r->getRegionID() != item.mRegion) return 0.f;
+        const LLVector3 me = r->getPosRegionFromAgent(gAgent.getPositionAgent());
+        F32 far_m = 0.f;
+        for (const ItemObject& o : item.mObjects) far_m = llmax(far_m, dist_vec(me, o.mRoot));
+        far_m = ceilf((far_m + FAR_MARGIN_M) / FAR_STEP_M) * FAR_STEP_M;
+        return far_m > gAgentCamera.mDrawDistance ? llmin(far_m, FAR_MAX_M) : 0.f;   // only ever wider than the resident's own
+    };
+    const F64 look_for_s = (F64)(FETCH_TRIES + LOOK_S) + FAR_RAMP_S + 30.0;   // the whole rez and look, with room
+    WolfTrackTool::setFar(far_for(), look_for_s);
+    const F64 far_asked_at = LLFrameTimer::getElapsedSeconds();
     auto fail = [&](const std::string& why)
     {
         f->mRezzing = false;
@@ -2490,6 +2535,25 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
         // the resident's other railways here (Your railways' laid lists) and of the one being replaced never count.
         f->mNotOurs = f->laidByOthers();
         f->mBefore.clear();
+        // pieces further than the resident's draw distance arrive only once the wider Far has reached them: wait for it
+        // before deciding that nothing of this part stands yet (a second copy would be rezzed over pieces not seen)
+        if (WolfTrackTool::farWanted() > 0.f)
+        {
+            f->setStatus("Laying your track: looking for any of its pieces further away...", false);
+            while (LLFrameTimer::getElapsedSeconds() - far_asked_at < FAR_RAMP_S)
+            {
+                llcoro::suspendUntilTimeout(1.f);
+                if (!self()) return;
+            }
+            f = self();
+            if (!f) return;
+            LLViewerRegion* rgn2 = gAgent.getRegion();
+            if (!rgn2 || rgn2->getRegionID() != item.mRegion)
+            {
+                fail("This part is for " + where + ", and you are not there now. Go there and press Lay the next part.");
+                return;
+            }
+        }
         const size_t standing = f->piecesNear(item);
         if (standing > 0)
         {
@@ -2519,6 +2583,7 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
         llcoro::suspendUntilTimeout(0.5f);
         f = self();
         if (!f) return;
+        WolfTrackTool::setFar(far_for(), look_for_s);   // the agent may have moved: Far follows the farthest piece
         LLViewerRegion* rgn = gAgent.getRegion();
         if (!rgn || rgn->getRegionID() != item.mRegion)
         {

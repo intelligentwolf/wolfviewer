@@ -4386,6 +4386,13 @@ void send_agent_update(bool force_send, bool send_reliable)
 
     bool send_update = force_send || sec_since_last_send > MAX_AGENT_UPDATE_PERIOD;
 
+    // [TRACK TOOL 2026-11-14] while the Lay Railway Track window looks for the pieces it placed, it asks the region for objects
+    // as far as the farthest piece (WolfTrackTool::farWanted: 0 = none; it lapses by itself; RenderFarClip is never changed).
+    // A change of it is sent at once rather than waiting for the next change of camera or controls below.
+    const F32 track_far = WolfTrackTool::farWanted();
+    static F32 last_track_far = 0.f;
+    if (track_far != last_track_far) send_update = true;
+
     LLVector3 camera_pos_agent = gAgentCamera.getCameraPositionAgent(); // local to avatar's region
     LLVector3 camera_at = LLViewerCamera::getInstance()->getAtAxis();
     LLQuaternion body_rotation = gAgent.getFrameAgent().getQuaternion();
@@ -4517,12 +4524,15 @@ void send_agent_update(bool force_send, bool send_reliable)
     msg->addVector3Fast(_PREHASH_CameraUpAxis, LLViewerCamera::getInstance()->getUpAxis());
 
     static F32 last_draw_disatance_step = 1024;
-    F32 memory_limited_draw_distance = gAgentCamera.mDrawDistance;
+    // [TRACK TOOL 2026-11-14] the window's wider Far while it looks for its pieces (above), else the draw distance as before
+    const F32 draw_distance = llmax(gAgentCamera.mDrawDistance, track_far);
+    last_track_far = track_far;
+    F32 memory_limited_draw_distance = draw_distance;
 
     if (LLViewerTexture::isSystemMemoryCritical())
     {
         // If we are low on memory, reduce requested draw distance
-        memory_limited_draw_distance = llmax(gAgentCamera.mDrawDistance / LLViewerTexture::getSystemMemoryBudgetFactor(), gAgentCamera.mDrawDistance / 2.f);
+        memory_limited_draw_distance = llmax(draw_distance / LLViewerTexture::getSystemMemoryBudgetFactor(), draw_distance / 2.f);
     }
 
     if (tp_state == LLAgent::TELEPORT_ARRIVING || LLStartUp::getStartupState() < STATE_MISC)
@@ -4532,7 +4542,7 @@ void send_agent_update(bool force_send, bool send_reliable)
         // we reduce the number of attachments sent to the viewer, thus prioritizing
         // closer ones.
         // Todo: revise and remove once server gets distance sorting.
-        last_draw_disatance_step = llmax((F32)(gAgentCamera.mDrawDistance / 2.f), 50.f);
+        last_draw_disatance_step = llmax((F32)(draw_distance / 2.f), 50.f);
         last_draw_disatance_step = llmin(last_draw_disatance_step, memory_limited_draw_distance);
         msg->addF32Fast(_PREHASH_Far, last_draw_disatance_step);
     }

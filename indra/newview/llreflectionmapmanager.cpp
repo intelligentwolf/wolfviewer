@@ -345,7 +345,25 @@ void LLReflectionMapManager::update()
     }
 
     // update distance to camera for all probes
-    std::sort(mProbes.begin()+1, mProbes.end(), CompareProbeDistance());
+    // [W107 FARPERF 2026-11-14] Only the slots' range is sorted: std::nth_element puts the closest probes (by the
+    // distances the loop below left last frame, as before) in [1, mReflectionProbeCount) and std::sort orders just those;
+    // the rest stay unordered. Everything below that reads the order looks only at that range: the slot hand-out
+    // (i < count), oldestProbe (i < mReflectionProbeCount), closestDynamic and getReflectionMaps() (the first probes
+    // holding a slot - beyond the range only mUpdatingProbe can hold one, and it stays beyond it either way); past the
+    // range each probe is treated alike (its slot freed, its distance refreshed). At Paddington Station (2,929 probes)
+    // the whole list was sorted every frame.
+    {
+        const auto first = mProbes.begin() + 1;
+        const auto mid = mProbes.begin() + (std::ptrdiff_t)llmin((size_t)mReflectionProbeCount, mProbes.size());
+        if (mid > first && mid < mProbes.end())
+        {
+            std::nth_element(first, mid, mProbes.end(), CompareProbeDistance());
+        }
+        if (mid > first)
+        {
+            std::sort(first, mid, CompareProbeDistance());
+        }
+    }
     llassert(mProbes[0] == mDefaultProbe);
     llassert(mProbes[0]->mCubeArray == mTexture);
     llassert(mProbes[0]->mCubeIndex == 0);

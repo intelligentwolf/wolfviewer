@@ -27,6 +27,7 @@
 #include "llviewerregion.h"
 
 #include <cmath>
+#include <utility>   // [FAR DRAW PERF 2026-11-14/] std::swap (swapPendingAll)
 
 const F32 WolfCloudClearance::TEXEL_M[WolfCloudClearance::LEVELS] = { 4.f, 16.f, 64.f };
 F32 WolfCloudClearance::M0 = 20.f;   // [2026-10-26] the cloud table's build_clear_m0_m (setFade)
@@ -69,6 +70,20 @@ void WolfCloudClearance::reset()
     for (S32 k = 0; k < LEVELS; ++k) mHaveOrigin[k] = false;
     mTopZ = -SENTINEL;
     mNext = 0.0;
+    // [FAR DRAW PERF 2026-11-14] the builds read and being read, and a rebuild under way, go with the rest
+    if (WolfObjectSweep::instanceExists())
+    {
+        WolfObjectSweep::instance().cancel(this);
+    }
+    mPrims.clear();
+    mPassPrims.clear();
+    mPrimOrigins.clear();
+    mPassOrigins.clear();
+    mPrimsFresh = false;
+    mHavePass = false;
+    mPassRegion = 0;
+    mPrimsRegion = 0;
+    mStage = -1;
 }
 
 LLVector2 WolfCloudClearance::levelOriginAgent(S32 k) const
@@ -101,17 +116,159 @@ void WolfCloudClearance::idle()
             moved = true;
         }
     }
-    if (!moved && mReady && now < mNext) return;
-    mNext = now + INTERVAL_SECS;
+    // [FAR DRAW PERF 2026-11-14] The builds come from the shared object pass (INTERVAL_SECS in wolfcloudclearance.h). A recentre
+    // (or no field yet) rebuilds at once from the last finished pass's builds, as before (a staged rebuild under way was made
+    // for the old window and is dropped); a newly finished pass is rebuilt over the next frames (advanceStage).
+    // [review 2] no pass to trust round the camera yet (wolfcloudclearance.h INTERVAL_SECS): one whole walk now, so no cloud
+    // ever stands over a build while a pass reads them
+    const U64 region = gAgent.getRegion()->getHandle();
+    const bool walk = !mHavePass || region != mPrimsRegion;
+    if (walk)
+    {
+        WolfObjectSweep::instance().walkNow(this);
+    }
+    if (moved || !mReady || walk)
+    {
+        rebuildNow();
+    }
+    else if (mStage >= 0)
+    {
+        advanceStage();
+    }
+    else if (mPrimsFresh)
+    {
+        mPrimsFresh = false;
+        swapPendingAll();
+        raster();
+        swapPendingAll();
+        mStage = 0;
+    }
+    if (now >= mNext && !WolfObjectSweep::instance().busy(this))
+    {
+        mNext = now + INTERVAL_SECS;
+        WolfObjectSweep::instance().request(this);
+    }
+}
+
+// [FAR DRAW PERF 2026-11-14]
+void WolfCloudClearance::rebuildNow()
+{
+    mStage = -1;
+    mPrimsFresh = false;
     const LLVector3d agent_origin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
-    raster(agent_origin);
+    raster();
     for (S32 k = 0; k < LEVELS; ++k) finishLevel(k);
     upload();
     mReady = mTex != 0;
     selfCheck(agent_origin);
 }
 
-void WolfCloudClearance::raster(const LLVector3d& agent_origin)
+void WolfCloudClearance::swapPendingLevel(S32 k)
+{
+    mTg[k].swap(mTgP[k]);
+    mTs[k].swap(mTsP[k]);
+    mBs[k].swap(mBsP[k]);
+    mMark[k].swap(mMarkP[k]);
+    mD[k].swap(mDP[k]);
+}
+
+void WolfCloudClearance::swapPendingAll()
+{
+    for (S32 k = 0; k < LEVELS; ++k) swapPendingLevel(k);
+    mBoxes.swap(mBoxesP);
+    std::swap(mTopZ, mTopZP);
+}
+
+// [FAR DRAW PERF 2026-11-14] The staged rebuild after a finished pass: raster() ran into the pending arrays in the frame it
+// began, then one level is finished a frame (finishLevel reads and writes only level k and the scratch mTmp), then the
+// pending field is published whole, uploaded and checked. Until then the shader and clearAt read the previous field.
+void WolfCloudClearance::advanceStage()
+{
+    if (mStage < LEVELS)
+    {
+        swapPendingLevel(mStage);
+        finishLevel(mStage);
+        swapPendingLevel(mStage);
+        ++mStage;
+        return;
+    }
+    swapPendingAll();
+    upload();
+    mReady = mTex != 0;
+    selfCheck(gAgent.getPosGlobalFromAgent(LLVector3::zero));
+    mStage = -1;
+}
+
+// [FAR DRAW PERF 2026-11-14] The builds are read in the shared object pass: visit() is the old raster loop's filter, box and
+// ground test (the shared pass already leaves out the dead, what is not LL_PCODE_VOLUME - avatars among them -, attachments
+// and HUD attachments), kept as a PrimBox with the agent origin of the frame it was read in.
+void WolfCloudClearance::beginPass()
+{
+    mPassPrims.clear();
+    mPassOrigins.clear();
+    mPassRegion = gAgent.getRegion() ? gAgent.getRegion()->getHandle() : 0;
+}
+
+void WolfCloudClearance::beginSlice()
+{
+    mSliceOrigin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
+    if (mPassOrigins.empty() || mPassOrigins.back() != mSliceOrigin)
+    {
+        mPassOrigins.push_back(mSliceOrigin);
+    }
+}
+
+void WolfCloudClearance::visit(LLViewerObject* o)
+{
+    if (!o->getRegion())
+    {
+        return;
+    }
+    LLViewerObject* root = o->getRootEdit();
+    if (!root || root->isAvatar() || root->isAttachment() || root->isHUDAttachment())
+    {
+        return;
+    }
+    if (root->getVelocity().lengthSquared() > MOVING_MPS * MOVING_MPS)
+    {
+        return;
+    }
+    // the prim's world box (agent space; the box of its rotated scale, a superset of the prim)
+    const LLVector3 c = o->getPositionAgent();
+    const LLVector3 half = o->getScale() * 0.5f;
+    const LLQuaternion rot = o->getRotationRegion();
+    LLVector3 lo(SENTINEL, SENTINEL, SENTINEL), hi(-SENTINEL, -SENTINEL, -SENTINEL);
+    for (S32 n = 0; n < 8; ++n)
+    {
+        const LLVector3 corner((n & 1) ? half.mV[VX] : -half.mV[VX],
+                               (n & 2) ? half.mV[VY] : -half.mV[VY],
+                               (n & 4) ? half.mV[VZ] : -half.mV[VZ]);
+        const LLVector3 p = c + corner * rot;
+        lo.set(llmin(lo.mV[VX], p.mV[VX]), llmin(lo.mV[VY], p.mV[VY]), llmin(lo.mV[VZ], p.mV[VZ]));
+        hi.set(llmax(hi.mV[VX], p.mV[VX]), llmax(hi.mV[VY], p.mV[VY]), llmax(hi.mV[VZ], p.mV[VZ]));
+    }
+    LLViewerRegion* region = o->getRegion();
+    const F32 ground = region->getLandHeightRegion(region->getPosRegionFromAgent(LLVector3(c.mV[VX], c.mV[VY], lo.mV[VZ])));
+    PrimBox pb;
+    pb.mLo = lo;
+    pb.mHi = hi;
+    pb.mGround = lo.mV[VZ] <= ground + GROUND_ATTACH_M;
+    pb.mOrigin = (U32)(mPassOrigins.size() - 1);   // beginSlice pushed this frame's
+    mPassPrims.push_back(pb);
+}
+
+void WolfCloudClearance::endPass()
+{
+    mPrims.swap(mPassPrims);
+    mPrimOrigins.swap(mPassOrigins);
+    mPassPrims.clear();
+    mPassOrigins.clear();
+    mPrimsFresh = true;
+    mHavePass = true;
+    mPrimsRegion = mPassRegion;
+}
+
+void WolfCloudClearance::raster()
 {
     const size_t NN = (size_t)N * N;
     for (S32 k = 0; k < LEVELS; ++k)
@@ -124,42 +281,14 @@ void WolfCloudClearance::raster(const LLVector3d& agent_origin)
     mBoxes.clear();
     mTopZ = -SENTINEL;
     // the same prims as WolfWaterClearance::rasterObjects (wolfwaterfield.cpp): volumes, no avatars, nothing worn or sat on,
-    // no linkset moving faster than MOVING_MPS
-    const S32 count = gObjectList.getNumObjects();
-    for (S32 i = 0; i < count; ++i)
+    // no linkset moving faster than MOVING_MPS - [FAR DRAW PERF 2026-11-14] chosen in visit(), in the shared object pass; each
+    // is placed with the agent origin of the frame it was read in, the one the old loop read it with
+    for (const PrimBox& pb : mPrims)
     {
-        LLViewerObject* o = gObjectList.getObject(i);
-        if (!o || o->isDead() || o->getPCode() != LL_PCODE_VOLUME || o->isAvatar()
-            || o->isAttachment() || o->isHUDAttachment() || !o->getRegion())
-        {
-            continue;
-        }
-        LLViewerObject* root = o->getRootEdit();
-        if (!root || root->isAvatar() || root->isAttachment() || root->isHUDAttachment())
-        {
-            continue;
-        }
-        if (root->getVelocity().lengthSquared() > MOVING_MPS * MOVING_MPS)
-        {
-            continue;
-        }
-        // the prim's world box (agent space; the box of its rotated scale, a superset of the prim)
-        const LLVector3 c = o->getPositionAgent();
-        const LLVector3 half = o->getScale() * 0.5f;
-        const LLQuaternion rot = o->getRotationRegion();
-        LLVector3 lo(SENTINEL, SENTINEL, SENTINEL), hi(-SENTINEL, -SENTINEL, -SENTINEL);
-        for (S32 n = 0; n < 8; ++n)
-        {
-            const LLVector3 corner((n & 1) ? half.mV[VX] : -half.mV[VX],
-                                   (n & 2) ? half.mV[VY] : -half.mV[VY],
-                                   (n & 4) ? half.mV[VZ] : -half.mV[VZ]);
-            const LLVector3 p = c + corner * rot;
-            lo.set(llmin(lo.mV[VX], p.mV[VX]), llmin(lo.mV[VY], p.mV[VY]), llmin(lo.mV[VZ], p.mV[VZ]));
-            hi.set(llmax(hi.mV[VX], p.mV[VX]), llmax(hi.mV[VY], p.mV[VY]), llmax(hi.mV[VZ], p.mV[VZ]));
-        }
-        LLViewerRegion* region = o->getRegion();
-        const F32 ground = region->getLandHeightRegion(region->getPosRegionFromAgent(LLVector3(c.mV[VX], c.mV[VY], lo.mV[VZ])));
-        const bool groundBuild = lo.mV[VZ] <= ground + GROUND_ATTACH_M;
+        const LLVector3d& agent_origin = mPrimOrigins[pb.mOrigin];
+        const LLVector3& lo = pb.mLo;
+        const LLVector3& hi = pb.mHi;
+        const bool groundBuild = pb.mGround;
         mTopZ = llmax(mTopZ, hi.mV[VZ]);
         Box b;
         b.lo.setVec(lo.mV[VX] + agent_origin.mdV[VX], lo.mV[VY] + agent_origin.mdV[VY], lo.mV[VZ]);

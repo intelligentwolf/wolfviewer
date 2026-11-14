@@ -927,6 +927,7 @@ set(viewer_SOURCE_FILES
     wolfnaturalwater.cpp
     wolfparcelbitmap.cpp
     wolfobjectprops.cpp
+    wolfobjectsweep.cpp            # [FAR DRAW PERF 2026-11-14] the shared incremental object pass
     wolffloatermeshupload.cpp
     wolffloaterlagdetector.cpp
     wolffloatercompass.cpp   # [WOLF COMPASS 2026-10-16]
@@ -1026,6 +1027,7 @@ set(viewer_SOURCE_FILES
     wolfregionweather.cpp
     wolfhurricane.cpp
     wolfframegovernor.cpp
+    wolfsubpixelcull.cpp
     wolfradiostations.cpp
     wolffloaterradio.cpp
     wolffloaterroleplay.cpp
@@ -1977,6 +1979,7 @@ set(viewer_HEADER_FILES
     wolfparcelbitmap.h
     wolfgrid.h
     wolfobjectprops.h
+    wolfobjectsweep.h
     wolffloatermeshupload.h
     wolffloaterlagdetector.h
     wolffloatercompass.h   # [WOLF COMPASS 2026-10-16]
@@ -2081,6 +2084,7 @@ set(viewer_HEADER_FILES
     wolfregionweather.h
     wolfhurricane.h
     wolfframegovernor.h
+    wolfsubpixelcull.h
     wolfradiostations.h
     wolffloaterradio.h
     wolffloaterroleplay.h

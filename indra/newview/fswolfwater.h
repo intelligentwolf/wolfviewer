@@ -25,6 +25,7 @@
 #define FS_WOLFWATER_H
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -33,9 +34,11 @@
 #include "llpointer.h"
 #include "llframetimer.h"
 #include "v3math.h"
+#include "wolfobjectsweep.h"
 
 class LLViewerObject;
 class LLVOWater;
+class WolfObjectProps;
 
 /**
  * A builder types "wolfwater" into a prim's description and the viewer draws a real water
@@ -68,7 +71,7 @@ class LLVOWater;
  * as the pool floor and its sides as the rim; a builder who wants open water sets the prim
  * transparent, which is the normal in-world workflow.
  */
-class FSWolfWater : public LLSingleton<FSWolfWater>
+class FSWolfWater : public LLSingleton<FSWolfWater>, public WolfObjectSweep::Client
 {
     LLSINGLETON(FSWolfWater);
     ~FSWolfWater();
@@ -94,8 +97,14 @@ public:
      *  is a mouth under one of them). */
     void appendPlanes(std::vector<LLVOWater*>& out) const;
 
+    // [FAR DRAW PERF 2026-11-14] The sweep is this feature's share of the ONE shared object pass (wolfobjectsweep.h): the
+    // loop body of the old sweep() is visit(), the tail is endPass(). See idle() for the timing.
+    void beginPass() override;
+    void beginSlice() override;
+    void visit(LLViewerObject* objectp) override;
+    void endPass() override;
+
 private:
-    void sweep();
     /** Create or re-fit the surface for one prim. */
     void ensureSurface(LLViewerObject* objectp);
     void destroySurface(const LLUUID& object_id);
@@ -110,6 +119,13 @@ private:
     /** object id -> its live water plane. */
     std::map<LLUUID, Surface> mSurfaces;
     F64 mNextSweep = 0.0;
+    // [FAR DRAW PERF 2026-11-14] the pass in progress: what the old sweep() kept in locals, and the per-frame camera
+    std::set<LLUUID> mPassWanted;
+    S32 mPassScanned = 0, mPassInRange = 0, mPassKnown = 0, mPassMatched = 0;
+    LLVector3 mSliceCamera;
+    F32 mSliceRangeSq = 0.f;
+    F32 mSliceDrawDistance = 0.f;
+    WolfObjectProps* mSliceProps = nullptr;
     /** Diagnostics: when the next sweep summary is due. */
     F64 mNextStatsLog = 0.0;
 

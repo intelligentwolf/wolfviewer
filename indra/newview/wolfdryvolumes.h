@@ -25,6 +25,7 @@
 #include "llsingleton.h"
 #include "lluuid.h"
 #include "v3math.h"
+#include "wolfobjectsweep.h"
 
 class LLShaderUniforms;
 class LLViewerObject;
@@ -68,7 +69,7 @@ class LLViewerObject;
  * sailing or rocking boat keeps it. Setting WolfViewerDryHulls (on) turns it off. A boat measured this way does not also
  * use its own wolfdry prims (HMS Wolfy's five tubes): the hull covers them and they would only take shader slots.
  */
-class WolfDryVolumes : public LLSingleton<WolfDryVolumes>
+class WolfDryVolumes : public LLSingleton<WolfDryVolumes>, public WolfObjectSweep::Client
 {
     LLSINGLETON(WolfDryVolumes);
     ~WolfDryVolumes();
@@ -78,7 +79,12 @@ public:
     static const std::string KEYWORD;
     /** waterFogF.glsl wolfDry[32] = 8 volumes x 4 vec4. */
     static constexpr S32 MAX_SHADER_VOLUMES = 8;
-    /** How often the object list is swept for tagged prims (the same pace as FSWolfWater, wolfobjectprops.h). */
+    /** How often the object list is swept for tagged prims (the same pace as FSWolfWater, wolfobjectprops.h).
+     *  [FAR DRAW PERF 2026-11-14] Now how often a shared object pass is asked for (wolfobjectsweep.h): the tag sweep takes that
+     *  pass's frames, so a tagged prim is found or dropped up to one pass later and the sweeps come every max(1.5 s, one pass).
+     *  Within what the feature already tolerates: the description it acts on is re-asked only every REFRESH_SECS (120 s,
+     *  wolfobjectprops.h), and the volumes themselves are placed every frame (collect) from the set the sweep keeps.
+     *  sweepHulls keeps its own 1.5 s cadence (it reads WolfBoatRock::boats(), not the object list). */
     static constexpr F64 SWEEP_INTERVAL_SECS = 1.5;
     /** Prims are asked about inside the draw distance and within NEAR_M + PER_METRE_M x their longest side
      *  (FSWolfWater::NEAR_M / PER_METRE_M: the same reach, so the same prims are asked). */
@@ -151,8 +157,14 @@ public:
     /** The volume a prim stands for; false when its shape is not one that is used (wolfdryvolumes.h WHAT COUNTS). */
     static bool volumeOf(LLViewerObject* objectp, Volume& out);
 
+    // [FAR DRAW PERF 2026-11-14] The tag sweep is this feature's share of the shared object pass (wolfobjectsweep.h): the old
+    // sweep()'s loop body is visit(), its tail endPass().
+    void beginPass() override;
+    void beginSlice() override;
+    void visit(LLViewerObject* objectp) override;
+    void endPass() override;
+
 private:
-    void sweep();
     /** The tagged prims and the tunnel boxes under the water, as volumes now (mFrame). */
     void collect();
     /** [WOLF DRY HULLS] Keep mHulls in step with WolfBoatRock::boats(): measure new or changed ones within the budget. */
@@ -165,6 +177,10 @@ private:
     static U64 hullSignature(LLViewerObject* root);
 
     std::set<LLUUID> mTagged;        // prims whose description has the keyword, in reach
+    std::set<LLUUID> mPassFound;     // [FAR DRAW PERF 2026-11-14/] the pass in progress (the old sweep()'s `found`)
+    LLVector3 mSliceCamera;          // [FAR DRAW PERF 2026-11-14/] this frame's camera and draw distance
+    F32 mSliceRangeSq = 0.f;
+    class WolfObjectProps* mSliceProps = nullptr;
     std::vector<Volume> mFrame;      // this frame's volumes, every one (not only the shader's)
     F64 mNextSweep = 0.0;
     U64 mRegionHandle = 0;

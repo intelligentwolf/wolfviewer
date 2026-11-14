@@ -26,6 +26,7 @@
 #include "v2math.h"
 #include "v3math.h"
 #include "wolfhurricane.h"   // [HURRICANE 2026-10-30/]
+#include "wolfobjectsweep.h"   // [FAR DRAW PERF 2026-11-14/] the sweep is a client of the shared object pass
 
 class LLViewerObject;
 class LLViewerRegion;
@@ -63,7 +64,7 @@ class LLViewerRegion;
 // active (geometry in object space under a spatial bridge), which is the same state every
 // vehicle the sim drives is in, and the state WolfStorm reproduces by popping a rocking
 // linkset out of its static batches.
-class WolfBoatRock : public LLSingleton<WolfBoatRock>
+class WolfBoatRock : public LLSingleton<WolfBoatRock>, public WolfObjectSweep::Client
 {
     LLSINGLETON(WolfBoatRock);
     ~WolfBoatRock();
@@ -92,6 +93,11 @@ public:
     F32 drawnWaveHeight(LLViewerRegion* regionp, F32 ax, F32 ay) const;
 
     // Source: terrain_manager.js updateFloaters() — 2.5 s sweep, 48 rockers, 256 m.
+    // [FAR DRAW PERF 2026-11-14] Now how often a shared object pass is asked for (wolfobjectsweep.h): the sweep's look at every
+    // prim takes that pass's frames and its result is applied in the next idle() (before gPipeline.updateMove, where sweep()
+    // ran), so a boat starts or stops rocking up to one pass (+ a frame) later and sweeps come every max(2.5 s, one pass).
+    // Within what the rocker tolerates: a boat waits for its name from WolfObjectProps (drained every 1.5 s) before it rocks
+    // at all, and a rocking hull is followed every frame by step(), not by the sweep.
     static constexpr F64 SWEEP_INTERVAL_SECS = 2.5;
     static constexpr S32 MAX_ROCKERS = 48;
     static constexpr F32 RADIUS_M = 256.f;
@@ -181,8 +187,24 @@ private:
         LLVector2    mMax = LLVector2(0.5f, 0.5f);
     };
 
-    /** rock: false = only find the boats (mBoats), rocking is off. */
-    void sweep(bool rock);
+    // [FAR DRAW PERF 2026-11-14] The sweep as a client of the shared object pass: the old sweep()'s loop is visit(), endPass()
+    // keeps the candidates, and applySweep() - from idle(), where the old sweep() ran - does the rest.
+public:
+    void beginPass() override;
+    void beginSlice() override;
+    void visit(LLViewerObject* objectp) override;
+    void endPass() override;
+private:
+    struct Candidate
+    {
+        LLPointer<LLViewerObject> mObject;   // held: a pass spans frames, and a candidate may die before it is applied
+        Verdict                   mVerdict;
+        F32                       mDistSq = 0.f;
+    };
+    /** rock: false = only find the boats (mBoats), rocking is off. The tail of the old sweep(rock), on a finished pass. */
+    void applySweep(bool rock);
+    /** Drop the pass under way and a finished one not yet applied. */
+    void dropPass();
     void step();
     /** Drop a rocker and put its hull back on the sim's transform. */
     void evict(std::map<const LLViewerObject*, Rocker>::iterator it);
@@ -210,6 +232,15 @@ private:
     mutable bool mHaveDrawnSea = false;
     F64 mNextSweep = 0.0;
     F64 mNextStatsLog = 0.0;
+    // [FAR DRAW PERF 2026-11-14] the pass under way (mPassRock: the mode it was asked for in) and the finished one
+    bool mPassRock = false;
+    std::vector<Candidate> mPassCands;
+    S32 mPassBand = 0, mPassQualify = 0, mPassWantName = 0, mPassDenied = 0;
+    LLVector3 mSliceCamera;
+    class WolfObjectProps* mSliceProps = nullptr;
+    bool mResultReady = false;
+    bool mResultRock = false;
+    std::vector<Candidate> mResultCands;
     // Diagnostics from the last sweep.
     S32 mStatBand = 0;
     S32 mStatQualify = 0;

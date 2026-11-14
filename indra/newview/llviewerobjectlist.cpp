@@ -58,6 +58,7 @@
 #include "llresmgr.h"
 #include "llsdutil.h"
 #include "llviewerregion.h"
+#include "wolfobjectsweep.h"   // [FAR DRAW PERF 2026-11-14/] the shared object pass is told before an entry is dropped
 #include "llviewerstats.h"
 #include "llviewerstatsrecorder.h"
 #include "llvovolume.h"
@@ -1670,6 +1671,11 @@ void LLViewerObjectList::killAllObjects()
     if(!mObjects.empty())
     {
         LL_WARNS() << "LLViewerObjectList::killAllObjects still has entries in mObjects: " << mObjects.size() << LL_ENDL;
+        // [FAR DRAW PERF 2026-11-14] the shared object pass drops its snapshot first (wolfobjectsweep.h)
+        if (WolfObjectSweep::instanceExists())
+        {
+            WolfObjectSweep::instance().noteAllRemoved();
+        }
         mObjects.clear();
     }
 }
@@ -1724,6 +1730,12 @@ void LLViewerObjectList::cleanDeadObjects(bool use_timer)
                 num_divergent++; // this is the number we are adrift in the count
             }
 
+            // [FAR DRAW PERF 2026-11-14] the list's reference goes next and may be the last: the shared object pass's snapshot
+            // must not read this pointer again (wolfobjectsweep.h)
+            if (WolfObjectSweep::instanceExists())
+            {
+                WolfObjectSweep::instance().noteRemoved(objectp);
+            }
             LLPointer<LLViewerObject>::swap(*iter, *target);
             *target = NULL;
             ++target;

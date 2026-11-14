@@ -46,6 +46,10 @@ WolfNaturalWater::~WolfNaturalWater()
     // LLPointers into the object list, which outlives this singleton's teardown order
     // guarantees — drop the references without touching the pipeline.
     mRegions.clear();
+    if (WolfObjectSweep::instanceExists())
+    {
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/]
+    }
 }
 
 // static
@@ -69,6 +73,13 @@ void WolfNaturalWater::reset()
     }
     mRegions.clear();
     mLoggedDecimation.clear();   // <WolfViewer 2026-09-26/> bounded with mRegions
+    // [FAR DRAW PERF 2026-11-14] a check whose prims are being read belongs to what was just dropped
+    WolfObjectSweep::instance().cancel(this);
+    mPassPending = false;
+    mPassRegionp = nullptr;
+    mPassZ.clear();
+    mPassBuilt.clear();
+    mPassFloor.clear();
 }
 
 // Changes whenever any patch of the region's surface was updated (terrain edits, new
@@ -89,17 +100,16 @@ void WolfNaturalWater::idle()
     // share, so after a hypergrid jump the last Wolf fields would have stayed on that grid's water.
     if (!WolfGrid::showsWolfRegion())   // [WOLF VISITOR SEES 2026-10-18/] the region underfoot: visitors on a Wolf region too
     {
-        if (!mRegions.empty())
+        if (!mRegions.empty() || mPassPending)   // [FAR DRAW PERF 2026-11-14/] or a check under way
         {
             reset();
         }
         return;
     }
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfTerrainWater", true);
-    static LLCachedControl<F32> catchment(gSavedSettings, "WolfTerrainWaterCatchment", 5000.f);
     if (!enabled)
     {
-        if (!mRegions.empty())
+        if (!mRegions.empty() || mPassPending)   // [FAR DRAW PERF 2026-11-14/] or a check under way
         {
             reset();
         }
@@ -112,7 +122,7 @@ void WolfNaturalWater::idle()
     WolfWaveZones::instance().idle();
 
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (now < mNextCheck || mBusy)
+    if (now < mNextCheck || mBusy || mPassPending)   // [FAR DRAW PERF 2026-11-14/] or its prims still being read
     {
         return;
     }
@@ -179,7 +189,7 @@ void WolfNaturalWater::idle()
     // 700 MB free). The analysis now runs on a DECIMATED grid of at most MAX_ANALYSIS_GRIDS
     // points an edge: every step-th height, metres-per-grid scaled to match, so a 25,600 m
     // region is analysed at 25 m (about 1 M points, ~60 MB of arrays) and everything up to
-    // 1024 m is untouched. rasterizeBuilt and compute take (grids, mpg) and never assumed 1 m.
+    // 1024 m is untouched. rasterizeObject and compute take (grids, mpg) and never assumed 1 m.
     const S32 step = llmax(1, (grids_full - 1 + MAX_ANALYSIS_GRIDS - 1) / MAX_ANALYSIS_GRIDS);
     const S32 grids = (grids_full - 1) / step + 1;
     std::vector<F32> z((size_t)grids * grids);
@@ -202,10 +212,74 @@ void WolfNaturalWater::idle()
 
     // Prims arrive long after the terrain does, so the built mask is part of the stamp:
     // a road rezzing across a stream takes the stream away on the next check.
+    // [FAR DRAW PERF 2026-11-14] The mask is made in the shared object pass now (visit, a slice a frame); the rest of this
+    // check runs in endPass(). The terrain revision and the water level are read HERE, with the heights they go with (they
+    // were read a moment after the mask in the same frame before; now the mask takes a few frames, and the stamp must name
+    // the heights the analysis is given).
+    mPassRegionp = regionp;
+    mPassHandle = regionp->getHandle();
+    mPassZ = std::move(z);
+    mPassGrids = grids;
+    mPassMpg = mpg;
+    mPassTerrainStamp = terrainStamp(regionp);
+    mPassSea = regionp->getWaterHeight();
+    mPassPending = true;
+    WolfObjectSweep::instance().request(this);
+}
+
+// [FAR DRAW PERF 2026-11-14]
+void WolfNaturalWater::beginPass()
+{
+    mPassSpoiled = false;
+    mPassBuilt.assign((size_t)mPassGrids * mPassGrids, 0);
+    mPassFloor.assign((size_t)mPassGrids * mPassGrids, std::numeric_limits<F32>::infinity());
+}
+
+void WolfNaturalWater::beginSlice()
+{
+    // The region must still be the one the heights came from; its origin in agent space is read each frame, as the
+    // drawables' extents are (a crossing during the pass moves both).
+    if (!mPassSpoiled && (!mPassRegionp || LLWorld::getInstance()->getRegionFromHandle(mPassHandle) != mPassRegionp))
+    {
+        mPassSpoiled = true;
+    }
+    if (!mPassSpoiled)
+    {
+        mSliceOrigin = mPassRegionp->getOriginAgent();
+    }
+}
+
+void WolfNaturalWater::visit(LLViewerObject* obj)
+{
+    // The shared pass already leaves out the dead (their drawable is gone: LLViewerObject::markDead), what is not
+    // LL_PCODE_VOLUME, attachments and HUD attachments - the rest of the old rasterizeBuilt filter is rasterizeObject's.
+    if (mPassSpoiled || obj->getRegion() != mPassRegionp)
+    {
+        return;
+    }
+    rasterizeObject(obj, mSliceOrigin, mPassZ, mPassGrids, mPassMpg, mPassBuilt, mPassFloor);
+}
+
+void WolfNaturalWater::endPass()
+{
+    mPassPending = false;
+    LLViewerRegion* regionp = mPassRegionp;
+    mPassRegionp = nullptr;
+    std::vector<F32> z;
+    z.swap(mPassZ);
     std::vector<U8> built;
+    built.swap(mPassBuilt);
     std::vector<F32> prim_floor;
-    rasterizeBuilt(regionp, z, grids, mpg, built, prim_floor);
-    U64 stamp = terrainStamp(regionp);
+    prim_floor.swap(mPassFloor);
+    if (mPassSpoiled || !regionp || LLWorld::getInstance()->getRegionFromHandle(mPassHandle) != regionp)
+    {
+        return;   // the region went during the pass: the next check (CHECK_INTERVAL_SECS) looks again
+    }
+    const S32 grids = mPassGrids;
+    const F32 mpg = mPassMpg;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    static LLCachedControl<F32> catchment(gSavedSettings, "WolfTerrainWaterCatchment", 5000.f);
+    U64 stamp = mPassTerrainStamp;
     for (U8 b : built)
     {
         stamp = (stamp ^ b) * 1099511628211ull;
@@ -218,7 +292,7 @@ void WolfNaturalWater::idle()
     }
     // <WolfViewer 2026-10-06> the region's water level is part of the answer now (a hollow it
     // already fills gets no pool), so a tide or an estate change of it re-runs the analysis.
-    const F32 sea = regionp->getWaterHeight();
+    const F32 sea = mPassSea;
     {
         U32 bits;
         memcpy(&bits, &sea, sizeof(bits));
@@ -282,60 +356,54 @@ namespace
 }
 
 // static
-void WolfNaturalWater::rasterizeBuilt(LLViewerRegion* regionp, const std::vector<F32>& z, S32 n, F32 mpg, std::vector<U8>& built, std::vector<F32>& prim_floor)
+// [FAR DRAW PERF 2026-11-14] The old rasterizeBuilt's loop body, for one prim (the shared object pass calls it from visit; the
+// arrays are assigned in beginPass, as rasterizeBuilt assigned them before its loop).
+void WolfNaturalWater::rasterizeObject(LLViewerObject* obj, const LLVector3& origin, const std::vector<F32>& z, S32 n, F32 mpg,
+                                       std::vector<U8>& built, std::vector<F32>& prim_floor)
 {
-    built.assign((size_t)n * n, 0);
-    prim_floor.assign((size_t)n * n, std::numeric_limits<F32>::infinity());
-    const LLVector3 origin = regionp->getOriginAgent();
     const F32 oo = 1.f / mpg;
-    const S32 count = gObjectList.getNumObjects();
-    for (S32 i = 0; i < count; ++i)
+    if (obj->mDrawable.isNull())
     {
-        LLViewerObject* obj = gObjectList.getObject(i);
-        if (!obj || obj->getRegion() != regionp || obj->getPCode() != LL_PCODE_VOLUME
-            || obj->isAttachment() || obj->isHUDAttachment() || obj->mDrawable.isNull())
+        return;
+    }
+    // <WolfViewer 2026-10-07> Only what stands still is "built". A moving drawable - a boat
+    // the rocker bobs (wolfboatrock.h: it makes the hull's drawable active), a vehicle being
+    // sailed or flown, anything spinning or being dragged - changed its box every frame, so
+    // this region's stamp changed on every 2 s check and the whole analysis and the water
+    // surfaces were rebuilt ~40 times a minute (Paul: "jerky, not smooth like it used to be").
+    if (obj->mDrawable->isActive())
+    {
+        return;
+    }
+    // Agent-space box of what is actually drawn, from the drawable's octree entry.
+    const LLVector4a* ext = obj->mDrawable->getSpatialExtents();
+    if (!ext || !ext[0].isFinite3() || !ext[1].isFinite3())
+    {
+        return;
+    }
+    const F32 minx = ext[0][0] - origin.mV[VX], miny = ext[0][1] - origin.mV[VY];
+    const F32 maxx = ext[1][0] - origin.mV[VX], maxy = ext[1][1] - origin.mV[VY];
+    const F32 minz = ext[0][2] - origin.mV[VZ], maxz = ext[1][2] - origin.mV[VZ];
+    const S32 x0 = llclamp((S32)floorf(minx * oo), 0, n - 1), x1 = llclamp((S32)ceilf(maxx * oo), 0, n - 1);
+    const S32 y0 = llclamp((S32)floorf(miny * oo), 0, n - 1), y1 = llclamp((S32)ceilf(maxy * oo), 0, n - 1);
+    if (maxx < 0.f || maxy < 0.f || minx > n * mpg || miny > n * mpg)
+    {
+        return;
+    }
+    for (S32 y = y0; y <= y1; ++y)
+    {
+        for (S32 x = x0; x <= x1; ++x)
         {
-            continue;
-        }
-        // <WolfViewer 2026-10-07> Only what stands still is "built". A moving drawable - a boat
-        // the rocker bobs (wolfboatrock.h: it makes the hull's drawable active), a vehicle being
-        // sailed or flown, anything spinning or being dragged - changed its box every frame, so
-        // this region's stamp changed on every 2 s check and the whole analysis and the water
-        // surfaces were rebuilt ~40 times a minute (Paul: "jerky, not smooth like it used to be").
-        if (obj->mDrawable->isActive())
-        {
-            continue;
-        }
-        // Agent-space box of what is actually drawn, from the drawable's octree entry.
-        const LLVector4a* ext = obj->mDrawable->getSpatialExtents();
-        if (!ext || !ext[0].isFinite3() || !ext[1].isFinite3())
-        {
-            continue;
-        }
-        const F32 minx = ext[0][0] - origin.mV[VX], miny = ext[0][1] - origin.mV[VY];
-        const F32 maxx = ext[1][0] - origin.mV[VX], maxy = ext[1][1] - origin.mV[VY];
-        const F32 minz = ext[0][2] - origin.mV[VZ], maxz = ext[1][2] - origin.mV[VZ];
-        const S32 x0 = llclamp((S32)floorf(minx * oo), 0, n - 1), x1 = llclamp((S32)ceilf(maxx * oo), 0, n - 1);
-        const S32 y0 = llclamp((S32)floorf(miny * oo), 0, n - 1), y1 = llclamp((S32)ceilf(maxy * oo), 0, n - 1);
-        if (maxx < 0.f || maxy < 0.f || minx > n * mpg || miny > n * mpg)
-        {
-            continue;
-        }
-        for (S32 y = y0; y <= y1; ++y)
-        {
-            for (S32 x = x0; x <= x1; ++x)
+            const F32 ground = z[x + y * n];
+            if (ground >= minz - OBJECT_CLEAR_M && ground <= maxz + BUILT_ABOVE_M)   // <WolfViewer 2026-10-06/> was minz - BUILT_BELOW_M
             {
-                const F32 ground = z[x + y * n];
-                if (ground >= minz - OBJECT_CLEAR_M && ground <= maxz + BUILT_ABOVE_M)   // <WolfViewer 2026-10-06/> was minz - BUILT_BELOW_M
-                {
-                    built[x + y * n] = 1;
-                }
-                // Anything not buried is a candidate for standing in a pool's water: the
-                // flood stage compares its bottom with the pool's level.
-                if (maxz >= ground - BUILT_BELOW_M)
-                {
-                    prim_floor[x + y * n] = llmin(prim_floor[x + y * n], minz);
-                }
+                built[x + y * n] = 1;
+            }
+            // Anything not buried is a candidate for standing in a pool's water: the
+            // flood stage compares its bottom with the pool's level.
+            if (maxz >= ground - BUILT_BELOW_M)
+            {
+                prim_floor[x + y * n] = llmin(prim_floor[x + y * n], minz);
             }
         }
     }

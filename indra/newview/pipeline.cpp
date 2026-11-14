@@ -6488,6 +6488,16 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
             const Light* light = &(*iter);
             ((LLViewerOctreeEntryData*) light->drawable)->setVisible();
         }
+
+        // [W107 FARPERF 2026-11-14] the counts behind this function's cost, in the log every 10 s while WolfLogFrameRate is on
+        static LLCachedControl<bool> log_rate(gSavedSettings, "WolfLogFrameRate", false);
+        static F64 next_log = 0.0;
+        if (log_rate && LLTimer::getTotalSeconds() >= next_log)
+        {
+            next_log = LLTimer::getTotalSeconds() + 10.0;
+            LL_INFOS("WolfLights") << "lights: " << mLights.size() << " known, " << mNearbyLights.size() << " within "
+                                   << max_dist << " m (RenderLocalLightCount " << (S32)local_light_count << ")" << LL_ENDL;
+        }
     }
 }
 

@@ -19,6 +19,7 @@
 #include "llsingleton.h"
 #include "v2math.h"
 #include "v3dmath.h"
+#include "wolfobjectsweep.h"   // [FAR DRAW PERF 2026-11-14/] the builds are read in the shared object pass
 #include <vector>
 
 /**
@@ -61,8 +62,10 @@
  * Why not one object scan with WolfWaterClearance: that scan keeps only prims within its waterline band (BAND_M) and runs
  * only where the Wolf sea shows; this one needs every prim's full box and runs wherever the native clouds draw. Sharing
  * would have meant changing the waves' scan; it is left byte-for-byte as it was (one walk of the object list a second each).
+ * [FAR DRAW PERF 2026-11-14] Both now read their prims in the ONE shared object pass (wolfobjectsweep.h), each with its own
+ * filter (visit): no walk of the object list of their own any more. See INTERVAL_SECS for the timing.
  */
-class WolfCloudClearance : public LLSingleton<WolfCloudClearance>
+class WolfCloudClearance : public LLSingleton<WolfCloudClearance>, public WolfObjectSweep::Client
 {
     LLSINGLETON(WolfCloudClearance);
     ~WolfCloudClearance();
@@ -83,6 +86,19 @@ public:
     static constexpr F32 SENTINEL = 60000.f;          // "none" (inside half-float range)
     static constexpr F32 CHAMFER = 1.0824f;           // as WolfWaterClearance::CHAMFER
     static constexpr F32 MOVING_MPS = 0.5f;           // as WolfWaterClearance::MOVING_MPS
+    // [FAR DRAW PERF 2026-11-14] Now how often a shared object pass is asked for (wolfobjectsweep.h). The builds are read in
+    // that pass (visit: the old raster's filter, box and ground test, kept as a PrimBox) and, when it ends, the field is rebuilt
+    // over the next LEVELS + 2 frames (raster, one level finished a frame, upload: the same functions on the same inputs,
+    // published together). So a build's clearing shows up to one pass + LEVELS + 2 frames after the old 1 s, and passes come
+    // every max(1 s, one pass). Within what the field tolerates: only builds that stand still count (MOVING_MPS), the clouds
+    // themselves drift over minutes, and M0 + W (70 m) of fade surround every box. A recentre still rebuilds at once from the
+    // last finished pass's builds.
+    // [review 2] CLOUDS NEVER COVER BUILDS (Paul's standing rule): where the last pass cannot be trusted to hold the builds
+    // round the camera - no pass yet (first use, after reset(), the clouds coming back on) or the agent in another region
+    // than the one that pass began in (a teleport, a region crossing: new regions' builds arrive) - the field is made from
+    // ONE whole walk of the object list in that frame (WolfObjectSweep::walkNow, the old behaviour and its one-time cost),
+    // then the passes take over again. What a resident can still see: a build that rezzes or moves into a region already
+    // walked is cleared up to one pass + LEVELS + 2 frames later than the old 1 s (see above).
     static constexpr F64 INTERVAL_SECS = 1.0;         // the builds are re-rastered this often
 
     /** Once a frame from the clouds' frame (wolfenvironmentrender.cpp cloudsFrame); rebuilds once a second. */
@@ -97,9 +113,33 @@ public:
     /** CPU twin of cloudsCommon.glsl wolfBuildClear at agent (x, y, z): 1 = no cloud. */
     F32 clearAt(F32 ax, F32 ay, F32 az) const;
 
+    // [FAR DRAW PERF 2026-11-14] the builds are read in the shared object pass (wolfobjectsweep.h)
+    void beginPass() override;
+    void beginSlice() override;
+    void visit(LLViewerObject* objectp) override;
+    void endPass() override;
+
 private:
     struct Box { LLVector3d lo, hi; };   // global
-    void raster(const LLVector3d& agent_origin);
+    // [FAR DRAW PERF 2026-11-14] A build as visit() found it: its world box in the agent frame of the frame it was read in,
+    // that frame's agent origin (an index into the origins list) and its group - what raster() needs, so the raster gives
+    // exactly what the old one-frame walk gave for the same prims.
+    struct PrimBox
+    {
+        LLVector3 mLo, mHi;
+        bool mGround;
+        U32 mOrigin;
+    };
+    /** The field's sources from the last finished pass's builds (mPrims). [FAR DRAW PERF 2026-11-14/] was the object walk */
+    void raster();
+    /** [FAR DRAW PERF 2026-11-14] Swap the field's working arrays (level k, or all and the sources) with the pending ones, so
+     *  raster / finishLevel run unchanged on the rebuild under way while the published field stays whole. */
+    void swapPendingLevel(S32 k);
+    void swapPendingAll();
+    /** [FAR DRAW PERF 2026-11-14] The whole rebuild in this frame (a recentre, the first): raster, finish, upload, check. */
+    void rebuildNow();
+    /** [FAR DRAW PERF 2026-11-14] One step of the staged rebuild after a finished pass (mStage). */
+    void advanceStage();
     void finishLevel(S32 k);
     void upload();
     void selfCheck(const LLVector3d& agent_origin);
@@ -112,6 +152,20 @@ private:
     std::vector<F32> mD[LEVELS];
     std::vector<F32> mTmp, mUpload;
     std::vector<Box> mBoxes;   // this rebuild's sources (selfCheck)
+    // [FAR DRAW PERF 2026-11-14] the last finished pass's builds, the pass under way, the agent origins they were read in, and
+    // the staged rebuild's pending arrays (stage -1 none, 0 .. LEVELS - 1 finishing level k, LEVELS publish)
+    std::vector<PrimBox> mPrims, mPassPrims;
+    std::vector<LLVector3d> mPrimOrigins, mPassOrigins;
+    LLVector3d mSliceOrigin;
+    bool mPrimsFresh = false;
+    bool mHavePass = false;   // [review 2] a pass (or a whole walk) has finished since reset()
+    U64 mPassRegion = 0;      // [review 2] the agent's region when the pass under way began
+    U64 mPrimsRegion = 0;     // [review 2] ... and when the one in mPrims began
+    S32 mStage = -1;
+    std::vector<F32> mTgP[LEVELS], mTsP[LEVELS], mBsP[LEVELS], mDP[LEVELS];
+    std::vector<U8> mMarkP[LEVELS];
+    std::vector<Box> mBoxesP;
+    F32 mTopZP = -SENTINEL;
     U32 mTex = 0;
     bool mTexAllocated = false;
     bool mReady = false;

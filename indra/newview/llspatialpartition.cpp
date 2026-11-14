@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llspatialpartition.h"
+#include "wolfsubpixelcull.h"   // [W107 FARPERF 2026-11-14/] static prims and mesh under one pixel across
 
 #include "llappviewer.h"
 #include "lltexturecache.h"
@@ -1158,6 +1159,10 @@ public:
         {
             group->doOcclusion(mCamera);
         }*/
+        if (WolfSubPixelCull::skipObjects(group, *mCamera))   // [W107 FARPERF 2026-11-14/] see wolfsubpixelcull.h
+        {
+            return;
+        }
         gPipeline.markNotCulled(group, *mCamera);
     }
 };

@@ -114,6 +114,21 @@ WolfBoatRock::~WolfBoatRock()
     // The object list outlives this singleton at shutdown; dropping the references is all
     // that is wanted here, and nothing is marked moved on a pipeline that may be gone.
     mRockers.clear();
+    mPassCands.clear();
+    mResultCands.clear();
+    if (WolfObjectSweep::instanceExists())
+    {
+        WolfObjectSweep::instance().cancel(this);   // [FAR DRAW PERF 2026-11-14/]
+    }
+}
+
+// [FAR DRAW PERF 2026-11-14]
+void WolfBoatRock::dropPass()
+{
+    WolfObjectSweep::instance().cancel(this);
+    mPassCands.clear();
+    mResultReady = false;
+    mResultCands.clear();
 }
 
 // Source: terrain_manager.js updateFloaters() — the tick: init, kill switch, sweep, step.
@@ -127,6 +142,7 @@ void WolfBoatRock::idle()
     if (!WolfGrid::showsBasicWolfSea())
     {
         mBoats.clear();
+        dropPass();   // [FAR DRAW PERF 2026-11-14/] no sweep here, as before
         return;
     }
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfViewerBoatRock", true);
@@ -142,26 +158,53 @@ void WolfBoatRock::idle()
         if (!dry_hulls || !WolfGrid::showsWolfRegion())
         {
             mBoats.clear();
+            dropPass();   // [FAR DRAW PERF 2026-11-14/] no sweep here, as before
             return;
         }
+        // [FAR DRAW PERF 2026-11-14] a pass (or result) of the other mode is not used: the old sweep(rock) ran in one frame
+        // with the mode of that frame
+        if ((WolfObjectSweep::instance().busy(this) && mPassRock) || (mResultReady && mResultRock))
+        {
+            dropPass();
+        }
+        if (mResultReady)
+        {
+            mResultReady = false;
+            applySweep(false);
+        }
         const F64 now = LLFrameTimer::getElapsedSeconds();
-        if (now > mNextSweep)
+        if (now > mNextSweep && !WolfObjectSweep::instance().busy(this))
         {
             mNextSweep = now + SWEEP_INTERVAL_SECS;
-            sweep(false);
+            mPassRock = false;
+            WolfObjectSweep::instance().request(this);
         }
         return;
     }
     if (LLPipeline::FreezeTime)
     {
+        dropPass();   // [FAR DRAW PERF 2026-11-14/] nothing is swept while time is frozen, as before
         return;
     }
 
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (now > mNextSweep)
+    // [FAR DRAW PERF 2026-11-14] the sweep is a shared object pass now (wolfobjectsweep.h, SWEEP_INTERVAL_SECS): a finished one
+    // is applied here, where the old sweep(true) ran (before gPipeline.updateMove, ahead of step()), and the next is asked for
+    // when the interval has run and the last one has finished
+    if ((WolfObjectSweep::instance().busy(this) && !mPassRock) || (mResultReady && !mResultRock))
+    {
+        dropPass();
+    }
+    if (mResultReady)
+    {
+        mResultReady = false;
+        applySweep(true);
+    }
+    if (now > mNextSweep && !WolfObjectSweep::instance().busy(this))
     {
         mNextSweep = now + SWEEP_INTERVAL_SECS;
-        sweep(true);
+        mPassRock = true;
+        WolfObjectSweep::instance().request(this);
     }
     if (!mRockers.empty())
     {
@@ -203,87 +246,110 @@ void WolfBoatRock::idle()
 // Source: terrain_manager.js updateFloaters() — the 2.5 s sweep ([FIX 2026-08-24]: cap on
 // the NEW set alone, candidates picked by DISTANCE not localId; [ROCK-NAME 2026-08-29]:
 // name wants routed to the shared harvester).
-void WolfBoatRock::sweep(bool rock)
+// [FAR DRAW PERF 2026-11-14] The old sweep(rock) in three parts: its loop is visit() (a slice a frame of the shared object
+// pass, wolfobjectsweep.h, which already leaves out what classify() calls "gone", "avatar/attachment" and "not a volume" -
+// verdicts that counted nothing), endPass() keeps the candidates and the counts, applySweep() is the tail.
+void WolfBoatRock::beginPass()
 {
-    const LLVector3 camera_pos = LLViewerCamera::getInstance()->getOrigin();
+    mPassCands.clear();
+    mPassBand = 0;
+    mPassQualify = 0;
+    mPassWantName = 0;
+    mPassDenied = 0;
+}
 
-    struct Candidate
+void WolfBoatRock::beginSlice()
+{
+    // this frame's camera, in the agent frame this frame's positions are read in
+    mSliceCamera = LLViewerCamera::getInstance()->getOrigin();
+    // [FAR DRAW PERF 2026-11-14/] LLSingleton::instance() takes a lock: looked up once a frame, not once an object
+    mSliceProps = &WolfObjectProps::instance();
+}
+
+void WolfBoatRock::visit(LLViewerObject* objectp)
+{
+    WolfObjectProps& props = *mSliceProps;
+    const Verdict verdict = classify(objectp);
+    if (verdict.mInBand)
     {
-        LLViewerObject* mObject;
-        Verdict         mVerdict;
-        F32             mDistSq;
-    };
-    std::vector<Candidate> cands;
-    WolfObjectProps& props = WolfObjectProps::instance();
-
-    mStatBand = 0;
-    mStatQualify = 0;
-    mStatWantName = 0;
-    mStatDenied = 0;
-
-    const S32 count = gObjectList.getNumObjects();
-    for (S32 i = 0; i < count; ++i)
-    {
-        LLViewerObject* objectp = gObjectList.getObject(i);
-        if (!objectp)
+        ++mPassBand;
+        if (!verdict.mRock && !verdict.mWantName)
         {
-            continue;
+            ++mPassDenied;
+            const WolfObjectProps::Props* np = props.get(objectp->getID());
+            LL_DEBUGS("WolfBoatRock") << "still " << objectp->getID() << ": " << verdict.mWhy
+                                      << " [" << (np ? np->mName : std::string("?")) << "] at "
+                                      << objectp->getPositionRegion() << LL_ENDL;
         }
-        const Verdict verdict = classify(objectp);
-        if (verdict.mInBand)
-        {
-            ++mStatBand;
-            if (!verdict.mRock && !verdict.mWantName)
-            {
-                ++mStatDenied;
-                const WolfObjectProps::Props* np = props.get(objectp->getID());
-                LL_DEBUGS("WolfBoatRock") << "still " << objectp->getID() << ": " << verdict.mWhy
-                                          << " [" << (np ? np->mName : std::string("?")) << "] at "
-                                          << objectp->getPositionRegion() << LL_ENDL;
-            }
-        }
-        if (verdict.mWantName)
-        {
-            ++mStatWantName;
-            // Names only arrive via ObjectPropertiesFamily, one packet per prim, through
-            // the ONE shared harvester (wolfobjectprops.cpp). want() is idempotent and
-            // drops anything already fetched, in flight or given up on.
-            props.want(objectp);
-        }
-        if (!verdict.mRock)
-        {
-            continue;
-        }
-        // <WolfViewer 2026-10-07> Paul: "we only need to rock boats we can see". A hull that was
-        // not drawn last frame (behind the camera, off screen, hidden behind a building) is not
-        // rocked: every rocker makes its drawable active and is moved every frame. Any prim of the
-        // linkset counts - a tiny or hidden root prim must not stop a visible hull.
-        auto drawn = [](const LLViewerObject* o)
-        {
-            return o->mDrawable.notNull() && o->mDrawable->isVisible();
-        };
-        bool seen = drawn(objectp);
-        if (!seen)
-        {
-            for (const LLViewerObject* child : objectp->getChildren())
-            {
-                if (child && drawn(child))
-                {
-                    seen = true;
-                    break;
-                }
-            }
-        }
-        if (!seen)
-        {
-            continue;
-        }
-        const LLVector3 pa = objectp->getPositionAgent();
-        const F32 ddx = pa.mV[VX] - camera_pos.mV[VX];
-        const F32 ddy = pa.mV[VY] - camera_pos.mV[VY];
-        cands.push_back({ objectp, verdict, ddx * ddx + ddy * ddy });
-        ++mStatQualify;
     }
+    if (verdict.mWantName)
+    {
+        ++mPassWantName;
+        // Names only arrive via ObjectPropertiesFamily, one packet per prim, through
+        // the ONE shared harvester (wolfobjectprops.cpp). want() is idempotent and
+        // drops anything already fetched, in flight or given up on.
+        props.want(objectp);
+    }
+    if (!verdict.mRock)
+    {
+        return;
+    }
+    // <WolfViewer 2026-10-07> Paul: "we only need to rock boats we can see". A hull that was
+    // not drawn last frame (behind the camera, off screen, hidden behind a building) is not
+    // rocked: every rocker makes its drawable active and is moved every frame. Any prim of the
+    // linkset counts - a tiny or hidden root prim must not stop a visible hull.
+    auto drawn = [](const LLViewerObject* o)
+    {
+        return o->mDrawable.notNull() && o->mDrawable->isVisible();
+    };
+    bool seen = drawn(objectp);
+    if (!seen)
+    {
+        for (const LLViewerObject* child : objectp->getChildren())
+        {
+            if (child && drawn(child))
+            {
+                seen = true;
+                break;
+            }
+        }
+    }
+    if (!seen)
+    {
+        return;
+    }
+    const LLVector3 pa = objectp->getPositionAgent();
+    const F32 ddx = pa.mV[VX] - mSliceCamera.mV[VX];
+    const F32 ddy = pa.mV[VY] - mSliceCamera.mV[VY];
+    Candidate c;
+    c.mObject = objectp;
+    c.mVerdict = verdict;
+    c.mDistSq = ddx * ddx + ddy * ddy;
+    mPassCands.push_back(c);
+    ++mPassQualify;
+}
+
+void WolfBoatRock::endPass()
+{
+    // The diagnostics of this sweep (the log line in idle() reads them), and its candidates for the next idle().
+    mStatBand = mPassBand;
+    mStatQualify = mPassQualify;
+    mStatWantName = mPassWantName;
+    mStatDenied = mPassDenied;
+    mResultCands.swap(mPassCands);
+    mPassCands.clear();
+    mResultRock = mPassRock;
+    mResultReady = true;
+}
+
+void WolfBoatRock::applySweep(bool rock)
+{
+    std::vector<Candidate> cands;
+    cands.swap(mResultCands);
+    // a candidate that died since its visit is not one (the old one-frame sweep only ever saw live objects)
+    cands.erase(std::remove_if(cands.begin(), cands.end(),
+                               [](const Candidate& c) { return c.mObject.isNull() || c.mObject->isDead(); }),
+                cands.end());
     // The budget must go to what the user can SEE: nearest 48.
     std::sort(cands.begin(), cands.end(),
               [](const Candidate& a, const Candidate& b) { return a.mDistSq < b.mDistSq; });
@@ -308,23 +374,24 @@ void WolfBoatRock::sweep(bool rock)
     std::set<const LLViewerObject*> keep;
     for (const Candidate& c : cands)
     {
-        keep.insert(c.mObject);
-        auto it = mRockers.find(c.mObject);
+        LLViewerObject* objectp = c.mObject.get();
+        keep.insert(objectp);
+        auto it = mRockers.find(objectp);
         if (it != mRockers.end())
         {
             it->second.mGain = c.mVerdict.mGain;
             it->second.mBoard = c.mVerdict.mBoard;   // <WolfViewer 2026-09-22/>
-            hullExtents(c.mObject, it->second.mMin, it->second.mMax);   // <WolfViewer 2026-09-27/> prims can be linked or resized
+            hullExtents(objectp, it->second.mMin, it->second.mMax);   // <WolfViewer 2026-09-27/> prims can be linked or resized
         }
         else
         {
             Rocker r;
-            r.mObject = c.mObject;
+            r.mObject = objectp;
             r.mGain = c.mVerdict.mGain;
             r.mBoard = c.mVerdict.mBoard;   // <WolfViewer 2026-09-22/>
-            hullExtents(c.mObject, r.mMin, r.mMax);   // <WolfViewer 2026-09-27/>
-            mRockers[c.mObject] = r;
-            LL_DEBUGS("WolfBoatRock") << "rocking " << c.mObject->getID() << " gain " << c.mVerdict.mGain
+            hullExtents(objectp, r.mMin, r.mMax);   // <WolfViewer 2026-09-27/>
+            mRockers[objectp] = r;
+            LL_DEBUGS("WolfBoatRock") << "rocking " << objectp->getID() << " gain " << c.mVerdict.mGain
                                       << ": " << c.mVerdict.mWhy << LL_ENDL;
         }
     }

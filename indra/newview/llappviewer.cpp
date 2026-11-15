@@ -96,6 +96,7 @@
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
 #include "wolfobjectsweep.h" // [FAR DRAW PERF 2026-11-14/] the shared object pass
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
+#include "wolfsunterrain.h" // [T871 SUN BEHIND TERRAIN 2026-11-15/] the sun's glint behind hills
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> Flight Mode
 #include "wolfgame.h"     // [WOLF GAME 2026-10-09/] Wolf Roleplay
@@ -6483,6 +6484,9 @@ void LLAppViewer::idle()
     // Depth + exposure fields the water shader samples (shore calming, breakers, swash);
     // bakes at most one region per 2 s check.
     { WolfVRScreen::SubPart wsp_("WolfWaterField"); WolfWaterField::instance().idle(); }
+    // [T871 SUN BEHIND TERRAIN 2026-11-15] the terrain round the camera, for the sun's and moon's glint on the water behind
+    // hills (wolfsunterrain.h); on every grid, as the water it serves
+    { WolfVRScreen::SubPart wsp_("WolfSunTerrain"); WolfSunTerrain::instance().idle(); }
     // The shared name/description harvester drains AFTER its consumers (FSWolfWater above,
     // WolfBoatRock before updateMove) have declared this frame's interest.
     { WolfVRScreen::SubPart wsp_("WolfObjectProps"); WolfObjectProps::instance().idle(); }

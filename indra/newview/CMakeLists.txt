@@ -1022,6 +1022,7 @@ set(viewer_SOURCE_FILES
     wolfoceanfft.cpp
     wolfwakefield.cpp
     wolfwaterfield.cpp
+    wolfsunterrain.cpp
     wolfautoenvironment.cpp
     wolfregionwolfenvironments.cpp
     wolfpassingplanes.cpp
@@ -2087,6 +2088,7 @@ set(viewer_HEADER_FILES
     wolfseastate.h
     wolfwakefield.h
     wolfwaterfield.h
+    wolfsunterrain.h
     wolfautoenvironment.h
     wolfregionwolfenvironments.h
     wolfpassingplanes.h

@@ -211,6 +211,77 @@ float wolfFoamLight(vec3 sunlit, vec3 amblit, float shadow)
     if (wolf_phys > 0.5) return dot(sunlit * shadow + amblit, vec3(0.3333));
     return clamp(dot(sunlit + amblit, vec3(0.3333)), 0.08, 1.0);
 }
+#ifdef WOLF_WATER_FULL
+// [T871 SUN BEHIND TERRAIN 2026-11-15] Ticket 871 (Jimmy Olsen): the sun behind a mountain, its glint still on the water.
+// The glint was hidden by the sun shadow map alone (`shadow` below), which is absent with shadows off and lit past its far
+// split (shadowUtil.glsl sampleDirectionalShadow), so nothing hid it behind a hill. wolfsunterrain.h WolfSunTerrain: BLOCKS
+// (4) camera-centred terrain blocks of N (256) texels, stacked in rows of one R32F texture, each texel the highest drawn
+// terrain in its own square (NO_TERRAIN, -10000, where no region is). wolfSunTerrainBlock[b] = (agent-space SW corner of
+// block b's texel grid, texel metres, 0), texel 0 = not uploaded; wolfSunTerrainMisc = (ready, the highest terrain in the
+// blocks, the light's disc angular radius in radians, 0). Bound by lldrawpoolwater.cpp.
+uniform sampler2D wolfSunTerrain;
+uniform vec4 wolfSunTerrainBlock[4];
+uniform vec4 wolfSunTerrainMisc;
+const float WOLF_SUN_TERRAIN_N = 256.0;      // WolfSunTerrain::N
+const float WOLF_SUN_TERRAIN_NONE = -10000.0; // WolfSunTerrain::NO_TERRAIN
+// The terrain height at agent-space p from the finest block whose texel centres surround it (textureLod: it is read in a
+// loop of varying length, where implicit derivatives are undefined).
+float wolfSunTerrainHeight(vec2 p)
+{
+    for (int b = 0; b < 4; ++b)
+    {
+        vec4 L = wolfSunTerrainBlock[b];
+        if (L.z <= 0.0)
+        {
+            continue;
+        }
+        vec2 g = (p - L.xy) / L.z;   // texel i's centre at g = i + 0.5
+        if (g.x >= 0.5 && g.y >= 0.5 && g.x <= WOLF_SUN_TERRAIN_N - 0.5 && g.y <= WOLF_SUN_TERRAIN_N - 0.5)
+        {
+            return textureLod(wolfSunTerrain, vec2(g.x / WOLF_SUN_TERRAIN_N, (float(b) * WOLF_SUN_TERRAIN_N + g.y) / (4.0 * WOLF_SUN_TERRAIN_N)), 0.0).r;
+        }
+    }
+    return WOLF_SUN_TERRAIN_NONE;
+}
+// How much of the light's disc is above the terrain seen from agent-space point p toward world direction l (unit, z up):
+// 1 = all of it, 0 = none. The terrain horizon is the steepest elevation of the ground along the light's azimuth, marched
+// out until even the disc's lowest edge clears the highest terrain there is; the part of the disc above it is Bruneton's
+// smoothstep over the disc (brunetonCommon.glsl:237-239 GetTransmittanceToSun, the sun disc against the planet's horizon),
+// here against the terrain's. The march grows 10% a step from 1 m: 96 steps reach about 9 km.
+float wolfSunTerrainVisibility(vec3 p, vec3 l)
+{
+    float h = length(l.xy);
+    float rise = wolfSunTerrainMisc.y - p.z;   // the most any ground stands above p
+    if (wolfSunTerrainMisc.x < 0.5 || h < 1e-5 || rise <= 0.0)
+    {
+        return 1.0;
+    }
+    float r = wolfSunTerrainMisc.z;
+    float elev = atan(l.z, h);
+    float top = elev + r;                       // the disc's top edge
+    float topTan = top < 1.5707 ? tan(top) : 1.0e30;
+    float lowest = elev - r;
+    float reach = lowest > 1e-4 ? rise / tan(lowest) : 1.0e5;
+    vec2 dir = l.xy / h;
+    float horizonTan = -1.0e6;                  // tan of the terrain horizon's elevation so far
+    float d = 1.0;
+    for (int i = 0; i < 96; ++i)
+    {
+        if (d > reach)
+        {
+            break;
+        }
+        float z = wolfSunTerrainHeight(p.xy + dir * d);
+        horizonTan = max(horizonTan, (z - p.z) / d);
+        if (horizonTan >= topTan)
+        {
+            return 0.0;                         // the whole disc is behind the ground
+        }
+        d *= 1.1;
+    }
+    return smoothstep(-r, r, elev - atan(horizonTan));
+}
+#endif
 // [HARBOUR STRIPES 2026-10-28] Real surf foam is broken: a wave does not break all along its crest at once, and the
 // whitewater it leaves is torn into patches with dark water between them. Without that every breaker and surf crest was
 // one unbroken white line, and a train of them read as regular stripes. wolfFoamPatch is 0..1 coverage from two octaves
@@ -800,6 +871,14 @@ void main()
 
 #ifdef HAS_SUN_SHADOW
     shadow = sampleDirectionalShadow(pos.xyz, norm.xyz, distort);
+#endif
+#ifdef WOLF_WATER_FULL
+    // [T871 SUN BEHIND TERRAIN 2026-11-15] the ground between this point and the light, at any distance and with shadows
+    // off (wolfSunTerrainVisibility above). The shadow map sees the same hills where it reaches, so the two are the same
+    // light's visibility: the smaller is kept, not the product, which would darken the shadow map's soft edge twice. The
+    // point is the displaced surface: vary_wolf_dry.xy (agent space, waterV.glsl wave_pos) at the undisplaced plane
+    // (vary_world_pos.z) + the displacement along the surface normal (vary_wolf_dry.w).
+    shadow = min(shadow, wolfSunTerrainVisibility(vec3(vary_wolf_dry.xy, vary_world_pos.z + vary_wolf_dry.w), normalize(lightDir)));
 #endif
 #ifdef WOLF_TK_LIB
     // [WOLF ENV TAKRAM 2026-10-12] decision D2: the clouds' shadow on the sun's glint - an adaptation of three-geospatial

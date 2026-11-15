@@ -54,6 +54,8 @@ namespace
     constexpr U16 FORMAT_VERSION = 1;
     constexpr size_t PART_BYTES = 24;
     constexpr size_t VERTEX_BYTES = 16;
+    constexpr size_t KEEP_BOX_BYTES = 8;           // u16 x0, y0, x1, y1 (0..65535 = 0..region size)
+    constexpr U32 MAX_KEEP_BOXES = 65535;          // the baker's cap
     constexpr U32 MAX_PART_VERTS = 65535;          // LLVertexBuffer indices are 16-bit (llvertexbuffer.cpp:1265)
     constexpr U32 MAX_REGION_M = 4096;             // DESIGN.md section 4: 16-bit positions, 6 cm at most
     constexpr U32 MAX_ATLAS = 4096;
@@ -69,7 +71,12 @@ namespace
     const char* HLOD_URL = "https://wolf-grid.com/hlod.php?rx=%u&ry=%u&f=%s";
     constexpr U32 GRID_CELL_M = 256;
 
-    constexpr F32 BAND_M = 64.f;                   // DESIGN.md section 2: the hand-over band B
+    // DESIGN.md section 2 (round 2): a cell goes over to its proxy at D + HYSTERESIS_M and comes back at D, and the
+    // change itself is a dissolve of DISSOLVE_SECS on the clock - so nothing is mid-dissolve while the camera stands
+    // still (the first version's distance band left a ring of cells half dissolved for as long as one stood there)
+    constexpr F32 HYSTERESIS_M = 32.f;
+    constexpr F32 DISSOLVE_SECS = 0.75f;
+    constexpr F32 KEEP_CELL_M = 8.f;               // the keep-real mask's cells (what the model lists, and moving objects)
     constexpr F32 DISTANCE_MIN_M = 256.f, DISTANCE_MAX_M = 4096.f;   // WolfFarProxyDistance is held to this
     constexpr F64 REFRESH_SECS = 1.0;              // the region list is looked at this often
     constexpr F64 INFO_SECS = 600.0;               // hlod.php answers with max-age 600; a model is rebuilt hourly at most
@@ -130,7 +137,7 @@ namespace
     {
         U32 mBuildTime = 0, mRegionSize = 0, mCellM = 0, mSide = 0, mParts = 0, mVerts = 0, mIndices = 0;
         F32 mZMin = 0.f, mZMax = 0.f;
-        U32 mGeomZip = 0, mGeomRaw = 0, mAtlasBytes = 0, mAtlasW = 0, mAtlasH = 0, mCrc = 0;
+        U32 mGeomZip = 0, mGeomRaw = 0, mAtlasBytes = 0, mAtlasW = 0, mAtlasH = 0, mCrc = 0, mKeepBoxes = 0;
     };
 
     bool power_of_two(U32 v) { return v != 0 && (v & (v - 1)) == 0; }
@@ -163,12 +170,14 @@ namespace
         h.mAtlasW = rd16(p + 52);
         h.mAtlasH = rd16(p + 54);
         h.mCrc = rd32(p + 56);
+        h.mKeepBoxes = rd32(p + 60);
         if (h.mBuildTime == 0 || h.mRegionSize == 0 || h.mRegionSize > MAX_REGION_M || h.mCellM != CELL_M || h.mSide == 0
             || h.mCellM * h.mSide != h.mRegionSize || h.mParts > h.mSide * h.mSide * MAX_PARTS_PER_CELL
             || !(h.mZMin <= h.mZMax) || !(h.mZMin >= -MAX_HEIGHT_M) || !(h.mZMax <= MAX_HEIGHT_M)
             || !power_of_two(h.mAtlasW) || !power_of_two(h.mAtlasH) || h.mAtlasW > MAX_ATLAS || h.mAtlasH > MAX_ATLAS
-            || h.mGeomRaw > MAX_GEOM_BYTES
-            || (U64)h.mGeomRaw != (U64)h.mParts * PART_BYTES + (U64)h.mVerts * VERTEX_BYTES + (U64)h.mIndices * 2)
+            || h.mGeomRaw > MAX_GEOM_BYTES || h.mKeepBoxes > MAX_KEEP_BOXES
+            || (U64)h.mGeomRaw != (U64)h.mParts * PART_BYTES + (U64)h.mVerts * VERTEX_BYTES + (U64)h.mIndices * 2
+                                  + (U64)h.mKeepBoxes * KEEP_BOX_BYTES)
         {
             error = "a header that does not add up";
             return false;
@@ -191,6 +200,7 @@ struct WolfFarProxy::Decoded
     Header mHeader;
     std::vector<P> mParts;                       // sorted by cell
     std::vector<U8> mGeom;                       // the geometry block, unpacked
+    size_t mKeepAt = 0;                          // offset of the keep-real boxes in mGeom (mHeader.mKeepBoxes of them)
     LLPointer<LLImageRaw> mAtlas;
 };
 
@@ -270,10 +280,21 @@ namespace
                 }
             }
         }
-        if (verts != h.mVerts || indices != h.mIndices)
+        if (verts != h.mVerts || indices != h.mIndices
+            || (U64)at + (U64)h.mKeepBoxes * KEEP_BOX_BYTES != (U64)h.mGeomRaw)
         {
             d->mError = "parts that do not fill the file";
             return d;
+        }
+        d->mKeepAt = at;
+        for (U32 i = 0; i < h.mKeepBoxes; ++i)
+        {
+            const U8* b = g + at + (size_t)i * KEEP_BOX_BYTES;
+            if (rd16(b) > rd16(b + 4) || rd16(b + 2) > rd16(b + 6))
+            {
+                d->mError = "a keep-real box that is inside out";
+                return d;
+            }
         }
         std::stable_sort(d->mParts.begin(), d->mParts.end(), [](const WolfFarProxy::Decoded::P& a, const WolfFarProxy::Decoded::P& b)
         {
@@ -692,6 +713,26 @@ bool WolfFarProxy::buildSome(Region& r)
     {
         m.mCellFirst[c + 1] += m.mCellFirst[c];
     }
+    // The places of everything the baker left out as a mover or a kept-real scripted object (DESIGN.md: the keep-real
+    // boxes), as fine cells: marked once here, they keep their real objects for as long as this model is drawn.
+    m.mKeepSide = (U32)llceil((F32)m.mRegionSize / KEEP_CELL_M);
+    m.mKeepBaked.assign((size_t)m.mKeepSide * m.mKeepSide, 0);
+    m.mKeepBoxes = h.mKeepBoxes;
+    {
+        const F32 to_cells = (F32)m.mRegionSize / 65535.f / KEEP_CELL_M;
+        const U8* b = d.mGeom.data() + d.mKeepAt;
+        for (U32 i = 0; i < h.mKeepBoxes; ++i, b += KEEP_BOX_BYTES)
+        {
+            const U32 cx0 = llmin((U32)((F32)rd16(b) * to_cells), m.mKeepSide - 1);
+            const U32 cy0 = llmin((U32)((F32)rd16(b + 2) * to_cells), m.mKeepSide - 1);
+            const U32 cx1 = llmin((U32)((F32)rd16(b + 4) * to_cells), m.mKeepSide - 1);
+            const U32 cy1 = llmin((U32)((F32)rd16(b + 6) * to_cells), m.mKeepSide - 1);
+            for (U32 cy = cy0; cy <= cy1; ++cy)
+            {
+                memset(m.mKeepBaked.data() + (size_t)cy * m.mKeepSide + cx0, 1, cx1 - cx0 + 1);
+            }
+        }
+    }
     // Source: wolffarterrain.cpp:1076 - a texture of the viewer's own from a raw picture, with mipmaps
     m.mAtlas = LLViewerTextureManager::getLocalTexture(r.mDecoded->mAtlas.get(), true);
     const U32 total_verts = h.mVerts, total_indices = h.mIndices;
@@ -709,18 +750,25 @@ bool WolfFarProxy::buildSome(Region& r)
                              << m.mAtlas->getWidth() << " x " << m.mAtlas->getHeight() << LL_ENDL;
     r.mModel = std::move(r.mBuilding);
     r.mFade.assign(cells, 0.f);
+    r.mFar.assign(cells, 0);
     r.mHidden.assign(cells, 0);
     r.mAnyFade = false;
+    r.mKeep.clear();
+    r.mKeepSum.clear();
     return true;
 }
 
-/** Each cell's f for this frame, from the main camera (DESIGN.md section 2). */
+/** Each cell's f for this frame, from the main camera, and the keep-real mask (DESIGN.md section 2, round 2). */
 void WolfFarProxy::computeFades()
 {
     static LLCachedControl<F32> distance(gSavedSettings, "WolfFarProxyDistance", 512.f);
     const F32 near_m = llclamp((F32)distance, DISTANCE_MIN_M, DISTANCE_MAX_M);
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
     LLWorld* world = LLWorld::getInstance();
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    // the dissolve runs on the clock: a long frame (a hitch, a teleport) moves it one step at most
+    const F32 step = llclamp((F32)(now - mLastFadeAt), 0.f, 0.1f) / DISSOLVE_SECS;
+    mLastFadeAt = now;
     bool any_hidden = false;
     sHiding.clear();
     for (auto& kv : mRegions)
@@ -735,7 +783,9 @@ void WolfFarProxy::computeFades()
         LLViewerRegion* regionp = mActive ? world->getRegionFromHandle(kv.first) : nullptr;
         if (!regionp)
         {
+            // standing down (build tools, no shader): everything is the real object at once
             std::fill(r.mFade.begin(), r.mFade.end(), 0.f);
+            std::fill(r.mFar.begin(), r.mFar.end(), (U8)0);
             std::fill(r.mHidden.begin(), r.mHidden.end(), (U8)0);
             continue;
         }
@@ -758,7 +808,18 @@ void WolfFarProxy::computeFades()
                 const F32 dz = m.mCellZMin[c] > m.mCellZMax[c] ? 0.f
                     : llmax(m.mCellZMin[c] - local.mV[VZ], 0.f, local.mV[VZ] - m.mCellZMax[c]);
                 const F32 d = sqrtf(dx * dx + dy * dy + dz * dz);
-                const F32 f = llclamp((d - near_m) / BAND_M, 0.f, 1.f);
+                // which side the cell is on changes only outside the HYSTERESIS_M ring, so a camera that stands
+                // still (or sways) leaves every cell where it is and nothing is mid-dissolve
+                if (d >= near_m + HYSTERESIS_M)
+                {
+                    r.mFar[c] = 1;
+                }
+                else if (d <= near_m)
+                {
+                    r.mFar[c] = 0;
+                }
+                F32 f = r.mFade[c];
+                f = r.mFar[c] ? llmin(1.f, f + step) : llmax(0.f, f - step);
                 r.mFade[c] = f;
                 r.mHidden[c] = f >= 1.f ? 1 : 0;
                 r.mAnyFade = r.mAnyFade || f > 0.f;
@@ -771,8 +832,18 @@ void WolfFarProxy::computeFades()
             sHiding.push_back(&r);
         }
     }
-    // the cells a moving object stands on keep their real objects (wolffarproxy.h)
-    mBridgeCells = 0;
+
+    // The keep-real mask of every region that hides something: the places the model itself lists (what the baker left
+    // out as a mover or a kept-real scripted object, standing still or not) and, fresh every frame, the spatial
+    // bridges - the objects that have moved - standing in its octree (wolffarproxy.h).
+    mKeepCells = 0;
+    mFarMovers = 0;
+    mFarMoversSeen = 0;
+    for (const Region* hiding : sHiding)
+    {
+        Region& r = const_cast<Region&>(*hiding);   // an entry of mRegions, listed just above
+        r.mKeep = r.mModel->mKeepBaked;
+    }
     if (any_hidden)
     {
         for (LLSpatialBridge* bridge : sBridges)
@@ -785,37 +856,68 @@ void WolfFarProxy::computeFades()
             }
             for (const Region* hiding : sHiding)
             {
-                if (hiding->mRegionp != part->mRegionp)
+                if (hiding->mRegionp == part->mRegionp)
                 {
-                    continue;
-                }
-                Region& r = const_cast<Region&>(*hiding);   // an entry of mRegions, listed just above
-                const Model& m = *r.mModel;
-                const LLVector4a* ext = bridge->getSpatialExtents();
-                const F32 cell = (F32)m.mCellM;
-                const F32 x0 = ext[0][VX] - r.mOriginAgent.mV[VX] - BRIDGE_MARGIN_M, x1 = ext[1][VX] - r.mOriginAgent.mV[VX] + BRIDGE_MARGIN_M;
-                const F32 y0 = ext[0][VY] - r.mOriginAgent.mV[VY] - BRIDGE_MARGIN_M, y1 = ext[1][VY] - r.mOriginAgent.mV[VY] + BRIDGE_MARGIN_M;
-                const F32 size = (F32)m.mRegionSize;
-                if (!(x0 <= x1) || !(y0 <= y1) || x1 < 0.f || y1 < 0.f || x0 >= size || y0 >= size)
-                {
-                    break;   // an unset box, or wholly off the region
-                }
-                const U32 cx0 = (U32)(llmax(x0, 0.f) / cell), cx1 = llmin((U32)(llmin(x1, size) / cell), m.mSide - 1);
-                const U32 cy0 = (U32)(llmax(y0, 0.f) / cell), cy1 = llmin((U32)(llmin(y1, size) / cell), m.mSide - 1);
-                for (U32 cy = cy0; cy <= cy1; ++cy)
-                {
-                    for (U32 cx = cx0; cx <= cx1; ++cx)
+                    Region& r = const_cast<Region&>(*hiding);   // an entry of mRegions
+                    markKeep(r, r.mKeep, bridge->getSpatialExtents(), BRIDGE_MARGIN_M);
+                    // for the log: a mover whose own centre stands on a cell drawn as its proxy, and whether the
+                    // cull still let it through (the proof that moving objects are never hidden)
+                    const LLVector4a* ext = bridge->getSpatialExtents();
+                    const F32 mx = 0.5f * (ext[0][VX] + ext[1][VX]) - r.mOriginAgent.mV[VX];
+                    const F32 my = 0.5f * (ext[0][VY] + ext[1][VY]) - r.mOriginAgent.mV[VY];
+                    const Model& m = *r.mModel;
+                    if (mx >= 0.f && my >= 0.f && mx < (F32)m.mRegionSize && my < (F32)m.mRegionSize
+                        && r.mHidden[(size_t)((U32)(my / (F32)m.mCellM)) * m.mSide + (U32)(mx / (F32)m.mCellM)])
                     {
-                        U8& hidden = r.mHidden[(size_t)cy * m.mSide + cx];
-                        mBridgeCells += hidden ? 1 : 0;
-                        hidden = 0;
+                        ++mFarMovers;
+                        mFarMoversSeen += bridge->isRecentlyVisible() ? 1 : 0;
                     }
+                    break;
                 }
-                break;
             }
         }
     }
+    for (const Region* hiding : sHiding)
+    {
+        Region& r = const_cast<Region&>(*hiding);
+        // summed-area table: mKeepSum[(y + 1) * (n + 1) + (x + 1)] = the marked fine cells in [0..x] x [0..y], so
+        // "is anything marked under this octree node" is four reads whatever the node's size
+        const U32 n = r.mModel->mKeepSide;
+        r.mKeepSum.assign((size_t)(n + 1) * (n + 1), 0);
+        for (U32 y = 0; y < n; ++y)
+        {
+            U32 row = 0;
+            const U8* src = r.mKeep.data() + (size_t)y * n;
+            const U32* above = r.mKeepSum.data() + (size_t)y * (n + 1);
+            U32* out = r.mKeepSum.data() + (size_t)(y + 1) * (n + 1);
+            for (U32 x = 0; x < n; ++x)
+            {
+                row += src[x];
+                out[x + 1] = above[x + 1] + row;
+            }
+        }
+        mKeepCells += r.mKeepSum.back();
+    }
     sAnyHidden = any_hidden;
+}
+
+/** Marks the fine cells under a box (agent frame, with a margin) in a keep-real grid of the region. */
+void WolfFarProxy::markKeep(Region& r, std::vector<U8>& grid, const LLVector4a* ext, F32 margin)
+{
+    const F32 size = (F32)r.mModel->mRegionSize;
+    const F32 x0 = ext[0][VX] - r.mOriginAgent.mV[VX] - margin, x1 = ext[1][VX] - r.mOriginAgent.mV[VX] + margin;
+    const F32 y0 = ext[0][VY] - r.mOriginAgent.mV[VY] - margin, y1 = ext[1][VY] - r.mOriginAgent.mV[VY] + margin;
+    if (!(x0 <= x1) || !(y0 <= y1) || x1 < 0.f || y1 < 0.f || x0 >= size || y0 >= size)
+    {
+        return;   // an unset box, or wholly off the region
+    }
+    const U32 n = r.mModel->mKeepSide;
+    const U32 cx0 = (U32)(llmax(x0, 0.f) / KEEP_CELL_M), cx1 = llmin((U32)(llmin(x1, size) / KEEP_CELL_M), n - 1);
+    const U32 cy0 = (U32)(llmax(y0, 0.f) / KEEP_CELL_M), cy1 = llmin((U32)(llmin(y1, size) / KEEP_CELL_M), n - 1);
+    for (U32 cy = cy0; cy <= cy1; ++cy)
+    {
+        memset(grid.data() + (size_t)cy * n + cx0, 1, cx1 - cx0 + 1);
+    }
 }
 
 // static
@@ -876,6 +978,21 @@ bool WolfFarProxy::allHidden(const LLSpatialGroup* group, bool subtree)
                 return false;
             }
         }
+    }
+    // nothing scripted and nothing moving may stand under the box: those are in no model (the summed-area table of
+    // computeFades; the box is widened to whole fine cells)
+    const U32 n = m.mKeepSide;
+    if (r->mKeepSum.size() != (size_t)(n + 1) * (n + 1))
+    {
+        return false;
+    }
+    const U32 kx0 = (U32)(x0 / KEEP_CELL_M), kx1 = llmin((U32)(x1 / KEEP_CELL_M), n - 1) + 1;
+    const U32 ky0 = (U32)(y0 / KEEP_CELL_M), ky1 = llmin((U32)(y1 / KEEP_CELL_M), n - 1) + 1;
+    const U32* sum = r->mKeepSum.data();
+    const U32 w = n + 1;
+    if (sum[(size_t)ky1 * w + kx1] - sum[(size_t)ky0 * w + kx1] - sum[(size_t)ky1 * w + kx0] + sum[(size_t)ky0 * w + kx0] != 0)
+    {
+        return false;
     }
     ++sHiddenNodes;
     return true;
@@ -1032,7 +1149,7 @@ void WolfFarProxy::logStats(F64 now)
         return;
     }
     mNextLog = now + LOG_SECS;
-    U32 models = 0, far_cells = 0, band_cells = 0;
+    U32 models = 0, far_cells = 0, band_cells = 0, boxes = 0;
     for (const auto& kv : mRegions)
     {
         const Region& r = kv.second;
@@ -1041,6 +1158,7 @@ void WolfFarProxy::logStats(F64 now)
             continue;
         }
         ++models;
+        boxes += r.mModel->mKeepBoxes;
         for (size_t c = 0; c < r.mFade.size(); ++c)
         {
             far_cells += r.mFade[c] >= 1.f ? 1 : 0;
@@ -1048,8 +1166,9 @@ void WolfFarProxy::logStats(F64 now)
         }
     }
     LL_INFOS("WolfFarProxy") << "far proxies: " << models << " models of " << mRegions.size() << " regions, " << far_cells
-                             << " cells far (" << mBridgeCells << " of them kept real by " << sBridges.size()
-                             << " moving objects), " << band_cells << " in the band, a frame: " << mDrawnParts / llmax(mLogFrames, 1U)
+                             << " cells far, " << band_cells << " dissolving, " << boxes << " places listed by the models and " << sBridges.size()
+                             << " moving objects keep " << mKeepCells << " fine cells real (" << mFarMovers << " movers on proxy cells, "
+                             << mFarMoversSeen << " of them passed a cull lately); a frame: " << mDrawnParts / llmax(mLogFrames, 1U)
                              << " parts drawn, " << mShadowParts / llmax(mLogFrames, 1U) << " as shadow casters; " << sHiddenNodes << " octree nodes not looked at in the last "
                              << (S32)LOG_SECS << " s" << (mActive ? "" : " (standing down: build tools open)") << LL_ENDL;
     sHiddenNodes = 0;

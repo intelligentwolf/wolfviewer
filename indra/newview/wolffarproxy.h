@@ -30,6 +30,7 @@ class LLCamera;
 class LLImageRaw;
 class LLSpatialBridge;
 class LLSpatialGroup;
+class LLVector4a;
 class LLVertexBuffer;
 class LLViewerRegion;
 class LLViewerTexture;
@@ -44,13 +45,15 @@ class LLViewerTexture;
  * cells, one texture atlas) and wolf-grid.com/hlod.php hands it out by the region's grid origin, as elev.php hands
  * out the far terrain's tiles (wolffarterrain.h). Here, for every connected region that has a model:
  *
- *  - per cell and frame, f = clamp((d - D) / B, 0, 1), d = the main camera's distance to the cell's box,
- *    D = WolfFarProxyDistance, B = 64 m;
+ *  - per 64 m cell, d = the main camera's distance to the cell's box, D = WolfFarProxyDistance: the cell goes over to
+ *    its proxy when d reaches D + 32 m and comes back to its real objects when d falls to D (so a camera standing still
+ *    changes nothing), and each change is a dissolve of 0.75 s on the clock, f running 0 -> 1 or back;
  *  - f = 0: nothing of the proxy is drawn, the real objects are, as stock;
- *  - 0 < f < 1: the real objects are drawn and the cell's proxy is drawn over them through a dither mask that keeps
- *    the share f of its pixels, so it dissolves in with distance;
+ *  - 0 < f < 1: the real objects are drawn and the cell's proxy is drawn over them through a noise mask that keeps
+ *    the share f of its pixels;
  *  - f = 1: the proxy is drawn whole and an octree node of the region's static volume partition whose extents lie only
- *    over such cells fails the cull, for the main view and the shadow passes alike (hidesSubtree / hidesObjects).
+ *    over such cells fails the cull, for the main view and the shadow passes alike (hidesSubtree / hidesObjects) -
+ *    unless something scripted or moving stands under it (below).
  *
  * A model's triangles are cut on the cell lines, so a cell's proxy is exactly what stands on that cell: an object
  * reaching over a nearer cell stays real, and no low-detail triangle comes nearer than D.
@@ -60,8 +63,12 @@ class LLViewerTexture;
  * drawable that is not ACTIVE, pipeline.cpp:2258-2260, which makeStatic then ignores, lldrawable.cpp:574) and is drawn
  * through a spatial bridge - which sits IN the region's static volume octree (LLSpatialBridge's constructor,
  * lldrawable.cpp:1327-1337 part->put(this)) and is only drawn when its node passes the cull. So every cell a bridge
- * stands on (its box and 16 m round it, for what it moves in a frame) keeps its real objects, whatever its distance:
- * no node holding the bridge, and no node above it, then lies only over hidden cells. Avatars, attachments, trees,
+ * stands on (8 m fine cells under its box and 16 m round it, for what it moves in a frame) keeps its real objects,
+ * whatever its distance: no node holding the bridge, and no node above it, then passes the test. The same mask holds
+ * the places the MODEL lists: the box of every linkset the baker left out because it can move or is scripted and to
+ * be kept real (Paul, 15 Nov: "anything scripted or with a wolf-rail script stays a real object, even when it's
+ * standing still" - a train at a platform that has not moved since the viewer connected is a static object here).
+ * What is left out and what is kept real are so one list, made by the baker, never two guesses that must agree. Avatars, attachments, trees,
  * grass, particles, terrain, water and sky are other partitions and are never touched.
  *
  * Wolf Territories regions only (WolfGrid::showsWolfRegion); the setting WolfFarProxy turns it off. With the setting off, on
@@ -128,6 +135,9 @@ private:
         std::vector<U32> mCellFirst;              // mSide * mSide + 1: a cell's parts are [first[c], first[c + 1])
         std::vector<F32> mCellZMin, mCellZMax;    // of a cell's parts; min > max = the cell has none
         LLPointer<LLViewerTexture> mAtlas;
+        U32 mKeepSide = 0;                        // fine cells per side of the keep-real mask
+        std::vector<U8> mKeepBaked;               // the places the baker left a mover or kept-real scripted object out
+        U32 mKeepBoxes = 0;                       // how many the file listed
     };
 
     struct Region
@@ -143,8 +153,13 @@ private:
         size_t mBuiltParts = 0;
         std::unique_ptr<Model> mModel;            // drawn
         // per cell of mModel, this frame
-        std::vector<F32> mFade;                   // f
-        std::vector<U8> mHidden;                  // f == 1 and no moving object on it: the real objects on it are not drawn
+        std::vector<F32> mFade;                   // f: 0 = real objects, 1 = proxy, between = dissolving
+        std::vector<U8> mFar;                     // which side the cell is on (changes only outside the hysteresis ring)
+        std::vector<U8> mHidden;                  // f == 1: real objects wholly on such cells are not drawn, unless ...
+        // ... the keep-real mask: fine cells (8 m) the model lists (Model::mKeepBaked) or under a moving object
+        // (added every frame); mKeepSum is mKeep's summed-area table for the cull hooks
+        std::vector<U8> mKeep;
+        std::vector<U32> mKeepSum;
         bool mAnyFade = false;
         // the cull hooks compare this with the partition's region and never follow it
         const LLViewerRegion* mRegionp = nullptr;
@@ -160,6 +175,7 @@ private:
     void decoded(U64 handle, U32 serial, std::shared_ptr<Decoded> d);
     bool buildSome(Region& r);
     void computeFades();
+    void markKeep(Region& r, std::vector<U8>& grid, const LLVector4a* ext, F32 margin);
     void drawParts(LLCamera& camera, bool far_clip, bool opaque, bool cut, bool fade_uniform);
     void logStats(F64 now);
     void clear();
@@ -171,7 +187,9 @@ private:
     // every cull, and LLSingleton::instance() takes a lock each call (measured: 7% of the main thread). Entries point
     // into mRegions; set by computeFades, emptied before anything is erased from mRegions.
     static std::vector<const Region*> sHiding;
-    U32 mBridgeCells = 0;                 // cells at f = 1 kept real by a moving object, this frame
+    U32 mKeepCells = 0;                   // fine cells kept real by scripted or moving objects, this frame
+    U32 mFarMovers = 0, mFarMoversSeen = 0;   // moving objects standing on proxy cells this frame; those a cull let through lately
+    F64 mLastFadeAt = 0.0;
     F64 mNextRefresh = 0.0;
     S32 mFetching = 0;
     U32 mNextSerial = 0;                  // one count for every region's requests, so a region that went and came back never matches an old answer

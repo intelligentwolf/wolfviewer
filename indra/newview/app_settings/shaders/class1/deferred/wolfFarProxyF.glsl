@@ -23,7 +23,7 @@
 //    class3/deferred/softenLightF.glsl:302 reads as "the legacy fullbright mask: the texture's own colour"
 //    (color.rgb = mix(lit, baseColor.rgb x fullbright luminance, baseColor.a)), so a fullbright or glowing face of
 //    the real object stays lit at night in its proxy;
-//  - wolf_far_fade (0..1): the share of this draw's pixels that are kept, through a 4 x 4 ordered dither, for the
+//  - wolf_far_fade (0..1): the share of this draw's pixels that are kept, through a per-pixel noise, for the
 //    band where the proxy dissolves in over the real objects.
 
 out vec4 frag_data[4];
@@ -43,22 +43,19 @@ void mirrorClip(vec3 pos);
 
 vec4 encodeNormal(vec3 n, float env, float gbuffer_flag);
 
-// The 4 x 4 Bayer index matrix (B. E. Bayer, "An optimum method for two-level rendition of continuous-tone
-// pictures", 1973): entry (x, y) of M4 = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]], thresholds (m + 0.5) / 16.
-float wolfBayer4(ivec2 p)
+// Interleaved gradient noise (J. Jimenez, "Next Generation Post Processing in Call of Duty: Advanced Warfare",
+// SIGGRAPH 2014): fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715)))) - a value in [0, 1) per pixel
+// with no visible grid, unlike an ordered (Bayer) matrix. It is only on screen for the 0.75 s of a cell's dissolve.
+float wolfDissolveNoise(vec2 p)
 {
-    const float m[16] = float[16](0.0, 8.0, 2.0, 10.0,
-                                  12.0, 4.0, 14.0, 6.0,
-                                  3.0, 11.0, 1.0, 9.0,
-                                  15.0, 7.0, 13.0, 5.0);
-    return (m[(p.y & 3) * 4 + (p.x & 3)] + 0.5) / 16.0;
+    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
 void main()
 {
     mirrorClip(vary_position);
 
-    if (wolf_far_fade < wolfBayer4(ivec2(gl_FragCoord.xy)))
+    if (wolf_far_fade < 1.0 && wolf_far_fade <= wolfDissolveNoise(floor(gl_FragCoord.xy)))
     {
         discard;
     }

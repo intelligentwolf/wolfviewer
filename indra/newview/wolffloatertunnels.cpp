@@ -4749,3 +4749,25 @@ void WolfToolTunnel::draw()
         lines.emplace_back(f->note(), f->noteIsError() ? LLColor4(1.f, 0.55f, 0.5f, 1.f) : LLColor4(1.f, 0.85f, 0.45f, 1.f));
     hintLines(lines);   // [WOLF TERRAFORM 2026-10-23] moved to hintLines, unchanged
 }
+
+// [TRACK TOOL TUNNELS 2026-11-15] The Lay Railway Track window's way into the Tunnel tool (wolffloatertunnels.h): the same
+// capability posts (capPostRetry) and record writes (putRecord) the Build and Delete coroutines use.
+bool WolfTunnels::capChange(const LLSD& body, LLSD& answer, std::string& error)
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    const std::string url = rgn ? rgn->getCapability(CAP) : std::string();
+    if (url.empty())
+    {
+        error = "this region has no tunnels (WolfTunnels) service";
+        return false;
+    }
+    const LLUUID region = rgn->getRegionID();
+    if (!capPostRetry(url, body, answer, error)) return false;
+    WolfTunnels::setFromAnswer(answer, region);
+    return true;
+}
+
+bool WolfTunnels::recordChange(const LLSD& body, std::string& error)
+{
+    return putRecord(body, error);
+}

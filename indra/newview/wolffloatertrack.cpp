@@ -133,6 +133,12 @@ namespace
     const LLColor4 COL_SHOWN(0.45f, 0.9f, 1.f, 0.9f);
     const LLColor4 COL_DRAWN(1.f, 1.f, 1.f, 0.85f);
     const LLColor4 COL_TURNTABLE(1.f, 0.65f, 0.25f, 1.f);
+    // [TRACK TOOL TUNNELS 2026-11-15] DESIGN.md 3.4 / 10: a stretch through the hill (PLAN structure "tunnel"), and a tunnel
+    // being marked
+    const LLColor4 COL_TUNNEL(0.55f, 0.55f, 0.65f, 1.f);
+    const LLColor4 COL_TUNNEL_MARK(0.82f, 0.63f, 1.f, 1.f);
+    constexpr size_t MAX_TUNNELS = 8;          // tracktool/tunnels.py:63 MAX_TUNNELS (plan.py parse refuses more)
+    constexpr F64 TUNNEL_MIN_M = 20.0;         // tracktool/tunnels.py:56 MIN_LEN
 
     bool onWolf() { return WolfGrid::isOnWolfTerritories(); }
 
@@ -407,6 +413,10 @@ bool WolfFloaterTrack::postBuild()
     mTTSpread = mTTPanel->getChild<LLSpinCtrl>("tt_spread");
     mTTShed = mTTPanel->getChild<LLCheckBoxCtrl>("tt_shed");
     mTTTurns = mTTPanel->getChild<LLTextBox>("tt_turns");
+    mSugPanel = getChild<LLPanel>("tunnel_choice_panel");
+    mSugText = mSugPanel->getChild<LLTextBox>("tunnel_choice_text");
+    mSugTunnelBtn = mSugPanel->getChild<LLButton>("tunnel_choice_tunnel");
+    mSugClimbBtn = mSugPanel->getChild<LLButton>("tunnel_choice_climb");
     mItemsList = getChild<LLScrollListCtrl>("track_items");
     mTakeOutBtn = getChild<LLButton>("track_take_out");
     mSummary = getChild<LLTextBox>("track_summary");
@@ -459,6 +469,8 @@ bool WolfFloaterTrack::postBuild()
     mTTSpread->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTurntableControls(); });
     mTTShed->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTurntableControls(); });
     mTakeOutBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onTakeOut(); });
+    mSugTunnelBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onSuggestion(true); });
+    mSugClimbBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onSuggestion(false); });
     mLayBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onLay(); });
     mNextPartBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { layHere(); });
     mLookAgainBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { lookAgain(); });
@@ -793,6 +805,45 @@ void WolfFloaterTrack::clickAt(F32 x, F32 y)
         changed();
         return;
     }
+    if (mode == MODE_TUNNEL)
+    {
+        // [TUNNELS] DESIGN.md 3.4 "By hand": its start and its end on one line, as a platform's
+        GP on;
+        if (!onALine(g, ON_LINE_M, on))
+        {
+            setStatus("Click right on a line - a tunnel takes the line through the hill.", true);
+            return;
+        }
+        if (mCurTunnel >= 0 && (size_t)mCurTunnel < mTunnels.size())
+        {
+            Tunnel& t = mTunnels[mCurTunnel];
+            if (dist(t.mA, on) < TUNNEL_MIN_M)
+            {
+                setStatus(llformat("A tunnel is at least %d m long: click its end further away, beyond the hill.", (S32)TUNNEL_MIN_M), true);
+                return;
+            }
+            t.mB = on;
+            t.mHasB = true;
+            t.mStamp = nextStamp();
+            mCurTunnel = -1;
+            setStatus("The tunnel is marked. Its ends are fitted to the hill when the plan comes back.", false);
+            changed();
+            return;
+        }
+        if (mTunnels.size() >= MAX_TUNNELS)
+        {
+            setStatus(llformat("That is the most tunnels one railway can have (%d).", (S32)MAX_TUNNELS), true);
+            return;
+        }
+        Tunnel t;
+        t.mA = on;
+        t.mStamp = nextStamp();
+        mTunnels.push_back(t);
+        mCurTunnel = (S32)mTunnels.size() - 1;
+        setStatus("Now click on the same line where the tunnel ends, on the far side of the hill.", false);
+        changed();
+        return;
+    }
     if (mode == MODE_TURNTABLE)
     {
         if (mTurntables.size() >= MAX_TURNTABLES)
@@ -896,7 +947,8 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
             if (fabs(t.mAt.x - was.x) < 1e-6 && fabs(t.mAt.y - was.y) < 1e-6) t.mAt = g;
         }
     }
-    if (r.mKind == REF_LINE_START || r.mKind == REF_STATION_A || r.mKind == REF_STATION_B || r.mKind == REF_SIGNAL)
+    if (r.mKind == REF_LINE_START || r.mKind == REF_STATION_A || r.mKind == REF_STATION_B || r.mKind == REF_SIGNAL
+        || r.mKind == REF_TUNNEL_A || r.mKind == REF_TUNNEL_B)
     {
         // these stay on a line: a drag puts them on the nearest one (the planner refuses them off a line anyway)
         GP on;
@@ -917,6 +969,8 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
         case REF_STATION_A: mStations[r.mItem].mA = g; break;
         case REF_STATION_B: mStations[r.mItem].mB = g; break;
         case REF_SIGNAL: mSignals[r.mItem].mAt = g; break;
+        case REF_TUNNEL_A: mTunnels[r.mItem].mA = g; break;
+        case REF_TUNNEL_B: mTunnels[r.mItem].mB = g; break;
     }
     changed();
 }
@@ -933,6 +987,7 @@ void WolfFloaterTrack::undoPoint()
     for (size_t i = 0; i < mStations.size(); ++i) if (mStations[i].mStamp > best) { best = mStations[i].mStamp; kind = 1; at = i; }
     for (size_t i = 0; i < mSignals.size(); ++i) if (mSignals[i].mStamp > best) { best = mSignals[i].mStamp; kind = 2; at = i; }
     for (size_t i = 0; i < mTurntables.size(); ++i) if (mTurntables[i].mStamp > best) { best = mTurntables[i].mStamp; kind = 3; at = i; }
+    for (size_t i = 0; i < mTunnels.size(); ++i) if (mTunnels[i].mStamp > best) { best = mTunnels[i].mStamp; kind = 4; at = i; }
     if (kind < 0)
     {
         setStatus("There is nothing to take back - click on the ground to draw a line.", false);
@@ -984,6 +1039,22 @@ void WolfFloaterTrack::undoPoint()
         mSignals.erase(mSignals.begin() + (std::ptrdiff_t)at);
         setStatus("The signal was taken out.", false);
     }
+    else if (kind == 4)
+    {
+        Tunnel& t = mTunnels[at];
+        if (t.mHasB)
+        {
+            t.mHasB = false;
+            mCurTunnel = (S32)at;
+            setStatus("The tunnel's end was taken back - click where it ends.", false);
+        }
+        else
+        {
+            mTunnels.erase(mTunnels.begin() + (std::ptrdiff_t)at);
+            mCurTunnel = -1;
+            setStatus("The tunnel was taken out: the line climbs over the hill again.", false);
+        }
+    }
     else
     {
         mTurntables.erase(mTurntables.begin() + (std::ptrdiff_t)at);
@@ -1029,6 +1100,12 @@ void WolfFloaterTrack::removeClick(S32 k)
         case REF_SIGNAL:
             mSignals.erase(mSignals.begin() + (std::ptrdiff_t)r.mItem);
             setStatus("The signal was taken out.", false);
+            break;
+        case REF_TUNNEL_A:
+        case REF_TUNNEL_B:
+            mTunnels.erase(mTunnels.begin() + (std::ptrdiff_t)r.mItem);
+            mCurTunnel = -1;
+            setStatus("The tunnel was taken out: the line climbs over the hill again.", false);
             break;
     }
     changed();
@@ -1089,6 +1166,8 @@ void WolfFloaterTrack::startOver()
     mStations.clear();
     mSignals.clear();
     mTurntables.clear();
+    mTunnels.clear();
+    mCurTunnel = -1;
     mCurLine = mCurStation = mEditStation = mEditTurntable = -1;
     mReplaces = LLSD();
     mReplaceLaid.clear();
@@ -1109,6 +1188,12 @@ void WolfFloaterTrack::onMode()
         changed();
     }
     mCurStation = -1;
+    if (mCurTunnel >= 0 && (size_t)mCurTunnel < mTunnels.size() && !mTunnels[mCurTunnel].mHasB)
+    {
+        mTunnels.erase(mTunnels.begin() + mCurTunnel);   // a tunnel without its end is not kept
+        changed();
+    }
+    mCurTunnel = -1;
     setStatus(std::string(), false);
     updateControls();
 }
@@ -1178,7 +1263,7 @@ void WolfFloaterTrack::onTakeOut()
 {
     if (busy()) return;
     const LLScrollListItem* it = mItemsList->getFirstSelected();
-    if (!it) { setStatus("Pick a line, branch, station, signal or turntable in the list first.", true); return; }
+    if (!it) { setStatus("Pick a line, branch, station, signal, turntable or tunnel in the list first.", true); return; }
     const std::string v = it->getValue().asString();
     if (v.size() < 3) return;
     const size_t i = (size_t)atoi(v.c_str() + 2);
@@ -1204,6 +1289,12 @@ void WolfFloaterTrack::onTakeOut()
         mTurntables.erase(mTurntables.begin() + (std::ptrdiff_t)i);
         mEditTurntable = -1;
         setStatus("The turntable was taken out.", false);
+    }
+    else if (v[0] == 'N' && i < mTunnels.size())
+    {
+        mTunnels.erase(mTunnels.begin() + (std::ptrdiff_t)i);
+        mCurTunnel = -1;
+        setStatus("The tunnel was taken out: the line climbs over the hill again.", false);
     }
     changed();
 }
@@ -1257,6 +1348,18 @@ void WolfFloaterTrack::fillItemList()
         row(llformat("T:%d", (S32)i), llformat("Turntable %d - %d m deck, ", (S32)i + 1, t.mSize) + plural(t.mRoads, "stall road", "stall roads")
             + llformat(" %d degrees apart", t.mSpread) + (t.mShed ? ", engine shed" : ""));
     }
+    for (size_t i = 0; i < mTunnels.size(); ++i)
+    {
+        // as fitted to the hill by the last plan (PLAN layout.tunnels, in the order drawn), else as marked
+        const Tunnel& t = mTunnels[i];
+        std::string w = llformat("Tunnel %d - ", (S32)i + 1);
+        const LLSD& fitted = mPlan.mTunnels;
+        if (!t.mHasB) w += "(click where it ends)";
+        else if (fitted.isArray() && (size_t)fitted.size() == mTunnels.size() && !mPlanDirty)
+            w += llformat("%d m through the hill, climbs at most ", fitted[(S32)i]["length_m"].asInteger()) + fitted[(S32)i]["grade"].asString();
+        else w += llformat("%d m as marked", (S32)ll_round((F32)sqrt((t.mB.x - t.mA.x) * (t.mB.x - t.mA.x) + (t.mB.y - t.mA.y) * (t.mB.y - t.mA.y))));
+        row(llformat("N:%d", (S32)i), w);
+    }
     if (drawingEmpty()) row(std::string(), "Nothing yet - click on the ground to start a line.");
     if (picked.isDefined() && !picked.asString().empty()) mItemsList->selectByValue(picked);
 }
@@ -1282,6 +1385,12 @@ void WolfFloaterTrack::rebuildFlat()
         if (mStations[i].mHasB) { mFlat.push_back(toRegion(mStations[i].mB)); mFlatRefs.push_back({ REF_STATION_B, i, 0 }); }
     }
     for (size_t i = 0; i < mSignals.size(); ++i) { mFlat.push_back(toRegion(mSignals[i].mAt)); mFlatRefs.push_back({ REF_SIGNAL, i, 0 }); }
+    for (size_t i = 0; i < mTunnels.size(); ++i)
+    {
+        mFlat.push_back(toRegion(mTunnels[i].mA));
+        mFlatRefs.push_back({ REF_TUNNEL_A, i, 0 });
+        if (mTunnels[i].mHasB) { mFlat.push_back(toRegion(mTunnels[i].mB)); mFlatRefs.push_back({ REF_TUNNEL_B, i, 0 }); }
+    }
 }
 
 void WolfFloaterTrack::changed()
@@ -1289,6 +1398,7 @@ void WolfFloaterTrack::changed()
     mCurLine = mCurLine >= (S32)mLines.size() ? -1 : mCurLine;
     mCurStation = mCurStation >= (S32)mStations.size() ? -1 : mCurStation;
     mEditStation = mEditStation >= (S32)mStations.size() ? -1 : mEditStation;
+    mCurTunnel = mCurTunnel >= (S32)mTunnels.size() ? -1 : mCurTunnel;
     // a turntable stands on a line's end (tracktool/layout.py add_turntable: within 6 m): one whose end was taken away goes
     // with it (the planner would refuse it), and one loaded within 6 m of an end (Change) is put on the end exactly
     size_t dropped = 0;
@@ -1340,6 +1450,8 @@ std::string WolfFloaterTrack::markerLabel(size_t k) const
             return mStations[r.mItem].mName.empty() ? std::string("Platform") : mStations[r.mItem].mName;
         case REF_STATION_B: return "Platform end";
         case REF_SIGNAL: return "Signal";
+        case REF_TUNNEL_A: return llformat("Tunnel %d", (S32)r.mItem + 1);
+        case REF_TUNNEL_B: return "Tunnel end";
     }
     return std::string();
 }
@@ -1373,6 +1485,12 @@ std::string WolfFloaterTrack::routeHint() const
     }
     if (mode == MODE_SIGNAL) return "Click on a line to put a signal there.";
     if (mode == MODE_TURNTABLE) return "Click on the END of a line to put a turntable there.";
+    if (mode == MODE_TUNNEL)
+    {
+        if (!mMayTunnel && !mNoTunnelReason.empty()) return mNoTunnelReason;
+        return mCurTunnel >= 0 ? "Click on the same line where the tunnel ENDS, beyond the hill."
+                               : "Click on a line before the hill where the tunnel STARTS.";
+    }
     if (mCurLine < 0) return mLines.empty() ? "Click on the ground where your line STARTS." : "Click on the ground to start another line.";
     const Line& l = mLines[mCurLine];
     if (l.mClicks.size() < 2) return "Click at each bend, then where the line ends. Too far to click? Alt + drag moves the camera.";
@@ -1432,6 +1550,16 @@ bool WolfFloaterTrack::buildRequest(LLSD& req, std::string& why) const
         e["shed"] = t.mShed;
         turntables.append(e);
         grow(t.mAt);
+    }
+
+    // [TUNNELS] DESIGN.md 10 REQ tunnels: [{a, b}] (both ends on one line)
+    LLSD tunnels = LLSD::emptyArray();
+    for (const Tunnel& t : mTunnels)
+    {
+        if (!t.mHasB) continue;
+        tunnels.append(LLSD().with("a", xy(t.mA.x, t.mA.y)).with("b", xy(t.mB.x, t.mB.y)));
+        grow(t.mA);
+        grow(t.mB);
     }
 
     // the ground box (DESIGN.md 10 "Ground box"; the planner's own test requests: test/fixtures.py request())
@@ -1565,6 +1693,7 @@ bool WolfFloaterTrack::buildRequest(LLSD& req, std::string& why) const
     req["stations"] = stations;
     req["signals"] = signals;
     req["turntables"] = turntables;
+    req["tunnels"] = tunnels;
     req["others"] = others;
     return true;
 }
@@ -1665,6 +1794,7 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
                 const LLSD::Integer idx = llclamp((LLSD::Integer)(sm / 2.0), 0, (LLSD::Integer)structure.size() - 1);
                 const std::string st = structure[idx].asString();
                 if (st == "ground") { col = COL_GROUND; kind = 0; }
+                else if (st == "tunnel") { col = COL_TUNNEL; kind = 4; }
                 else if (st == "bank") { col = COL_BANK; kind = 1; }
                 else if (st == "viaduct")
                 {
@@ -1891,6 +2021,8 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
         }
         if (sm["stations"].asInteger() > 0) t += ", " + plural(sm["stations"].asInteger(), "station", "stations");
         if (sm["points"].asInteger() > 0) t += ", " + plural(sm["points"].asInteger(), "set of points", "sets of points");
+        if (sm["tunnels"].asInteger() > 0)
+            t += ", " + plural(sm["tunnels"].asInteger(), "tunnel", "tunnels") + llformat(" (%d m)", sm["tunnel_m"].asInteger());
         const S32 rises = ll_round((F32)sm["rises_m"].asReal());
         if (rises > 0) t += llformat(", rises %d m", rises);
         out.mSummary = t + ".";
@@ -1928,6 +2060,8 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
     if (total > shown) text += llformat("\n...and %d more (the red marks in the world).", (S32)(total - shown));
     if (!out.mOk && refused.empty()) text = "This railway cannot be laid yet.";
     out.mProblemText = text;
+    out.mTunnels = arr(layout["tunnels"]);
+    out.mSuggestions = arr(plan["suggestions"]);
 }
 
 // ---- the preview in the world ---------------------------------------------------------------------------------------------
@@ -2095,6 +2229,7 @@ std::vector<WolfFloaterTrack::Item> WolfFloaterTrack::readItems(const LLSD& item
         it.mRayEnd = readV3(e["ray_end"]);
         it.mLaid = e["laid"].asBoolean();
         for (const LLSD& o : llsd::inArray(arr(e["objects"]))) it.mObjects.push_back({ o["name"].asString(), readV3(o["root"]) });
+        it.mTunnels = arr(e["tunnels"]);
         if (it.mRegion.notNull() && it.mItem.notNull()) out.push_back(it);
     }
     return out;
@@ -2597,12 +2732,29 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
              "saving them again.");
         return;
     }
+    // [TUNNELS] DESIGN.md 3.4 / 10: the part's tunnels opened (the region's boxes) and recorded (the Tunnel tool's record)
+    std::string tunnel_words;
+    if (item.mTunnels.size() > 0)
+    {
+        const auto uuid_of = [&matched](const std::string& name) -> LLUUID
+        {
+            for (const auto& m : matched) if (m.first == name) return m.second;
+            return LLUUID::null;
+        };
+        const std::string why = finishTunnels(layout, item, uuid_of, [&](const std::string& t) { if (WolfFloaterTrack* g = self()) g->setStatus(t, false); });
+        f = self();
+        if (!f) return;
+        tunnel_words = why.empty() ? " " + plural((S32)item.mTunnels.size(), "tunnel was", "tunnels were") + " opened through the hill."
+                                   : " " + why + " Your railway is laid; the tunnel stays closed until it is opened: pick the railway in "
+                                     "Your railways and press Open the tunnel.";
+    }
     f->mRezzing = false;
     f->mPartialShown = false;
     for (Item& it : f->mItems) if (it.mRegion == item.mRegion && it.mItem == item.mItem) it.mLaid = true;
     LL_INFOS("WolfTrack") << "saved " << matched.size() << " pieces in " << where << LL_ENDL;
     f->mLaidThisSession.insert(layout.asString());   // every piece of it is in view this session: Remove starts nearby
     f->afterSaved(reply["layout"]);
+    if (!tunnel_words.empty()) f->setStatus(f->mStatus->getText() + tunnel_words, tunnel_words.find("stays closed") != std::string::npos);
 }
 
 void WolfFloaterTrack::lookAgain()
@@ -2659,6 +2811,8 @@ void WolfFloaterTrack::afterSaved(const LLSD& layout)
         mStations.clear();
         mSignals.clear();
         mTurntables.clear();
+        mTunnels.clear();
+        mCurTunnel = -1;
         mCurLine = mCurStation = mEditStation = mEditTurntable = -1;
         mPlan.clear();
         mPlannedReq = LLSD();
@@ -2876,7 +3030,10 @@ void WolfFloaterTrack::refreshMine()
         const LLSD& access = reply["access"];
         f->mMayLay = !access.isMap() || !access.has("lay") || access["lay"].asBoolean();
         f->mNoLayReason = access.isMap() ? access["reason"].asString() : std::string();
+        f->mMayTunnel = access.isMap() && access["tunnel"].asBoolean();
+        f->mNoTunnelReason = access.isMap() ? access["tunnel_reason"].asString() : std::string();
         f->fillMineList();
+        f->updateControls();
     });
 }
 
@@ -2924,9 +3081,20 @@ void WolfFloaterTrack::loadDrawing(const LLSD& req)
     mStations.clear();
     mSignals.clear();
     mTurntables.clear();
+    mTunnels.clear();
+    mCurTunnel = -1;
     mEditTurntable = -1;
     mCurLine = mCurStation = mEditStation = -1;
     auto gp = [](const LLSD& v) { GP p; readXY(v, p.x, p.y); return p; };
+    for (const LLSD& e : llsd::inArray(arr(req["tunnels"])))
+    {
+        Tunnel t;
+        t.mA = gp(e["a"]);
+        t.mB = gp(e["b"]);
+        t.mHasB = true;
+        t.mStamp = nextStamp();
+        mTunnels.push_back(t);
+    }
     for (const LLSD& e : llsd::inArray(arr(req["lines"])))
     {
         Line ln;
@@ -2970,6 +3138,8 @@ bool WolfFloaterTrack::requestFor(const LLSD& stored, const std::vector<LLUUID>&
     const std::vector<Station> stations = mStations;
     const std::vector<Signal> signals = mSignals;
     const std::vector<Turntable> turntables = mTurntables;
+    const std::vector<Tunnel> tunnels = mTunnels;
+    const S32 cur_tunnel = mCurTunnel;
     const std::vector<LLUUID> replace_laid = mReplaceLaid;
     const S32 cur_line = mCurLine, cur_station = mCurStation, edit_station = mEditStation, edit_tt = mEditTurntable;
     loadDrawing(stored);
@@ -2979,12 +3149,232 @@ bool WolfFloaterTrack::requestFor(const LLSD& stored, const std::vector<LLUUID>&
     mStations = stations;
     mSignals = signals;
     mTurntables = turntables;
+    mTunnels = tunnels;
+    mCurTunnel = cur_tunnel;
     mReplaceLaid = replace_laid;
     mCurLine = cur_line;
     mCurStation = cur_station;
     mEditStation = edit_station;
     mEditTurntable = edit_tt;
     return ok;
+}
+
+// ---- [TRACK TOOL TUNNELS 2026-11-15] tunnels (DESIGN.md 3.4) ----------------------------------------------------------------
+
+LLSD WolfFloaterTrack::pendingSuggestion() const
+{
+    // the plan's first suggestion the resident has not answered (Climb the hill is kept here only: climbing is the default)
+    if (mPlanDirty) return LLSD();
+    for (const LLSD& g : llsd::inArray(arr(mPlan.mSuggestions)))
+    {
+        const std::string key = g["line"].asString() + llformat(":%d:%d", ll_round((F32)g["s0"].asReal() / 10.f), ll_round((F32)g["s1"].asReal() / 10.f));
+        if (!mSugHidden.count(key)) return g;
+    }
+    return LLSD();
+}
+
+void WolfFloaterTrack::onSuggestion(bool tunnel)
+{
+    const LLSD g = pendingSuggestion();
+    if (!g.isMap() || busy()) return;
+    if (!tunnel)
+    {
+        mSugHidden.insert(g["line"].asString() + llformat(":%d:%d", ll_round((F32)g["s0"].asReal() / 10.f), ll_round((F32)g["s1"].asReal() / 10.f)));
+        setStatus("The line climbs over the hill.", false);
+        updateControls();
+        return;
+    }
+    if (!mMayTunnel) { setStatus(mNoTunnelReason.empty() ? std::string("You cannot make tunnels in this region.") : mNoTunnelReason, true); return; }
+    if (mTunnels.size() >= MAX_TUNNELS)
+    {
+        setStatus(llformat("That is the most tunnels one railway can have (%d).", (S32)MAX_TUNNELS), true);
+        return;
+    }
+    // DESIGN.md 10 REQ tunnels: the suggestion's own ends (a, b), on its line
+    Tunnel t;
+    readXY(g["a"], t.mA.x, t.mA.y);
+    readXY(g["b"], t.mB.x, t.mB.y);
+    t.mHasB = true;
+    t.mStamp = nextStamp();
+    mTunnels.push_back(t);
+    setStatus("The line now goes through the hill in a tunnel. (Undo last point, or Take out in the list, climbs it again.)", false);
+    changed();
+}
+
+// static
+std::string WolfFloaterTrack::finishTunnels(const LLSD& layout, const Item& item, const std::function<LLUUID(const std::string&)>& uuid_of,
+                                            const std::function<void(const std::string&)>& progress)
+{
+    // Source: WolfStorm js/world/wolf_track_tool.js finishTunnels, the same steps; wolffloatertunnels.cpp buildCoro step 5
+    // (the new box is the id not seen before)
+    LLSD saved = LLSD::emptyArray();
+    S32 n = 0;
+    for (const LLSD& t : llsd::inArray(item.mTunnels))
+    {
+        ++n;
+        const LLUUID bore = uuid_of(t["object"].asString());
+        if (bore.isNull()) return llformat("Tunnel %d was not found among the placed pieces, so it was not opened.", n);
+        std::set<S32> known;
+        for (const WolfTunnels::Box& b : WolfTunnels::boxes()) known.insert(b.mId);
+        LLSD added = LLSD::emptyArray();
+        auto drop = [&]()
+        {
+            for (const LLSD& id : llsd::inArray(added))
+            {
+                LLSD a;
+                std::string e;
+                WolfTunnels::capChange(LLSD().with("op", "remove").with("id", id.asInteger()), a, e);
+            }
+        };
+        const LLSD& vols = t["volumes"];
+        S32 k = 0;
+        for (const LLSD& v : llsd::inArray(vols))
+        {
+            progress(llformat("Opening tunnel %d: part %d of %d...", n, ++k, (S32)vols.size()));
+            LLSD answer;
+            std::string err;
+            if (!WolfTunnels::capChange(LLSD().with("op", "add").with("tunnel", LLSD().with("c", v["c"]).with("s", v["s"]).with("yaw", v["yaw"])), answer, err))
+            {
+                drop();
+                return llformat("Tunnel %d could not be opened: ", n) + err + ".";
+            }
+            S32 got = -1;
+            for (const LLSD& b : llsd::inArray(answer["tunnels"])) if (!known.count(b["id"].asInteger())) got = llmax(got, b["id"].asInteger());
+            for (const LLSD& b : llsd::inArray(answer["tunnels"])) known.insert(b["id"].asInteger());
+            if (got < 0) { drop(); return llformat("Tunnel %d could not be opened: the region did not list the new part.", n); }
+            added.append(got);   // (append, never with(i, ...): llsd-with-integer-adds-null)
+        }
+        // the Tunnel tool's record (php/tunnels.php put): the same design, the bore's uuid and the box ids
+        LLSD objects = LLSD::emptyArray();
+        objects.append(bore.asString());
+        LLSD built;
+        built["item"] = LLSD();
+        built["objects"] = objects;
+        built["volumes"] = added;
+        LLSD rec;
+        rec["id"] = t["id"].asString();
+        rec["name"] = t["name"].asString();
+        rec["design"] = t["design"];
+        rec["built"] = built;
+        LLSD body;
+        body["region"] = item.mRegion.asString();
+        body["op"] = "put";
+        body["tunnel"] = rec;
+        std::string err;
+        if (!WolfTunnels::recordChange(body, err)) { drop(); return llformat("Tunnel %d could not be recorded: ", n) + err; }
+        LLSD one;
+        one["id"] = t["id"].asString();
+        one["volumes"] = added;
+        saved.append(one);
+    }
+    LLSD reply;
+    std::string err;
+    LLSD body;
+    body["layout"] = layout;
+    body["region"] = item.mRegion.asString();
+    body["tunnels"] = saved;
+    if (!callNow("tunnels_saved", body, reply, err)) return "The tunnels are open, but your railway's record of them could not be saved: " + err;
+    return std::string();
+}
+
+// static
+std::string WolfFloaterTrack::removeTunnels(const LLSD& layout, const LLUUID& region, const LLSD& list, bool& rights)
+{
+    // Source: WolfStorm js/world/wolf_track_tool.js removeTunnels; wolffloatertunnels.cpp's Delete (the boxes, then the record)
+    rights = true;
+    LLSD done = LLSD::emptyArray();
+    for (const LLSD& t : llsd::inArray(arr(list)))
+    {
+        if (!t["recorded"].asBoolean()) continue;
+        std::set<S32> present;
+        for (const WolfTunnels::Box& b : WolfTunnels::boxes()) present.insert(b.mId);
+        for (const LLSD& id : llsd::inArray(arr(t["volume_ids"])))
+        {
+            if (!present.count(id.asInteger())) continue;
+            LLSD a;
+            std::string e;
+            if (!WolfTunnels::capChange(LLSD().with("op", "remove").with("id", id.asInteger()), a, e) && e.find("not here any more") == std::string::npos)
+            {
+                rights = e.find("estate") == std::string::npos;
+                return rights ? "A tunnel could not be closed: " + e + ". Press Remove again."
+                              : "The railway's tunnel stays open in the ground: " + e + ". The region's owner can take it away in the Tunnels window.";
+            }
+        }
+        std::string e;
+        LLSD body;
+        body["region"] = region.asString();
+        body["op"] = "delete";
+        body["id"] = t["id"].asString();
+        if (!WolfTunnels::recordChange(body, e)) return "A tunnel was closed, but its record could not be taken away: " + e + " Press Remove again.";
+        done.append(t["id"].asString());
+    }
+    LLSD reply;
+    std::string err;
+    LLSD body;
+    body["layout"] = layout;
+    body["region"] = region.asString();
+    body["ids"] = done;
+    if (!callNow("tunnels_removed", body, reply, err)) return "The tunnels were closed, but your railway's record of them could not be updated: " + err;
+    return std::string();
+}
+
+void WolfFloaterTrack::openTunnelsHere(const LLSD& layout_id)
+{
+    // "Open the tunnel" (Your railways): a part laid here whose tunnel was not opened. The bore's uuid: "saved" keeps the uuids
+    // in the order of the item's objects (track_tool_lib.php tt_api_saved), so the object named as the bore is at that place
+    if (busy()) return;
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) return;
+    const LLUUID region = rgn->getRegionID();
+    mRezzing = true;
+    LLHandle<LLFloater> h = getHandle();
+    const U32 gen = mGen;
+    updateControls();
+    LLCoros::instance().launch("WolfTrackOpenTunnel", [h, gen, layout_id, region]()
+    {
+        auto self = [&h, gen]() -> WolfFloaterTrack*
+        {
+            WolfFloaterTrack* f = dynamic_cast<WolfFloaterTrack*>(h.get());
+            return f && f->mGen == gen ? f : nullptr;
+        };
+        LLSD reply;
+        std::string error;
+        const bool ok = callNow("get", LLSD().with("layout", layout_id), reply, error);
+        WolfFloaterTrack* f = self();
+        if (!f) return;
+        auto end = [&](const std::string& text, bool err)
+        {
+            f->mRezzing = false;
+            f->setStatus(text, err);
+            f->refreshMine();
+            f->updateControls();
+        };
+        if (!ok) { end("That railway could not be fetched: " + error, true); return; }
+        const std::vector<Item> items = readItems(reply["items"]);
+        const LLSD laid = arr(reply["layout"]["laid"][region.asString()]);
+        std::set<std::string> closed;
+        for (const LLSD& t : llsd::inArray(arr(reply["layout"]["tunnels"][region.asString()]))) if (!t["recorded"].asBoolean()) closed.insert(t["id"].asString());
+        for (const Item& it : items)
+        {
+            if (it.mRegion != region) continue;
+            if (laid.size() == 0) break;
+            Item part = it;
+            part.mTunnels = LLSD::emptyArray();
+            for (const LLSD& t : llsd::inArray(it.mTunnels)) if (closed.count(t["id"].asString())) part.mTunnels.append(t);
+            const auto uuid_of = [&it, &laid](const std::string& name) -> LLUUID
+            {
+                for (size_t k = 0; k < it.mObjects.size(); ++k)
+                    if (it.mObjects[k].mName == name && (LLSD::Integer)k < (LLSD::Integer)laid.size()) return laid[(LLSD::Integer)k].asUUID();
+                return LLUUID::null;
+            };
+            const std::string why = finishTunnels(layout_id, part, uuid_of, [&](const std::string& t) { if (WolfFloaterTrack* g = self()) g->setStatus(t, false); });
+            f = self();
+            if (!f) return;
+            end(why.empty() ? plural((S32)part.mTunnels.size(), "tunnel was", "tunnels were") + " opened through the hill." : why, !why.empty());
+            return;
+        }
+        end("This railway is not laid in this region.", true);   // the WolfStorm window's words
+    });
 }
 
 void WolfFloaterTrack::onShow()
@@ -3071,6 +3461,14 @@ void WolfFloaterTrack::onLayPart()
 {
     const LLSD l = pickedLayout();
     if (!l.isMap() || busy()) return;
+    if (LLViewerRegion* rgn = gAgent.getRegion())
+    {
+        const std::string r = rgn->getRegionID().asString();
+        bool to_open = false;
+        if (arr(l["laid"][r]).size() > 0)
+            for (const LLSD& t : llsd::inArray(arr(l["tunnels"][r]))) to_open = to_open || !t["recorded"].asBoolean();
+        if (to_open) { openTunnelsHere(l["id"]); return; }
+    }
     post("get", LLSD().with("layout", l["id"]), [](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
     {
         if (!ok) { f->setStatus("That railway could not be fetched: " + error, true); return; }
@@ -3139,13 +3537,14 @@ void WolfFloaterTrack::removalCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, 
     WolfFloaterTrack* f = self();
     if (!f) return;
     const std::string key = layout.asString();
+    std::string tunnel_note;   // [TUNNELS] a tunnel left open (no rights to close it), said with the last words
     auto finish = [&](const std::string& text, bool error, bool gone_here)
     {
         f->mRemoving = false;
         f->mProgress->setVisible(false);
         if (gone_here && replacing) f->mReplaceLaid.clear();
         if (gone_here) f->mShown.clear();
-        f->setStatus(text, error);
+        f->setStatus(text + tunnel_note, error);
         f->updateControls();
         f->refreshMine();
     };
@@ -3194,6 +3593,34 @@ void WolfFloaterTrack::removalCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, 
         if (!ok) { finish("The pieces were taken away, but the record could not be updated: " + error + " Press Remove again.", true, false); return; }
         finish(words + elsewhereWords(reply["layout"]["laid"]) + (replacing ? f->mLaidNote : std::string()), false, true);
     };
+
+    // 0. [TUNNELS] DESIGN.md 3.4 "Remove": this region's tunnels go first, the way the Tunnels window's Delete takes one -
+    //    their boxes (the ground closes) and their records; where the resident may no longer change tunnels here they stay,
+    //    the window says who can take them away, and the railway's pieces still go
+    {
+        LLSD rec;
+        std::string terr;
+        if (callNow("remove", LLSD().with("layout", layout), rec, terr))
+        {
+            const LLSD& list = rec["layout"]["tunnels"][region.asString()];
+            bool any = false;
+            for (const LLSD& t : llsd::inArray(arr(list))) any = any || t["recorded"].asBoolean();
+            if (any)
+            {
+                f = self();
+                if (!f) return;
+                f->setStatus("Closing the railway's tunnel...", false);
+                bool rights = true;
+                const std::string why = removeTunnels(layout, region, list, rights);
+                f = self();
+                if (!f) return;
+                if (!why.empty() && rights) { finish(why, true, false); return; }
+                if (!why.empty()) tunnel_note = " " + why;
+            }
+        }
+        f = self();
+        if (!f) return;
+    }
 
     // 1. on record here
     LLSD laid;
@@ -3525,8 +3952,24 @@ void WolfFloaterTrack::updateControls()
     const S32 mode_now = mMode->getSelectedIndex();
     const bool show_tt = mode_now == MODE_TURNTABLE || (tt_edit && !station_edit);   // the last one picked shows
     mTTPanel->setVisible(show_tt);
-    for (LLView* v : { (LLView*)mSide, (LLView*)mStyle, (LLView*)mName }) v->setVisible(!show_tt);
-    if (LLView* lbl = findChild<LLView>("station_label")) lbl->setVisible(!show_tt);
+    // [TUNNELS] where the plan finds a hill in the way, its two choices take the station row's place (not while a station or a
+    // turntable is being put down or changed)
+    const LLSD sug = pendingSuggestion();
+    const bool show_sug = !show_tt && !station_edit && mode_now != MODE_STATION && sug.isMap();
+    mSugPanel->setVisible(show_sug);
+    if (show_sug)
+    {
+        const LLSD& climb = sug["climb"];
+        std::string t = "A hill is in the way of your line. " + sug["tunnel"]["text"].asString();
+        t += "\n" + (climb.isMap() && climb.has("text") ? climb["text"].asString() : std::string("Climb the hill: the line goes over it."));
+        if (!mMayTunnel) t += "\n" + (mNoTunnelReason.empty() ? std::string("You cannot make tunnels in this region.") : mNoTunnelReason);
+        setTextIfChanged(mSugText, t);
+        mSugTunnelBtn->setEnabled(!b && mMayTunnel);
+        // the climb cannot be chosen when it cannot be made (the plan says so in its words)
+        mSugClimbBtn->setEnabled(!b && !(climb.isMap() && climb.has("possible") && climb["possible"].isBoolean() && !climb["possible"].asBoolean()));
+    }
+    for (LLView* v : { (LLView*)mSide, (LLView*)mStyle, (LLView*)mName }) v->setVisible(!show_tt && !show_sug);
+    if (LLView* lbl = findChild<LLView>("station_label")) lbl->setVisible(!show_tt && !show_sug);
     mTTPanel->setEnabled(!b);
     {
         // DESIGN.md 10: the longest train a deck turns is the deck less 1 m (15 / 20 / 24 m: 14 / 19 / 23)
@@ -3576,6 +4019,15 @@ void WolfFloaterTrack::updateControls()
     const std::string st = picked.isMap() ? picked["state"].asString() : std::string();
     mShowBtn->setEnabled(!b && picked.isMap());
     mChangeBtn->setEnabled(!b && picked.isMap() && st != "building" && st != "failed");
-    mLayPartBtn->setEnabled(!b && picked.isMap() && (st == "built" || st == "partly_laid"));
+    // [TUNNELS] a part laid here whose tunnel was not opened: the same button opens it (DESIGN.md 3.4)
+    bool to_open = false;
+    if (picked.isMap() && rgn)
+    {
+        const std::string r = rgn->getRegionID().asString();
+        if (arr(picked["laid"][r]).size() > 0)
+            for (const LLSD& t : llsd::inArray(arr(picked["tunnels"][r]))) to_open = to_open || !t["recorded"].asBoolean();
+    }
+    mLayPartBtn->setLabel(to_open ? std::string("Open the tunnel") : std::string("Lay its part here"));
+    mLayPartBtn->setEnabled(!b && picked.isMap() && (to_open || st == "built" || st == "partly_laid"));
     mRemoveBtn->setEnabled(!b && picked.isMap() && st != "building");
 }

@@ -26,16 +26,19 @@
     <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="draw_heading" top="68" width="468">1. Draw your railway - what do your clicks make?</text>
     <radio_group follows="left|top" height="22" layout="topleft" left="16" name="track_mode" top="90" width="468"
      tool_tip="Each choice makes something different with your next clicks on the ground. The words at the top of the world view say what to click.">
-        <radio_item height="20" label="A line" layout="topleft" left="0" name="line" top="0" value="line" width="70"
+        <radio_item height="20" label="A line" layout="topleft" left="0" name="line" top="0" value="line" width="62"
          tool_tip="Click where the line starts, at each bend, and where it ends. Click the first point again to make a loop." />
-        <radio_item height="20" label="A branch" layout="topleft" left="74" name="branch" top="0" value="branch" width="84"
+        <radio_item height="20" label="A branch" layout="topleft" left="64" name="branch" top="0" value="branch" width="76"
          tool_tip="Click on a line where the branch leaves it, then its bends and its end. End it on a line to join that line." />
-        <radio_item height="20" label="A station" layout="topleft" left="162" name="station" top="0" value="station" width="88"
+        <radio_item height="20" label="A station" layout="topleft" left="142" name="station" top="0" value="station" width="78"
          tool_tip="Click on a line where the platform starts, then where it ends." />
-        <radio_item height="20" label="A signal" layout="topleft" left="254" name="signal" top="0" value="signal" width="80"
+        <radio_item height="20" label="A signal" layout="topleft" left="222" name="signal" top="0" value="signal" width="70"
          tool_tip="Click on a line to put a signal there. Signals are also put in by themselves." />
-        <radio_item height="20" label="A turntable" layout="topleft" left="338" name="turntable" top="0" value="turntable" width="96"
+        <radio_item height="20" label="A turntable" layout="topleft" left="294" name="turntable" top="0" value="turntable" width="92"
          tool_tip="Click on the end of a line to put a turntable there, with stall roads round it." />
+        <!-- [TRACK TOOL TUNNELS 2026-11-15] DESIGN.md 3.4: a stretch of a line through the hill -->
+        <radio_item height="20" label="A tunnel" layout="topleft" left="388" name="tunnel" top="0" value="tunnel" width="78"
+         tool_tip="Click on a line before a hill where the tunnel starts, then beyond the hill where it ends. The ends are fitted to the hill." />
     </radio_group>
     <button follows="left|top" height="26" label="Undo last point" layout="topleft" left="16" name="track_undo" top="118" width="128"
      tool_tip="Take the last point you clicked back (Backspace)" />
@@ -85,6 +88,16 @@
         <check_box follows="left|top" height="20" label="Engine shed over the roads" layout="topleft" left="300" name="tt_shed" top="30" width="190"
          tool_tip="Build an engine shed over the stall roads" />
         <text follows="left|top" height="18" layout="topleft" left="16" name="tt_turns" top="54" width="468" />
+    </panel>
+    <!-- [TRACK TOOL TUNNELS 2026-11-15] Paul: "let the user choose though sometimes they might just want to go up a hill".
+         Where the plan finds a hill in the way, its two choices with their grade and length, in place of the station's row
+         (climbing is the default: Climb the hill only puts the question away) -->
+    <panel follows="left|top" height="72" layout="topleft" left="0" name="tunnel_choice_panel" top="186" visible="false" width="500">
+        <text follows="left|top" height="44" layout="topleft" left="16" name="tunnel_choice_text" top="0" width="468" word_wrap="true" />
+        <button follows="left|top" height="24" label="Tunnel through" layout="topleft" left="16" name="tunnel_choice_tunnel" top="46" width="150"
+         tool_tip="Take the line through the hill in a tunnel, with brick portals at each end" />
+        <button follows="left|top" height="24" label="Climb the hill" layout="topleft" left="174" name="tunnel_choice_climb" top="46" width="150"
+         tool_tip="Keep the line going over the hill (as it is now)" />
     </panel>
     <text follows="left|top" height="18" layout="topleft" left="16" name="drawn_heading" top="260" width="380">What you have drawn (pick one to change or take it out):</text>
     <scroll_list draw_heading="false" follows="left|top" height="80" layout="topleft" left="16" name="track_items" top="280" width="380">

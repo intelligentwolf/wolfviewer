@@ -194,9 +194,10 @@ private:
     // each feature, and each std::map lookup walked about 15 tree nodes (want() 5.7 % of the main thread's samples, nearly
     // all of it LLUUID::operator< on a node not in the cache). Nothing depended on their order except pruneSlice's
     // cursor, which is a bucket index now. A pointer from get() stays good as before: std::unordered_map never moves an
-    // element (only erasing that element ends it). mWants stays a std::map: it is small (what was wanted since the last
-    // drain), and drain() builds its queue in this map's order before a sort that is not stable, so the order requests
-    // go out in is exactly what it was.
+    // element (only erasing that element ends it). mWants stays a std::map: drain() builds its queue in this map's order
+    // before a sort that is not stable, so the order requests go out in is exactly what it was. (It is not small in a
+    // scene like this one - every prim not yet answered is wanted again each pass - and its inserts are what is left of
+    // want()'s cost: 0.8 % of the main thread's samples in the same scene after this change.)
     /** object id -> what the sim last said. */
     std::unordered_map<LLUUID, Props> mProps;
     /** object id -> when we last asked, and how many times running. */

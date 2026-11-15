@@ -107,6 +107,7 @@
 #include "wolfskis.h"     // [SKIS 2026-11-06/] skis and snowboards
 #include "wolfair.h"      // <WolfViewer 2026-11-01/> Wolf Air (warplanes: the dogfight band, the kill feed)
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
+#include "wolffarproxy.h"    // [W107 FAR HLOD 2026-11-14/] the regions' far proxy models
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
 #include "wolfundersea.h"   // [UNDERSEA 2026-11-09/] ticket 652
@@ -6431,6 +6432,7 @@ void LLAppViewer::idle()
     // (wolfair.cpp); after WolfFlight so the deck it may switch on is there next frame. </WolfViewer>
     { WolfVRScreen::SubPart wsp_("WolfAir"); WolfAir::instance().idle(); }
     { WolfVRScreen::SubPart wsp_("WolfFarTerrain"); WolfFarTerrain::instance().idle(); }  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
+    { WolfVRScreen::SubPart wsp_("WolfFarProxy"); WolfFarProxy::instance().idle(); }     // [W107 FAR HLOD 2026-11-14/] the regions' far proxy models: fetches, building, each cell's hand-over
     { WolfVRScreen::SubPart wsp_("WolfFarGround"); WolfFarGround::instance().idle(); }   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     { WolfVRScreen::SubPart wsp_("WolfBirds"); WolfBirds::instance().idle(); }       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
     { WolfVRScreen::SubPart wsp_("WolfSeaLife"); WolfSeaLife::instance().idle(); }     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)

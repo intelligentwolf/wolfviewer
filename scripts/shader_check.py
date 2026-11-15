@@ -754,6 +754,10 @@ class Enumerator:
         p = prog("Deferred Diffuse Non-Indexed Alpha Mask Shader", "diffuseV.glsl", "diffuseAlphaMaskF.glsl", ":1669")
         self.common_permutations(p)
         self.add(p)
+        # [W107 FAR HLOD 2026-11-14] llviewershadermgr.cpp "Wolf Far Proxy Shader" (wolffarproxy.cpp), right after the program above
+        p = prog("Wolf Far Proxy Shader", "diffuseV.glsl", "wolfFarProxyF.glsl", ":1722")
+        self.common_permutations(p)
+        self.add(p)
         p = prog("Deferred Diffuse Non-Indexed Alpha Mask No Color Shader", "diffuseNoColorV.glsl", "diffuseAlphaMaskNoColorF.glsl", ":1681")
         self.common_permutations(p)
         self.add(p)

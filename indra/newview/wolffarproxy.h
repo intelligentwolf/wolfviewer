@@ -1,0 +1,185 @@
+/**
+ * @file wolffarproxy.h
+ * @brief WolfViewer: beyond a switch distance a region's static objects are drawn as one baked low-detail model
+ * (a proxy) and the real objects standing there are not drawn at all.
+ *
+ * $LicenseInfo:firstyear=2026&license=viewerlgpl$
+ * WolfViewer — Wolf Territories Grid
+ * Copyright (C) 2026 IntelligentWolf Ltd.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation;
+ * version 2.1 of the License only.
+ * $/LicenseInfo$
+ */
+
+#ifndef WOLF_FAR_PROXY_H
+#define WOLF_FAR_PROXY_H
+
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "llpointer.h"
+#include "llsingleton.h"
+#include "v3math.h"
+
+class LLCamera;
+class LLImageRaw;
+class LLSpatialBridge;
+class LLSpatialGroup;
+class LLVertexBuffer;
+class LLViewerRegion;
+class LLViewerTexture;
+
+/**
+ * [W107 FAR HLOD 2026-11-14] Paul: "what would REALLY increase the performance". At Paddington Station with a 4096 m
+ * draw distance every far object still costs a cull test, a level-of-detail update, draw calls, occlusion queries and
+ * shadow work. Design, file format, switch rule and measurements:
+ * firestorm/region-terrain-work/far-hlod-2026-11-14/DESIGN.md.
+ *
+ * The grid bakes one model per region from the region's own database (static objects only, cut on a 64 m grid of
+ * cells, one texture atlas) and wolf-grid.com/hlod.php hands it out by the region's grid origin, as elev.php hands
+ * out the far terrain's tiles (wolffarterrain.h). Here, for every connected region that has a model:
+ *
+ *  - per cell and frame, f = clamp((d - D) / B, 0, 1), d = the main camera's distance to the cell's box,
+ *    D = WolfFarProxyDistance, B = 64 m;
+ *  - f = 0: nothing of the proxy is drawn, the real objects are, as stock;
+ *  - 0 < f < 1: the real objects are drawn and the cell's proxy is drawn over them through a dither mask that keeps
+ *    the share f of its pixels, so it dissolves in with distance;
+ *  - f = 1: the proxy is drawn whole and an octree node of the region's static volume partition whose extents lie only
+ *    over such cells fails the cull, for the main view and the shadow passes alike (hidesSubtree / hidesObjects).
+ *
+ * A model's triangles are cut on the cell lines, so a cell's proxy is exactly what stands on that cell: an object
+ * reaching over a nearer cell stays real, and no low-detail triangle comes nearer than D.
+ *
+ * Moving objects are not in a model and must never be hidden. An object that has moved is active for good
+ * (LLDrawable::updateMove -> makeActive, lldrawable.cpp:822; LLPipeline::updateMovedList only calls makeStatic for a
+ * drawable that is not ACTIVE, pipeline.cpp:2258-2260, which makeStatic then ignores, lldrawable.cpp:574) and is drawn
+ * through a spatial bridge - which sits IN the region's static volume octree (LLSpatialBridge's constructor,
+ * lldrawable.cpp:1327-1337 part->put(this)) and is only drawn when its node passes the cull. So every cell a bridge
+ * stands on (its box and 16 m round it, for what it moves in a frame) keeps its real objects, whatever its distance:
+ * no node holding the bridge, and no node above it, then lies only over hidden cells. Avatars, attachments, trees,
+ * grass, particles, terrain, water and sky are other partitions and are never touched.
+ *
+ * Wolf Territories regions only (WolfGrid::showsWolfRegion); the setting WolfFarProxy turns it off. With the setting off, on
+ * another grid, while the build tools are open, in a reflection probe's pictures, or for a region with no model,
+ * everything is stock.
+ */
+class WolfFarProxy : public LLSingleton<WolfFarProxy>
+{
+    LLSINGLETON(WolfFarProxy);
+    ~WolfFarProxy();
+
+public:
+    /** Every frame from LLAppViewer::idle(): which regions have models, fetches, building, and each cell's f. */
+    void idle();
+
+    /** From LLPipeline::renderGeomDeferred, for the main camera only: the proxies of cells with f > 0. */
+    void renderDeferred();
+
+    /** From LLPipeline::renderShadow with the stock shadow program bound (static pass): the opaque triangles of the
+     *  proxies of cells with f > 0 that are in the shadow camera's frustum. Leaves that program bound. */
+    void renderShadowOpaque(LLCamera& shadow_cam);
+
+    /** From LLPipeline::renderShadow with gDeferredTreeShadowProgram bound (alpha cut 0.5 set here): the alpha-cut
+     *  triangles of the same proxies. Leaves that program bound. */
+    void renderShadowAlphaCut(LLCamera& shadow_cam);
+
+    /** From LLOctreeCull::earlyFail: true = neither this node nor anything under it is looked at. */
+    static bool hidesSubtree(const LLSpatialGroup* group);
+
+    /** From LLOctreeCull::processGroup: true = this node's own objects are not drawn. */
+    static bool hidesObjects(const LLSpatialGroup* group);
+
+    /** From LLSpatialGroup, where a spatial bridge (a moving object's own octree) is put on / taken off a node's
+     *  bridge list, and from the bridge's destructor: the cells a bridge stands on keep their real objects. */
+    static void bridgeIn(LLSpatialBridge* bridge, LLSpatialGroup* group);
+    static void bridgeOut(LLSpatialBridge* bridge);
+
+    /** From LLPipeline::cleanup: the vertex buffers and atlases go while the GL context is still there. */
+    void releaseAll();
+
+    static bool enabled();
+
+    /** A model's bytes, checked and unpacked (on a worker thread). */
+    struct Decoded;
+
+private:
+    struct Part
+    {
+        U16 mCellX = 0, mCellY = 0;
+        LLPointer<LLVertexBuffer> mVB;
+        U32 mVerts = 0;
+        U32 mOpaque = 0;     // index counts: the opaque triangles first, then the alpha-cut ones
+        U32 mCut = 0;
+        F32 mZMin = 0.f, mZMax = 0.f;
+    };
+
+    struct Model
+    {
+        U32 mBuildTime = 0;
+        U32 mRegionSize = 0;      // metres
+        U32 mCellM = 0;           // metres
+        U32 mSide = 0;            // cells per side
+        std::vector<Part> mParts;                 // sorted by cell
+        std::vector<U32> mCellFirst;              // mSide * mSide + 1: a cell's parts are [first[c], first[c + 1])
+        std::vector<F32> mCellZMin, mCellZMax;    // of a cell's parts; min > max = the cell has none
+        LLPointer<LLViewerTexture> mAtlas;
+    };
+
+    struct Region
+    {
+        enum State { NEW, INFO, MODEL, DECODING, BUILDING, IDLE };
+        State mState = NEW;
+        U32 mGridX = 0, mGridY = 0;               // the region's origin, 256 m cells (hlod.php rx, ry)
+        F64 mNextInfoAt = 0.0;
+        U32 mSerial = 0;                          // of the request in flight: an answer for an older one is dropped
+        U32 mFailedBuildTime = 0;                 // a build that would not decode or build: not fetched again
+        std::shared_ptr<Decoded> mDecoded;        // being turned into vertex buffers, a few parts a frame
+        std::unique_ptr<Model> mBuilding;
+        size_t mBuiltParts = 0;
+        std::unique_ptr<Model> mModel;            // drawn
+        // per cell of mModel, this frame
+        std::vector<F32> mFade;                   // f
+        std::vector<U8> mHidden;                  // f == 1 and no moving object on it: the real objects on it are not drawn
+        bool mAnyFade = false;
+        // the cull hooks compare this with the partition's region and never follow it
+        const LLViewerRegion* mRegionp = nullptr;
+        LLVector3 mOriginAgent;
+    };
+
+    void refreshRegions();
+    void step(U64 handle, Region& r, F64 now);
+    void fetch(U64 handle, Region& r, bool model);
+    static void fetchCoro(U64 handle, U32 serial, bool model, std::string url);
+    void gotInfo(Region& r, const std::vector<U8>& body, F64 now);
+    void gotModel(U64 handle, Region& r, std::shared_ptr<std::vector<U8>> body);
+    void decoded(U64 handle, U32 serial, std::shared_ptr<Decoded> d);
+    bool buildSome(Region& r);
+    void computeFades();
+    void drawParts(LLCamera& camera, bool far_clip, bool opaque, bool cut, bool fade_uniform);
+    void logStats(F64 now);
+    void clear();
+
+    static bool allHidden(const LLSpatialGroup* group, bool subtree);
+
+    std::map<U64, Region> mRegions;       // by region handle
+    // The regions whose model has a cell at f = 1 this frame, for the cull hooks: they run for every octree node of
+    // every cull, and LLSingleton::instance() takes a lock each call (measured: 7% of the main thread). Entries point
+    // into mRegions; set by computeFades, emptied before anything is erased from mRegions.
+    static std::vector<const Region*> sHiding;
+    U32 mBridgeCells = 0;                 // cells at f = 1 kept real by a moving object, this frame
+    F64 mNextRefresh = 0.0;
+    S32 mFetching = 0;
+    U32 mNextSerial = 0;                  // one count for every region's requests, so a region that went and came back never matches an old answer
+    bool mActive = false;                 // this frame: enabled, and the build tools are closed
+    F64 mNextLog = 0.0;
+    U32 mDrawnParts = 0;                  // main pass, since the last log line
+    U32 mShadowParts = 0;                 // shadow passes, since the last log line
+    U32 mLogFrames = 0;                   // frames since the last log line
+};
+
+#endif // WOLF_FAR_PROXY_H

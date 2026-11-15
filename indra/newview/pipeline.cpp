@@ -157,6 +157,7 @@
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfshadowbatch.h"   // [W107 SHADOW BATCH 2026-11-14/] the shadow pass joins neighbouring untextured draws
 #include "wolfstaticshadowbatch.h"   // [W107 STATIC BATCH 2026-11-14/] the shadow pass draws static casters from shared buffers
+#include "wolffarproxy.h"   // [W107 FAR HLOD 2026-11-14/]
 #include "wolfterrainlevels.h"   // [WOLF SKY LEVELS 2026-11-05/]
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
 #include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12/] the Wolf Environment's clouds, fog and zones
@@ -771,6 +772,10 @@ void LLPipeline::cleanup()
     releaseGLBuffers();
     WolfEnvironmentRender::destroyGL();   // [WOLF ENV TAKRAM 2026-10-12] the atmosphere's tables as well
     WolfStaticShadowBatch::releaseAll();   // [W107 STATIC BATCH 2026-11-14/] the shared shadow caster buffers
+    if (WolfFarProxy::instanceExists())
+    {
+        WolfFarProxy::instance().releaseAll();   // [W107 FAR HLOD 2026-11-14/] the far proxy models' buffers and atlases
+    }
 
     mFaceSelectImagep = NULL;
 
@@ -4433,6 +4438,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
         if (&camera == LLViewerCamera::getInstance() && !gCubeSnapshot)
         {
             WolfFarTerrain::instance().renderDeferred();   // <WolfViewer 2026-10-08/> the far ground in relief (wolffarterrain.h)
+            WolfFarProxy::instance().renderDeferred();     // [W107 FAR HLOD 2026-11-14/] the regions' far proxy models (wolffarproxy.h)
             WolfTerrainLevels::renderDeferred();   // [WOLF SKY LEVELS 2026-11-05/] ticket 541: the rock under sky land (wolfterrainlevels.h)
             WolfFarGround::instance().renderDeferred();
             WolfBirds::instance().renderDeferred();   // [BIRDS 2026-11-02/] ticket 445: the wild birds, lit as the scene
@@ -11359,6 +11365,9 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
             // [W107 STATIC BATCH 2026-11-14] the groups postSort handed over, in the state the stock draws below get
             // (gDeferredShadowProgram bound, colour mask set, texture unit 0 off); the shader is bound again on return
             WolfStaticShadowBatch::drawPass(wolf_batch);
+            // [W107 FAR HLOD 2026-11-14] the far proxies' opaque triangles as casters, in the same state (the real
+            // objects they stand for failed this pass's cull: wolffarproxy.h)
+            WolfFarProxy::instance().renderShadowOpaque(shadow_cam);
         }
 
         // [W107 SHADOW BATCH 2026-11-14] WolfShadowBatchJoin off: the stock path below, exactly as before (A/B comparison)
@@ -11455,6 +11464,10 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
                 if (i == 0)
                 {
                     renderObjects(LLRenderPass::PASS_GRASS, true);
+                    // [W107 FAR HLOD 2026-11-14] the far proxies' alpha-cut triangles: this program is position,
+                    // texture coordinate and an alpha cut (deferred/treeShadowV.glsl, treeShadowF.glsl)
+                    WolfFarProxy::instance().renderShadowAlphaCut(shadow_cam);
+                    LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
                 }
 
                 {

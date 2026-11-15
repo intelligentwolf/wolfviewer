@@ -109,6 +109,8 @@ namespace
     constexpr F64 SAME_CLICK_M = 1.0;          // wolffloaterlifts.cpp:75: the second press of a double-click
     constexpr F64 LOOP_CLOSE_M = 4.0;          // CHOSEN: under the planner's 5 m between clicks (tracktool/geom.py:19 MIN_CLICK_GAP)
     constexpr F64 ON_LINE_M = 8.0;             // CHOSEN: a click this near a line is "on" it; it is put on the line itself
+    constexpr F32 LINE_PICK_PX = 12.f;         // [15 Nov] WolfStorm floater_wolf_track_tool.js LINE_PICK_PX: a click this near the
+                                               // plan's line on the screen (drawn at its rail level) is ON the line
     constexpr F64 JOIN_M = 6.0;                // tracktool/layout.py:108 nearest_line within=6.0: a branch's last click joins there
     constexpr F64 HALF_GAUGE_M = 1.435 * 0.5;  // the brief: two rails 1.435 m apart (standard gauge)
     constexpr F64 FORMATION_M = 0.75;          // tracktool/profile.py:15 FORMATION_DOWN: formation under the rail head
@@ -730,9 +732,21 @@ void WolfFloaterTrack::clickAt(F32 x, F32 y)
 {
     if (busy() || !gAgent.getRegion()) return;
     endAsk();
-    const GP g = toGrid(x, y);
+    GP g = toGrid(x, y);
     auto dist = [](const GP& a, const GP& b) { return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)); };
     const S32 mode = mMode->getSelectedIndex();
+    {
+        // [15 Nov] a station, signal, tunnel or a branch's start goes ON a line: a click on the plan's line where it stands
+        // up on a bank or viaduct (drawn at its rail level, so on the screen it is not over the land under it) is on the
+        // line (Paul: "i couldnt really make tunnels work"). WolfStorm: floater_wolf_track_tool.js _onDown / _planLineAt.
+        const bool new_branch = mode == MODE_BRANCH && !(mCurLine >= 0 && (size_t)mCurLine < mLines.size() && mLines[mCurLine].mBranch);
+        GP on, picked;
+        if ((mode == MODE_STATION || mode == MODE_SIGNAL || mode == MODE_TUNNEL || new_branch) && !onALine(g, ON_LINE_M, on)
+            && planLineAtMouse(picked))
+        {
+            g = picked;
+        }
+    }
     if (mode == MODE_LINE || mode == MODE_BRANCH)
     {
         if (mCurLine >= 0 && (size_t)mCurLine < mLines.size() && mLines[mCurLine].mBranch != (mode == MODE_BRANCH)) mCurLine = -1;
@@ -2142,6 +2156,32 @@ void WolfFloaterTrack::renderRouteExtras(LLViewerRegion* rgn)
             red.c.push_back(m.mColour);
         }
     }
+    // [15 Nov] the hill whose choice is waiting (WolfStorm _draw3d COL_SUG): posts at its two ends and its middle, purple, so
+    // the choice shows where it is, not only in the window (Paul: "i couldnt really make tunnels work")
+    const LLSD sug = pendingSuggestion();
+    if (sug.isMap())
+    {
+        auto post = [&](const LLSD& p, F64 h, F64 r)
+        {
+            F64 x, y;
+            if (!readXY(p, x, y)) return;
+            F32 g32;
+            const F64 z = landAt(x, y, g32) ? (F64)g32 : (F64)LLWorld::getInstance()->resolveLandHeightGlobal(LLVector3d(x, y, 0.0));
+            red.v.emplace_back(x, y, z);
+            red.v.emplace_back(x, y, z + h);
+            red.c.push_back(COL_TUNNEL_MARK);
+            for (S32 i = 0; i < 16; ++i)
+            {
+                const F64 a0 = (F64)i / 16.0 * F_TWO_PI, a1 = (F64)(i + 1) / 16.0 * F_TWO_PI;
+                red.v.emplace_back(x + cos(a0) * r, y + sin(a0) * r, z + 0.2);
+                red.v.emplace_back(x + cos(a1) * r, y + sin(a1) * r, z + 0.2);
+                red.c.push_back(COL_TUNNEL_MARK);
+            }
+        };
+        post(sug["a"], 8.0, 2.5);
+        post(sug["b"], 8.0, 2.5);
+        post(sug["at"], 14.0, 4.0);
+    }
     gGL.setLineWidth(4.f);
     strokes(red, nullptr);
     gGL.setLineWidth(1.f);
@@ -2173,6 +2213,14 @@ void WolfFloaterTrack::drawRouteExtras(LLViewerRegion* rgn)
         PlanMark up = m;
         up.mAt.mdV[VZ] += 8.0;
         label(up, true);
+    }
+    const LLSD sug = pendingSuggestion();                // [15 Nov] the waiting hill choice's post (renderRouteExtras)
+    F64 sx, sy;
+    if (sug.isMap() && readXY(sug["at"], sx, sy))
+    {
+        F32 g32;
+        const F64 z = landAt(sx, sy, g32) ? (F64)g32 : (F64)LLWorld::getInstance()->resolveLandHeightGlobal(LLVector3d(sx, sy, 0.0));
+        label(PlanMark{ LLVector3d(sx, sy, z + 14.0), "Tunnel? A hill is in the way - choose in the window", COL_TUNNEL_MARK }, true);
     }
 }
 
@@ -3163,6 +3211,33 @@ bool WolfFloaterTrack::requestFor(const LLSD& stored, const std::vector<LLUUID>&
 
 // ---- [TRACK TOOL TUNNELS 2026-11-15] tunnels (DESIGN.md 3.4) ----------------------------------------------------------------
 
+bool WolfFloaterTrack::planLineAtMouse(GP& out) const
+{
+    // Source: WolfStorm floater_wolf_track_tool.js _planLineAt - the plan's rails (renderRouteExtras draws them at their rail
+    // level) projected to the screen as drawRouteExtras projects its labels; the nearest vertex within LINE_PICK_PX
+    if (mPlanDirty || mPlan.mRails.v.empty()) return false;
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) return false;
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    const F32 mx = (F32)gViewerWindow->getCurrentMouseX(), my = (F32)gViewerWindow->getCurrentMouseY();
+    F32 best = LINE_PICK_PX * LINE_PICK_PX;
+    bool found = false;
+    for (const LLVector3d& v : mPlan.mRails.v)
+    {
+        LLCoordGL sp;
+        if (!cam->projectPosAgentToScreen(rgn->getPosAgentFromRegion(rgn->getPosRegionFromGlobal(v)), sp, false)) continue;
+        const F32 dx = (F32)sp.mX - mx, dy = (F32)sp.mY - my;
+        if (dx * dx + dy * dy < best)
+        {
+            best = dx * dx + dy * dy;
+            out.x = v.mdV[VX];
+            out.y = v.mdV[VY];
+            found = true;
+        }
+    }
+    return found;
+}
+
 LLSD WolfFloaterTrack::pendingSuggestion() const
 {
     // the plan's first suggestion the resident has not answered (Climb the hill is kept here only: climbing is the default)
@@ -3957,7 +4032,9 @@ void WolfFloaterTrack::updateControls()
     // [TUNNELS] where the plan finds a hill in the way, its two choices take the station row's place (not while a station or a
     // turntable is being put down or changed)
     const LLSD sug = pendingSuggestion();
-    const bool show_sug = !show_tt && !station_edit && mode_now != MODE_STATION && sug.isMap();
+    // (also in station mode - Paul 15 Nov: the choice is never out of sight while a hill is in the way; only a station or a
+    // turntable being changed takes the row)
+    const bool show_sug = !show_tt && !station_edit && sug.isMap();
     mSugPanel->setVisible(show_sug);
     if (show_sug)
     {
@@ -3967,9 +4044,21 @@ void WolfFloaterTrack::updateControls()
         const LLSD& tun = sug["tunnel"];
         const LLSD& climb = sug["climb"];
         setTextIfChanged(mSugText, std::string("A hill is in the way of your line:"));
+        // and how much of the whole line each leaves up on viaducts (layout.py _viaduct_m: viaduct_m)
+        auto viaducts = [](const LLSD& o) -> std::string
+        {
+            if (!o.has("viaduct_m")) return std::string(".");
+            const S32 m = o["viaduct_m"].asInteger();
+            return m <= 0 ? std::string("; no viaduct on the line.") : llformat("; %d m of viaduct on the line.", m);
+        };
+        auto climbing = [](const LLSD& o) -> std::string
+        {
+            const std::string gr = o["grade"].asString();
+            return gr == "level" ? std::string("level") : "climbing at most " + gr;
+        };
         const std::string tt = mMayTunnel
-            ? llformat("%d m of tunnel, climbing at most ", tun["length_m"].asInteger()) + tun["grade"].asString()
-              + llformat(", with up to %d m of hill over it.", ll_round((F32)tun["deepest_m"].asReal()))
+            ? llformat("%d m of tunnel, ", tun["length_m"].asInteger()) + climbing(tun)
+              + llformat(", up to %d m of hill over it", ll_round((F32)tun["deepest_m"].asReal())) + viaducts(tun)
             : (mNoTunnelReason.empty() ? std::string("You cannot make tunnels in this region.") : mNoTunnelReason);
         setTextIfChanged(mSugTunnelText, tt);
         mSugTunnelText->setToolTip(tun["text"].asString());
@@ -3981,8 +4070,8 @@ void WolfFloaterTrack::updateControls()
         else if (climb_no)
             ct = llformat("Not possible as drawn: the ground rises %d m, too steeply for trains.", ll_round((F32)climb["rise_m"].asReal()));
         else if (climb["possible"].isBoolean())
-            ct = llformat("Over the top %d m above the lowest ground, climbing at most ", ll_round((F32)climb["rise_m"].asReal()))
-                 + climb["grade"].asString() + llformat(", up to %d m above the ground.", ll_round((F32)climb["highest_m"].asReal()));
+            ct = llformat("Over the top %d m up, ", ll_round((F32)climb["rise_m"].asReal())) + climbing(climb)
+                 + llformat(", up to %d m above the ground", ll_round((F32)climb["highest_m"].asReal())) + viaducts(climb);
         else ct = climb["text"].asString();
         setTextIfChanged(mSugClimbText, ct);
         mSugClimbText->setToolTip(climb.isMap() ? climb["text"].asString() : std::string());

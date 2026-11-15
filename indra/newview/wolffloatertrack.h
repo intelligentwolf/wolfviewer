@@ -229,6 +229,7 @@ private:
     LLVector2 toRegion(const GP& p) const;        // grid -> agent-region metres
     /** The nearest point on any line (the last plan's line, else the drawn clicks) within `within` metres, or false. */
     bool onALine(const GP& p, F64 within, GP& snapped, S32 exclude_line = -1) const;
+    bool planLineAtMouse(GP& out) const;   // [15 Nov] the plan's line drawn at its rail level, under the mouse
     U32 nextStamp() { return ++mStampSeq; }
     bool drawingEmpty() const;
     S32 usableLines() const;

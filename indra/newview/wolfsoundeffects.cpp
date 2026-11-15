@@ -19,10 +19,12 @@ namespace
     const char* const SWITCHES[WolfSoundEffects::GROUP_COUNT] = {
         "WolfSoundWeather", "WolfSoundThunder", "WolfViewerBirdsSound", "WolfViewerNatureSounds",
         "WolfViewerSeaLifeSound", "WolfViewerSwimBubblesSound", "PlayModeUISndTeleportOut",
+        "WolfViewerPlaneSound",   // [PLANE SOUND 2026-11-15/] t865: the passing planes' engines (wolfplanesound.cpp)
     };
     const char* const VOLUMES[WolfSoundEffects::GROUP_COUNT] = {
         "WolfSoundWeatherVolume", "WolfSoundThunderVolume", "WolfSoundBirdsVolume", "WolfSoundNatureVolume",
         "WolfSoundSeaLifeVolume", "WolfSoundBubblesVolume", "WolfSoundTeleportVolume",
+        "WolfSoundPlanesVolume",  // [PLANE SOUND 2026-11-15/]
     };
 
     // Source: settings.xml UISndTeleportOut, its Value (Firestorm's default teleport sound, an asset on every grid).

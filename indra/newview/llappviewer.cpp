@@ -109,6 +109,7 @@
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
+#include "wolfplanesound.h"  // [PLANE SOUND 2026-11-15/] ticket 865
 #include "wolfundersea.h"   // [UNDERSEA 2026-11-09/] ticket 652
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolfleaves.h"      // [FALLING LEAVES 2026-11-10/] ticket 718
@@ -6434,6 +6435,7 @@ void LLAppViewer::idle()
     { WolfVRScreen::SubPart wsp_("WolfFarGround"); WolfFarGround::instance().idle(); }   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     { WolfVRScreen::SubPart wsp_("WolfBirds"); WolfBirds::instance().idle(); }       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
     { WolfVRScreen::SubPart wsp_("WolfSeaLife"); WolfSeaLife::instance().idle(); }     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)
+    { WolfVRScreen::SubPart wsp_("WolfPlaneSound"); WolfPlaneSound::instance().idle(); }   // [PLANE SOUND 2026-11-15/] ticket 865: the passing planes' distant engines (wolfplanesound.h)
     { WolfVRScreen::SubPart wsp_("WolfUnderSea"); WolfUnderSea::instance().idle(); }   // [UNDERSEA 2026-11-09/] ticket 652: sea plants, fish and sharks (wolfundersea.h)
     { WolfVRScreen::SubPart wsp_("WolfSwimBubbles"); WolfSwimBubbles::instance().idle(); } // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles from mouths under the water
     { WolfVRScreen::SubPart wsp_("WolfLeaves"); WolfLeaves::instance().idle(); }   // [FALLING LEAVES 2026-11-10/] ticket 718: leaves falling from wolftree trees (wolfleaves.h)

@@ -22,7 +22,7 @@
 
 namespace WolfSoundEffects
 {
-    enum Group { WEATHER, THUNDER, BIRDS, NATURE, SEA_LIFE, BUBBLES, TELEPORT, GROUP_COUNT };
+    enum Group { WEATHER, THUNDER, BIRDS, NATURE, SEA_LIFE, BUBBLES, TELEPORT, PLANES, GROUP_COUNT };   // PLANES: [PLANE SOUND 2026-11-15/] t865
 
     /** 0 when the group is switched off here, else its volume (0 to 1). */
     float level(Group group);

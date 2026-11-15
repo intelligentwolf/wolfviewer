@@ -132,7 +132,12 @@ private:
 
     // the pointer to the wearable we're editing. NULL means we're not editing a wearable.
     LLViewerWearable *mWearablePtr;
-    LLViewerInventoryItem* mWearableItem;
+    // [WOLF CRASH 2026-11-15, ticket 868] The item is kept by id and looked up each time it is used. The raw
+    // LLViewerInventoryItem* stock kept from showWearable() outlived the item once the inventory model dropped it
+    // (LLInventoryModel::deleteObject erases mItemMap's LLPointer), and draw() -> updateVerbs() then made a virtual
+    // call on the destroyed object (W101 crash: its vptr was already LLRefCount's).
+    LLUUID mWearableItemID;
+    LLViewerInventoryItem* getWearableItem() const;
 
     // these are constant no matter what wearable we're editing
     LLButton* mBtnSaveAs;

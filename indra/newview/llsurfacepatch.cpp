@@ -1273,7 +1273,9 @@ void LLSurfacePatch::dirtyZ()
 
     dirty();
     mLastUpdateTime = gFrameTime;
-    ++mSurfacep->mTerrainRevision;   // <WolfViewer 2026-09-23/> see LLSurface::getTerrainRevision
+    // <WolfViewer 2026-09-23/> see LLSurface::getTerrainRevision
+    //++mSurfacep->mTerrainRevision;
+    mSurfacep->mTerrainRevision = LLSurface::nextTerrainRevision();   // [W107 PIPELINE 2026-11-14/] one counter for all surfaces (llsurface.h)
 }
 
 

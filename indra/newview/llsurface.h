@@ -130,6 +130,12 @@ public:
     // Goes up whenever any patch's heights change (LLSurfacePatch::dirtyZ), so a whole-surface
     // "has the terrain changed" test no longer has to visit every patch.
     U64 getTerrainRevision() const                  { return mTerrainRevision; }
+    // [W107 PIPELINE 2026-11-14] The next revision, from ONE counter for every surface (it was a count per surface):
+    // a revision other than 0 now names one state of one surface, so a result kept under (region, revision) - the
+    // automatic wave layout, wolfwavezones.cpp autoZones - cannot be mistaken for that of a later surface of a region
+    // that left and came back. It still goes up at every height change, which is all its other readers ask
+    // (wolfwaterfield.cpp terrainStamp, wolfnaturalwater.cpp terrainStamp). Main thread (LLSurfacePatch::dirtyZ).
+    static U64 nextTerrainRevision()                { static U64 sClock = 0; return ++sClock; }
     // Would a patch at (x, y) - which may lie outside this surface - have a neighbour patch that
     // simply has not been made yet? True inside this surface and inside any connected neighbour.
     bool expectsPatchAt(const S32 x, const S32 y) const;

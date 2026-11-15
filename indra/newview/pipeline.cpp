@@ -27,6 +27,8 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "pipeline.h"
+
+#include <algorithm>   // [W107 PIPELINE 2026-11-14/] std::is_sorted, std::sort, std::inplace_merge, std::unique, std::lower_bound (the nearby lights)
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] roleplay desaturate / blur
 #include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] no sun shafts inside a sea tunnel
 
@@ -6307,6 +6309,184 @@ static F32 calc_light_dist(LLVOVolume* light, const LLVector3& cam_pos, F32 max_
     return dist;
 }
 
+// [W107 PIPELINE 2026-11-14] See pipeline.h light_set_t.
+void LLPipeline::insertNearbyLight(const Light& light)
+{
+    light_set_t::iterator at = std::lower_bound(mNearbyLights.begin(), mNearbyLights.end(), light, Light::compare());
+    if (at == mNearbyLights.end() || Light::compare()(light, *at))
+    {
+        mNearbyLights.insert(at, light);
+    }
+}
+
+// [W107 PIPELINE 2026-11-14] The light loops wait on memory, not on arithmetic: each light is reached through
+// light -> drawable -> object -> light parameters, four places the frame's other work has pushed out of the cache
+// (perf, Paddington Station, 6,430 lights: LLDrawable::getVOVolume, a two-line function, was 2 % of the main thread).
+// With the lights side by side the next ones are known, so each step of a loop asks for one stage of three lights
+// further on: the drawable of the light 12 places ahead, the object of the one 8 ahead (its drawable was asked for four
+// steps ago), the parameters of the one 4 ahead. This function follows those pointers (the list holds a reference to
+// each drawable, the drawable to its object, the object owns its parameters: all live) and reads nothing else; the
+// rest are hints (wolfprefetch.h). The loops themselves read exactly what they read before.
+void LLPipeline::prefetchNearbyLights(size_t index) const
+{
+    const size_t count = mNearbyLights.size();
+    if (index + 12 < count)
+    {
+        const LLDrawable* drawable = mNearbyLights[index + 12].drawable;
+        if (drawable)
+        {
+            drawable->wolfPrefetchForLights();
+        }
+    }
+    if (index + 8 < count)
+    {
+        const LLDrawable* drawable = mNearbyLights[index + 8].drawable;
+        const LLViewerObject* object = drawable ? drawable->getVObj() : nullptr;
+        if (object)
+        {
+            object->wolfPrefetchForLights();
+        }
+    }
+    if (index + 4 < count)
+    {
+        const LLDrawable* drawable = mNearbyLights[index + 4].drawable;
+        const LLViewerObject* object = drawable ? drawable->getVObj() : nullptr;
+        if (object)
+        {
+            wolf_prefetch(object->getLightParams());
+        }
+    }
+}
+
+// [W107 PIPELINE 2026-11-14] The self test's reference (WolfPipelineSelfTest): the stock calcNearbyLights, as it stood
+// before mNearbyLights became a sorted vector (same tests, same fade rules, a std::set with one insert a light), run on
+// the present state WITHOUT its side effects: where the stock code cleared NEARBY_LIGHT on a dropped light and then
+// read that flag in its second loop, the dropped lights are remembered here instead. Reads only.
+std::vector<LLPipeline::Light> LLPipeline::stockNearbyLights(const LLVector3& cam_pos, F32 max_dist) const
+{
+    const S32 MAX_LOCAL_LIGHTS = 6;
+    typedef std::set<Light, Light::compare> stock_light_set_t;
+    stock_light_set_t nearby;
+    std::set<const LLDrawable*> dropped;
+    for (const Light& old_light : mNearbyLights)
+    {
+        const Light* light = &old_light;
+        LLDrawable* drawable = light->drawable;
+        const LLViewerObject *vobj = light->drawable->getVObj();
+        if(vobj && vobj->getAvatar()
+           && (vobj->getAvatar()->isTooComplex() || vobj->getAvatar()->isInMuteList() || vobj->getAvatar()->isTooSlow())
+           )
+        {
+            dropped.insert(drawable);
+            continue;
+        }
+        LLVOVolume* volight = drawable->getVOVolume();
+        if (!volight || !drawable->isState(LLDrawable::LIGHT))
+        {
+            dropped.insert(drawable);
+            continue;
+        }
+        if (light->fade <= -LIGHT_FADE_TIME)
+        {
+            dropped.insert(drawable);
+            continue;
+        }
+        if (!sRenderAttachedLights && volight && volight->isAttachment())
+        {
+            dropped.insert(drawable);
+            continue;
+        }
+        F32 dist = calc_light_dist(volight, cam_pos, max_dist);
+        F32 fade = light->fade;
+        if (dist < max_dist)
+        {
+            if (fade < 0)
+            {
+                fade += LIGHT_FADE_TIME;
+            }
+        }
+        else
+        {
+            if (fade >= LIGHT_FADE_TIME)
+            {
+                fade = -0.0001f; // was fully visible
+            }
+            else if (fade >= 0)
+            {
+                fade -= LIGHT_FADE_TIME;
+            }
+        }
+        nearby.insert(Light(drawable, dist, fade));
+    }
+
+    stock_light_set_t new_nearby_lights;
+    for (LLDrawable::ordered_drawable_set_t::const_iterator iter = mLights.begin();
+         iter != mLights.end(); ++iter)
+    {
+        LLDrawable* drawable = *iter;
+        LLVOVolume* light = drawable->getVOVolume();
+        if (!light || (drawable->isState(LLDrawable::NEARBY_LIGHT) && !dropped.count(drawable)))
+        {
+            continue;
+        }
+        if (light->isHUDAttachment())
+        {
+            continue; // no lighting from HUD objects
+        }
+        if (!sRenderAttachedLights && light && light->isAttachment())
+        {
+            continue;
+        }
+        LLVOAvatar * av = light->getAvatar();
+        if (av && (av->isTooComplex() || av->isInMuteList() || av->isTooSlow()))
+        {
+            continue;
+        }
+        F32 dist = calc_light_dist(light, cam_pos, max_dist);
+        if (dist >= max_dist)
+        {
+            continue;
+        }
+        new_nearby_lights.insert(Light(drawable, dist, 0.f));
+        if (!LLPipeline::sRenderDeferred && new_nearby_lights.size() > (U32)MAX_LOCAL_LIGHTS)
+        {
+            new_nearby_lights.erase(--new_nearby_lights.end());
+            const Light& last = *new_nearby_lights.rbegin();
+            max_dist = last.dist;
+        }
+    }
+
+    for (stock_light_set_t::iterator iter = new_nearby_lights.begin();
+         iter != new_nearby_lights.end(); iter++)
+    {
+        const Light* light = &(*iter);
+        if (LLPipeline::sRenderDeferred || nearby.size() < (U32)MAX_LOCAL_LIGHTS)
+        {
+            nearby.insert(*light);
+        }
+        else
+        {
+            Light* farthest_light = (const_cast<Light*>(&(*(nearby.rbegin()))));
+            if (light->dist < farthest_light->dist)
+            {
+                if (farthest_light->fade >= LIGHT_FADE_TIME)
+                {
+                    farthest_light->fade = -0.0001f; // was fully visible
+                }
+                else if (farthest_light->fade >= 0)
+                {
+                    farthest_light->fade -= LIGHT_FADE_TIME;
+                }
+            }
+            else
+            {
+                break; // none of the other lights are closer
+            }
+        }
+    }
+    return std::vector<Light>(nearby.begin(), nearby.end());
+}
+
 void LLPipeline::calcNearbyLights(LLCamera& camera)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_DRAWPOOL;
@@ -6336,17 +6516,34 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
             max_dist = llmin(RenderFarClip, LIGHT_MAX_RADIUS * 4.f);
         }
 
-        // UPDATE THE EXISTING NEARBY LIGHTS
-        // [W107 FARPERF 2026-11-14] The kept lights' set nodes are moved into the new set (std::set::extract, C++17)
-        // and the sets swapped, instead of a new node per light plus a copy of the whole set every frame. Same lights,
-        // same distances, same fades, same order (Light::compare); measured at Paddington Station (RenderFarClip
-        // 4096) this function was 8% of the main thread's samples, the set copy, inserts and frees about 15% of that.
-        light_set_t cur_nearby_lights;
-        for (light_set_t::iterator iter = mNearbyLights.begin(), next = iter;
-            iter != mNearbyLights.end(); iter = next)
+        // [W107 PIPELINE 2026-11-14] self test (WolfPipelineSelfTest frames to go): the stock result first, from the
+        // state as it is now; compared with the list at the end of this block
+        static LLCachedControl<S32> self_test_frames(gSavedSettings, "WolfPipelineSelfTest", 0);
+        const bool self_test = self_test_frames > 0;
+        std::vector<Light> stock_lights;
+        if (self_test)
         {
-            next = std::next(iter);
-            const Light* light = &(*iter);
+            stock_lights = stockNearbyLights(cam_pos, max_dist);
+        }
+
+        // UPDATE THE EXISTING NEARBY LIGHTS
+        // [W107 FARPERF 2026-11-14] (superseded the same day by the sorted vector below) The kept lights' set nodes
+        // were moved into the new set (std::set::extract) instead of a new node per light plus a copy of the whole set.
+        // [W107 PIPELINE 2026-11-14] mNearbyLights is a sorted vector now (pipeline.h light_set_t): the kept lights are
+        // packed to its front in place with their new distance and fade, then sorted only if the new distances changed
+        // the order. The stock per-light tests and fade rules below are unchanged. The "mark nearby lights
+        // not-removable" pass that followed the inserts is done here for the kept lights and at the insert for the new
+        // ones: the same lights get the same setVisible() (it stores LLViewerOctreeEntryData::sCurVisible in the
+        // light's octree entry, llvieweroctree.cpp:436, and nothing in between reads it).
+        // The lights dropped here are held to the end of this block, as the old set's nodes were, so a drawable whose
+        // last reference this is goes at the same point as before.
+        std::vector<Light> dropped_lights;
+        const size_t nearby_count = mNearbyLights.size();
+        size_t kept = 0;
+        for (size_t idx = 0; idx < nearby_count; ++idx)
+        {
+            prefetchNearbyLights(idx);
+            Light* light = &mNearbyLights[idx];
             LLDrawable* drawable = light->drawable;
             const LLViewerObject *vobj = light->drawable->getVObj();
             if(vobj && vobj->getAvatar()
@@ -6354,6 +6551,7 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
                )
             {
                 drawable->clearState(LLDrawable::NEARBY_LIGHT);
+                dropped_lights.push_back(*light);
                 continue;
             }
 
@@ -6361,16 +6559,19 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
             if (!volight || !drawable->isState(LLDrawable::LIGHT))
             {
                 drawable->clearState(LLDrawable::NEARBY_LIGHT);
+                dropped_lights.push_back(*light);
                 continue;
             }
             if (light->fade <= -LIGHT_FADE_TIME)
             {
                 drawable->clearState(LLDrawable::NEARBY_LIGHT);
+                dropped_lights.push_back(*light);
                 continue;
             }
             if (!sRenderAttachedLights && volight && volight->isAttachment())
             {
                 drawable->clearState(LLDrawable::NEARBY_LIGHT);
+                dropped_lights.push_back(*light);
                 continue;
             }
 
@@ -6405,19 +6606,35 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
                     fade -= LIGHT_FADE_TIME;
                 }
             }
-            light_set_t::node_type node = mNearbyLights.extract(iter);
-            node.value().dist = dist;
-            node.value().fade = fade;
-            cur_nearby_lights.insert(std::move(node));
+            light->dist = dist;
+            light->fade = fade;
+            //mark nearby lights not-removable.
+            ((LLViewerOctreeEntryData*) drawable)->setVisible();
+            if (kept != idx)
+            {
+                mNearbyLights[kept] = *light;
+            }
+            ++kept;
         }
-        mNearbyLights.swap(cur_nearby_lights);   // the lights dropped above stay in the old set, freed at the end of this block
+        mNearbyLights.erase(mNearbyLights.begin() + kept, mNearbyLights.end());
+        if (!std::is_sorted(mNearbyLights.begin(), mNearbyLights.end(), Light::compare()))
+        {
+            std::sort(mNearbyLights.begin(), mNearbyLights.end(), Light::compare());
+        }
 
         // FIND NEW LIGHTS THAT ARE IN RANGE
-        light_set_t new_nearby_lights;
+        // (a std::set, as stock: it is empty in nearly every frame, and the non-deferred rule below trims it as it grows)
+        std::set<Light, Light::compare> new_nearby_lights;
         for (LLDrawable::ordered_drawable_set_t::iterator iter = mLights.begin();
              iter != mLights.end(); ++iter)
         {
             LLDrawable* drawable = *iter;
+            // [W107 PIPELINE 2026-11-14/] the flag first: a light already nearby (nearly all of them) is passed over
+            // by the stock test just below either way, and this way without reaching for its object
+            if (drawable->isState(LLDrawable::NEARBY_LIGHT))
+            {
+                continue;
+            }
             LLVOVolume* light = drawable->getVOVolume();
             if (!light || drawable->isState(LLDrawable::NEARBY_LIGHT))
             {
@@ -6452,21 +6669,51 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
         }
 
         // INSERT ANY NEW LIGHTS
-        for (light_set_t::iterator iter = new_nearby_lights.begin();
+        if (LLPipeline::sRenderDeferred)
+        {
+            // [W107 PIPELINE 2026-11-14] Deferred: the stock loop (kept below for the other case) takes its first
+            // branch for every new light. They are added at the end in their own sorted order and merged into place in
+            // one pass (std::inplace_merge keeps a light already there in front of an equal new one, and std::unique
+            // then drops the new one: what the set's insert did), instead of one sorted insert each - a region
+            // arriving brings thousands in one frame.
+            if (!new_nearby_lights.empty())
+            {
+                const size_t old_count = mNearbyLights.size();
+                for (const Light& light : new_nearby_lights)
+                {
+                    mNearbyLights.push_back(light);
+                    ((LLDrawable*) light.drawable)->setState(LLDrawable::NEARBY_LIGHT);
+                    //mark nearby lights not-removable.
+                    ((LLViewerOctreeEntryData*) (LLDrawable*) light.drawable)->setVisible();
+                }
+                std::inplace_merge(mNearbyLights.begin(), mNearbyLights.begin() + old_count, mNearbyLights.end(), Light::compare());
+                mNearbyLights.erase(std::unique(mNearbyLights.begin(), mNearbyLights.end(),
+                                                [](const Light& a, const Light& b)
+                                                {
+                                                    return !Light::compare()(a, b) && !Light::compare()(b, a);
+                                                }),
+                                    mNearbyLights.end());
+            }
+        }
+        else
+        {
+        for (std::set<Light, Light::compare>::iterator iter = new_nearby_lights.begin();
              iter != new_nearby_lights.end(); iter++)
         {
             const Light* light = &(*iter);
             if (LLPipeline::sRenderDeferred || mNearbyLights.size() < (U32)MAX_LOCAL_LIGHTS)
             {
-                mNearbyLights.insert(*light);
+                insertNearbyLight(*light);
                 ((LLDrawable*) light->drawable)->setState(LLDrawable::NEARBY_LIGHT);
+                //mark nearby lights not-removable.
+                ((LLViewerOctreeEntryData*) (LLDrawable*) light->drawable)->setVisible();
             }
             else
             {
                 // crazy cast so that we can overwrite the fade value
                 // even though gcc enforces sets as const
                 // (fade value doesn't affect sort so this is safe)
-                Light* farthest_light = (const_cast<Light*>(&(*(mNearbyLights.rbegin()))));
+                Light* farthest_light = &mNearbyLights.back();
                 if (light->dist < farthest_light->dist)
                 {
                     // mark light to fade out
@@ -6492,13 +6739,32 @@ void LLPipeline::calcNearbyLights(LLCamera& camera)
                 }
             }
         }
+        }
 
-        //mark nearby lights not-removable.
-        for (light_set_t::iterator iter = mNearbyLights.begin();
-             iter != mNearbyLights.end(); iter++)
+        if (self_test)
         {
-            const Light* light = &(*iter);
-            ((LLViewerOctreeEntryData*) light->drawable)->setVisible();
+            // light by light: the same drawable, and distance and fade the same bits
+            size_t differ = stock_lights.size() == mNearbyLights.size() ? 0 : 1;
+            size_t first = 0;
+            for (size_t i = 0; differ == 0 && i < stock_lights.size(); ++i)
+            {
+                const Light& a = stock_lights[i];
+                const Light& b = mNearbyLights[i];
+                if (a.drawable != b.drawable || memcmp(&a.dist, &b.dist, sizeof(F32)) != 0 || memcmp(&a.fade, &b.fade, sizeof(F32)) != 0)
+                {
+                    differ = 1;
+                    first = i;
+                }
+            }
+            LL_INFOS("WolfPipeline") << "nearby lights self test: stock " << stock_lights.size() << ", kept list "
+                                     << mNearbyLights.size() << ": "
+                                     << (differ ? "DIFFERENT" : "the same lights in the same order, distances and fades bit for bit");
+            if (differ)
+            {
+                LL_CONT << " (first difference at " << first << ")";
+            }
+            LL_CONT << LL_ENDL;
+            gSavedSettings.setS32("WolfPipelineSelfTest", self_test_frames - 1);
         }
 
         // [W107 FARPERF 2026-11-14] the counts behind this function's cost, in the log every 10 s while WolfLogFrameRate is on
@@ -10143,6 +10409,8 @@ void LLPipeline::renderDeferredLighting()
                     { //stop collecting lights once we hit the limit
                         break;
                     }
+                    // [W107 PIPELINE 2026-11-14/] ask for the objects of the lights a few places on (prefetchNearbyLights)
+                    prefetchNearbyLights((size_t)(count - 1));
 
                     LLDrawable * drawablep = iter->drawable;
                     LLVOVolume * volume = drawablep->getVOVolume();

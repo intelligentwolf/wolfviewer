@@ -22435,6 +22435,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>384</integer>
 		</map>
+		<key>WolfPipelineSelfTest</key>
+		<map>
+			<key>Comment</key>
+			<string>[W107 PIPELINE 2026-11-14] Debugging. Set to N: for the next N frames the nearby local lights are also worked out the stock way (a sorted set, one insert a light) and compared, light by light, distance and fade bit for bit, with the list the viewer now keeps (LLPipeline::calcNearbyLights); and every automatic wave layout taken from the kept copy is worked out again and compared (WolfWaveZones::autoZones). The results go to the log (WolfPipeline). Counts down to 0 by itself. Slow while it runs.</string>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfStaticShadowBatchSelfTest</key>
 		<map>
 			<key>Comment</key>

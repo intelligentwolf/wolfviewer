@@ -74,6 +74,10 @@ public:
         U64 mPendingStamp = 0;
         F64 mPendingSince = 0.0;
         F64 mBakedAt = 0.0;
+        // [W107 PIPELINE 2026-11-14] Names the exposure data held (mExpo and its span): a new number, never used
+        // before, each time bake() stores them. WolfWaveZones keeps each region's automatic layout under it
+        // (wolfwavezones.cpp autoZones), because that layout reads the agent region's exposure.
+        U64 mExpoSerial = 0;
         bool mReady = false;
         LLUUID mRegionID;   // [BASIC WOLF SEA 2026-10-19/] the region baked for (handles repeat across grids; WolfWaterField::get)
         // CPU copies of the two bakes, for the boat rocker's wave sampler (wolfboatrock.cpp
@@ -262,6 +266,7 @@ private:
     std::vector<F32> mSurfScale, mScaleNum, mScaleDen, mScaleTmpN, mScaleTmpD;   // [SURF HEIGHT 2026-10-02/] the surf height bake
     bool mRebakeAll = false;   // [WAVES 2026-09-07] set by invalidate()
     U32 mBakes = 0;
+    U64 mExpoClock = 0;   // [W107 PIPELINE 2026-11-14/] the last Field::mExpoSerial given out
     U32 mLastSurfTexels = 0;
 };
 

@@ -895,6 +895,13 @@ protected:
         {
             bool operator()(const Light& a, const Light& b) const
             {
+                // [W107 PIPELINE 2026-11-14] A distance that is not a number (a light whose position is not finite)
+                // sorts after every number. The stock test below answers "neither is nearer" for such a pair and
+                // falls to the pointers, which is not an ordering std::sort may be given (it can then read outside
+                // the array); for two numbers this is the stock comparison unchanged.
+                const bool a_nan = llisnan(a.dist), b_nan = llisnan(b.dist);
+                if (a_nan != b_nan)
+                    return b_nan;
                 if ( a.dist < b.dist )
                     return true;
                 else if ( a.dist > b.dist )
@@ -904,7 +911,23 @@ protected:
             }
         };
     };
-    typedef std::set< Light, Light::compare > light_set_t;
+    // [W107 PIPELINE 2026-11-14] The nearby lights are a std::vector kept sorted by Light::compare (begin() the closest,
+    // back() the farthest, no two equal), no longer a std::set. Paddington Station at RenderFarClip 4096 has 6,430 of
+    // them and every frame walks them three times (calcNearbyLights, setupHWLights, the local light loop of
+    // renderDeferredLighting): as tree nodes each step was a pointer to somewhere else in memory, and a light's node had
+    // to be taken out and put back every frame because its distance is the sort key. Side by side they are read in
+    // order, the loops can ask for the next lights' objects ahead of time (wolfprefetch.h), and a frame in which the
+    // order did not change (a still camera) sorts nothing. Same lights, same order, same distances and fades.
+    //typedef std::set< Light, Light::compare > light_set_t;
+    typedef std::vector<Light> light_set_t;
+    // What a set insert did: in its sorted place, and not at all if an equal light (same distance, same drawable) is there.
+    void insertNearbyLight(const Light& light);
+    // Asks for the objects of the lights a few places after `index` to be loaded (wolfprefetch.h). It follows their
+    // pointers (light -> drawable -> object -> light parameters) and reads nothing else of them.
+    void prefetchNearbyLights(size_t index) const;
+    // WolfPipelineSelfTest: what the stock calcNearbyLights (the std::set) would leave in mNearbyLights this frame,
+    // worked out from the present state without changing anything.
+    std::vector<Light> stockNearbyLights(const LLVector3& cam_pos, F32 max_dist) const;
 
     LLDrawable::ordered_drawable_set_t  mLights;
     light_set_t                     mNearbyLights; // lights near camera

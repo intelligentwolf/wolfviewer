@@ -185,6 +185,17 @@ public:
     const Tiles& editorTilesFor(const Region& r) const { return r.mTiles; }
     /** The automatic layout, from the exposure field of the agent region's bake. */
     std::string defaultZones(const Region& r) const;
+    /**
+     * [W107 PIPELINE 2026-11-14] defaultZones(r), kept while everything it reads is unchanged. One layouts reply marks
+     * every water field stale, each field's bake calls fill(), and fill() asked defaultZones for EVERY region of the
+     * reply: 20 fields x 20 regions = 400 flood fills over terrain that had not changed, about 2.8 % of the main thread
+     * at Paddington Station (RenderFarClip 4096) and most of each bake's hitch. What defaultZones reads, and so what the
+     * kept copy is filed under (AutoKey): the record's handle, grid and cell; the agent's region and the exposure data of
+     * its water field (WolfWaterField::Field::mExpoSerial, 0 when it has no ready field); the record's own region - there
+     * or not, which region, its terrain revision (LLSurface::getTerrainRevision: every height change, one counter for
+     * all surfaces) and its water height. Any of them different: computed again. The same string either way.
+     */
+    const std::string& autoZones(const Region& r) const;
 
     /**
      * Fill the zone-energy span of a region's field (WolfWaterField::bake uploads it): w x h
@@ -240,6 +251,29 @@ private:
     static F32 energyOf(char z);
 
     std::map<U64, Region> mByHandle;
+    // [W107 PIPELINE 2026-11-14] see autoZones()
+    struct AutoKey
+    {
+        S32    mW = 0, mH = 0, mCell = 0;
+        U64    mAgentHandle = 0;
+        U64    mExpoSerial = 0;
+        bool   mHasRegion = false;
+        LLUUID mRegionID;
+        U64    mTerrainRevision = 0;
+        F32    mWaterHeight = 0.f;
+        bool operator==(const AutoKey& o) const
+        {
+            return mW == o.mW && mH == o.mH && mCell == o.mCell && mAgentHandle == o.mAgentHandle
+                && mExpoSerial == o.mExpoSerial && mHasRegion == o.mHasRegion && mRegionID == o.mRegionID
+                && mTerrainRevision == o.mTerrainRevision && mWaterHeight == o.mWaterHeight;
+        }
+    };
+    struct AutoMemo
+    {
+        AutoKey     mKey;
+        std::string mZones;
+    };
+    mutable std::map<U64, AutoMemo> mAutoMemo;   // record handle -> its last automatic layout
     struct Preview { Tiles mTiles; bool mEnabled = true; };
     std::map<U64, Preview> mPreview;       // handle -> the layout being edited
     LLSD mPreviewParams;                   // slider values being edited (undefined = none)

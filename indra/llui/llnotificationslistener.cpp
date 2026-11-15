@@ -144,7 +144,15 @@ void LLNotificationsListener::listChannelNotifications(const LLSD& params) const
 {
     LLReqID reqID(params);
     LLSD response(reqID.makeResponse());
-    LLNotificationChannelPtr channel(mNotifications.getChannel(params["channel"]));
+    // [W106 QUIT FIX 2026-11-15] Look the channel up without taking ownership. LLNotificationChannelPtr is a
+    // boost::intrusive_ptr (llnotifications.h:823) on LLRefCount (llnotifications.h:744-746); a channel owned some other way
+    // has a count of 0 - LLNotificationChiclet's std::unique_ptr<ChicletNotificationChannel> (llchiclet.h:926) - so a
+    // temporary intrusive_ptr took it 0 -> 1 -> 0 and
+    // LLRefCount::unref deleted it (llrefcount.h:64-67). The owner deleted it again at quit: SIGSEGV in
+    // ~LLNotificationChiclet (llchiclet.cpp:349) during shutdownViews, seen after LEAP scripts listed the channels.
+    // LLInstanceTracker::getInstance gives a shared_ptr with a no-op deleter (llinstancetracker.h:238-244, 251-253).
+    // Source: stock llnotificationslistener.cpp:147 (same lookup through LLNotifications::getChannel, llnotifications.cpp:1426-1429)
+    LLNotificationChannel::ptr_t channel(LLNotificationChannel::getInstance(params["channel"].asString()));
     if (channel)
     {
         LLSD notifications(LLSD::emptyArray());
@@ -215,7 +223,9 @@ public:
         // Connect to the specified channel on construction. Because
         // LLEventTrackable is a base, we should automatically disconnect when
         // destroyed.
-        LLNotificationChannelPtr channelptr(llnotifications.getChannel(channel));
+        // [W106 QUIT FIX 2026-11-15] the same non-owning lookup as listChannelNotifications above (a count-0 channel
+        // would be deleted when an intrusive_ptr let go of it)
+        LLNotificationChannel::ptr_t channelptr(LLNotificationChannel::getInstance(channel));
         if (channelptr)
         {
             // Insert our processing as a "passed filter" listener. This way

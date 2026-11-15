@@ -93,11 +93,15 @@
          Where the plan finds a hill in the way, its two choices with their grade and length, in place of the station's row
          (climbing is the default: Climb the hill only puts the question away) -->
     <panel follows="left|top" height="72" layout="topleft" left="0" name="tunnel_choice_panel" top="186" visible="false" width="500">
-        <text follows="left|top" height="44" layout="topleft" left="16" name="tunnel_choice_text" top="0" width="468" word_wrap="true" />
-        <button follows="left|top" height="24" label="Tunnel through" layout="topleft" left="16" name="tunnel_choice_tunnel" top="46" width="150"
+        <!-- a heading, then one row per choice: its button and its length and grade in a line or two (the plan's whole
+             sentence is the row's tool tip). 72 px: the drawn list's heading starts at 260 -->
+        <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="16" name="tunnel_choice_text" top="0" width="468" />
+        <button follows="left|top" height="24" label="Tunnel through" layout="topleft" left="16" name="tunnel_choice_tunnel" top="18" width="116"
          tool_tip="Take the line through the hill in a tunnel, with brick portals at each end" />
-        <button follows="left|top" height="24" label="Climb the hill" layout="topleft" left="174" name="tunnel_choice_climb" top="46" width="150"
+        <text follows="left|top" font="SansSerifSmall" height="26" layout="topleft" left="138" name="tunnel_choice_tunnel_text" top="18" width="346" word_wrap="true" />
+        <button follows="left|top" height="24" label="Climb the hill" layout="topleft" left="16" name="tunnel_choice_climb" top="46" width="116"
          tool_tip="Keep the line going over the hill (as it is now)" />
+        <text follows="left|top" font="SansSerifSmall" height="26" layout="topleft" left="138" name="tunnel_choice_climb_text" top="46" width="346" word_wrap="true" />
     </panel>
     <text follows="left|top" height="18" layout="topleft" left="16" name="drawn_heading" top="260" width="380">What you have drawn (pick one to change or take it out):</text>
     <scroll_list draw_heading="false" follows="left|top" height="80" layout="topleft" left="16" name="track_items" top="280" width="380">

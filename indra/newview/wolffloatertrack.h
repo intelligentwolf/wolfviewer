@@ -317,6 +317,8 @@ private:
     LLPanel* mTTPanel = nullptr;
     LLPanel* mSugPanel = nullptr;      // [TUNNELS] a hill is in the way: Tunnel through / Climb the hill
     LLTextBox* mSugText = nullptr;
+    LLTextBox* mSugTunnelText = nullptr;  // the two choices' figures (updateControls)
+    LLTextBox* mSugClimbText = nullptr;
     LLButton *mSugTunnelBtn = nullptr, *mSugClimbBtn = nullptr;
     LLComboBox* mTTSize = nullptr;
     LLSpinCtrl *mTTRoads = nullptr, *mTTSpread = nullptr;

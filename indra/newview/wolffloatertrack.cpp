@@ -415,6 +415,8 @@ bool WolfFloaterTrack::postBuild()
     mTTTurns = mTTPanel->getChild<LLTextBox>("tt_turns");
     mSugPanel = getChild<LLPanel>("tunnel_choice_panel");
     mSugText = mSugPanel->getChild<LLTextBox>("tunnel_choice_text");
+    mSugTunnelText = mSugPanel->getChild<LLTextBox>("tunnel_choice_tunnel_text");
+    mSugClimbText = mSugPanel->getChild<LLTextBox>("tunnel_choice_climb_text");
     mSugTunnelBtn = mSugPanel->getChild<LLButton>("tunnel_choice_tunnel");
     mSugClimbBtn = mSugPanel->getChild<LLButton>("tunnel_choice_climb");
     mItemsList = getChild<LLScrollListCtrl>("track_items");
@@ -3959,11 +3961,31 @@ void WolfFloaterTrack::updateControls()
     mSugPanel->setVisible(show_sug);
     if (show_sug)
     {
+        // each choice in a line or two from the plan's own figures (tracktool/layout.py _tunnel_stats: length_m, grade,
+        // deepest_m; _climb_stats: rise_m, grade, highest_m; _climb_impossible / the MAX_FILL refusal: possible false with
+        // rise_m or highest_m); the plan's whole sentence is the row's tool tip
+        const LLSD& tun = sug["tunnel"];
         const LLSD& climb = sug["climb"];
-        std::string t = "A hill is in the way of your line. " + sug["tunnel"]["text"].asString();
-        t += "\n" + (climb.isMap() && climb.has("text") ? climb["text"].asString() : std::string("Climb the hill: the line goes over it."));
-        if (!mMayTunnel) t += "\n" + (mNoTunnelReason.empty() ? std::string("You cannot make tunnels in this region.") : mNoTunnelReason);
-        setTextIfChanged(mSugText, t);
+        setTextIfChanged(mSugText, std::string("A hill is in the way of your line:"));
+        const std::string tt = mMayTunnel
+            ? llformat("%d m of tunnel, climbing at most ", tun["length_m"].asInteger()) + tun["grade"].asString()
+              + llformat(", with up to %d m of hill over it.", ll_round((F32)tun["deepest_m"].asReal()))
+            : (mNoTunnelReason.empty() ? std::string("You cannot make tunnels in this region.") : mNoTunnelReason);
+        setTextIfChanged(mSugTunnelText, tt);
+        mSugTunnelText->setToolTip(tun["text"].asString());
+        const bool climb_no = climb.isMap() && climb["possible"].isBoolean() && !climb["possible"].asBoolean();
+        std::string ct;
+        if (!climb.isMap()) ct = "The line goes over the hill.";
+        else if (climb_no && climb.has("highest_m"))
+            ct = llformat("Not possible as drawn: the line would stand %d m above the ground.", ll_round((F32)climb["highest_m"].asReal()));
+        else if (climb_no)
+            ct = llformat("Not possible as drawn: the ground rises %d m, too steeply for trains.", ll_round((F32)climb["rise_m"].asReal()));
+        else if (climb["possible"].isBoolean())
+            ct = llformat("Over the top %d m above the lowest ground, climbing at most ", ll_round((F32)climb["rise_m"].asReal()))
+                 + climb["grade"].asString() + llformat(", up to %d m above the ground.", ll_round((F32)climb["highest_m"].asReal()));
+        else ct = climb["text"].asString();
+        setTextIfChanged(mSugClimbText, ct);
+        mSugClimbText->setToolTip(climb.isMap() ? climb["text"].asString() : std::string());
         mSugTunnelBtn->setEnabled(!b && mMayTunnel);
         // the climb cannot be chosen when it cannot be made (the plan says so in its words)
         mSugClimbBtn->setEnabled(!b && !(climb.isMap() && climb.has("possible") && climb["possible"].isBoolean() && !climb["possible"].asBoolean()));

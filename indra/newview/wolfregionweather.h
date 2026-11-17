@@ -238,6 +238,17 @@ public:
      *  the next minute's poll. Ignored for any region but the agent's. */
     void setUnderSeaLocal(const LLUUID& region, bool on);
 
+    /** [KRAKEN 2026-11-17] ticket 823: weather.php's `kraken` block for this region (wolfstorm/php/wolf_ambient_lib.php
+     *  wa_kraken_payload: {ambient, default (true), on} and, while on, {near}). Kraken sightings happen in the sea unless the
+     *  estate owner or a manager switched them off; no block (an older grid) or no row yet is off. wolfkraken.cpp draws it. */
+    bool krakenAllowed() const { return mHaveRow && mKrakenOn; }
+    /** [KRAKEN 2026-11-17] Whether region `id` round this one allows a sighting: this region's is on and `id` is in
+     *  `kraken.near` (wa_kraken_near: the regions within 600 m whose own switch is on; one within 600 m not listed is off). */
+    bool krakenNear(const LLUUID& id) const;
+    /** [KRAKEN 2026-11-17] Region/Estate saved a new choice for `region` (wolfpassingplanes.cpp): show it now instead of at
+     *  the next minute's poll. Ignored for any region but the agent's. */
+    void setKrakenLocal(const LLUUID& region, bool on);
+
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
 
@@ -262,6 +273,7 @@ private:
     void readSounds(const LLSD& row);    ///< [NATURE SOUNDS 2026-11-03/] weather.php region payload `sounds` (absent = off)
     void readSeaLife(const LLSD& row);   ///< [SEA LIFE 2026-11-03/] weather.php region payload `sealife` (absent = off)
     void readUnderSea(const LLSD& row);  ///< [UNDERSEA 2026-11-09/] weather.php region payload `undersea` (absent = off)
+    void readKraken(const LLSD& row);    ///< [KRAKEN 2026-11-17/] weather.php region payload `kraken` (absent = off)
 
     bool               mHaveRow = false;
     bool               mBirdsOn = false;        // [BIRDS 2026-11-02/] weather.php `birds.on`
@@ -276,6 +288,8 @@ private:
     F32                mUnderSeaWarm = 0.f;     // [UNDERSEA 2026-11-09/] weather.php `undersea.warm`, 0..1
     F32                mUnderSeaCold = 0.f;     // [UNDERSEA 2026-11-09/] weather.php `undersea.cold`, 0..1
     std::vector<LLUUID> mUnderSeaNear;          // [UNDERSEA 2026-11-09/] weather.php `undersea.near`
+    bool               mKrakenOn = false;       // [KRAKEN 2026-11-17/] weather.php `kraken.on`
+    std::vector<LLUUID> mKrakenNear;            // [KRAKEN 2026-11-17/] weather.php `kraken.near`
     bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
     bool               mAutoEnvSky = false;
     bool               mAutoEnvWeather = false;

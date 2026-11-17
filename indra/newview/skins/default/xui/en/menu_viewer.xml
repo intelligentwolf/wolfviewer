@@ -1946,6 +1946,14 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerUnderSea" />
             <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
         </menu_item_check>
+        <!-- [KRAKEN 2026-11-17] ticket 823: now and then a Kraken rises in the open sea (wolfkraken.cpp), your own on/off; on
+             by default (WolfViewerKraken). The region owner's is in Region/Estate > Region. Wolf regions only, visitors
+             included: gone (not greyed) elsewhere. -->
+        <menu_item_check label="Kraken Sightings" name="WolfKraken">
+            <menu_item_check.on_check function="CheckControl" parameter="WolfViewerKraken" />
+            <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerKraken" />
+            <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
+        </menu_item_check>
         <!-- [FALLING LEAVES 2026-11-10] ticket 718: a few leaves falling from trees whose description contains "wolftree"
              (wolfleaves.cpp), coloured by the season of the region's place, none in winter; your own on/off, on by default
              (WolfViewerFallingLeaves). Wolf regions only, visitors included: gone (not greyed) elsewhere. -->

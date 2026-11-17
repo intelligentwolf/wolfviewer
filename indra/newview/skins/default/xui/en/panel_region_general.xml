@@ -674,6 +674,30 @@
      visible="false"
      width="442"
      wrap="true" />
+    <!-- [KRAKEN 2026-11-17] ticket 823: Kraken sightings in the open sea (wolfkraken.cpp); on unless switched off. The
+         block is stacked by wolfpassingplanes.cpp, so these tops are only where it starts. -->
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Kraken sightings on this region"
+     layout="topleft"
+     left="10"
+     name="wolf_kraken_check"
+     tool_tip="Now and then, far out in this region's open sea, a great Kraken rises, waves its arms, roars and sinks again (rarely; it can reach for a passing boat, just for show). It never harms anyone or anything, and never comes up on land, near builds or in shallow water. Each visitor sees it in their own viewer and can switch it off for themselves. Saved at once. Only the estate owner or an estate manager can change it."
+     top="692"
+     visible="false"
+     width="460" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="28"
+     name="wolf_kraken_state"
+     top="712"
+     visible="false"
+     width="442"
+     wrap="true" />
     <text
      follows="left|top"
      font="SansSerifSmall"
@@ -681,7 +705,7 @@
      layout="topleft"
      left="28"
      name="wolf_planes_status"
-     top="692"
+     top="730"
      visible="false"
      width="442"
      wrap="true" />
@@ -719,6 +743,11 @@
     <string name="undersea_saved_on">Saved: fish and sea plants may now live in this region's sea.</string>
     <string name="undersea_saved_off">Saved: no more fish and sea plants here.</string>
     <string name="undersea_save_failed">Could not save fish and sea plants:</string>
+    <!-- [KRAKEN 2026-11-17] the same texts as WolfStorm's region_passing_planes.js TEXT kraken* -->
+    <string name="kraken_on_default">On: the default.</string>
+    <string name="kraken_saved_on">Saved: the Kraken may now be seen in this region's sea.</string>
+    <string name="kraken_saved_off">Saved: no more Kraken sightings here.</string>
+    <string name="kraken_save_failed">Could not save Kraken sightings:</string>
     <!-- [STYLES 2026-11-10] the kinds' words (the same as WolfStorm's region_passing_planes.js TEXT) -->
     <string name="kind_auto">automatic</string>
     <string name="kind_vintage">classic propeller planes</string>

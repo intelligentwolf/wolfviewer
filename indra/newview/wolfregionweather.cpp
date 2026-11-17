@@ -247,6 +247,7 @@ void WolfRegionWeather::onRegionChanged()
     readSounds(LLSD());      // [NATURE SOUNDS 2026-11-03/] the old region's answer
     readSeaLife(LLSD());     // [SEA LIFE 2026-11-03/] the old region's answer
     readUnderSea(LLSD());    // [UNDERSEA 2026-11-09/] the old region's answer
+    readKraken(LLSD());      // [KRAKEN 2026-11-17/] the old region's answer
     mProfile = WolfWeatherProfile();
     mKind.clear();
     mRegionName.clear();
@@ -483,6 +484,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     self.readSounds(r);  // [NATURE SOUNDS 2026-11-03/]
     self.readSeaLife(r); // [SEA LIFE 2026-11-03/]
     self.readUnderSea(r); // [UNDERSEA 2026-11-09/]
+    self.readKraken(r);   // [KRAKEN 2026-11-17/]
     self.mLastError.clear();
     if (include_parcel && self.mParcelGate.accepts(parcel_generation))
     {
@@ -834,6 +836,42 @@ void WolfRegionWeather::setUnderSeaLocal(const LLUUID& region, bool on)
     mUnderSeaOn = on;
 }
 
+// [KRAKEN 2026-11-17] ticket 823. Source: wolfstorm/php/weather.php region_payload `kraken` = wolf_ambient_lib.php
+// wa_kraken_payload {ambient, default (true), on, near?} (single-region reads only). No block, or anything malformed, is off.
+void WolfRegionWeather::readKraken(const LLSD& row)
+{
+    const LLSD b = (row.isMap() && row.has("kraken") && row["kraken"].isMap()) ? row["kraken"] : LLSD();
+    const bool on = b.isMap() && b["on"].isBoolean() && b["on"].asBoolean();
+    if (on != mKrakenOn) LL_INFOS("WolfKraken") << "Kraken sightings on this region: " << (on ? "on" : "off") << LL_ENDL;
+    mKrakenOn = on;
+    // Source: wolf_ambient_lib.php wa_kraken_near (lower-case uuid strings, only while on). Malformed entries are left out.
+    mKrakenNear.clear();
+    if (on && b["near"].isArray())
+    {
+        for (LLSD::array_const_iterator it = b["near"].beginArray(); it != b["near"].endArray(); ++it)
+        {
+            LLUUID id;
+            if (it->isString() && id.set(it->asString(), false) && id.notNull()) mKrakenNear.push_back(id);
+        }
+    }
+}
+
+bool WolfRegionWeather::krakenNear(const LLUUID& id) const
+{
+    if (!krakenAllowed()) return false;
+    return std::find(mKrakenNear.begin(), mKrakenNear.end(), id) != mKrakenNear.end();
+}
+
+void WolfRegionWeather::setKrakenLocal(const LLUUID& region, bool on)
+{
+    LLViewerRegion* here = gAgent.getRegion();
+    if (!here || here->getRegionID() != region) return;
+    LL_INFOS("WolfKraken") << "Kraken sightings on this region: " << (on ? "on" : "off") << " (saved in Region/Estate)" << LL_ENDL;
+    // turned on here: the neighbours come with the next weather read (within the minute)
+    if (!on || !mKrakenOn) mKrakenNear.clear();
+    mKrakenOn = on;
+}
+
 void WolfRegionWeather::applyPush(const LLSD& row)
 {
     if (!row.isMap()) return;
@@ -855,6 +893,7 @@ void WolfRegionWeather::applyPush(const LLSD& row)
     readSounds(row);  // [NATURE SOUNDS 2026-11-03/] so is `sounds`
     readSeaLife(row); // [SEA LIFE 2026-11-03/] and `sealife`
     readUnderSea(row); // [UNDERSEA 2026-11-09/] and `undersea`
+    readKraken(row);   // [KRAKEN 2026-11-17/] and `kraken` (weather.php's POST reply passes $robust: the block is in it)
     recomputeParcelApplies();
     mLastError.clear();
     mGeneration++;
@@ -1016,6 +1055,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
             self.readSounds(reply);  // [NATURE SOUNDS 2026-11-03/]
             self.readSeaLife(reply); // [SEA LIFE 2026-11-03/]
             self.readUnderSea(reply); // [UNDERSEA 2026-11-09/]
+            self.readKraken(reply);   // [KRAKEN 2026-11-17/]
             self.recomputeParcelApplies();
         }
     }

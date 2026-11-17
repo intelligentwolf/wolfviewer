@@ -115,6 +115,8 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 self.path("wolfnature")
                 # [SEA LIFE 2026-11-03] the dolphins' and whales' sounds (wolfsealife.cpp) + SOURCES.md
                 self.path("wolfsealife")
+                # [KRAKEN 2026-11-17] ticket 823: the Kraken's sounds (wolfkraken.cpp, our own synthesis) + SOURCES.md
+                self.path("wolfkraken")
                 # [SOUND EFFECTS 2026-11-06] WolfViewer's own teleport sounds (wolfsoundeffects.cpp) + SOURCES.md
                 self.path("wolfteleport")
                 # [2026-11-02] the clouds' blue noise (wolftkclouds.cpp, cloudsCommon.glsl getSTBN) + its generator and SOURCES.md

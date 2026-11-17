@@ -151,6 +151,7 @@
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
+#include "wolfkraken.h"      // [KRAKEN 2026-11-17/] ticket 823
 #include "wolfundersea.h"   // [UNDERSEA 2026-11-09/] ticket 652
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolfleaves.h"      // [FALLING LEAVES 2026-11-10/] ticket 718
@@ -4437,6 +4438,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
             WolfFarGround::instance().renderDeferred();
             WolfBirds::instance().renderDeferred();   // [BIRDS 2026-11-02/] ticket 445: the wild birds, lit as the scene
             WolfSeaLife::instance().renderDeferred(); // [SEA LIFE 2026-11-03/] ticket 499: dolphins, whales and their spray
+            WolfKraken::instance().renderDeferred();  // [KRAKEN 2026-11-17/] ticket 823: the Kraken, its foam and spray
             WolfUnderSea::instance().renderDeferred(); // [UNDERSEA 2026-11-09/] ticket 652: sea plants, fish and sharks
             WolfSwimBubbles::instance().renderDeferred();   // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles under the water
             WolfLeaves::instance().renderDeferred();   // [FALLING LEAVES 2026-11-10/] ticket 718: leaves from wolftree trees

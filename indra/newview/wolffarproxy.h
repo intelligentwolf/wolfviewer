@@ -212,7 +212,7 @@ private:
         LLVector3 mLocal;
         bool mSeen = false;
     };
-    static constexpr U32 FAR_MOVER_SAMPLES = 6;
+    static constexpr U32 FAR_MOVER_SAMPLES = 24;
     FarMover mFarSample[FAR_MOVER_SAMPLES];
     F64 mLastFadeAt = 0.0;
     F64 mNextRefresh = 0.0;

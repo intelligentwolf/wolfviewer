@@ -2019,6 +2019,8 @@ namespace
         f.depth_tex = gPipeline.mRT->deferredScreen.getDepth();
         f.pre_exposure = sFrame.exposure;
         f.reset_history = gSnapshot;
+        // [WolfViewer 2026-11-17 ticket 886] a snapshot frame builds its clouds' history within itself (wolftkclouds.cpp render)
+        f.snapshot = gSnapshot && !probe;
         // [WolfViewer 2026-10-19] a cut (updateLight sCloudReseed): the cloud field's offsets restart at a phase made from the
         // region's id and the UTC hour (wolftkclouds.cpp), so two arrivals on one region in the same hour show the same field,
         // drifted by the wind in between; a session's accumulated drift no longer decides what a region looks like on arrival

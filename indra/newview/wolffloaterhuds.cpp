@@ -27,6 +27,9 @@
 #include "wolffloatergreedy.h"   // [W104 FEATFIX 2026-11-11/] WolfGreedyGame: the Greedy HUD
 #include "wolfweatherprops.h"   // [WEATHER PROPS 2026-11-13/] the switch, for the tile's state line
 
+#include <algorithm>    // [HUDS SMALL 2026-11-14/] std::find, std::sort (the grid in reading order)
+#include <functional>   // [HUDS SMALL 2026-11-14/] std::greater
+
 namespace
 {
     // Source: floater_wolf_huds.xml tile_<id> / state_<id>; the order is ETile's.
@@ -51,6 +54,14 @@ namespace
         "Weather Props", "Tutorial Videos",   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml name_weatherprops / name_tutorials
         "The Train Builder", "Lay Railway Track"   // [HUDS TILES 2 2026-11-14/] floater_wolf_huds.xml name_trainbuilder / name_track
     };
+
+    // [HUDS SMALL 2026-11-14] the status line's two kinds of words, here once so fitToArea can measure the tallest
+    // (they were written in onTile [W104 FEATFIX A7] and refreshTiles, unchanged)
+    const char* const NOT_ON_WOLF_STATUS = "Wolf HUDs work on Wolf Territories regions only (Tessa's Compass works everywhere).";
+    std::string pressNote(WolfFloaterHuds::ETile t)
+    {
+        return std::string(TILE_NAMES[t]) + " did not come on. If a message popped up, it says why; otherwise try again in a moment.";
+    }
 
     // [W104 FEATFIX 2026-11-11] Wolf Territories only, as their menu items (menu_viewer.xml on_visible WolfGrid.IsOnWolfTerritories);
     // Tessa's Compass works on every grid (its menu item has no gate, floater_wolf_compass.xml "Every grid")
@@ -113,7 +124,64 @@ bool WolfFloaterHuds::postBuild()
     // the fold brings it into view, as Wolf Experiences' cards (wolffloaterexperiences.cpp): a tile's rect is in tiles_panel's
     // coordinates, which are the scroll's document coordinates (llscrollcontainer.cpp scrollToShowRect).
     mScroll = getChild<LLScrollContainer>("tiles_scroll");
-    mFullHeight = getRect().getHeight();
+    // [HUDS SMALL 2026-11-14] the grid and margins as built (floater_wolf_huds.xml, after the header stretch), for fitToArea
+    mIntro = getChild<LLTextBox>("intro");
+    mPanel = getChild<LLView>("tiles_panel");
+    {
+        const LLRect win = getRect(), intro = mIntro->getRect(), scroll = mScroll->getRect(), status = mStatus->getRect();
+        const LLRect panel = mPanel->getRect();
+        mXmlWidth = win.getWidth();
+        mPanelXmlWidth = panel.getWidth();
+        mIntroXmlWidth = intro.getWidth();
+        mStatusXmlWidth = status.getWidth();
+        mScrollRightPad = win.getWidth() - scroll.mRight;
+        mTopToIntro = win.getHeight() - intro.mTop;
+        mIntroToScroll = intro.mBottom - scroll.mTop;
+        mScrollToStatus = scroll.mBottom - status.mTop;
+        mStatusBottom = status.mBottom;
+        mIntroMinH = intro.getHeight();
+        mStatusMinH = status.getHeight();
+        mGrid.clear();
+        std::vector<S32> lefts, tops;
+        for (S32 i = 0; i < T_COUNT; ++i)
+        {
+            const std::string id = TILE_IDS[i];
+            TileParts tp;
+            tp.views[0] = mTiles[i];
+            tp.views[1] = getChild<LLView>("pic_" + id);
+            tp.views[2] = getChild<LLView>("name_" + id);
+            tp.views[3] = getChild<LLView>("desc_" + id);
+            tp.views[4] = mStates[i];
+            const LLRect tr = mTiles[i]->getRect();
+            for (int k = 0; k < TileParts::N; ++k)
+            {
+                const LLRect vr = tp.views[k]->getRect();
+                tp.dx[k] = vr.mLeft - tr.mLeft;
+                tp.dtop[k] = tr.mTop - vr.mTop;
+            }
+            mGrid.push_back(tp);
+            if (std::find(lefts.begin(), lefts.end(), tr.mLeft) == lefts.end()) lefts.push_back(tr.mLeft);
+            if (std::find(tops.begin(), tops.end(), tr.mTop) == tops.end()) tops.push_back(tr.mTop);
+        }
+        // reading order: the top row first (panel rects count up from the bottom), each row left to right
+        std::sort(mGrid.begin(), mGrid.end(), [](const TileParts& a, const TileParts& b)
+        {
+            const LLRect ra = a.views[0]->getRect(), rb = b.views[0]->getRect();
+            return ra.mTop != rb.mTop ? ra.mTop > rb.mTop : ra.mLeft < rb.mLeft;
+        });
+        std::sort(lefts.begin(), lefts.end());
+        std::sort(tops.begin(), tops.end(), std::greater<S32>());
+        mGridOk = lefts.size() >= 2 && tops.size() >= 2;
+        if (mGridOk)
+        {
+            mXmlCols = (S32)lefts.size();
+            mColStep = lefts[1] - lefts[0];   // 264: a 256-wide tile and its 8 gap
+            mRowStep = tops[0] - tops[1];     // 116: a 108-high tile and its 8 gap
+            mFirstLeft = lefts[0];
+            mFirstTopGap = panel.getHeight() - tops[0];
+            mTileH = mTiles[0]->getRect().getHeight();
+        }
+    }
     LLHandle<LLFloater> fh = getHandle();
     for (S32 i = 0; i < T_COUNT; ++i)
     {
@@ -137,7 +205,7 @@ void WolfFloaterHuds::onOpen(const LLSD& key)
     refreshTiles();
     // [HUDS TILES 2 2026-11-14] from the top every time (as WolfStorm's window), fitted to the floaters' area as it is now
     if (mScroll) mScroll->goToTop();
-    mFitRoom = -1;
+    mFitW = mFitH = -1;
     fitToArea();
     // Keyboard: Tab moves between the tiles, Enter or Space presses one (LLButton::handleKeyHere). No tile is given focus
     // on open: in the WolfViewer skins a focused button is drawn green, which would read as "this one is on".
@@ -149,10 +217,15 @@ void WolfFloaterHuds::draw()
     // every frame while this shows, as lltoolbarview.cpp draw() lit the old icons.
     refreshTiles();
     // [HUDS TILES 2 2026-11-14] the floaters' area changed while this shows (the viewer window resized, the UI size changed,
-    // a toolbar shown or hidden): fit again
-    if (gFloaterView && gFloaterView->getSnapRect().getHeight() != mFitRoom)
+    // a toolbar shown or hidden): fit again. [HUDS SMALL 2026-11-14] its width as well: a viewer window made narrower at the
+    // same height (tiled beside another window) changes only that
+    if (gFloaterView)
     {
-        fitToArea();
+        const LLRect area = gFloaterView->getSnapRect();
+        if (area.getWidth() != mFitW || area.getHeight() != mFitH)
+        {
+            fitToArea();
+        }
     }
     LLFloater::draw();
 }
@@ -161,28 +234,106 @@ void WolfFloaterHuds::draw()
 // floaters' area on many screens at a larger UI size. LLFloaterView::adjustToFitScreen (llfloater.cpp:3242-3307) only
 // shrinks resizable floaters and this one is not, so it is done here: never taller than the area (getSnapRect, the space
 // between the toolbars, in the same UI units as this window's rect, so it follows the UI size), never shorter than the
-// intro, one row of tiles with its gap and the status line (64 + 116 + 52, floater_wolf_huds.xml; the row's 8-unit gap
-// covers the title bar's few units of header stretch, llfloater.cpp), and never taller than every tile
-// needs. The tiles scroll inside (tiles_scroll follows all; the status line follows the bottom). Then the window is brought
-// wholly inside the area (adjustToFitScreen, allow_partial_outside false, snap_in_toolbars true, as wolffloaterbuilder.cpp).
+// intro, one row of tiles with its gap and the status line, and never taller than every tile needs. The tiles scroll
+// inside. Then the window is brought wholly inside the area (adjustToFitScreen, allow_partial_outside false,
+// snap_in_toolbars true, as wolffloaterbuilder.cpp).
+// [HUDS SMALL 2026-11-14] Paul (W106 beta): "the huds menu on a smaller screen needs to scroll". His viewer window, made
+// small (WolfViewer.log "Handling a resize event: 640x779"), is 474 UI units wide at UI size 1.35, and the window stayed
+// 824 wide: only its height was fitted, so the right-hand column and the scroll bar (at the window's right edge) were past
+// the edge of the screen, and adjustToFitScreen cannot shrink it (not resizable, above). Now the width is fitted too: as
+// many of the XML's three columns as the area's width takes (824 for three, 560 for two, 296 for one: each column is a
+// tile and its gap, mColStep), the same tiles in the same reading order, so every tile is reached by scrolling up and down
+// only. The intro and the status line take the window's width less their XML margins and grow to their words' height
+// (narrower, they wrap to more lines).
 void WolfFloaterHuds::fitToArea()
 {
-    if (!gFloaterView || getParent() != gFloaterView || isMinimized() || mFullHeight <= 0)
+    if (!gFloaterView || getParent() != gFloaterView || isMinimized() || !mGridOk)
     {
         return;
     }
-    const S32 room = gFloaterView->getSnapRect().getHeight();
-    mFitRoom = room;
-    constexpr S32 MIN_HEIGHT = 64 + 116 + 52;
-    const S32 want = llmax(MIN_HEIGHT, llmin(room, mFullHeight));
-    const LLRect r = getRect();
-    if (want != r.getHeight())
+    const LLRect area = gFloaterView->getSnapRect();
+    mFitW = area.getWidth();
+    mFitH = area.getHeight();
+
+    // columns: the most that fit the area's width, one at the least (a window narrower than one tile cannot be helped)
+    S32 cols = mXmlCols;
+    while (cols > 1 && mXmlWidth - (mXmlCols - cols) * mColStep > mFitW)
     {
-        LLRect fitted;
-        fitted.setLeftTopAndSize(r.mLeft, r.mTop, r.getWidth(), want);   // the top stays where it is
+        --cols;
+    }
+    const S32 narrower = (mXmlCols - cols) * mColStep;
+    const S32 width = mXmlWidth - narrower;
+    const S32 tiles = (S32)mGrid.size();
+    const S32 rows = (tiles + cols - 1) / cols;
+    const S32 panel_h = mFirstTopGap + (rows - 1) * mRowStep + mTileH;   // 804 for three columns, as the XML
+
+    // the tiles, in reading order, cols to a row; each part keeps its XML offset from its tile
+    mPanel->reshape(mPanelXmlWidth - narrower, panel_h);
+    for (S32 k = 0; k < tiles; ++k)
+    {
+        const S32 left = mFirstLeft + (k % cols) * mColStep;
+        const S32 top = panel_h - mFirstTopGap - (k / cols) * mRowStep;
+        const TileParts& tp = mGrid[k];
+        for (int p = 0; p < TileParts::N; ++p)
+        {
+            const LLRect vr = tp.views[p]->getRect();
+            LLRect moved;
+            moved.setLeftTopAndSize(left + tp.dx[p], top - tp.dtop[p], vr.getWidth(), vr.getHeight());
+            tp.views[p]->setShape(moved);
+        }
+    }
+
+    // the intro's and the status line's heights at this width (never less than the XML gives them)
+    const S32 intro_w = mIntroXmlWidth - narrower;
+    const S32 status_w = mStatusXmlWidth - narrower;
+    mIntro->reshape(intro_w, mIntroMinH);
+    const S32 intro_h = llmax(mIntroMinH, mIntro->getTextPixelHeight());
+    const S32 status_h = statusHeight(status_w);
+
+    const S32 above = mTopToIntro + intro_h + mIntroToScroll;      // the title bar, the intro and its gap
+    const S32 below = mScrollToStatus + status_h + mStatusBottom;  // the gap, the status line and the bottom margin
+    const S32 full = above + panel_h + below;
+    const S32 least = above + mRowStep + below;                     // one whole row with its gap
+    const S32 height = llmax(least, llmin(mFitH, full));
+
+    const LLRect r = getRect();
+    LLRect fitted;
+    fitted.setLeftTopAndSize(r.mLeft, r.mTop, width, height);   // the top left stays where it is
+    if (fitted != r)
+    {
         setShape(fitted);
     }
+    // the intro, the tiles' scroll and the status line placed for this size (the follows flags alone would keep the XML's
+    // intro and status heights)
+    const LLRect intro_r = mIntro->getRect(), status_r = mStatus->getRect(), scroll_r = mScroll->getRect();
+    mIntro->setShape(LLRect(intro_r.mLeft, height - mTopToIntro, intro_r.mLeft + intro_w, height - mTopToIntro - intro_h));
+    mStatus->setShape(LLRect(status_r.mLeft, mStatusBottom + status_h, status_r.mLeft + status_w, mStatusBottom));
+    const LLRect scroll_new(scroll_r.mLeft, height - above, width - mScrollRightPad, below);
+    mScroll->setShape(scroll_new);
+    // setShape reshapes only when the rect changed; the document (tiles_panel) may have changed alone, so the scroll bars
+    // are worked out again here either way (LLScrollContainer::reshape: doc and page sizes, updateScroll)
+    mScroll->reshape(scroll_new.getWidth(), scroll_new.getHeight());
+
     gFloaterView->adjustToFitScreen(this, false, true);
+}
+
+// [HUDS SMALL 2026-11-14] The status line's words change while the window shows (refreshTiles): its height is the tallest
+// of every message it can show at this width, so a message never runs past it. Measured with the line itself (its font
+// and wrapping), then its own words put back.
+S32 WolfFloaterHuds::statusHeight(S32 width)
+{
+    const std::string now = mStatus->getText();
+    mStatus->reshape(width, mStatusMinH);
+    S32 h = mStatusMinH;
+    mStatus->setText(std::string(NOT_ON_WOLF_STATUS));
+    h = llmax(h, mStatus->getTextPixelHeight());
+    for (S32 i = 0; i < T_COUNT; ++i)
+    {
+        mStatus->setText(pressNote(static_cast<ETile>(i)));
+        h = llmax(h, mStatus->getTextPixelHeight());
+    }
+    mStatus->setText(now);
+    return h;
 }
 
 // Source: lltoolbarview.cpp draw() before 2026-11-10 - each icon's setToggleState test, unchanged.
@@ -303,7 +454,7 @@ void WolfFloaterHuds::onTile(ETile t)
         closeFloater();
         return;
     }
-    mNote = std::string(TILE_NAMES[t]) + " did not come on. If a message popped up, it says why; otherwise try again in a moment.";
+    mNote = pressNote(t);   // [HUDS SMALL 2026-11-14/] the words unchanged, now in pressNote
     refreshTiles();
 }
 
@@ -362,7 +513,7 @@ void WolfFloaterHuds::refreshTiles()
     if (mStatus)
     {
         // [W104 FEATFIX 2026-11-11 A7] after a press that did not switch a HUD on: why the window stayed open
-        const std::string msg = wolf ? mNote : std::string("Wolf HUDs work on Wolf Territories regions only (Tessa's Compass works everywhere).");
+        const std::string msg = wolf ? mNote : std::string(NOT_ON_WOLF_STATUS);   // [HUDS SMALL 2026-11-14/] words unchanged
         if (mStatus->getText() != msg)
         {
             mStatus->setText(msg);

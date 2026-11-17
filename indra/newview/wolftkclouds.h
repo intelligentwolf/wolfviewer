@@ -199,6 +199,9 @@ namespace WolfTk
         GLuint     depth_tex = 0;       // the scene depth (GL depth texture, [0,1])
         F32        pre_exposure = 1.f;
         bool       reset_history = false;
+        // [WolfViewer 2026-11-17 ticket 886] a snapshot frame (gSnapshot, llviewerdisplay.cpp display): drawn once, often at
+        // another size than the window's frame, so Clouds::render builds the whole temporal result within this one frame
+        bool       snapshot = false;
         // [WolfViewer 2026-10-19] a cut (a teleport): the weather and shape offsets start again at this phase (0..1 of a
         // repeat) instead of carrying on from wherever the session's drift had taken them - see wolfenvironmentrender.cpp
         bool       reseed = false;
@@ -249,6 +252,10 @@ namespace WolfTk
         void release();
 
     private:
+        /** The clouds pass at the frame's full size without temporal upscaling, into the probe targets (probeColorTex,
+         *  probeShadowLengthTex): a probe face's output (renderProbe) and the seed of a snapshot's history (render). */
+        bool marchFullResolution(const Atmosphere& atmosphere, const CloudsFrame& frame, const glm::mat4& cascadeView, const GLint vp[4]);
+
         struct Impl;
         Impl* mImpl;
         CloudLayers mLayers;

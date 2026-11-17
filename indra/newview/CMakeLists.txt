@@ -918,6 +918,7 @@ set(viewer_SOURCE_FILES
     wolfswimbubbles.cpp   # [SWIM BUBBLES 2026-11-02] ticket 346
     wolfnaturesounds.cpp   # [NATURE SOUNDS 2026-11-03] ticket 475
     wolfsealife.cpp   # [SEA LIFE 2026-11-03] ticket 499
+    wolfplanesound.cpp   # [PLANE SOUND 2026-11-15] ticket 865
     wolfundersea.cpp   # [UNDERSEA 2026-11-09] ticket 652
     wolfleaves.cpp   # [FALLING LEAVES 2026-11-10] ticket 718
     wolfweatherprops.cpp   # [WEATHER PROPS 2026-11-13] ticket 847
@@ -1022,6 +1023,7 @@ set(viewer_SOURCE_FILES
     wolfoceanfft.cpp
     wolfwakefield.cpp
     wolfwaterfield.cpp
+    wolfsunterrain.cpp
     wolfautoenvironment.cpp
     wolfregionwolfenvironments.cpp
     wolfpassingplanes.cpp
@@ -1972,6 +1974,7 @@ set(viewer_HEADER_FILES
     wolfswimbubbles.h   # [SWIM BUBBLES 2026-11-02]
     wolfnaturesounds.h   # [NATURE SOUNDS 2026-11-03]
     wolfsealife.h   # [SEA LIFE 2026-11-03]
+    wolfplanesound.h   # [PLANE SOUND 2026-11-15]
     wolfundersea.h   # [UNDERSEA 2026-11-09]
     wolfleaves.h   # [FALLING LEAVES 2026-11-10]
     wolfleavesseason.h   # [FALLING LEAVES 2026-11-10]
@@ -2087,6 +2090,7 @@ set(viewer_HEADER_FILES
     wolfseastate.h
     wolfwakefield.h
     wolfwaterfield.h
+    wolfsunterrain.h
     wolfautoenvironment.h
     wolfregionwolfenvironments.h
     wolfpassingplanes.h

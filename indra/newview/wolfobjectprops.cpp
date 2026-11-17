@@ -310,7 +310,12 @@ void WolfObjectProps::drain()
     {
         const Queued& q = queue[i];
         LLViewerObject* objectp = gObjectList.findObject(q.mId);
-        if (!objectp || objectp->isDead())
+        // No region yet (or any more): LLSelectMgr::requestObjectPropertiesFamily sends to
+        // object->getRegion()->getHost() with no null check (llselectmgr.cpp:6182-6183), so an
+        // object whose region is still connecting crashed here at login (15 Nov, STATE_PRECACHE,
+        // neighbours connecting). It is dropped from this drain only; the sweep wants it again on
+        // its next pass (want() re-inserts every pass), by when its region is known.
+        if (!objectp || objectp->isDead() || !objectp->getRegion())
         {
             continue;
         }

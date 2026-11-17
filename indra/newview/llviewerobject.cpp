@@ -2699,9 +2699,33 @@ void LLViewerObject::interpolateLinearMotion(const F64SecondsImplicit& frame_tim
                     // Find out how many seconds since last packet arrived on the circuit
                     F64Seconds time_since_last_packet = LLMessageSystem::getMessageTimeSeconds() - cdp->getLastPacketInTime();
 
+                    // <WolfViewer 2026-11-15> LOST UPDATES OF A MOVING PRIM. Paul at Paddington Station, 15 Nov ~15:07Z: green
+                    // engines, tenders and coaches "lying on the grass beside the viaduct, tilted", then they "sorted themselves
+                    // out"; the region had every vehicle on the track. His log: 0.9-1.5 s frames, the viewer's own receive ring
+                    // full (llpacketring.cpp MAX_BUFFER_RING_SIZE 1024: "Dropped packets current: 1478" at 15:07:31, 12518 more
+                    // by 15:08:31), and the keyframed train he rode got no update for 27.5 s (WolfJerk "max gap 27.5426 s") while
+                    // it was drawn on at 11.3 m/s in a straight line - off the curving viaduct - then put back 127 m at 15:08:05.
+                    // The test below only stops a prediction when the whole circuit is silent; here the circuit kept getting
+                    // packets, so a lost update was predicted for ever. (Past a region edge the 1 s crossing limit further down
+                    // no longer applies to kept movers - OPEN SEA / VISITING LAND - so nothing else stopped it either.)
+                    // On OpenSim a moving prim is re-sent at least every 250 ms while it moves: a keyframed one is scheduled every
+                    // timer tick (KeyframeMotion.cs:824 ScheduleTerseUpdate) and a physical one every physics step (ubOde
+                    // ODEPrim.cs:4000), and a scheduled terse update waits at most TIME_MS_TOLERANCE 250 ms
+                    // (SceneObjectPart.cs:3477, 3519 SendScheduledUpdates). Its stop is ONE unreliable terse update
+                    // (KeyframeMotion.cs:489-492 Stop, 655-658 Done). So a prim with no update for InterpolationTime has lost them:
+                    // phase it out as for a silent circuit. (This branch is reached after sPhaseOutUpdateInterpolationTime, which
+                    // holds the InterpolationTime setting, 3 s - llviewerobjectlist.cpp:958 passes the two settings crosswise, as
+                    // stock - and phase_out below is then 0: the prim stays where the prediction had it until its next update.)
+                    // Avatars are left as they are: OpenSim sends a walker at a steady
+                    // speed only after it has gone 5 m (ScenePresence.cs:3974 POSITION_LARGETOLERANCE, 4036-4040), seconds apart
+                    // at a slow walk. Second Life keeps the stock rule (its simulator source is not ours to read).
+                    const bool wolf_prim_updates_lost = !isAvatar() && !LLGridManager::getInstance()->isInSecondLife();
+                    // </WolfViewer>
+
                     if (!cdp->isAlive() ||      // Circuit is dead or blocked
                          cdp->isBlocked() ||    // or doesn't seem to be getting any packets
-                         (time_since_last_packet > sPhaseOutUpdateInterpolationTime))
+                         (time_since_last_packet > sPhaseOutUpdateInterpolationTime) ||
+                         wolf_prim_updates_lost) // [WolfViewer 2026-11-15/] or a prim's own updates stopped (above)
                     {
                         // Start to reduce motion interpolation since we haven't seen a server update in a while
                         F64Seconds time_since_last_interpolation = frame_time - mLastInterpUpdateSecs;

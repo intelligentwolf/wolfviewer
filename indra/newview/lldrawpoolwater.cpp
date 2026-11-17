@@ -59,6 +59,7 @@
 #include "wolfoceanfft.h"
 #include "wolfwakefield.h"
 #include "wolfwaterfield.h"
+#include "wolfsunterrain.h"  // [T871 SUN BEHIND TERRAIN 2026-11-15/]
 #include "wolfwavezones.h"   // [SURF 2026-09-07]
 #include "wolfsurfcurl.h"    // [SURF 2026-09-07 phase 2]
 #include "wolfgrid.h"        // <WolfViewer 2026-09-22/> Wolf Territories only
@@ -583,6 +584,43 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         shader->uniform4f(s_clear_misc, clear.minSourceZ(), ready ? 1.f : 0.f, 0.f, 0.f);
     }
     // [DRY BUILDS 2026-10-26/]
+
+    // [T871 SUN BEHIND TERRAIN 2026-11-15] The terrain blocks (wolfsunterrain.h) waterF.glsl hides the sun's or moon's glint
+    // with where a hill stands between the water and the light. Not a reserved sampler either: it takes the unit after the
+    // clearance field's (which takes mActiveTextureChannels, above), whether or not that one was bound this frame. Not ready,
+    // or no unit free: ready 0, and the glint is the shadow map's alone, as before.
+    {
+        static LLStaticHashedString s_sun_terrain("wolfSunTerrain");
+        static LLStaticHashedString s_sun_terrain_block("wolfSunTerrainBlock");
+        static LLStaticHashedString s_sun_terrain_misc("wolfSunTerrainMisc");
+        const WolfSunTerrain& st = WolfSunTerrain::instance();
+        const S32 unit = shader->mActiveTextureChannels + 1;
+        const bool ready = st.isReady() && st.texture() && unit < (S32)LL_NUM_TEXTURE_LAYERS
+                        && shader->getUniformLocation(s_sun_terrain) >= 0;
+        F32 blocks[WolfSunTerrain::BLOCKS * 4] = {};
+        if (ready)
+        {
+            shader->uniform1i(s_sun_terrain, unit);
+            gGL.getTexUnit(unit)->bindManual(LLTexUnit::TT_TEXTURE, st.texture());
+            for (S32 b = 0; b < WolfSunTerrain::BLOCKS; ++b)
+            {
+                if (!st.blockReady(b))
+                {
+                    continue;   // texel 0: the shader skips the block
+                }
+                const LLVector2 o = st.blockOriginAgent(b);
+                blocks[b * 4 + 0] = o.mV[VX];
+                blocks[b * 4 + 1] = o.mV[VY];
+                blocks[b * 4 + 2] = WolfSunTerrain::TEXEL_M[b];
+            }
+        }
+        shader->uniform4fv(s_sun_terrain_block, WolfSunTerrain::BLOCKS, blocks);
+        // The light the glint is of: LLEnvironment::getLightDirection (light_dir above) is the sun while it is up, else the
+        // moon (llenvironment.cpp getLightDirection; llsettingssky.cpp getLightDirection), so its disc is the same body's.
+        const F32 disc = sun_up ? WolfSunTerrain::SUN_RADIUS_RAD : WolfSunTerrain::MOON_RADIUS_RAD;
+        shader->uniform4f(s_sun_terrain_misc, ready ? 1.f : 0.f, st.highestZ(), disc, 0.f);
+    }
+    // [T871 SUN BEHIND TERRAIN 2026-11-15/]
 
     static LLStaticHashedString s_exposure("exposure");
     static LLStaticHashedString tonemap_mix("tonemap_mix");

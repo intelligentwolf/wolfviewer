@@ -1476,73 +1476,107 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         std::swap(m.shadowResolveTex, m.shadowHistoryTex);
     }
 
+    // [WolfViewer 2026-11-17 ticket 886] A SNAPSHOT (Jimmy Olsen, W105, TROMSO at night: "when i take a CLEAN pic from viewer,
+    // sky looks quite pixelated, cartoonish even", while the same picture with the interface looked as on screen). The march
+    // below covers 1 pixel in 16 a frame and the resolve rebuilds the rest from the history, so the picture on screen is
+    // the work of many frames. A snapshot is drawn as ONE frame (llviewerwindow.cpp rawSnapshot: display() once per tile),
+    // and without the interface at another size than the window's frame - the world view grows to the whole window
+    // (rawSnapshot updateWorldViewRect(!show_ui); the scene targets follow the world view, pipeline.cpp resizeScreenTexture),
+    // or the picture's own size (rawSnapshot allocateScreenBuffer). Measured 2026-11-17 (OVERLAY WATCH, 1600 x 1000 window):
+    // "FRAME SIZE 1601x975 -> 1600x1000 (snapshot) (the clouds' targets are re-made, their history dropped)". The new
+    // targets are zero (alloc), so 15 pixels in 16 had only a cleared history clipped to their 4 x 4-pixel neighbourhood:
+    // the blocks and the one-in-16 dots of his picture; at night a cloud's colour is near 0 and the clip keeps the empty
+    // history's alpha 0 as well (the note above wolfHistoryOtherSurface in cloudsResolveF.glsl), so the stars showed
+    // through the clouds. With the interface shown the size did not change and the window's history was used.
+    // So a snapshot frame builds its own history first, with its own camera and size: the clouds pass at full size
+    // (marchFullResolution, takram's non-temporal mode) seeds the history, then the march and the resolve run
+    // SNAPSHOT_SLOT_VISITS x 16 times with no time passing (the offsets moved by f.dt once, above), every pixel's
+    // own slot coming round SNAPSHOT_SLOT_VISITS times. The resolve blends a slot's sample into the history with
+    // WOLF_SLOT_ALPHA 0.25 (cloudsResolveF.glsl temporalUpscale), so after k visits the seed keeps 0.75^k of the weight
+    // and the noise's variance is 0.75^2k + 0.0625 (1 - 0.5625^k) / 0.4375: at k = 8, 0.10 of the weight and a variance
+    // of 0.151, against 0.143 (alpha / (2 - alpha)) for a still camera on screen - the picture is as clean as the screen.
+    // Each pass costs a 1/16 march and a resolve: the 128 passes together cost about 8 full-size marches, once a picture.
+    constexpr S32 SNAPSHOT_SLOT_VISITS = 8;
+    const S32 passes = f.snapshot ? 16 * SNAPSHOT_SLOT_VISITS : 1;
+    if (f.snapshot)
+    {
+        if (!marchFullResolution(atmosphere, f, f.view, vp)) return false;
+        ++m.frame;   // the seed's noise frame is its own: the passes below take the next ones
+    }
+
     // ── CloudsPass.update (CloudsPass.ts:185-201) ──
     const S32 lw = m.cColor.w, lh = m.cColor.h;
     const glm::vec2 resolution((F32)(lw * 4), (F32)(lh * 4));   // setSize(lowResWidth * 4, lowResHeight * 4, width, height)
+    for (S32 pass = 0; pass < passes; ++pass)
     {
-        LLGLSLShader& sh = cloudsSh;
-        sh.bind();
-        m.sharedUniforms(sh, mLayers, f, w2e, e2w, bottomRadius, topRadius, false);
-        atmosphere.setRuntimeUniforms(sh, f.pre_exposure);
-        m.cloudsMaterialUniforms(sh, p, f);
-        u2f(sh, "resolution", resolution.x, resolution.y);
-        u2f(sh, "targetUvScale", resolution.x / f.width, resolution.y / f.height);   // CloudsMaterial.setSize (:406-414)
-        const glm::mat4 prevP = m.havePrev ? m.prevProj : f.proj;   // `previousProjectionMatrix ?? camera.projectionMatrix`
-        const glm::mat4 prevV = m.havePrev ? m.prevView : f.view;
-        m.cameraUniforms(sh, f, true, resolution, bottomRadius, prevP, prevV, f.view);
-        m.copyShadow(sh);
-        WolfTk::bindReserved(sh, LLShaderMgr::WOLF_TK_SHADOW_BUFFER, GL_TEXTURE_2D_ARRAY, m.shadowOutput().id);
-        WolfTk::bindNamed(sh, "depthBuffer", 12, GL_TEXTURE_2D, f.depth_tex);
-        std::vector<Att> atts = { { &m.cColor, 0 }, { &m.cDepthVelocity, 0 } };
-        if (p.lightShafts) atts.push_back({ &m.cShadowLength, 0 });
-        if (!m.fbo.bind(atts)) { sh.unbind(); return m.incomplete(vp); }
-        drawScreen(lw, lh);
-        sh.unbind();
-        for (S32 u = 8; u <= 12; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
-        WolfTk::unbindUnit(sh.getTextureChannel(LLShaderMgr::WOLF_TK_SHADOW_BUFFER), GL_TEXTURE_2D_ARRAY);
-        WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
-        WolfTk::unbindUnit(BLUE_NOISE_UNIT, GL_TEXTURE_2D);    // [2026-11-02]
-    }
-    {
-        // the resolve (CloudsResolveMaterial: varianceGamma 2, temporalAlpha 0.1, CloudsResolveMaterial.ts:68-79)
-        LLGLSLShader& sh = cloudsResolveSh;
-        sh.bind();
-        const S32 ri = m.resolveIndex, hi = 1 - m.resolveIndex;
-        u2f(sh, "texelSize", 1.f / f.width, 1.f / f.height);   // setSize (:83-85)
-        u1i(sh, "frame", (S32)m.frame);
-        // onBeforeRender (:87-101)
-        const glm::vec2 off = bayerOffset((S32)(m.frame % 16));
-        u2f(sh, "jitterOffset", (off.x - 0.5f) * 4.f, (off.y - 0.5f) * 4.f);
-        u1f(sh, "varianceGamma", 2.f);
-        u1f(sh, "temporalAlpha", 0.1f);
-        WolfTk::bindNamed(sh, "colorBuffer", 8, GL_TEXTURE_2D, m.cColor.id);
-        WolfTk::bindNamed(sh, "depthVelocityBuffer", 9, GL_TEXTURE_2D, m.cDepthVelocity.id);
-        WolfTk::bindNamed(sh, "colorHistoryBuffer", 10, GL_TEXTURE_2D, m.rColor[hi].id);
-        if (p.lightShafts)
+        if (pass > 0) ++m.frame;   // a snapshot's next pass: the next Bayer slot, jitter and noise frame
+        // the seed is the history of a snapshot's first pass; from then on the history is the last pass's resolve
+        const bool seedHistory = f.snapshot && pass == 0;
         {
-            WolfTk::bindNamed(sh, "shadowLengthBuffer", 11, GL_TEXTURE_2D, m.cShadowLength.id);
-            WolfTk::bindNamed(sh, "shadowLengthHistoryBuffer", 12, GL_TEXTURE_2D, m.rShadowLength[hi].id);
+            LLGLSLShader& sh = cloudsSh;
+            sh.bind();
+            m.sharedUniforms(sh, mLayers, f, w2e, e2w, bottomRadius, topRadius, false);
+            atmosphere.setRuntimeUniforms(sh, f.pre_exposure);
+            m.cloudsMaterialUniforms(sh, p, f);
+            u2f(sh, "resolution", resolution.x, resolution.y);
+            u2f(sh, "targetUvScale", resolution.x / f.width, resolution.y / f.height);   // CloudsMaterial.setSize (:406-414)
+            const glm::mat4 prevP = m.havePrev ? m.prevProj : f.proj;   // `previousProjectionMatrix ?? camera.projectionMatrix`
+            const glm::mat4 prevV = m.havePrev ? m.prevView : f.view;
+            m.cameraUniforms(sh, f, true, resolution, bottomRadius, prevP, prevV, f.view);
+            m.copyShadow(sh);
+            WolfTk::bindReserved(sh, LLShaderMgr::WOLF_TK_SHADOW_BUFFER, GL_TEXTURE_2D_ARRAY, m.shadowOutput().id);
+            WolfTk::bindNamed(sh, "depthBuffer", 12, GL_TEXTURE_2D, f.depth_tex);
+            std::vector<Att> atts = { { &m.cColor, 0 }, { &m.cDepthVelocity, 0 } };
+            if (p.lightShafts) atts.push_back({ &m.cShadowLength, 0 });
+            if (!m.fbo.bind(atts)) { sh.unbind(); return m.incomplete(vp); }
+            drawScreen(lw, lh);
+            sh.unbind();
+            for (S32 u = 8; u <= 12; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
+            WolfTk::unbindUnit(sh.getTextureChannel(LLShaderMgr::WOLF_TK_SHADOW_BUFFER), GL_TEXTURE_2D_ARRAY);
+            WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
+            WolfTk::unbindUnit(BLUE_NOISE_UNIT, GL_TEXTURE_2D);    // [2026-11-02]
         }
-        // [WolfViewer round 13] the scene depth for the resolve's history rejection (cloudsResolveF.glsl wolfSceneDistance)
-        WolfTk::bindNamed(sh, "depthBuffer", 13, GL_TEXTURE_2D, f.depth_tex);
-        u1f(sh, "cameraNear", f.near_clip);
-        u1f(sh, "cameraFar", f.far_clip);
-        // [GHOST 2026-11-11] the surface each pixel of the history showed (cloudsResolveF.glsl wolfHistoryOtherSurface)
-        WolfTk::bindNamed(sh, "surfaceHistoryBuffer", 14, GL_TEXTURE_2D, m.rSurface[hi].id);
-        std::vector<Att> atts = { { &m.rColor[ri], 0 } };
-        if (p.lightShafts) atts.push_back({ &m.rShadowLength[ri], 0 });
-        atts.push_back({ &m.rSurface[ri], 0 });   // [GHOST 2026-11-11] the last attachment: cloudsResolveF.glsl outputSurfaceDepth
-        if (!m.fbo.bind(atts)) { sh.unbind(); return m.incomplete(vp); }
-        drawScreen((S32)f.width, (S32)f.height);
-        sh.unbind();
-        for (S32 u = 8; u <= 14; ++u) WolfTk::unbindUnit(u, GL_TEXTURE_2D);
+        {
+            // the resolve (CloudsResolveMaterial: varianceGamma 2, temporalAlpha 0.1, CloudsResolveMaterial.ts:68-79)
+            LLGLSLShader& sh = cloudsResolveSh;
+            sh.bind();
+            const S32 ri = m.resolveIndex, hi = 1 - m.resolveIndex;
+            u2f(sh, "texelSize", 1.f / f.width, 1.f / f.height);   // setSize (:83-85)
+            u1i(sh, "frame", (S32)m.frame);
+            // onBeforeRender (:87-101)
+            const glm::vec2 off = bayerOffset((S32)(m.frame % 16));
+            u2f(sh, "jitterOffset", (off.x - 0.5f) * 4.f, (off.y - 0.5f) * 4.f);
+            u1f(sh, "varianceGamma", 2.f);
+            u1f(sh, "temporalAlpha", 0.1f);
+            WolfTk::bindNamed(sh, "colorBuffer", 8, GL_TEXTURE_2D, m.cColor.id);
+            WolfTk::bindNamed(sh, "depthVelocityBuffer", 9, GL_TEXTURE_2D, m.cDepthVelocity.id);
+            WolfTk::bindNamed(sh, "colorHistoryBuffer", 10, GL_TEXTURE_2D, seedHistory ? m.pColor.id : m.rColor[hi].id);
+            if (p.lightShafts)
+            {
+                WolfTk::bindNamed(sh, "shadowLengthBuffer", 11, GL_TEXTURE_2D, m.cShadowLength.id);
+                WolfTk::bindNamed(sh, "shadowLengthHistoryBuffer", 12, GL_TEXTURE_2D, seedHistory ? m.pShadowLength.id : m.rShadowLength[hi].id);
+            }
+            // [WolfViewer round 13] the scene depth for the resolve's history rejection (cloudsResolveF.glsl wolfSceneDistance)
+            WolfTk::bindNamed(sh, "depthBuffer", 13, GL_TEXTURE_2D, f.depth_tex);
+            u1f(sh, "cameraNear", f.near_clip);
+            u1f(sh, "cameraFar", f.far_clip);
+            // [GHOST 2026-11-11] the surface each pixel of the history showed (cloudsResolveF.glsl wolfHistoryOtherSurface)
+            WolfTk::bindNamed(sh, "surfaceHistoryBuffer", 14, GL_TEXTURE_2D, m.rSurface[hi].id);
+            std::vector<Att> atts = { { &m.rColor[ri], 0 } };
+            if (p.lightShafts) atts.push_back({ &m.rShadowLength[ri], 0 });
+            atts.push_back({ &m.rSurface[ri], 0 });   // [GHOST 2026-11-11] the last attachment: cloudsResolveF.glsl outputSurfaceDepth
+            if (!m.fbo.bind(atts)) { sh.unbind(); return m.incomplete(vp); }
+            drawScreen((S32)f.width, (S32)f.height);
+            sh.unbind();
+            for (S32 u = 8; u <= 14; ++u) WolfTk::unbindUnit(u, GL_TEXTURE_2D);
+        }
+        // copyReprojection (CloudsMaterial.ts:393-398), then swapBuffers (CloudsPass.ts:174-183): the history is the
+        // texture just resolved, the output (outputBuffer :239-242) that history
+        m.prevProj = f.proj;
+        m.prevView = f.view;
+        m.havePrev = true;
+        m.resolveIndex = 1 - m.resolveIndex;
     }
-    // copyReprojection (CloudsMaterial.ts:393-398), then swapBuffers (CloudsPass.ts:174-183): the history is the
-    // texture just resolved, the output (outputBuffer :239-242) that history
-    m.prevProj = f.proj;
-    m.prevView = f.view;
-    m.havePrev = true;
-    m.resolveIndex = 1 - m.resolveIndex;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(vp[0], vp[1], vp[2], vp[3]);
@@ -1553,18 +1587,28 @@ bool Clouds::renderProbe(const Atmosphere& atmosphere, const CloudsFrame& f)
 {
     Impl& m = *mImpl;
     if (!m.loaded || !m.ensureQuality(f.quality) || !m.proceduralDone || !m.shadowOutput().id) return false;
-    const S32 q = llclamp(f.quality, 0, 3);
-    const QualityPreset& p = QualityPreset::get(q);
-    LLGLSLShader& sh = *m.clouds[q];
     GLint vp[4];
     glGetIntegerv(GL_VIEWPORT, vp);
     LLGLDepthTest depth(GL_FALSE, GL_FALSE);
     LLGLDisable blend(GL_BLEND);
     LLGLDisable cull(GL_CULL_FACE);
     LLGLDisable scissor(GL_SCISSOR_TEST);
+    // its output used directly: a probe face has no history to resolve against. The cascades are selected with the
+    // main view's camera, whose frustum they were fitted to (CloudsPass.copyShadow :159-168).
+    if (!marchFullResolution(atmosphere, f, m.mainView, vp)) return false;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    return true;
+}
+
+bool Clouds::marchFullResolution(const Atmosphere& atmosphere, const CloudsFrame& f, const glm::mat4& cascadeView, const GLint vp[4])
+{
+    Impl& m = *mImpl;
+    const S32 q = llclamp(f.quality, 0, 3);
+    const QualityPreset& p = QualityPreset::get(q);
+    LLGLSLShader& sh = *m.clouds[q];
     // The clouds pass without temporal upscaling (CloudsPass.setSize :217-219: the current target at full size,
-    // CloudsMaterial.copyCameraSettings :344-353 non-temporal branch), its output used directly: a probe face has
-    // no history to resolve against.
+    // CloudsMaterial.copyCameraSettings :344-353 non-temporal branch).
     alloc(m.pColor, GL_TEXTURE_2D, GL_RGBA16F, f.width, f.height);
     alloc(m.pDepthVelocity, GL_TEXTURE_2D, GL_RGBA16F, f.width, f.height);
     if (p.lightShafts) alloc(m.pShadowLength, GL_TEXTURE_2D, GL_R16F, f.width, f.height); else m.pShadowLength.release();
@@ -1579,8 +1623,8 @@ bool Clouds::renderProbe(const Atmosphere& atmosphere, const CloudsFrame& f)
     m.cloudsMaterialUniforms(sh, p, f);
     u2f(sh, "resolution", resolution.x, resolution.y);
     u2f(sh, "targetUvScale", 1.f, 1.f);
-    // no reprojection for a face: the previous matrices are its own (the velocity it writes is not read)
-    m.cameraUniforms(sh, f, false, resolution, bottomRadius, f.proj, f.view, m.mainView);
+    // no reprojection: the previous matrices are this view's own (the velocity it writes is not read)
+    m.cameraUniforms(sh, f, false, resolution, bottomRadius, f.proj, f.view, cascadeView);
     m.copyShadow(sh);
     WolfTk::bindReserved(sh, LLShaderMgr::WOLF_TK_SHADOW_BUFFER, GL_TEXTURE_2D_ARRAY, m.shadowOutput().id);
     WolfTk::bindNamed(sh, "depthBuffer", 12, GL_TEXTURE_2D, f.depth_tex);
@@ -1593,8 +1637,6 @@ bool Clouds::renderProbe(const Atmosphere& atmosphere, const CloudsFrame& f)
     WolfTk::unbindUnit(sh.getTextureChannel(LLShaderMgr::WOLF_TK_SHADOW_BUFFER), GL_TEXTURE_2D_ARRAY);
     WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
     WolfTk::unbindUnit(BLUE_NOISE_UNIT, GL_TEXTURE_2D);    // [2026-11-02]
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(vp[0], vp[1], vp[2], vp[3]);
     return true;
 }
 

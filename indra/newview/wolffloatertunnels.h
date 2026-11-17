@@ -111,6 +111,17 @@ namespace WolfTunnels
     };
     /** The boxes last read from the region the agent stands on. */
     const std::vector<Box>& boxes();
+    /**
+     * [TRACK TOOL TUNNELS 2026-11-15] For the Lay Railway Track window (wolffloatertrack.cpp; track-tool DESIGN.md 3.4): a
+     * railway's tunnel is the Tunnel tool's own, so the track window opens and closes it the way this window does after its
+     * own rez. Both run in a coroutine (they wait for the region / the record service).
+     * capChange: one change ({op: "add", tunnel: {c, s, yaw}} or {op: "remove", id}) through the agent's region's WolfTunnels
+     * capability, retried while the region says "one change at a time"; the answer (every box) is kept in the store at once,
+     * so the ground opens or closes now. false + the reason in plain words otherwise.
+     * recordChange: one change to php/tunnels.php (put / delete), as Save and Delete send it.
+     */
+    bool capChange(const LLSD& body, LLSD& answer, std::string& error);
+    bool recordChange(const LLSD& body, std::string& error);
     LLUUID boxesRegion();
     S32 selectedId();
 

@@ -645,7 +645,6 @@ static void set_enabled_texture_ctrl(bool enabled, LLPanel* panel, const LLEditW
 LLPanelEditWearable::LLPanelEditWearable()
         : LLPanel()
         , mWearablePtr(NULL)
-        , mWearableItem(NULL)
 {
         mCommitCallbackRegistrar.add("ColorSwatch.Commit", boost::bind(&LLPanelEditWearable::onColorSwatchCommit, this, _1));
         mCommitCallbackRegistrar.add("TexturePicker.Commit", boost::bind(&LLPanelEditWearable::onTexturePickerCommit, this, _1));
@@ -889,8 +888,9 @@ bool LLPanelEditWearable::isDirty() const
         bool isDirty = false;
         if (mWearablePtr)
         {
+                const LLViewerInventoryItem* item = getWearableItem();
                 if (mWearablePtr->isDirty() ||
-                        (mWearableItem && mNameEditor && mWearableItem->getName().compare(mNameEditor->getText()) != 0))
+                        (item && mNameEditor && item->getName().compare(mNameEditor->getText()) != 0))
                 {
                         isDirty = true;
                 }
@@ -936,6 +936,12 @@ void LLPanelEditWearable::setWearable(LLViewerWearable *wearable, bool disable_c
         if( mWearablePtr )
             mWearablePtr->registerObserver( this );
         showWearable(mWearablePtr, true, disable_camera_switch);
+}
+
+// [WOLF CRASH 2026-11-15, ticket 868] NULL once the item has left the inventory model, never a destroyed item.
+LLViewerInventoryItem* LLPanelEditWearable::getWearableItem() const
+{
+        return mWearableItemID.notNull() ? gInventory.getItem(mWearableItemID) : NULL;
 }
 
 //static
@@ -1108,9 +1114,9 @@ void LLPanelEditWearable::updatePanelPickerControls(LLWearableType::EType type)
 
         bool is_modifiable = false;
 
-        if (mWearableItem)
+        if (const LLViewerInventoryItem* item = getWearableItem())
         {
-                const LLPermissions& perm = mWearableItem->getPermissions();
+                const LLPermissions& perm = item->getPermissions();
                 is_modifiable = perm.allowModifyBy(gAgent.getID(), gAgent.getGroupID());
         }
 
@@ -1168,7 +1174,10 @@ void LLPanelEditWearable::saveChanges(bool force_save_as)
                 // the name of the wearable has changed, re-save wearable with new name
                 LLAppearanceMgr::instance().removeCOFItemLinks(mWearablePtr->getItemID(), gAgentAvatarp->mEndCustomizeCallback);
                 gAgentWearables.saveWearableAs(mWearablePtr->getType(), index, new_name, description, false);
-                mNameEditor->setText(mWearableItem->getName());
+                if (const LLViewerInventoryItem* item = getWearableItem())
+                {
+                        mNameEditor->setText(item->getName());
+                }
         }
         else
         {
@@ -1205,7 +1214,10 @@ void LLPanelEditWearable::revertChanges()
         }
 
         mWearablePtr->revertValues();
-        mNameEditor->setText(mWearableItem->getName());
+        if (const LLViewerInventoryItem* item = getWearableItem())
+        {
+                mNameEditor->setText(item->getName());
+        }
         updatePanelPickerControls(mWearablePtr->getType());
         updateTypeSpecificControls(mWearablePtr->getType());
         // <FS:Ansariel> [Legacy Bake]
@@ -1220,8 +1232,8 @@ void LLPanelEditWearable::showWearable(LLViewerWearable* wearable, bool show, bo
                 return;
         }
 
-        mWearableItem = gInventory.getItem(mWearablePtr->getItemID());
-        llassert(mWearableItem);
+        mWearableItemID = mWearablePtr->getItemID(); // [WOLF CRASH 2026-11-15, ticket 868] by id, see the header
+        llassert(getWearableItem());
 
         LLWearableType::EType type = wearable->getType();
         LLPanel *targetPanel = NULL;
@@ -1255,7 +1267,10 @@ void LLPanelEditWearable::showWearable(LLViewerWearable* wearable, bool show, bo
                 mDescTitle->setText(description_title);
 
                 // set name
-                mNameEditor->setText(mWearableItem->getName());
+                if (const LLViewerInventoryItem* item = getWearableItem())
+                {
+                        mNameEditor->setText(item->getName());
+                }
 
                 updatePanelPickerControls(type);
 
@@ -1664,9 +1679,11 @@ void LLPanelEditWearable::updateVerbs()
 {
         bool can_copy = false;
 
-        if (mWearableItem)
+        // [WOLF CRASH 2026-11-15, ticket 868] looked up every frame, never a kept pointer (see the header)
+        const LLViewerInventoryItem* item = getWearableItem();
+        if (item)
         {
-                can_copy = mWearableItem->getPermissions().allowCopyBy(gAgentID);
+                can_copy = item->getPermissions().allowCopyBy(gAgentID);
         }
 
         bool is_dirty = isDirty();
@@ -1676,7 +1693,7 @@ void LLPanelEditWearable::updateVerbs()
 
         // [FS:CR] FIRE-10986 - A little redundant since you shouldn't be able to get here if the wearable is
         // no modify, but what the hell, check anyways.
-        childSetEnabled("import_btn", mWearableItem->getPermissions().allowModifyBy(gAgentID));
+        childSetEnabled("import_btn", item && item->getPermissions().allowModifyBy(gAgentID));
 
         if (isAgentAvatarValid())
         {

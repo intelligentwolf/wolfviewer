@@ -96,6 +96,7 @@
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
 #include "wolfobjectsweep.h" // [FAR DRAW PERF 2026-11-14/] the shared object pass
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
+#include "wolfsunterrain.h" // [T871 SUN BEHIND TERRAIN 2026-11-15/] the sun's glint behind hills
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> Flight Mode
 #include "wolfgame.h"     // [WOLF GAME 2026-10-09/] Wolf Roleplay
@@ -110,6 +111,7 @@
 #include "wolffarproxy.h"    // [W107 FAR HLOD 2026-11-14/] the regions' far proxy models
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
+#include "wolfplanesound.h"  // [PLANE SOUND 2026-11-15/] ticket 865
 #include "wolfundersea.h"   // [UNDERSEA 2026-11-09/] ticket 652
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolfleaves.h"      // [FALLING LEAVES 2026-11-10/] ticket 718
@@ -6436,6 +6438,7 @@ void LLAppViewer::idle()
     { WolfVRScreen::SubPart wsp_("WolfFarGround"); WolfFarGround::instance().idle(); }   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     { WolfVRScreen::SubPart wsp_("WolfBirds"); WolfBirds::instance().idle(); }       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
     { WolfVRScreen::SubPart wsp_("WolfSeaLife"); WolfSeaLife::instance().idle(); }     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)
+    { WolfVRScreen::SubPart wsp_("WolfPlaneSound"); WolfPlaneSound::instance().idle(); }   // [PLANE SOUND 2026-11-15/] ticket 865: the passing planes' distant engines (wolfplanesound.h)
     { WolfVRScreen::SubPart wsp_("WolfUnderSea"); WolfUnderSea::instance().idle(); }   // [UNDERSEA 2026-11-09/] ticket 652: sea plants, fish and sharks (wolfundersea.h)
     { WolfVRScreen::SubPart wsp_("WolfSwimBubbles"); WolfSwimBubbles::instance().idle(); } // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles from mouths under the water
     { WolfVRScreen::SubPart wsp_("WolfLeaves"); WolfLeaves::instance().idle(); }   // [FALLING LEAVES 2026-11-10/] ticket 718: leaves falling from wolftree trees (wolfleaves.h)
@@ -6483,6 +6486,9 @@ void LLAppViewer::idle()
     // Depth + exposure fields the water shader samples (shore calming, breakers, swash);
     // bakes at most one region per 2 s check.
     { WolfVRScreen::SubPart wsp_("WolfWaterField"); WolfWaterField::instance().idle(); }
+    // [T871 SUN BEHIND TERRAIN 2026-11-15] the terrain round the camera, for the sun's and moon's glint on the water behind
+    // hills (wolfsunterrain.h); on every grid, as the water it serves
+    { WolfVRScreen::SubPart wsp_("WolfSunTerrain"); WolfSunTerrain::instance().idle(); }
     // The shared name/description harvester drains AFTER its consumers (FSWolfWater above,
     // WolfBoatRock before updateMove) have declared this frame's interest.
     { WolfVRScreen::SubPart wsp_("WolfObjectProps"); WolfObjectProps::instance().idle(); }

@@ -1331,7 +1331,9 @@ bool LLViewerShaderMgr::loadShadersWater()
             // ACTIVE fragment samplers are 10 / 14 stock (no / sun shadows), + 7 ours (was 6), + 5 with the native sky's
             // aerial perspective (which wolf_tk_create drops by itself if a program will not link) - at most 26, inside the
             // 32 every desktop driver reports. The counts below are the older, larger estimate and stay as the gate.
-            const S32 OURS = 7;
+            // [T871 SUN BEHIND TERRAIN 2026-11-15] + 1: the terrain blocks the sun's glint is hidden behind hills with
+            // (wolfSunTerrain, wolfsunterrain.h) - the 26 measured above + 1 = 27 at most, still inside 32.
+            const S32 OURS = 8;
             const S32 before_ours = 13 + (use_sun_shadow ? 6 : 0);
             const S32 units = gGLManager.mNumTextureImageUnits;
             sWolfWaterFull = units <= 0 || units >= before_ours + OURS;

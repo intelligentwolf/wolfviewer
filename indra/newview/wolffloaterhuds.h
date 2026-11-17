@@ -12,6 +12,8 @@
 
 #include "llfloater.h"
 
+#include <vector>
+
 class LLButton;
 class LLScrollContainer;
 class LLTextBox;
@@ -52,14 +54,34 @@ public:
 private:
     void onTile(ETile t);
     void refreshTiles();
-    void fitToArea();   // [HUDS TILES 2 2026-11-14] no taller than the floaters' area; the tiles scroll inside
+    // [HUDS TILES 2 2026-11-14] no taller than the floaters' area; the tiles scroll inside.
+    // [HUDS SMALL 2026-11-14] and no wider: fewer columns of tiles when the area is narrower than the XML's three.
+    void fitToArea();
+    S32  statusHeight(S32 width);   // [HUDS SMALL 2026-11-14] the tallest the status line's words get at this width
 
     LLButton*  mTiles[T_COUNT] = { nullptr };
     LLTextBox* mStates[T_COUNT] = { nullptr };
     LLTextBox* mStatus = nullptr;
     LLScrollContainer* mScroll = nullptr;   // [HUDS TILES 2 2026-11-14] floater_wolf_huds.xml tiles_scroll
-    S32 mFullHeight = 0;                    // [HUDS TILES 2 2026-11-14] the XML height: every tile showing, no scroll bar
-    S32 mFitRoom = -1;                      // [HUDS TILES 2 2026-11-14] the floaters' area height fitToArea last fitted to
+
+    // [HUDS SMALL 2026-11-14] the window as built from floater_wolf_huds.xml (after LLFloater's header stretch), so that
+    // fitToArea can lay the same tiles out in fewer columns. Each tile is its button and four views beside it in
+    // tiles_panel (picture, name, words, state line), kept at their XML offsets from the button.
+    struct TileParts
+    {
+        static constexpr int N = 5;   // tile_<id>, pic_<id>, name_<id>, desc_<id>, state_<id>
+        LLView* views[N] = { nullptr };
+        S32 dx[N] = { 0 };     // left, from the tile's left
+        S32 dtop[N] = { 0 };   // down, from the tile's top
+    };
+    std::vector<TileParts> mGrid;   // reading order (rows top to bottom, each left to right), as the XML places them
+    bool mGridOk = false;           // the XML gave at least two columns and two rows to measure the steps from
+    LLTextBox* mIntro = nullptr;    // floater_wolf_huds.xml intro
+    LLView* mPanel = nullptr;       // floater_wolf_huds.xml tiles_panel
+    S32 mXmlCols = 0, mColStep = 0, mRowStep = 0, mTileH = 0, mFirstLeft = 0, mFirstTopGap = 0;
+    S32 mXmlWidth = 0, mPanelXmlWidth = 0, mIntroXmlWidth = 0, mStatusXmlWidth = 0, mScrollRightPad = 0;
+    S32 mTopToIntro = 0, mIntroToScroll = 0, mScrollToStatus = 0, mStatusBottom = 0, mIntroMinH = 0, mStatusMinH = 0;
+    S32 mFitW = -1, mFitH = -1;     // the floaters' area fitToArea last fitted to
     std::string mNote;   // [W104 FEATFIX 2026-11-11 A7] the status line's words after a press that did not switch a HUD on
 };
 

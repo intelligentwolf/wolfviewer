@@ -136,8 +136,17 @@ private:
         bool mShed = false;           // an engine shed over the roads
         U32 mStamp = 0;
     };
-    enum EMode { MODE_LINE = 0, MODE_BRANCH = 1, MODE_STATION = 2, MODE_SIGNAL = 3, MODE_TURNTABLE = 4 };
-    enum ERefKind { REF_LINE_START, REF_LINE_CLICK, REF_STATION_A, REF_STATION_B, REF_SIGNAL };
+    /** [TRACK TOOL TUNNELS 2026-11-15] Paul: "allow the user to go through mountains - we already have a tunnelling tool", then
+     *  "let the user choose though sometimes they might just want to go up a hill" (DESIGN.md 3.4, 10 REQ tunnels): a
+     *  stretch of a line marked to go through the hill, its two ends clicked on the line as a platform's. */
+    struct Tunnel
+    {
+        GP mA, mB;
+        bool mHasB = false;
+        U32 mStamp = 0;
+    };
+    enum EMode { MODE_LINE = 0, MODE_BRANCH = 1, MODE_STATION = 2, MODE_SIGNAL = 3, MODE_TURNTABLE = 4, MODE_TUNNEL = 5 };
+    enum ERefKind { REF_LINE_START, REF_LINE_CLICK, REF_STATION_A, REF_STATION_B, REF_SIGNAL, REF_TUNNEL_A, REF_TUNNEL_B };
     struct Ref { ERefKind mKind; size_t mItem; size_t mPoint; };
 
     // ---- the plan (php/track_tool.php "plan": DESIGN.md 10 PLAN) ----
@@ -172,6 +181,8 @@ private:
         std::string mSummary;
         std::string mProblemText;
         bool mRefused = false;
+        LLSD mTunnels;        // [TUNNELS] PLAN layout.tunnels: each laid tunnel as fitted to the hill (DESIGN.md 10)
+        LLSD mSuggestions;    // [TUNNELS] PLAN suggestions: where a hill is in the way, Tunnel through or Climb the hill
         void clear() { *this = Plan(); }
     };
 
@@ -184,7 +195,18 @@ private:
         LLVector3 mRayEnd;
         std::vector<ItemObject> mObjects;
         bool mLaid = false;
+        LLSD mTunnels;        // [TUNNELS] ITEM.tunnels: [{id, name, object, root, design, volumes}] (DESIGN.md 10)
     };
+    /** [TUNNELS] After a part is saved: its tunnels opened (WolfTunnels boxes) and recorded (php/tunnels.php), then
+     *  tunnels_saved. uuid_of(object name) -> the saved piece's uuid. "" = done, else the words. Coroutine only. */
+    static std::string finishTunnels(const LLSD& layout, const Item& item, const std::function<LLUUID(const std::string&)>& uuid_of,
+                                     const std::function<void(const std::string&)>& progress);
+    /** [TUNNELS] Remove: a region's recorded tunnels closed (their boxes) and their records deleted, then tunnels_removed.
+     *  "" = done; `rights` false when the resident may no longer change tunnels here (the pieces still go). Coroutine only. */
+    static std::string removeTunnels(const LLSD& layout, const LLUUID& region, const LLSD& list, bool& rights);
+    void onSuggestion(bool tunnel);
+    LLSD pendingSuggestion() const;
+    void openTunnelsHere(const LLSD& layout_id);
 
     // ---- the window's own question (Start over, Remove, forget missing pieces) ----
     void ask(const std::string& question, const std::string& yes, std::function<void()> on_yes);
@@ -207,6 +229,7 @@ private:
     LLVector2 toRegion(const GP& p) const;        // grid -> agent-region metres
     /** The nearest point on any line (the last plan's line, else the drawn clicks) within `within` metres, or false. */
     bool onALine(const GP& p, F64 within, GP& snapped, S32 exclude_line = -1) const;
+    bool planLineAtMouse(GP& out) const;   // [15 Nov] the plan's line drawn at its rail level, under the mouse
     U32 nextStamp() { return ++mStampSeq; }
     bool drawingEmpty() const;
     S32 usableLines() const;
@@ -293,6 +316,11 @@ private:
     LLComboBox *mSide = nullptr, *mStyle = nullptr;
     LLLineEditor* mName = nullptr;
     LLPanel* mTTPanel = nullptr;
+    LLPanel* mSugPanel = nullptr;      // [TUNNELS] a hill is in the way: Tunnel through / Climb the hill
+    LLTextBox* mSugText = nullptr;
+    LLTextBox* mSugTunnelText = nullptr;  // the two choices' figures (updateControls)
+    LLTextBox* mSugClimbText = nullptr;
+    LLButton *mSugTunnelBtn = nullptr, *mSugClimbBtn = nullptr;
     LLComboBox* mTTSize = nullptr;
     LLSpinCtrl *mTTRoads = nullptr, *mTTSpread = nullptr;
     LLCheckBoxCtrl* mTTShed = nullptr;
@@ -311,6 +339,9 @@ private:
     std::vector<Station> mStations;
     std::vector<Signal> mSignals;
     std::vector<Turntable> mTurntables;
+    std::vector<Tunnel> mTunnels;      // [TUNNELS]
+    S32 mCurTunnel = -1;               // a tunnel waiting for its other end
+    std::set<std::string> mSugHidden;  // suggestions answered "Climb the hill" (line + where), never sent
     S32 mEditTurntable = -1;           // the turntable the turntable controls change
     S32 mCurLine = -1;                 // the line the next click adds to (-1: the next click starts one)
     S32 mCurStation = -1;              // a station waiting for its platform's end
@@ -364,6 +395,8 @@ private:
     LLUUID mMineRegion;
     bool mMayLay = true;
     std::string mNoLayReason;
+    bool mMayTunnel = false;           // [TUNNELS] "open" access.tunnel: the resident may make tunnels in this region
+    std::string mNoTunnelReason;
     std::map<LLUUID, std::string> mRegionNames;
 
     // the question

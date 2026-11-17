@@ -18,6 +18,7 @@
 
 #include <map>
 #include <string>
+#include <vector>   // [PLANE SOUND 2026-11-15/] writeCachedWav
 
 #include "lluuid.h"
 #include "llsingleton.h"
@@ -75,6 +76,12 @@ public:
     void crack(bool distant);
     /** Fade everything out (the sources go once they are silent). */
     void stop();
+
+    /** [PLANE SOUND 2026-11-15] Where the audio engine looks for a sound with this UUID (<sound cache>/<uuid>.dsf), and a
+     *  16-bit PCM WAV of interleaved samples (-1..1) written there safely (a temporary name, then renamed): the two steps
+     *  the weather's synthesised voices use, for wolfplanesound.cpp's engine sounds. */
+    static std::string cachedSoundPath(const LLUUID& id);
+    static bool writeCachedWav(const std::string& path, const std::vector<F32>& samples, U16 channels, U32 rate);
 
     /** Sample rate and length of every generated loop. */
     static constexpr S32 SAMPLE_RATE = 22050;

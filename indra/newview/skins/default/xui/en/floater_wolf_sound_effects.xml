@@ -14,7 +14,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="580"
+ height="644"
  layout="topleft"
  name="wolf_sound_effects"
  save_rect="true"
@@ -37,16 +37,20 @@
     <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="swim_heading" top="288" width="448">Swimming</text>
     <check_box control_name="WolfViewerSwimBubblesSound" follows="left|top" height="22" label="Bubbles" layout="topleft" left="24" name="bubbles_on" top="312" width="200" tool_tip="The bubbling when you swim under water." />
     <slider control_name="WolfSoundBubblesVolume" enabled_control="WolfViewerSwimBubblesSound" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="bubbles_volume" show_text="false" top="312" width="236" tool_tip="How loud: left is quieter, right is louder." />
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="teleport_heading" top="348" width="448">Teleporting</text>
-    <check_box control_name="PlayModeUISndTeleportOut" follows="left|top" height="22" label="Teleport sound" layout="topleft" left="24" name="teleport_on" top="372" width="200" tool_tip="The sound you hear when you teleport. Only you hear it." />
-    <slider control_name="WolfSoundTeleportVolume" enabled_control="PlayModeUISndTeleportOut" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="teleport_volume" show_text="false" top="372" width="236" tool_tip="How loud: left is quieter, right is louder." />
-    <text follows="left|top" height="22" layout="topleft" left="24" name="sound_label" top="406" valign="center" width="60">Sound:</text>
-    <combo_box follows="left|top" height="24" layout="topleft" left="88" name="teleport_sound" top="405" width="262" tool_tip="Choose a sound. It plays so you can hear it." />
-    <button follows="left|top" height="24" label="Play" layout="topleft" left="362" name="play_btn" top="405" width="102" tool_tip="Play the teleport sound." />
-    <view_border bevel_style="in" follows="left|top" height="50" layout="topleft" left="24" name="drop_border" top="440" width="440" />
-    <text follows="left|top" font="SansSerif" height="42" layout="topleft" left="32" name="drop_hint" top="444" width="424" wrap="true">To use a sound of your own, drag it from your inventory and drop it anywhere on this window.</text>
-    <text follows="left|top" font="SansSerif" height="34" layout="topleft" left="24" name="status" top="498" width="440" wrap="true" />
-    <button follows="left|top" height="26" label="Back to normal" layout="topleft" left="16" name="reset_btn" top="540" width="150" tool_tip="Every sound on again at full volume, and the standard teleport sound." />
+    <!-- [PLANE SOUND 2026-11-15] ticket 865 (Jimmy Olsen): the passing planes' faint, distant engines (wolfplanesound.cpp) -->
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="planes_heading" top="348" width="448">Overhead</text>
+    <check_box control_name="WolfViewerPlaneSound" follows="left|top" height="22" label="Passing planes" layout="topleft" left="24" name="planes_on" top="372" width="200" tool_tip="The faint, far-off engines of the planes that fly over Wolf regions." />
+    <slider control_name="WolfSoundPlanesVolume" enabled_control="WolfViewerPlaneSound" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="planes_volume" show_text="false" top="372" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="teleport_heading" top="412" width="448">Teleporting</text>
+    <check_box control_name="PlayModeUISndTeleportOut" follows="left|top" height="22" label="Teleport sound" layout="topleft" left="24" name="teleport_on" top="436" width="200" tool_tip="The sound you hear when you teleport. Only you hear it." />
+    <slider control_name="WolfSoundTeleportVolume" enabled_control="PlayModeUISndTeleportOut" follows="left|top" height="22" increment="0.05" initial_value="1" label="" layout="topleft" left="228" max_val="1" min_val="0" name="teleport_volume" show_text="false" top="436" width="236" tool_tip="How loud: left is quieter, right is louder." />
+    <text follows="left|top" height="22" layout="topleft" left="24" name="sound_label" top="470" valign="center" width="60">Sound:</text>
+    <combo_box follows="left|top" height="24" layout="topleft" left="88" name="teleport_sound" top="469" width="262" tool_tip="Choose a sound. It plays so you can hear it." />
+    <button follows="left|top" height="24" label="Play" layout="topleft" left="362" name="play_btn" top="469" width="102" tool_tip="Play the teleport sound." />
+    <view_border bevel_style="in" follows="left|top" height="50" layout="topleft" left="24" name="drop_border" top="504" width="440" />
+    <text follows="left|top" font="SansSerif" height="42" layout="topleft" left="32" name="drop_hint" top="508" width="424" wrap="true">To use a sound of your own, drag it from your inventory and drop it anywhere on this window.</text>
+    <text follows="left|top" font="SansSerif" height="34" layout="topleft" left="24" name="status" top="562" width="440" wrap="true" />
+    <button follows="left|top" height="26" label="Back to normal" layout="topleft" left="16" name="reset_btn" top="604" width="150" tool_tip="Every sound on again at full volume, and the standard teleport sound." />
     <string name="own_sound">Your own: [NAME]</string>
     <string name="own_sound_unnamed">Your own sound</string>
     <string name="dropped">Your teleport sound is now "[NAME]".</string>

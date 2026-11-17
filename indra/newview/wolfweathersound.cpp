@@ -338,6 +338,14 @@ namespace
     }
 }
 
+// static [PLANE SOUND 2026-11-15/]
+std::string WolfWeatherSound::cachedSoundPath(const LLUUID& id) { return soundPath(id.asString().c_str()); }
+// static [PLANE SOUND 2026-11-15/]
+bool WolfWeatherSound::writeCachedWav(const std::string& path, const std::vector<F32>& samples, U16 channels, U32 rate)
+{
+    return write_pcm_wav(path, samples, channels, rate);
+}
+
 WolfWeatherSound::WolfWeatherSound() {}
 WolfWeatherSound::~WolfWeatherSound() {}
 

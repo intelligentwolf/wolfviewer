@@ -139,14 +139,19 @@ private:
     /** [TRACK TOOL TUNNELS 2026-11-15] Paul: "allow the user to go through mountains - we already have a tunnelling tool", then
      *  "let the user choose though sometimes they might just want to go up a hill" (DESIGN.md 3.4, 10 REQ tunnels): a
      *  stretch of a line marked to go through the hill, its two ends clicked on the line as a platform's. */
-    struct Tunnel
+    struct Stretch
     {
         GP mA, mB;
         bool mHasB = false;
         U32 mStamp = 0;
     };
-    enum EMode { MODE_LINE = 0, MODE_BRANCH = 1, MODE_STATION = 2, MODE_SIGNAL = 3, MODE_TURNTABLE = 4, MODE_TUNNEL = 5 };
-    enum ERefKind { REF_LINE_START, REF_LINE_CLICK, REF_STATION_A, REF_STATION_B, REF_SIGNAL, REF_TUNNEL_A, REF_TUNNEL_B };
+    typedef Stretch Tunnel;
+    /** [TRACK TOOL CUTTINGS 2026-11-17] Paul approved real cuttings, "yes IF the user specifies that" (DESIGN.md 3.6, 10 REQ
+     *  cuttings): a stretch of a line where the region's ground is lowered to the rail's level, marked as a tunnel is. */
+    typedef Stretch Cutting;
+    enum EMode { MODE_LINE = 0, MODE_BRANCH = 1, MODE_STATION = 2, MODE_SIGNAL = 3, MODE_TURNTABLE = 4, MODE_TUNNEL = 5, MODE_CUTTING = 6 };
+    enum ERefKind { REF_LINE_START, REF_LINE_CLICK, REF_STATION_A, REF_STATION_B, REF_SIGNAL, REF_TUNNEL_A, REF_TUNNEL_B, REF_CUTTING_A,
+                    REF_CUTTING_B };
     struct Ref { ERefKind mKind; size_t mItem; size_t mPoint; };
 
     // ---- the plan (php/track_tool.php "plan": DESIGN.md 10 PLAN) ----
@@ -183,6 +188,9 @@ private:
         bool mRefused = false;
         LLSD mTunnels;        // [TUNNELS] PLAN layout.tunnels: each laid tunnel as fitted to the hill (DESIGN.md 10)
         LLSD mSuggestions;    // [TUNNELS] PLAN suggestions: where a hill is in the way, Tunnel through or Climb the hill
+        LLSD mCuttings;       // [CUTTINGS] PLAN layout.cuttings: each cutting as fitted to the hill (DESIGN.md 3.6)
+        LLSD mCutSuggestions; // [CUTTINGS] PLAN cut_suggestions: hills with no tunnel option, Dig a cutting or Climb the hill
+        Strokes mCutEdges;    // [CUTTINGS] the dashed tops of a cutting's sides (DESIGN.md 3.6 "Window")
         void clear() { *this = Plan(); }
     };
 
@@ -204,9 +212,32 @@ private:
     /** [TUNNELS] Remove: a region's recorded tunnels closed (their boxes) and their records deleted, then tunnels_removed.
      *  "" = done; `rights` false when the resident may no longer change tunnels here (the pieces still go). Coroutine only. */
     static std::string removeTunnels(const LLSD& layout, const LLUUID& region, const LLSD& list, bool& rights);
-    void onSuggestion(bool tunnel);
+    enum ESugChoice { SUG_CLIMB, SUG_TUNNEL, SUG_CUTTING };
+    void onSuggestion(ESugChoice choice);
+    /** The first hill choice not answered yet: a PLAN suggestions[] entry, else a cut_suggestions[] one with "cut_only" true
+     *  and its cutting's ends as "a" / "b" (DESIGN.md 3.6). */
     LLSD pendingSuggestion() const;
     void openTunnelsHere(const LLSD& layout_id);
+
+    // ---- [TRACK TOOL CUTTINGS 2026-11-17] cuttings (DESIGN.md 3.6) ----
+    /** Where p lies along the drawn lines: the nearest line's index and how far along it (metres). */
+    bool drawnChainage(const GP& p, S32& line, F64& s) const;
+    /** Two marked stretches share some of one drawn line. */
+    bool stretchesOverlap(const Stretch& x, const Stretch& y) const;
+    /** A cutting that overlaps a marked tunnel (or a tunnel a cutting): the plain sentence, else "". */
+    std::string overlapWords(const Stretch& s, bool is_cutting) const;
+    /** A complete cutting at `at` merged with every other complete cutting it overlaps (DESIGN.md 3.6: "marks that overlap are
+     *  one cutting"): true when any was joined. */
+    bool mergeCuttings(size_t at);
+    /** The dig or the fill of a layout's cutting in a region (a JOB, or its id): its progress in the window until done or failed
+     *  (DESIGN.md 3.6 "Window"); `lead` is said before it (an earlier error that must stay). */
+    void startGroundJob(const LLSD& job, const std::string& kind, const LLSD& layout, const LLUUID& region, const std::string& lead);
+    static void groundJobCoro(LLHandle<LLFloater> h, U32 gen, U32 ground_gen);
+    /** Dig again ("cut") / Put the ground back ("fill") for a layout's part in a region (DESIGN.md 3.6 new actions). */
+    void groundAgain(const std::string& action, const LLSD& layout, const LLUUID& region);
+    /** Your railways: the picked layout's cutting in this region in plain words ("" when it has none here). */
+    std::string cuttingWords(const LLSD& layout, bool& failed, bool& laid_here) const;
+    void onPickMine();
 
     // ---- the window's own question (Start over, Remove, forget missing pieces) ----
     void ask(const std::string& question, const std::string& yes, std::function<void()> on_yes);
@@ -321,6 +352,11 @@ private:
     LLTextBox* mSugTunnelText = nullptr;  // the two choices' figures (updateControls)
     LLTextBox* mSugClimbText = nullptr;
     LLButton *mSugTunnelBtn = nullptr, *mSugClimbBtn = nullptr;
+    LLTextBox* mSugCutText = nullptr;     // [CUTTINGS] the third choice, Dig a cutting (DESIGN.md 3.6)
+    LLButton* mSugCutBtn = nullptr;
+    LLRect mSugRowRect[3][2];             // [CUTTINGS] the three rows' button and text as in the XUI (a cutting-only hill
+                                          // moves Dig a cutting and Climb the hill up into the first two)
+    LLButton* mGroundBtn = nullptr;       // [CUTTINGS] Dig again / Put the ground back after a failed dig or fill
     LLComboBox* mTTSize = nullptr;
     LLSpinCtrl *mTTRoads = nullptr, *mTTSpread = nullptr;
     LLCheckBoxCtrl* mTTShed = nullptr;
@@ -341,6 +377,8 @@ private:
     std::vector<Turntable> mTurntables;
     std::vector<Tunnel> mTunnels;      // [TUNNELS]
     S32 mCurTunnel = -1;               // a tunnel waiting for its other end
+    std::vector<Cutting> mCuttings;    // [CUTTINGS]
+    S32 mCurCutting = -1;              // a cutting waiting for its other end
     std::set<std::string> mSugHidden;  // suggestions answered "Climb the hill" (line + where), never sent
     S32 mEditTurntable = -1;           // the turntable the turntable controls change
     S32 mCurLine = -1;                 // the line the next click adds to (-1: the next click starts one)
@@ -397,7 +435,21 @@ private:
     std::string mNoLayReason;
     bool mMayTunnel = false;           // [TUNNELS] "open" access.tunnel: the resident may make tunnels in this region
     std::string mNoTunnelReason;
+    bool mMayCut = false;              // [CUTTINGS] "open" access.cut: the resident may dig anywhere in this region
+    std::string mNoCutReason;
     std::map<LLUUID, std::string> mRegionNames;
+
+    // [CUTTINGS] the dig / fill job being followed (one at a time; a newer one takes its place)
+    LLSD mGroundJob;                   // its id, undefined when none
+    std::string mGroundKind;           // "cut" | "fill"
+    LLSD mGroundLayout;
+    LLUUID mGroundRegion;
+    std::string mGroundLead;           // words said before its progress (an earlier error that stays)
+    std::string mGroundSaid;           // the progress last shown (the status is only set when it changes)
+    U32 mGroundGen = 0;                // bumped when a newer job takes its place: the older coroutine stops
+    bool mGroundPolling = false;
+    LLSD mGroundRetry;                 // after a failure: {action "cut" | "fill", layout, region} for Dig again / Put the ground back
+    bool mStatusError = false;         // the status line shows an error now
 
     // the question
     bool mAsking = false;

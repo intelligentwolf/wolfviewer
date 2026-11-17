@@ -14,7 +14,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="652"
+ height="680"
  layout="topleft"
  name="wolf_track"
  help_topic="wolf_track"
@@ -26,19 +26,24 @@
     <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="draw_heading" top="68" width="468">1. Draw your railway - what do your clicks make?</text>
     <radio_group follows="left|top" height="22" layout="topleft" left="16" name="track_mode" top="90" width="468"
      tool_tip="Each choice makes something different with your next clicks on the ground. The words at the top of the world view say what to click.">
-        <radio_item height="20" label="A line" layout="topleft" left="0" name="line" top="0" value="line" width="62"
+        <!-- [TRACK TOOL CUTTINGS 2026-11-17] seven choices in the row: the labels lost their "A " so that A cutting fits beside A
+             tunnel (DESIGN.md 3.6 "Window": a Cutting pen beside the Tunnel pen) -->
+        <radio_item height="20" label="Line" layout="topleft" left="0" name="line" top="0" value="line" width="48"
          tool_tip="Click where the line starts, at each bend, and where it ends. Click the first point again to make a loop." />
-        <radio_item height="20" label="A branch" layout="topleft" left="64" name="branch" top="0" value="branch" width="76"
+        <radio_item height="20" label="Branch" layout="topleft" left="50" name="branch" top="0" value="branch" width="62"
          tool_tip="Click on a line where the branch leaves it, then its bends and its end. End it on a line to join that line." />
-        <radio_item height="20" label="A station" layout="topleft" left="142" name="station" top="0" value="station" width="78"
+        <radio_item height="20" label="Station" layout="topleft" left="114" name="station" top="0" value="station" width="66"
          tool_tip="Click on a line where the platform starts, then where it ends." />
-        <radio_item height="20" label="A signal" layout="topleft" left="222" name="signal" top="0" value="signal" width="70"
+        <radio_item height="20" label="Signal" layout="topleft" left="182" name="signal" top="0" value="signal" width="58"
          tool_tip="Click on a line to put a signal there. Signals are also put in by themselves." />
-        <radio_item height="20" label="A turntable" layout="topleft" left="294" name="turntable" top="0" value="turntable" width="92"
+        <radio_item height="20" label="Turntable" layout="topleft" left="242" name="turntable" top="0" value="turntable" width="84"
          tool_tip="Click on the end of a line to put a turntable there, with stall roads round it." />
         <!-- [TRACK TOOL TUNNELS 2026-11-15] DESIGN.md 3.4: a stretch of a line through the hill -->
-        <radio_item height="20" label="A tunnel" layout="topleft" left="388" name="tunnel" top="0" value="tunnel" width="78"
+        <radio_item height="20" label="Tunnel" layout="topleft" left="328" name="tunnel" top="0" value="tunnel" width="62"
          tool_tip="Click on a line before a hill where the tunnel starts, then beyond the hill where it ends. The ends are fitted to the hill." />
+        <!-- [TRACK TOOL CUTTINGS 2026-11-17] DESIGN.md 3.6: a stretch of a line where the ground is dug down to the rails -->
+        <radio_item height="20" label="Cutting" layout="topleft" left="392" name="cutting" top="0" value="cutting" width="70"
+         tool_tip="Click on a line where the cutting starts, then where it ends. The ground there is dug down to the rails when the railway is laid, and put back if you remove it." />
     </radio_group>
     <button follows="left|top" height="26" label="Undo last point" layout="topleft" left="16" name="track_undo" top="118" width="128"
      tool_tip="Take the last point you clicked back (Backspace)" />
@@ -92,41 +97,50 @@
     <!-- [TRACK TOOL TUNNELS 2026-11-15] Paul: "let the user choose though sometimes they might just want to go up a hill".
          Where the plan finds a hill in the way, its two choices with their grade and length, in place of the station's row
          (climbing is the default: Climb the hill only puts the question away) -->
-    <panel follows="left|top" height="72" layout="topleft" left="0" name="tunnel_choice_panel" top="186" visible="false" width="500">
+    <panel follows="left|top" height="100" layout="topleft" left="0" name="tunnel_choice_panel" top="186" visible="false" width="500">
         <!-- a heading, then one row per choice: its button and its length and grade in a line or two (the plan's whole
-             sentence is the row's tool tip). 72 px: the drawn list's heading starts at 260 -->
+             sentence is the row's tool tip). [CUTTINGS 2026-11-17] three rows (Tunnel through, Dig a cutting, Climb the hill):
+             100 px, so the drawn list's heading starts at 288; a hill with no tunnel choice shows Dig a cutting and Climb the
+             hill in the first two rows (wolffloatertrack.cpp updateControls) -->
         <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="16" name="tunnel_choice_text" top="0" width="468" />
         <button follows="left|top" height="24" label="Tunnel through" layout="topleft" left="16" name="tunnel_choice_tunnel" top="18" width="116"
          tool_tip="Take the line through the hill in a tunnel, with brick portals at each end" />
         <text follows="left|top" font="SansSerifSmall" height="26" layout="topleft" left="138" name="tunnel_choice_tunnel_text" top="18" width="346" word_wrap="true" />
-        <button follows="left|top" height="24" label="Climb the hill" layout="topleft" left="16" name="tunnel_choice_climb" top="46" width="116"
+        <button follows="left|top" height="24" label="Dig a cutting" layout="topleft" left="16" name="tunnel_choice_cutting" top="46" width="116"
+         tool_tip="Dig the ground down along the line so the track runs through the hill in the open, with sloped grass sides (or stone walls where it is deep). Remove puts the ground back." />
+        <text follows="left|top" font="SansSerifSmall" height="26" layout="topleft" left="138" name="tunnel_choice_cutting_text" top="46" width="346" word_wrap="true" />
+        <button follows="left|top" height="24" label="Climb the hill" layout="topleft" left="16" name="tunnel_choice_climb" top="74" width="116"
          tool_tip="Keep the line going over the hill (as it is now)" />
-        <text follows="left|top" font="SansSerifSmall" height="26" layout="topleft" left="138" name="tunnel_choice_climb_text" top="46" width="346" word_wrap="true" />
+        <text follows="left|top" font="SansSerifSmall" height="26" layout="topleft" left="138" name="tunnel_choice_climb_text" top="74" width="346" word_wrap="true" />
     </panel>
-    <text follows="left|top" height="18" layout="topleft" left="16" name="drawn_heading" top="260" width="380">What you have drawn (pick one to change or take it out):</text>
-    <scroll_list draw_heading="false" follows="left|top" height="80" layout="topleft" left="16" name="track_items" top="280" width="380">
+    <text follows="left|top" height="18" layout="topleft" left="16" name="drawn_heading" top="288" width="380">What you have drawn (pick one to change or take it out):</text>
+    <scroll_list draw_heading="false" follows="left|top" height="80" layout="topleft" left="16" name="track_items" top="308" width="380">
         <scroll_list.columns name="what" relative_width="1" />
     </scroll_list>
-    <button follows="left|top" height="26" label="Take out" layout="topleft" left="404" name="track_take_out" top="280" width="80"
-     tool_tip="Take the line, branch, station, signal or turntable picked in the list out of the drawing" />
-    <text follows="left|top" height="34" layout="topleft" left="16" name="track_summary" top="366" width="468" word_wrap="true" />
-    <text follows="left|top" height="52" layout="topleft" left="16" name="track_problems" top="400" width="468" word_wrap="true" />
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="lay_heading" top="456" width="468">2. Lay it</text>
-    <button follows="left|top" font="SansSerifLarge" height="34" label="Lay track" layout="topleft" left="16" name="track_lay" top="478" width="180"
+    <button follows="left|top" height="26" label="Take out" layout="topleft" left="404" name="track_take_out" top="308" width="80"
+     tool_tip="Take the line, branch, station, signal, turntable, tunnel or cutting picked in the list out of the drawing" />
+    <text follows="left|top" height="34" layout="topleft" left="16" name="track_summary" top="394" width="468" word_wrap="true" />
+    <text follows="left|top" height="52" layout="topleft" left="16" name="track_problems" top="428" width="468" word_wrap="true" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="lay_heading" top="484" width="468">2. Lay it</text>
+    <button follows="left|top" font="SansSerifLarge" height="34" label="Lay track" layout="topleft" left="16" name="track_lay" top="506" width="180"
      tool_tip="Make the track, stations and signals and put them on your land (free)" />
-    <progress_bar color_bar="0.3 0.85 0.4 1" follows="left|top" height="10" layout="topleft" left="208" name="track_progress" top="490" visible="false" width="276" />
+    <progress_bar color_bar="0.3 0.85 0.4 1" follows="left|top" height="10" layout="topleft" left="208" name="track_progress" top="518" visible="false" width="276" />
     <!-- Lay the next part shows only when Look again / Take away what was placed do not (wolffloatertrack.cpp updateControls),
          so they share the row -->
-    <button follows="left|top" height="26" label="Lay the next part" layout="topleft" left="16" name="track_next_part" top="518" visible="false" width="180"
+    <button follows="left|top" height="26" label="Lay the next part" layout="topleft" left="16" name="track_next_part" top="546" visible="false" width="180"
      tool_tip="Put the part of your railway that is in the region you are in now on the land" />
-    <button follows="left|top" height="26" label="Look again" layout="topleft" left="16" name="track_look_again" top="518" visible="false" width="120"
+    <button follows="left|top" height="26" label="Look again" layout="topleft" left="16" name="track_look_again" top="546" visible="false" width="120"
      tool_tip="Look again for the pieces that have not appeared yet" />
-    <button follows="left|top" height="26" label="Take away what was placed" layout="topleft" left="144" name="track_take_away" top="518" visible="false" width="220"
+    <button follows="left|top" height="26" label="Take away what was placed" layout="topleft" left="144" name="track_take_away" top="546" visible="false" width="220"
      tool_tip="Take away the pieces that did appear (the railway stays in your inventory, in Objects)" />
-    <text follows="left|top" height="46" layout="topleft" left="16" name="track_status" top="548" width="468" word_wrap="true" />
-    <check_box follows="left|top" height="18" label="Your railways in this region" layout="topleft" left="16" name="track_mine_check" top="600" width="300"
+    <!-- [TRACK TOOL CUTTINGS 2026-11-17] DESIGN.md 3.6 "Window": after a dig or a fill that failed, Dig again / Put the ground
+         back (its label). Never shown with Look again / Take away what was placed (wolffloatertrack.cpp updateControls) -->
+    <button follows="left|top" height="26" label="Dig again" layout="topleft" left="204" name="track_ground_again" top="546" visible="false" width="180"
+     tool_tip="Ask the region again to dig the cutting, or to put the ground back as it was" />
+    <text follows="left|top" height="46" layout="topleft" left="16" name="track_status" top="576" width="468" word_wrap="true" />
+    <check_box follows="left|top" height="18" label="Your railways in this region" layout="topleft" left="16" name="track_mine_check" top="628" width="300"
      tool_tip="Show the railways you have laid in this region, to show, change or remove them" />
-    <panel follows="left|top" height="140" layout="topleft" left="0" name="track_mine_panel" top="622" visible="false" width="500">
+    <panel follows="left|top" height="140" layout="topleft" left="0" name="track_mine_panel" top="650" visible="false" width="500">
         <scroll_list follows="left|top" height="96" layout="topleft" left="16" name="track_mine_list" top="0" width="468">
             <scroll_list.columns label="Railway" name="name" relative_width="0.5" />
             <scroll_list.columns label="State" name="state" relative_width="0.3" />

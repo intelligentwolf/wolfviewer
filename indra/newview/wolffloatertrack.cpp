@@ -141,6 +141,20 @@ namespace
     const LLColor4 COL_TUNNEL_MARK(0.82f, 0.63f, 1.f, 1.f);
     constexpr size_t MAX_TUNNELS = 8;          // tracktool/tunnels.py:63 MAX_TUNNELS (plan.py parse refuses more)
     constexpr F64 TUNNEL_MIN_M = 20.0;         // tracktool/tunnels.py:56 MIN_LEN
+    // [TRACK TOOL CUTTINGS 2026-11-17] DESIGN.md 3.6: the ground lowered along the line where the resident chooses it
+    const LLColor4 COL_CUTTING(0.45f, 0.29f, 0.12f, 1.f);       // CHOSEN: earth brown, darker than COL_BANK so the two differ
+    const LLColor4 COL_CUTTING_MARK(0.95f, 0.78f, 0.52f, 1.f);  // CHOSEN: a waiting cutting-only hill's posts, light earth
+    constexpr size_t MAX_CUTTINGS = 8;         // DESIGN.md 3.6 contract: REQ cuttings "at most 8 ... like tunnels"
+    constexpr F64 CUTTING_MIN_M = 20.0;        // DESIGN.md 3.6 "The levels": a cutting is fitted as a tunnel, at least MIN_LEN 20 m
+    // DESIGN.md 3.6 "The cross-section" (formation f = rail - 0.75; the side starts 5.0 m out; 1:2 to CUT_ROCK_AT 4 m deep, else
+    // 1:1.5; a wall face 5.2 m out where deeper than CUT_WALL_AT 8 m): where the preview draws the tops of a cutting's sides.
+    // The preview only - the planner's own section also turns slopes into walls at land the resident may not dig, which the
+    // window does not know, and reads each side's own ground (the window uses the ground under the line)
+    constexpr F64 CUT_SIDE_FROM_M = 5.0, CUT_ROCK_AT_M = 4.0, CUT_WALL_AT_M = 8.0, CUT_WALL_FACE_M = 5.2;
+    constexpr F64 CUT_SLOPE_SOIL = 2.0, CUT_SLOPE_ROCK = 1.5;    // metres out per metre up
+    constexpr F64 CUT_DASH_M = 2.0;            // CHOSEN: the tops are drawn 2 m on, 2 m off
+    constexpr F32 GROUND_POLL_S = 2.5f;        // the brief / DESIGN.md 10: a job's status every 2-3 s
+    constexpr F64 GROUND_JOB_MAX_S = 1200.0;   // CHOSEN: a dig or fill is waited for 20 minutes at most (it may queue behind others)
 
     bool onWolf() { return WolfGrid::isOnWolfTerritories(); }
 
@@ -421,6 +435,15 @@ bool WolfFloaterTrack::postBuild()
     mSugClimbText = mSugPanel->getChild<LLTextBox>("tunnel_choice_climb_text");
     mSugTunnelBtn = mSugPanel->getChild<LLButton>("tunnel_choice_tunnel");
     mSugClimbBtn = mSugPanel->getChild<LLButton>("tunnel_choice_climb");
+    mSugCutText = mSugPanel->getChild<LLTextBox>("tunnel_choice_cutting_text");
+    mSugCutBtn = mSugPanel->getChild<LLButton>("tunnel_choice_cutting");
+    mSugRowRect[0][0] = mSugTunnelBtn->getRect();
+    mSugRowRect[0][1] = mSugTunnelText->getRect();
+    mSugRowRect[1][0] = mSugCutBtn->getRect();
+    mSugRowRect[1][1] = mSugCutText->getRect();
+    mSugRowRect[2][0] = mSugClimbBtn->getRect();
+    mSugRowRect[2][1] = mSugClimbText->getRect();
+    mGroundBtn = getChild<LLButton>("track_ground_again");
     mItemsList = getChild<LLScrollListCtrl>("track_items");
     mTakeOutBtn = getChild<LLButton>("track_take_out");
     mSummary = getChild<LLTextBox>("track_summary");
@@ -473,8 +496,15 @@ bool WolfFloaterTrack::postBuild()
     mTTSpread->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTurntableControls(); });
     mTTShed->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTurntableControls(); });
     mTakeOutBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onTakeOut(); });
-    mSugTunnelBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onSuggestion(true); });
-    mSugClimbBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onSuggestion(false); });
+    mSugTunnelBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onSuggestion(SUG_TUNNEL); });
+    mSugCutBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onSuggestion(SUG_CUTTING); });
+    mSugClimbBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onSuggestion(SUG_CLIMB); });
+    mGroundBtn->setClickedCallback([this](LLUICtrl*, const LLSD&)
+    {
+        const LLSD r = mGroundRetry;
+        if (r.isMap()) groundAgain(r["action"].asString(), r["layout"], r["region"].asUUID());
+    });
+    mMineList->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPickMine(); });
     mLayBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onLay(); });
     mNextPartBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { layHere(); });
     mLookAgainBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { lookAgain(); });
@@ -512,6 +542,14 @@ void WolfFloaterTrack::onOpen(const LLSD& key)
     if (LLViewerRegion* rgn = gAgent.getRegion()) mMineRegion = rgn->getRegionID();
     refreshMine();                                   // DESIGN.md 10 "open": the access and the layouts here
     if (mLaying && mJobId.isDefined()) startStatusPoll();   // a job that ran while the window was closed
+    if (mGroundJob.isDefined() && !mGroundPolling)
+    {
+        // [CUTTINGS] a dig or fill followed when the window was closed: followed again (the closed window's coroutine stopped)
+        const LLSD job = mGroundJob, layout = mGroundLayout;
+        const std::string kind = mGroundKind, lead = mGroundLead;
+        const LLUUID region = mGroundRegion;
+        startGroundJob(job, kind, layout, region, lead);
+    }
     if (usableLines() > 0) changed();
     updateControls();
 }
@@ -522,6 +560,7 @@ void WolfFloaterTrack::onClose(bool app_quitting)
     mPenWanted = false;
     ++mGen;   // every coroutine of this window stops at its next wake-up (wolffloaterlifts.cpp mBoxGen, the same)
     mPolling = false;
+    mGroundPolling = false;   // [CUTTINGS] its coroutine stops too (mGen); onOpen follows the job again
     mPlanInFlight = false;
     if (app_quitting) return;
     if (mRezzing)
@@ -741,7 +780,7 @@ void WolfFloaterTrack::clickAt(F32 x, F32 y)
         // line (Paul: "i couldnt really make tunnels work"). WolfStorm: floater_wolf_track_tool.js _onDown / _planLineAt.
         const bool new_branch = mode == MODE_BRANCH && !(mCurLine >= 0 && (size_t)mCurLine < mLines.size() && mLines[mCurLine].mBranch);
         GP on, picked;
-        if ((mode == MODE_STATION || mode == MODE_SIGNAL || mode == MODE_TUNNEL || new_branch) && !onALine(g, ON_LINE_M, on)
+        if ((mode == MODE_STATION || mode == MODE_SIGNAL || mode == MODE_TUNNEL || mode == MODE_CUTTING || new_branch) && !onALine(g, ON_LINE_M, on)
             && planLineAtMouse(picked))
         {
             g = picked;
@@ -838,6 +877,12 @@ void WolfFloaterTrack::clickAt(F32 x, F32 y)
                 setStatus(llformat("A tunnel is at least %d m long: click its end further away, beyond the hill.", (S32)TUNNEL_MIN_M), true);
                 return;
             }
+            // [CUTTINGS] DESIGN.md 3.6 contract: a cutting may not overlap a tunnel (nor a tunnel a cutting)
+            Tunnel whole = t;
+            whole.mB = on;
+            whole.mHasB = true;
+            const std::string clash = overlapWords(whole, false);
+            if (!clash.empty()) { setStatus(clash, true); return; }
             t.mB = on;
             t.mHasB = true;
             t.mStamp = nextStamp();
@@ -857,6 +902,58 @@ void WolfFloaterTrack::clickAt(F32 x, F32 y)
         mTunnels.push_back(t);
         mCurTunnel = (S32)mTunnels.size() - 1;
         setStatus("Now click on the same line where the tunnel ends, on the far side of the hill.", false);
+        changed();
+        return;
+    }
+    if (mode == MODE_CUTTING)
+    {
+        // [TRACK TOOL CUTTINGS 2026-11-17] DESIGN.md 3.6 "Window": click where it starts and where it ends on a line, as a tunnel
+        GP on;
+        if (!onALine(g, ON_LINE_M, on))
+        {
+            setStatus("Click right on a line - a cutting digs the ground down along the line.", true);
+            return;
+        }
+        if (mCurCutting >= 0 && (size_t)mCurCutting < mCuttings.size())
+        {
+            Cutting& c = mCuttings[mCurCutting];
+            if (dist(c.mA, on) < CUTTING_MIN_M)
+            {
+                setStatus(llformat("A cutting is at least %d m long: click its end further along the line.", (S32)CUTTING_MIN_M), true);
+                return;
+            }
+            Cutting whole = c;
+            whole.mB = on;
+            whole.mHasB = true;
+            const std::string clash = overlapWords(whole, true);
+            if (!clash.empty()) { setStatus(clash, true); return; }
+            c.mB = on;
+            c.mHasB = true;
+            c.mStamp = nextStamp();
+            const size_t at = (size_t)mCurCutting;
+            mCurCutting = -1;
+            setStatus(mergeCuttings(at)
+                ? std::string("The cutting overlaps one you marked before, so they were joined into one cutting.")
+                : std::string("The cutting is marked. The ground there is dug down to the rails when your railway is laid."), false);
+            changed();
+            return;
+        }
+        if (mCuttings.size() >= MAX_CUTTINGS)
+        {
+            setStatus(llformat("That is the most cuttings one railway can have (%d).", (S32)MAX_CUTTINGS), true);
+            return;
+        }
+        Cutting c;
+        c.mA = on;
+        c.mB = on;   // a stretch of nothing yet: only its start is tested against the tunnels
+        c.mHasB = true;
+        const std::string clash = overlapWords(c, true);
+        if (!clash.empty()) { setStatus(clash, true); return; }
+        c.mHasB = false;
+        c.mStamp = nextStamp();
+        mCuttings.push_back(c);
+        mCurCutting = (S32)mCuttings.size() - 1;
+        setStatus("Now click on the same line where the cutting ends.", false);
         changed();
         return;
     }
@@ -964,7 +1061,7 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
         }
     }
     if (r.mKind == REF_LINE_START || r.mKind == REF_STATION_A || r.mKind == REF_STATION_B || r.mKind == REF_SIGNAL
-        || r.mKind == REF_TUNNEL_A || r.mKind == REF_TUNNEL_B)
+        || r.mKind == REF_TUNNEL_A || r.mKind == REF_TUNNEL_B || r.mKind == REF_CUTTING_A || r.mKind == REF_CUTTING_B)
     {
         // these stay on a line: a drag puts them on the nearest one (the planner refuses them off a line anyway)
         GP on;
@@ -987,6 +1084,10 @@ void WolfFloaterTrack::moveClick(S32 k, F32 x, F32 y, bool done)
         case REF_SIGNAL: mSignals[r.mItem].mAt = g; break;
         case REF_TUNNEL_A: mTunnels[r.mItem].mA = g; break;
         case REF_TUNNEL_B: mTunnels[r.mItem].mB = g; break;
+        // [CUTTINGS] a dragged end that makes it overlap a tunnel is refused by the window when the plan is asked for
+        // (buildRequest: the sentence in the window), not mid-drag
+        case REF_CUTTING_A: mCuttings[r.mItem].mA = g; break;
+        case REF_CUTTING_B: mCuttings[r.mItem].mB = g; break;
     }
     changed();
 }
@@ -1004,6 +1105,7 @@ void WolfFloaterTrack::undoPoint()
     for (size_t i = 0; i < mSignals.size(); ++i) if (mSignals[i].mStamp > best) { best = mSignals[i].mStamp; kind = 2; at = i; }
     for (size_t i = 0; i < mTurntables.size(); ++i) if (mTurntables[i].mStamp > best) { best = mTurntables[i].mStamp; kind = 3; at = i; }
     for (size_t i = 0; i < mTunnels.size(); ++i) if (mTunnels[i].mStamp > best) { best = mTunnels[i].mStamp; kind = 4; at = i; }
+    for (size_t i = 0; i < mCuttings.size(); ++i) if (mCuttings[i].mStamp > best) { best = mCuttings[i].mStamp; kind = 5; at = i; }
     if (kind < 0)
     {
         setStatus("There is nothing to take back - click on the ground to draw a line.", false);
@@ -1071,6 +1173,22 @@ void WolfFloaterTrack::undoPoint()
             setStatus("The tunnel was taken out: the line climbs over the hill again.", false);
         }
     }
+    else if (kind == 5)
+    {
+        Cutting& c = mCuttings[at];
+        if (c.mHasB)
+        {
+            c.mHasB = false;
+            mCurCutting = (S32)at;
+            setStatus("The cutting's end was taken back - click where it ends.", false);
+        }
+        else
+        {
+            mCuttings.erase(mCuttings.begin() + (std::ptrdiff_t)at);
+            mCurCutting = -1;
+            setStatus("The cutting was taken out: the line climbs over the hill again.", false);
+        }
+    }
     else
     {
         mTurntables.erase(mTurntables.begin() + (std::ptrdiff_t)at);
@@ -1122,6 +1240,12 @@ void WolfFloaterTrack::removeClick(S32 k)
             mTunnels.erase(mTunnels.begin() + (std::ptrdiff_t)r.mItem);
             mCurTunnel = -1;
             setStatus("The tunnel was taken out: the line climbs over the hill again.", false);
+            break;
+        case REF_CUTTING_A:
+        case REF_CUTTING_B:
+            mCuttings.erase(mCuttings.begin() + (std::ptrdiff_t)r.mItem);
+            mCurCutting = -1;
+            setStatus("The cutting was taken out: the line climbs over the hill again.", false);
             break;
     }
     changed();
@@ -1184,6 +1308,8 @@ void WolfFloaterTrack::startOver()
     mTurntables.clear();
     mTunnels.clear();
     mCurTunnel = -1;
+    mCuttings.clear();
+    mCurCutting = -1;
     mCurLine = mCurStation = mEditStation = mEditTurntable = -1;
     mReplaces = LLSD();
     mReplaceLaid.clear();
@@ -1210,6 +1336,12 @@ void WolfFloaterTrack::onMode()
         changed();
     }
     mCurTunnel = -1;
+    if (mCurCutting >= 0 && (size_t)mCurCutting < mCuttings.size() && !mCuttings[mCurCutting].mHasB)
+    {
+        mCuttings.erase(mCuttings.begin() + mCurCutting);   // [CUTTINGS] a cutting without its end is not kept
+        changed();
+    }
+    mCurCutting = -1;
     setStatus(std::string(), false);
     updateControls();
 }
@@ -1279,7 +1411,7 @@ void WolfFloaterTrack::onTakeOut()
 {
     if (busy()) return;
     const LLScrollListItem* it = mItemsList->getFirstSelected();
-    if (!it) { setStatus("Pick a line, branch, station, signal, turntable or tunnel in the list first.", true); return; }
+    if (!it) { setStatus("Pick a line, branch, station, signal, turntable, tunnel or cutting in the list first.", true); return; }
     const std::string v = it->getValue().asString();
     if (v.size() < 3) return;
     const size_t i = (size_t)atoi(v.c_str() + 2);
@@ -1311,6 +1443,12 @@ void WolfFloaterTrack::onTakeOut()
         mTunnels.erase(mTunnels.begin() + (std::ptrdiff_t)i);
         mCurTunnel = -1;
         setStatus("The tunnel was taken out: the line climbs over the hill again.", false);
+    }
+    else if (v[0] == 'C' && i < mCuttings.size())
+    {
+        mCuttings.erase(mCuttings.begin() + (std::ptrdiff_t)i);
+        mCurCutting = -1;
+        setStatus("The cutting was taken out: the line climbs over the hill again.", false);
     }
     changed();
 }
@@ -1376,6 +1514,24 @@ void WolfFloaterTrack::fillItemList()
         else w += llformat("%d m as marked", (S32)ll_round((F32)sqrt((t.mB.x - t.mA.x) * (t.mB.x - t.mA.x) + (t.mB.y - t.mA.y) * (t.mB.y - t.mA.y))));
         row(llformat("N:%d", (S32)i), w);
     }
+    for (size_t i = 0; i < mCuttings.size(); ++i)
+    {
+        // [CUTTINGS] as fitted to the hill by the last plan (PLAN layout.cuttings: length_m, deepest_m, walls_m - DESIGN.md 3.6
+        // contract), else as marked. The plan joins marks that overlap, so its list is only read when it has one per mark
+        const Cutting& c = mCuttings[i];
+        std::string w = llformat("Cutting %d - ", (S32)i + 1);
+        const LLSD& fitted = mPlan.mCuttings;
+        if (!c.mHasB) w += "(click where it ends)";
+        else if (fitted.isArray() && (size_t)fitted.size() == mCuttings.size() && !mPlanDirty)
+        {
+            const LLSD& f = fitted[(S32)i];
+            w += llformat("%d m long, up to %d m deep", f["length_m"].asInteger(), ll_round((F32)f["deepest_m"].asReal()));
+            const S32 walls = ll_round((F32)f["walls_m"].asReal());
+            if (walls > 0) w += llformat(", %d m of stone wall", walls);
+        }
+        else w += llformat("%d m as marked", (S32)ll_round((F32)sqrt((c.mB.x - c.mA.x) * (c.mB.x - c.mA.x) + (c.mB.y - c.mA.y) * (c.mB.y - c.mA.y))));
+        row(llformat("C:%d", (S32)i), w);
+    }
     if (drawingEmpty()) row(std::string(), "Nothing yet - click on the ground to start a line.");
     if (picked.isDefined() && !picked.asString().empty()) mItemsList->selectByValue(picked);
 }
@@ -1407,6 +1563,12 @@ void WolfFloaterTrack::rebuildFlat()
         mFlatRefs.push_back({ REF_TUNNEL_A, i, 0 });
         if (mTunnels[i].mHasB) { mFlat.push_back(toRegion(mTunnels[i].mB)); mFlatRefs.push_back({ REF_TUNNEL_B, i, 0 }); }
     }
+    for (size_t i = 0; i < mCuttings.size(); ++i)
+    {
+        mFlat.push_back(toRegion(mCuttings[i].mA));
+        mFlatRefs.push_back({ REF_CUTTING_A, i, 0 });
+        if (mCuttings[i].mHasB) { mFlat.push_back(toRegion(mCuttings[i].mB)); mFlatRefs.push_back({ REF_CUTTING_B, i, 0 }); }
+    }
 }
 
 void WolfFloaterTrack::changed()
@@ -1415,6 +1577,7 @@ void WolfFloaterTrack::changed()
     mCurStation = mCurStation >= (S32)mStations.size() ? -1 : mCurStation;
     mEditStation = mEditStation >= (S32)mStations.size() ? -1 : mEditStation;
     mCurTunnel = mCurTunnel >= (S32)mTunnels.size() ? -1 : mCurTunnel;
+    mCurCutting = mCurCutting >= (S32)mCuttings.size() ? -1 : mCurCutting;
     // a turntable stands on a line's end (tracktool/layout.py add_turntable: within 6 m): one whose end was taken away goes
     // with it (the planner would refuse it), and one loaded within 6 m of an end (Change) is put on the end exactly
     size_t dropped = 0;
@@ -1468,6 +1631,8 @@ std::string WolfFloaterTrack::markerLabel(size_t k) const
         case REF_SIGNAL: return "Signal";
         case REF_TUNNEL_A: return llformat("Tunnel %d", (S32)r.mItem + 1);
         case REF_TUNNEL_B: return "Tunnel end";
+        case REF_CUTTING_A: return llformat("Cutting %d", (S32)r.mItem + 1);
+        case REF_CUTTING_B: return "Cutting end";
     }
     return std::string();
 }
@@ -1506,6 +1671,13 @@ std::string WolfFloaterTrack::routeHint() const
         if (!mMayTunnel && !mNoTunnelReason.empty()) return mNoTunnelReason;
         return mCurTunnel >= 0 ? "Click on the same line where the tunnel ENDS, beyond the hill."
                                : "Click on a line before the hill where the tunnel STARTS.";
+    }
+    if (mode == MODE_CUTTING)
+    {
+        // [CUTTINGS] DESIGN.md 3.6 "open": access.cut / access.cut_reason
+        if (!mMayCut && !mNoCutReason.empty()) return mNoCutReason;
+        return mCurCutting >= 0 ? "Click on the same line where the cutting ENDS."
+                                : "Click on a line where the cutting STARTS, before the rising ground.";
     }
     if (mCurLine < 0) return mLines.empty() ? "Click on the ground where your line STARTS." : "Click on the ground to start another line.";
     const Line& l = mLines[mCurLine];
@@ -1576,6 +1748,19 @@ bool WolfFloaterTrack::buildRequest(LLSD& req, std::string& why) const
         tunnels.append(LLSD().with("a", xy(t.mA.x, t.mA.y)).with("b", xy(t.mB.x, t.mB.y)));
         grow(t.mA);
         grow(t.mB);
+    }
+    // [CUTTINGS] DESIGN.md 3.6 contract: REQ cuttings [{a, b}] (both ends on one line, at most 8; a cutting may not overlap a
+    // tunnel - a dragged end can make one: said here, in the window, before anything is sent)
+    LLSD cuttings = LLSD::emptyArray();
+    for (size_t i = 0; i < mCuttings.size(); ++i)
+    {
+        const Cutting& c = mCuttings[i];
+        if (!c.mHasB) continue;
+        const std::string clash = overlapWords(c, true);
+        if (!clash.empty()) { why = llformat("Cutting %d: ", (S32)i + 1) + clash; return false; }
+        cuttings.append(LLSD().with("a", xy(c.mA.x, c.mA.y)).with("b", xy(c.mB.x, c.mB.y)));
+        grow(c.mA);
+        grow(c.mB);
     }
 
     // the ground box (DESIGN.md 10 "Ground box"; the planner's own test requests: test/fixtures.py request())
@@ -1710,6 +1895,7 @@ bool WolfFloaterTrack::buildRequest(LLSD& req, std::string& why) const
     req["signals"] = signals;
     req["turntables"] = turntables;
     req["tunnels"] = tunnels;
+    req["cuttings"] = cuttings;
     req["others"] = others;
     return true;
 }
@@ -1730,7 +1916,11 @@ void WolfFloaterTrack::sendPlan()
     }
     mPlanInFlight = true;
     const U32 serial = mPlanSerial;
-    post("plan", LLSD().with("request", req), [serial, req](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
+    LLSD body = LLSD().with("request", req);
+    // [CUTTINGS] DESIGN.md 3.6 contract: "plan also takes layout: id (the layout being changed): the preview is then planned on
+    // the ground before that layout's cuttings" - a Change's old layout (lay sends the same id as "layout")
+    if (mReplaces.isDefined() && !(mReplaces.isString() && mReplaces.asString().empty())) body["layout"] = mReplaces;
+    post("plan", body, [serial, req](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
     {
         f->mPlanInFlight = false;
         if (serial != f->mPlanSerial) return;   // the drawing changed meanwhile: draw() asks again
@@ -1811,6 +2001,7 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
                 const std::string st = structure[idx].asString();
                 if (st == "ground") { col = COL_GROUND; kind = 0; }
                 else if (st == "tunnel") { col = COL_TUNNEL; kind = 4; }
+                else if (st == "cutting") { col = COL_CUTTING; kind = 5; }   // [CUTTINGS] DESIGN.md 3.6 contract
                 else if (st == "bank") { col = COL_BANK; kind = 1; }
                 else if (st == "viaduct")
                 {
@@ -1876,6 +2067,50 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
             out.mOutline.c.push_back(col);
         }
     };
+
+    // [CUTTINGS] DESIGN.md 3.6 "Window": the tops of each cutting's sides, dashed, from layout.cuttings and the line - where the
+    // section (CUT_* above) meets the ground this viewer has under the line; nothing where the rail is not below the ground
+    for (const LLSD& c : llsd::inArray(arr(layout["cuttings"])))
+    {
+        const PlanLine* l = lineById(c["line"].asString());
+        if (!l) continue;
+        const F64 s0 = c["s0"].asReal(), s1 = c["s1"].asReal();
+        LLVector3d prev[2];
+        bool prev_ok = false;
+        S32 n = 0;
+        for (F64 s = s0; s <= s1 + 1e-6; s += CUT_DASH_M, ++n)
+        {
+            LLVector3d p;
+            F64 hx, hy;
+            bool ok = along(*l, llmin(s, s1), p, hx, hy);
+            const F64 depth = ok ? groundZ(p.mdV[VX], p.mdV[VY]) - (p.mdV[VZ] - FORMATION_M) : 0.0;
+            ok = ok && depth > 0.0;
+            LLVector3d cur[2];
+            if (ok)
+            {
+                const F64 w = depth > CUT_WALL_AT_M ? CUT_WALL_FACE_M
+                                                    : CUT_SIDE_FROM_M + depth * (depth > CUT_ROCK_AT_M ? CUT_SLOPE_ROCK : CUT_SLOPE_SOIL);
+                for (S32 k = 0; k < 2; ++k)
+                {
+                    const F64 sgn = k == 0 ? 1.0 : -1.0;   // left (-hy, hx), then right
+                    const F64 x = p.mdV[VX] - hy * w * sgn, y = p.mdV[VY] + hx * w * sgn;
+                    cur[k] = LLVector3d(x, y, groundZ(x, y) + 0.15);
+                }
+            }
+            if (ok && prev_ok && n % 2 == 1)   // every other 2 m: dashed
+            {
+                for (S32 k = 0; k < 2; ++k)
+                {
+                    out.mCutEdges.v.push_back(prev[k]);
+                    out.mCutEdges.v.push_back(cur[k]);
+                    out.mCutEdges.c.push_back(COL_CUTTING);
+                }
+            }
+            prev[0] = cur[0];
+            prev[1] = cur[1];
+            prev_ok = ok;
+        }
+    }
 
     // stations: platform outlines beside the line (DESIGN.md 4.4; offsets tracktool/layout.py:35-36)
     for (const LLSD& st : llsd::inArray(arr(layout["stations"])))
@@ -2039,6 +2274,9 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
         if (sm["points"].asInteger() > 0) t += ", " + plural(sm["points"].asInteger(), "set of points", "sets of points");
         if (sm["tunnels"].asInteger() > 0)
             t += ", " + plural(sm["tunnels"].asInteger(), "tunnel", "tunnels") + llformat(" (%d m)", sm["tunnel_m"].asInteger());
+        // [CUTTINGS] DESIGN.md 3.6 contract: summary cuttings, cutting_m
+        if (sm["cuttings"].asInteger() > 0)
+            t += ", " + plural(sm["cuttings"].asInteger(), "cutting", "cuttings") + llformat(" (%d m)", ll_round((F32)sm["cutting_m"].asReal()));
         const S32 rises = ll_round((F32)sm["rises_m"].asReal());
         if (rises > 0) t += llformat(", rises %d m", rises);
         out.mSummary = t + ".";
@@ -2078,6 +2316,8 @@ void WolfFloaterTrack::applyPlan(const LLSD& plan, Plan& out) const
     out.mProblemText = text;
     out.mTunnels = arr(layout["tunnels"]);
     out.mSuggestions = arr(plan["suggestions"]);
+    out.mCuttings = arr(layout["cuttings"]);            // [CUTTINGS] DESIGN.md 3.6 contract
+    out.mCutSuggestions = arr(plan["cut_suggestions"]);
 }
 
 // ---- the preview in the world ---------------------------------------------------------------------------------------------
@@ -2141,6 +2381,7 @@ void WolfFloaterTrack::renderRouteExtras(LLViewerRegion* rgn)
     strokes(mPlan.mRails, nullptr);
     gGL.setLineWidth(2.f);
     strokes(mPlan.mOutline, nullptr);
+    strokes(mPlan.mCutEdges, nullptr);   // [CUTTINGS] the tops of a cutting's sides, dashed
     // every problem: a post from the land and a ring round its foot
     Strokes red;
     for (const PlanMark& m : mPlan.mProblems)
@@ -2161,6 +2402,8 @@ void WolfFloaterTrack::renderRouteExtras(LLViewerRegion* rgn)
     const LLSD sug = pendingSuggestion();
     if (sug.isMap())
     {
+        // [CUTTINGS] a hill whose only choice is a cutting: "Cutting?" posts in light earth (DESIGN.md 3.6 "Window")
+        const LLColor4& mark = sug["cut_only"].asBoolean() ? COL_CUTTING_MARK : COL_TUNNEL_MARK;
         auto post = [&](const LLSD& p, F64 h, F64 r)
         {
             F64 x, y;
@@ -2169,13 +2412,13 @@ void WolfFloaterTrack::renderRouteExtras(LLViewerRegion* rgn)
             const F64 z = landAt(x, y, g32) ? (F64)g32 : (F64)LLWorld::getInstance()->resolveLandHeightGlobal(LLVector3d(x, y, 0.0));
             red.v.emplace_back(x, y, z);
             red.v.emplace_back(x, y, z + h);
-            red.c.push_back(COL_TUNNEL_MARK);
+            red.c.push_back(mark);
             for (S32 i = 0; i < 16; ++i)
             {
                 const F64 a0 = (F64)i / 16.0 * F_TWO_PI, a1 = (F64)(i + 1) / 16.0 * F_TWO_PI;
                 red.v.emplace_back(x + cos(a0) * r, y + sin(a0) * r, z + 0.2);
                 red.v.emplace_back(x + cos(a1) * r, y + sin(a1) * r, z + 0.2);
-                red.c.push_back(COL_TUNNEL_MARK);
+                red.c.push_back(mark);
             }
         };
         post(sug["a"], 8.0, 2.5);
@@ -2220,7 +2463,11 @@ void WolfFloaterTrack::drawRouteExtras(LLViewerRegion* rgn)
     {
         F32 g32;
         const F64 z = landAt(sx, sy, g32) ? (F64)g32 : (F64)LLWorld::getInstance()->resolveLandHeightGlobal(LLVector3d(sx, sy, 0.0));
-        label(PlanMark{ LLVector3d(sx, sy, z + 14.0), "Tunnel? A hill is in the way - choose in the window", COL_TUNNEL_MARK }, true);
+        // [CUTTINGS] a hill whose only choice is a cutting: "Cutting?" (DESIGN.md 3.6 "Window")
+        if (sug["cut_only"].asBoolean())
+            label(PlanMark{ LLVector3d(sx, sy, z + 14.0), "Cutting? A hill is in the way - choose in the window", COL_CUTTING_MARK }, true);
+        else
+            label(PlanMark{ LLVector3d(sx, sy, z + 14.0), "Tunnel? A hill is in the way - choose in the window", COL_TUNNEL_MARK }, true);
     }
 }
 
@@ -2805,6 +3052,10 @@ void WolfFloaterTrack::rezCoro(LLHandle<LLFloater> h, U32 gen, Item item, LLSD l
     f->mLaidThisSession.insert(layout.asString());   // every piece of it is in view this session: Remove starts nearby
     f->afterSaved(reply["layout"]);
     if (!tunnel_words.empty()) f->setStatus(f->mStatus->getText() + tunnel_words, tunnel_words.find("stays closed") != std::string::npos);
+    // [CUTTINGS] DESIGN.md 3.6 contract: "saved answers also cut_job: JOB | null (the dig, queued at once for that region's
+    // cuttings)" - followed in the window until the cutting is dug (an error said above stays in front of it)
+    const LLSD cut_job = reply["cut_job"];
+    if (cut_job.isMap()) f->startGroundJob(cut_job, "cut", layout, item.mRegion, f->mStatusError ? f->mStatus->getText() : std::string());
 }
 
 void WolfFloaterTrack::lookAgain()
@@ -2863,6 +3114,8 @@ void WolfFloaterTrack::afterSaved(const LLSD& layout)
         mTurntables.clear();
         mTunnels.clear();
         mCurTunnel = -1;
+        mCuttings.clear();
+        mCurCutting = -1;
         mCurLine = mCurStation = mEditStation = mEditTurntable = -1;
         mPlan.clear();
         mPlannedReq = LLSD();
@@ -3017,7 +3270,7 @@ void WolfFloaterTrack::sendRemoved(const LLSD& layout, const LLUUID& region, boo
     LLSD body;
     body["layout"] = layout;
     body["region"] = region.asString();
-    post("removed", body, [region, replacing](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
+    post("removed", body, [layout, region, replacing](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
     {
         if (!ok)
         {
@@ -3044,6 +3297,8 @@ void WolfFloaterTrack::sendRemoved(const LLSD& layout, const LLUUID& region, boo
         f->mShown.clear();
         f->setStatus(t, false);
         f->refreshMine();
+        // [CUTTINGS] DESIGN.md 3.6 contract: "removed answers fill_job: JOB | null" - the ground put back as it was
+        if (reply["fill_job"].isMap()) f->startGroundJob(reply["fill_job"], "fill", layout, region, std::string());
     });
 }
 
@@ -3082,6 +3337,8 @@ void WolfFloaterTrack::refreshMine()
         f->mNoLayReason = access.isMap() ? access["reason"].asString() : std::string();
         f->mMayTunnel = access.isMap() && access["tunnel"].asBoolean();
         f->mNoTunnelReason = access.isMap() ? access["tunnel_reason"].asString() : std::string();
+        f->mMayCut = access.isMap() && access["cut"].asBoolean();   // [CUTTINGS] DESIGN.md 3.6 contract "open"
+        f->mNoCutReason = access.isMap() ? access["cut_reason"].asString() : std::string();
         f->fillMineList();
         f->updateControls();
     });
@@ -3093,7 +3350,13 @@ void WolfFloaterTrack::fillMineList()
     for (LLSD::Integer i = 0; i < (LLSD::Integer)mMine.size(); ++i)
     {
         const LLSD& l = mMine[i];
-        if (l["state"].asString() == "removed") continue;
+        if (l["state"].asString() == "removed")
+        {
+            // [CUTTINGS] a removed railway stays listed while its cutting here is not filled in yet (DESIGN.md 3.6 LAYOUT
+            // cuttings: waiting | filling | failed), so the ground can still be put back from here
+            const LLSD& cut = l["cuttings"][mMineRegion.asString()];
+            if (!cut.isMap() || cut["state"].asString() == "filled") continue;
+        }
         LLSD e;
         e["value"] = i;
         e["columns"][0]["column"] = "name";
@@ -3133,6 +3396,8 @@ void WolfFloaterTrack::loadDrawing(const LLSD& req)
     mTurntables.clear();
     mTunnels.clear();
     mCurTunnel = -1;
+    mCuttings.clear();
+    mCurCutting = -1;
     mEditTurntable = -1;
     mCurLine = mCurStation = mEditStation = -1;
     auto gp = [](const LLSD& v) { GP p; readXY(v, p.x, p.y); return p; };
@@ -3144,6 +3409,15 @@ void WolfFloaterTrack::loadDrawing(const LLSD& req)
         t.mHasB = true;
         t.mStamp = nextStamp();
         mTunnels.push_back(t);
+    }
+    for (const LLSD& e : llsd::inArray(arr(req["cuttings"])))   // [CUTTINGS] DESIGN.md 3.6 contract REQ cuttings
+    {
+        Cutting c;
+        c.mA = gp(e["a"]);
+        c.mB = gp(e["b"]);
+        c.mHasB = true;
+        c.mStamp = nextStamp();
+        mCuttings.push_back(c);
     }
     for (const LLSD& e : llsd::inArray(arr(req["lines"])))
     {
@@ -3190,6 +3464,8 @@ bool WolfFloaterTrack::requestFor(const LLSD& stored, const std::vector<LLUUID>&
     const std::vector<Turntable> turntables = mTurntables;
     const std::vector<Tunnel> tunnels = mTunnels;
     const S32 cur_tunnel = mCurTunnel;
+    const std::vector<Cutting> cuttings = mCuttings;
+    const S32 cur_cutting = mCurCutting;
     const std::vector<LLUUID> replace_laid = mReplaceLaid;
     const S32 cur_line = mCurLine, cur_station = mCurStation, edit_station = mEditStation, edit_tt = mEditTurntable;
     loadDrawing(stored);
@@ -3201,6 +3477,8 @@ bool WolfFloaterTrack::requestFor(const LLSD& stored, const std::vector<LLUUID>&
     mTurntables = turntables;
     mTunnels = tunnels;
     mCurTunnel = cur_tunnel;
+    mCuttings = cuttings;
+    mCurCutting = cur_cutting;
     mReplaceLaid = replace_laid;
     mCurLine = cur_line;
     mCurStation = cur_station;
@@ -3240,25 +3518,77 @@ bool WolfFloaterTrack::planLineAtMouse(GP& out) const
 
 LLSD WolfFloaterTrack::pendingSuggestion() const
 {
-    // the plan's first suggestion the resident has not answered (Climb the hill is kept here only: climbing is the default)
+    // the plan's first suggestion the resident has not answered (Climb the hill is kept here only: climbing is the default);
+    // [CUTTINGS] then the hills where only a cutting is the other choice (DESIGN.md 3.6 contract: PLAN cut_suggestions [{line,
+    // s0, s1, at, cutting, climb}] - their ends are the cutting's own a, b, put where the posts and the answer look for them)
     if (mPlanDirty) return LLSD();
+    auto key = [](const LLSD& g, const char* kind)
+    {
+        return std::string(kind) + g["line"].asString()
+             + llformat(":%d:%d", ll_round((F32)g["s0"].asReal() / 10.f), ll_round((F32)g["s1"].asReal() / 10.f));
+    };
     for (const LLSD& g : llsd::inArray(arr(mPlan.mSuggestions)))
     {
-        const std::string key = g["line"].asString() + llformat(":%d:%d", ll_round((F32)g["s0"].asReal() / 10.f), ll_round((F32)g["s1"].asReal() / 10.f));
-        if (!mSugHidden.count(key)) return g;
+        if (!mSugHidden.count(key(g, ""))) return g;
+    }
+    for (const LLSD& g : llsd::inArray(arr(mPlan.mCutSuggestions)))
+    {
+        if (mSugHidden.count(key(g, "cut:"))) continue;
+        LLSD c = g;
+        c["cut_only"] = true;
+        c["key"] = key(g, "cut:");
+        if (!c.has("a")) c["a"] = g["cutting"]["a"];
+        if (!c.has("b")) c["b"] = g["cutting"]["b"];
+        return c;
     }
     return LLSD();
 }
 
-void WolfFloaterTrack::onSuggestion(bool tunnel)
+void WolfFloaterTrack::onSuggestion(ESugChoice choice)
 {
     const LLSD g = pendingSuggestion();
     if (!g.isMap() || busy()) return;
-    if (!tunnel)
+    if (choice == SUG_CLIMB)
     {
-        mSugHidden.insert(g["line"].asString() + llformat(":%d:%d", ll_round((F32)g["s0"].asReal() / 10.f), ll_round((F32)g["s1"].asReal() / 10.f)));
+        mSugHidden.insert(g.has("key") ? g["key"].asString()
+                                       : g["line"].asString() + llformat(":%d:%d", ll_round((F32)g["s0"].asReal() / 10.f), ll_round((F32)g["s1"].asReal() / 10.f)));
         setStatus("The line climbs over the hill.", false);
         updateControls();
+        return;
+    }
+    if (choice == SUG_CUTTING)
+    {
+        // [CUTTINGS] DESIGN.md 3.6 contract: "cutting: {possible, text, a, b, ...} (a, b: the ends to send in REQ.cuttings when
+        // chosen)"; access.cut false: the resident may not dig here
+        const LLSD& cut = g["cutting"];
+        if (!mMayCut) { setStatus(mNoCutReason.empty() ? std::string("You cannot dig cuttings in this region.") : mNoCutReason, true); return; }
+        if (!cut.isMap() || !cut["possible"].asBoolean())
+        {
+            setStatus(cut.isMap() && !cut["text"].asString().empty() ? cut["text"].asString() : std::string("A cutting is not possible here."), true);
+            return;
+        }
+        if (mCuttings.size() >= MAX_CUTTINGS)
+        {
+            setStatus(llformat("That is the most cuttings one railway can have (%d).", (S32)MAX_CUTTINGS), true);
+            return;
+        }
+        Cutting c;
+        if (!readXY(cut["a"], c.mA.x, c.mA.y) || !readXY(cut["b"], c.mB.x, c.mB.y))
+        {
+            setStatus("The railway service did not say where the cutting would go. Mark it with Cutting instead: click where it "
+                      "starts and where it ends on the line.", true);
+            return;
+        }
+        c.mHasB = true;
+        const std::string clash = overlapWords(c, true);
+        if (!clash.empty()) { setStatus(clash, true); return; }
+        c.mStamp = nextStamp();
+        mCuttings.push_back(c);
+        const bool joined = mergeCuttings(mCuttings.size() - 1);
+        setStatus(std::string("The line now runs through the hill in a cutting: the ground there is dug down to the rails when your "
+                              "railway is laid, and put back if you remove it. (Undo last point, or Take out in the list, climbs it again.)")
+                  + (joined ? " It joins a cutting you marked before." : ""), false);
+        changed();
         return;
     }
     if (!mMayTunnel) { setStatus(mNoTunnelReason.empty() ? std::string("You cannot make tunnels in this region.") : mNoTunnelReason, true); return; }
@@ -3272,10 +3602,300 @@ void WolfFloaterTrack::onSuggestion(bool tunnel)
     readXY(g["a"], t.mA.x, t.mA.y);
     readXY(g["b"], t.mB.x, t.mB.y);
     t.mHasB = true;
+    // [CUTTINGS] DESIGN.md 3.6 contract: a cutting may not overlap a tunnel
+    const std::string clash = overlapWords(t, false);
+    if (!clash.empty()) { setStatus(clash, true); return; }
     t.mStamp = nextStamp();
     mTunnels.push_back(t);
     setStatus("The line now goes through the hill in a tunnel. (Undo last point, or Take out in the list, climbs it again.)", false);
     changed();
+}
+
+// ---- [TRACK TOOL CUTTINGS 2026-11-17] cuttings (DESIGN.md 3.6) ----------------------------------------------------------------
+
+bool WolfFloaterTrack::drawnChainage(const GP& p, S32& line, F64& s) const
+{
+    // the drawn lines (not the plan's, which may be of an older drawing): the nearest piece of any line, and the length along
+    // that line to there. Both ends of a mark are snapped onto the plan's line, which is near the drawn one (tracktool/geom.py
+    // fits a curve inside each corner), so the nearest drawn line is the one it is on
+    F64 best = 1e300;
+    bool found = false;
+    for (size_t li = 0; li < mLines.size(); ++li)
+    {
+        const Line& l = mLines[li];
+        std::vector<GP> pts;
+        if (l.mBranch) pts.push_back(l.mStart);
+        pts.insert(pts.end(), l.mClicks.begin(), l.mClicks.end());
+        if (l.mClosed && pts.size() >= 3) pts.push_back(pts.front());
+        F64 run = 0.0;
+        for (size_t k = 1; k < pts.size(); ++k)
+        {
+            const GP& a = pts[k - 1];
+            const GP& b = pts[k];
+            const F64 vx = b.x - a.x, vy = b.y - a.y, len = sqrt(vx * vx + vy * vy);
+            const F64 u = len > 1e-9 ? llclamp(((p.x - a.x) * vx + (p.y - a.y) * vy) / (len * len), 0.0, 1.0) : 0.0;
+            const F64 qx = a.x + vx * u - p.x, qy = a.y + vy * u - p.y;
+            const F64 d = qx * qx + qy * qy;
+            if (d < best) { best = d; line = (S32)li; s = run + u * len; found = true; }
+            run += len;
+        }
+    }
+    return found;
+}
+
+bool WolfFloaterTrack::stretchesOverlap(const Stretch& x, const Stretch& y) const
+{
+    S32 lxa = -1, lxb = -1, lya = -1, lyb = -1;
+    F64 sxa = 0.0, sxb = 0.0, sya = 0.0, syb = 0.0;
+    if (!drawnChainage(x.mA, lxa, sxa) || !drawnChainage(x.mB, lxb, sxb) || !drawnChainage(y.mA, lya, sya) || !drawnChainage(y.mB, lyb, syb))
+        return false;
+    if (lxa != lxb || lya != lyb || lxa != lya) return false;   // not on one line
+    const F64 x0 = llmin(sxa, sxb), x1 = llmax(sxa, sxb), y0 = llmin(sya, syb), y1 = llmax(sya, syb);
+    constexpr F64 POINT_M = 1e-3;
+    // a stretch of no length (a first click) overlaps when it lies inside the other; two stretches when they share some line.
+    // Ends that only meet (a cutting up to a tunnel's portal) do not overlap
+    if (x1 - x0 < POINT_M) return x0 > y0 && x0 < y1;
+    if (y1 - y0 < POINT_M) return y0 > x0 && y0 < x1;
+    return llmin(x1, y1) - llmax(x0, y0) > POINT_M;
+}
+
+std::string WolfFloaterTrack::overlapWords(const Stretch& s, bool is_cutting) const
+{
+    // DESIGN.md 3.6 contract: "a cutting may not overlap a tunnel" (the planner refuses it; the window says so first)
+    const std::vector<Stretch>& others = is_cutting ? mTunnels : mCuttings;
+    for (size_t i = 0; i < others.size(); ++i)
+    {
+        if (!others[i].mHasB || !stretchesOverlap(s, others[i])) continue;
+        return is_cutting
+            ? llformat("A cutting cannot overlap a tunnel (tunnel %d is there). Choose one for this hill: end the cutting before "
+                       "the tunnel starts, or take the tunnel out in the list.", (S32)i + 1)
+            : llformat("A tunnel cannot overlap a cutting (cutting %d is there). Choose one for this hill: end the tunnel before "
+                       "the cutting starts, or take the cutting out in the list.", (S32)i + 1);
+    }
+    return std::string();
+}
+
+bool WolfFloaterTrack::mergeCuttings(size_t at)
+{
+    // DESIGN.md 3.6 contract: "marks that overlap are one cutting" - the earliest mark takes the furthest ends of both
+    if (at >= mCuttings.size() || !mCuttings[at].mHasB) return false;
+    bool joined = false;
+    for (size_t i = 0; i < mCuttings.size();)
+    {
+        if (i == at || !mCuttings[i].mHasB || !stretchesOverlap(mCuttings[at], mCuttings[i])) { ++i; continue; }
+        // the two ends furthest apart along the line, out of the four
+        std::vector<GP> ends = { mCuttings[at].mA, mCuttings[at].mB, mCuttings[i].mA, mCuttings[i].mB };
+        S32 line = -1;
+        F64 lo = 1e300, hi = -1e300;
+        GP a = ends[0], b = ends[1];
+        for (const GP& e : ends)
+        {
+            F64 s = 0.0;
+            if (!drawnChainage(e, line, s)) continue;
+            if (s < lo) { lo = s; a = e; }
+            if (s > hi) { hi = s; b = e; }
+        }
+        const size_t keep = llmin(at, i), drop = llmax(at, i);
+        mCuttings[keep].mA = a;
+        mCuttings[keep].mB = b;
+        mCuttings[keep].mStamp = nextStamp();
+        mCuttings.erase(mCuttings.begin() + (std::ptrdiff_t)drop);
+        at = keep;
+        joined = true;
+        i = 0;   // the longer cutting may now overlap one more
+    }
+    return joined;
+}
+
+void WolfFloaterTrack::startGroundJob(const LLSD& job, const std::string& kind, const LLSD& layout, const LLUUID& region, const std::string& lead)
+{
+    // DESIGN.md 3.6 contract: a JOB (saved's cut_job, removed's fill_job, the cut / fill actions' job) or a job id (a
+    // remove_server JOB result's fill_job); JOB kind "cut" | "fill"
+    const LLSD id = job.isMap() ? job["id"] : job;
+    if (!id.isDefined() || (id.isString() && id.asString().empty())) return;
+    mGroundJob = id;
+    mGroundKind = kind;
+    mGroundLayout = layout;
+    mGroundRegion = region;
+    mGroundLead = lead;
+    mGroundRetry = LLSD();
+    const std::string words = kind == "cut" ? "Digging the cutting..." : "Putting the ground back...";
+    mGroundSaid = words;
+    setStatus(lead.empty() ? words : lead + " " + words, !lead.empty());
+    const U32 gen = mGen, ground_gen = ++mGroundGen;   // an older job's coroutine stops at its next wake-up
+    mGroundPolling = true;
+    LLHandle<LLFloater> h = getHandle();
+    LL_INFOS("WolfTrack") << kind << " job " << id << " for layout " << layout << " in " << region << LL_ENDL;
+    LLCoros::instance().launch("WolfTrackGround", [h, gen, ground_gen]() { groundJobCoro(h, gen, ground_gen); });
+    updateControls();
+}
+
+// static
+void WolfFloaterTrack::groundJobCoro(LLHandle<LLFloater> h, U32 gen, U32 ground_gen)
+{
+    // DESIGN.md 3.6 "Window" / 10: status every 2-3 s while the job is queued or running, then its end in plain words
+    auto self = [&h, gen, ground_gen]() -> WolfFloaterTrack*
+    {
+        WolfFloaterTrack* f = dynamic_cast<WolfFloaterTrack*>(h.get());
+        return f && f->mGen == gen && f->mGroundGen == ground_gen ? f : nullptr;
+    };
+    const F64 started = LLFrameTimer::getElapsedSeconds();
+    S32 fails = 0;
+    while (true)
+    {
+        llcoro::suspendUntilTimeout(GROUND_POLL_S);
+        WolfFloaterTrack* f = self();
+        if (!f) return;
+        const LLSD id = f->mGroundJob;
+        LLSD r;
+        std::string e;
+        const bool got = callNow("status", LLSD().with("job", id), r, e);
+        f = self();
+        if (!f) return;
+        const bool cut = f->mGroundKind == "cut";
+        auto say = [f](const std::string& words, bool error)
+        {
+            f->setStatus(f->mGroundLead.empty() ? words : f->mGroundLead + " " + words, error || !f->mGroundLead.empty());
+        };
+        auto stop = [f]()
+        {
+            f->mGroundJob = LLSD();
+            f->mGroundPolling = false;
+            f->refreshMine();   // Your railways shows the cutting's state as the record has it now
+            f->updateControls();
+        };
+        const LLSD& job = r["job"];
+        const std::string st = got && job.isMap() ? job["state"].asString() : std::string();
+        if (st == "done")
+        {
+            // JOB result {layout, region, cells, kept, state}: kept = cells left on record, land no longer the resident's
+            const LLSD& res = job["result"];
+            std::string words = cut ? "The cutting is dug." : "The ground is back as it was.";
+            if (!cut && res["kept"].asInteger() > 0)
+                words = "The ground is back as it was, except on land that is no longer yours: that part could not be put back, and "
+                        "is left as it is.";
+            LL_INFOS("WolfTrack") << f->mGroundKind << " job " << id << " done: " << res["cells"].asInteger() << " cells, kept "
+                                  << res["kept"].asInteger() << LL_ENDL;
+            say(words, false);
+            stop();
+            return;
+        }
+        if (st == "failed")
+        {
+            const std::string err = job["error"].asString();
+            LL_INFOS("WolfTrack") << f->mGroundKind << " job " << id << " failed (" << job["code"].asString() << "): " << err << LL_ENDL;
+            LLSD retry;
+            retry["action"] = f->mGroundKind;
+            retry["layout"] = f->mGroundLayout;
+            retry["region"] = f->mGroundRegion;
+            f->mGroundRetry = retry;
+            say((cut ? "The cutting was not dug: " : "The ground was not put back: ")
+                + (err.empty() ? std::string("the region did not say why.") : err)
+                + (cut ? " Press Dig again to try once more." : " Press Put the ground back to try once more."), true);
+            stop();
+            return;
+        }
+        if (st == "queued" || st == "running")
+        {
+            fails = 0;
+            const std::string progress = job["progress"].asString();
+            const std::string words = (cut ? "Digging the cutting: " : "Putting the ground back: ")
+                                    + (progress.empty() ? std::string("waiting for its turn...") : progress);
+            if (words != f->mGroundSaid)   // said only when it changes, so the resident's own steps meanwhile stay readable
+            {
+                f->mGroundSaid = words;
+                say(words, false);
+            }
+        }
+        else if (++fails >= REMOVE_POLL_FAILS)
+        {
+            say(std::string("This window has stopped waiting for ") + (cut ? "the cutting to be dug" : "the ground to be put back")
+                + (e.empty() ? std::string(".") : ": " + e) + " Open Your railways in a while to see how it went.", true);
+            stop();
+            return;
+        }
+        if (LLFrameTimer::getElapsedSeconds() - started > GROUND_JOB_MAX_S)
+        {
+            say(std::string("The region has not finished ") + (cut ? "digging the cutting" : "putting the ground back")
+                + " after 20 minutes, so this window has stopped waiting. It may still be at work: open Your railways in a while "
+                  "to see how it went.", true);
+            stop();
+            return;
+        }
+    }
+}
+
+void WolfFloaterTrack::groundAgain(const std::string& action, const LLSD& layout, const LLUUID& region)
+{
+    // DESIGN.md 3.6 contract, new actions: cut {layout, region} (only while that part is laid), fill {layout, region} (only when
+    // that part is not laid) -> job: JOB
+    if (busy())
+    {
+        setStatus("The window is busy with your railway just now - wait until it has finished, then try again.", true);
+        return;
+    }
+    const bool cut = action == "cut";
+    mGroundRetry = LLSD();
+    setStatus(cut ? "Asking the region to dig the cutting again..." : "Asking the region to put the ground back...", false);
+    post(action, LLSD().with("layout", layout).with("region", region.asString()),
+         [action, layout, region, cut](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (!ok)
+        {
+            LLSD retry;
+            retry["action"] = action;
+            retry["layout"] = layout;
+            retry["region"] = region;
+            f->mGroundRetry = retry;
+            f->setStatus((cut ? "The cutting could not be dug again: " : "The ground could not be put back: ") + error, true);
+            f->updateControls();
+            return;
+        }
+        f->startGroundJob(reply["job"], action, layout, region, std::string());
+    });
+    updateControls();
+}
+
+std::string WolfFloaterTrack::cuttingWords(const LLSD& layout, bool& failed, bool& laid_here) const
+{
+    // DESIGN.md 3.6 contract LAYOUT cuttings {region uuid: {state: waiting | digging | dug | filling | filled | failed, job, kept}}
+    failed = false;
+    laid_here = false;
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn || !layout.isMap()) return std::string();
+    const std::string r = rgn->getRegionID().asString();
+    laid_here = arr(layout["laid"][r]).size() > 0;
+    const LLSD& cut = layout["cuttings"][r];
+    if (!cut.isMap()) return std::string();
+    const std::string st = cut["state"].asString();
+    const std::string kept = cut["kept"].asInteger() > 0
+        ? " Some of the ground could not be put back, because that land is no longer yours." : std::string();
+    if (st == "waiting") return laid_here ? "Its cutting here is waiting its turn to be dug." : "Its ground here is waiting its turn to be put back.";
+    if (st == "digging") return "Its cutting here is being dug.";
+    if (st == "dug") return "Its cutting here is dug.";
+    if (st == "filling") return "The ground at its cutting here is being put back.";
+    if (st == "filled") return "The ground at its cutting here is back as it was." + kept;
+    if (st == "failed")
+    {
+        failed = true;
+        return laid_here ? std::string("Digging its cutting here did not finish - press Dig again.")
+                         : "Putting the ground back at its cutting here did not finish - press Put the ground back." + kept;
+    }
+    return std::string();
+}
+
+void WolfFloaterTrack::onPickMine()
+{
+    // the picked railway's cutting here, in plain words (DESIGN.md 3.6 "Window": Your railways shows a layout's cuttings' state)
+    const LLSD l = pickedLayout();
+    bool failed = false, laid_here = false;
+    const std::string words = cuttingWords(l, failed, laid_here);
+    if (!words.empty())
+    {
+        const std::string name = l["name"].asString().empty() ? std::string("This railway") : l["name"].asString();
+        setStatus(name + ": " + words, failed);
+    }
+    updateControls();
 }
 
 // static
@@ -3489,7 +4109,9 @@ void WolfFloaterTrack::onShow()
             f->setStatus("That railway could not be drawn: " + (why.empty() ? std::string("it has no line to draw.") : why), true);
             return;
         }
-        f->post("plan", LLSD().with("request", req), [name, id](WolfFloaterTrack* f2, bool ok2, const LLSD& r2, const std::string& e2)
+        // [CUTTINGS] DESIGN.md 3.6 contract: plan with "layout": id is planned on the ground before that layout's cuttings - the
+        // ground this viewer has is dug where they are, so without it a laid railway's cuttings would not show
+        f->post("plan", LLSD().with("request", req).with("layout", id), [name, id](WolfFloaterTrack* f2, bool ok2, const LLSD& r2, const std::string& e2)
         {
             if (!ok2) { f2->setStatus("That railway could not be drawn: " + e2, true); return; }
             f2->applyPlan(r2["plan"], f2->mShown);
@@ -3545,6 +4167,11 @@ void WolfFloaterTrack::onLayPart()
         if (arr(l["laid"][r]).size() > 0)
             for (const LLSD& t : llsd::inArray(arr(l["tunnels"][r]))) to_open = to_open || !t["recorded"].asBoolean();
         if (to_open) { openTunnelsHere(l["id"]); return; }
+        // [CUTTINGS] a dig or fill that failed here: the same button asks again (DESIGN.md 3.6 "Window": Your railways offers
+        // Dig again while the part is laid here, Put the ground back when it is not)
+        bool failed = false, laid_here = false;
+        cuttingWords(l, failed, laid_here);
+        if (failed) { groundAgain(laid_here ? "cut" : "fill", l["id"], rgn->getRegionID()); return; }
     }
     post("get", LLSD().with("layout", l["id"]), [](WolfFloaterTrack* f, bool ok, const LLSD& reply, const std::string& error)
     {
@@ -3615,6 +4242,9 @@ void WolfFloaterTrack::removalCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, 
     if (!f) return;
     const std::string key = layout.asString();
     std::string tunnel_note;   // [TUNNELS] a tunnel left open (no rights to close it), said with the last words
+    // [CUTTINGS] DESIGN.md 3.6 contract: the fill of this region's cutting, queued when its part is gone - "removed" answers
+    // fill_job: JOB | null, a remove_server JOB's result has fill_job: id | null; followed once the removal has ended
+    LLSD fill_job;
     auto finish = [&](const std::string& text, bool error, bool gone_here)
     {
         f->mRemoving = false;
@@ -3624,6 +4254,8 @@ void WolfFloaterTrack::removalCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, 
         f->setStatus(text + tunnel_note, error);
         f->updateControls();
         f->refreshMine();
+        if (fill_job.isMap() || fill_job.isInteger() || (fill_job.isString() && !fill_job.asString().empty()))
+            f->startGroundJob(fill_job, "fill", layout, region, error ? text + tunnel_note : std::string());
     };
     // the record's laid map, or false with the words
     auto onRecord = [&](LLSD& laid, std::string& error) -> bool
@@ -3668,6 +4300,7 @@ void WolfFloaterTrack::removalCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, 
         f = self();
         if (!f) return;
         if (!ok) { finish("The pieces were taken away, but the record could not be updated: " + error + " Press Remove again.", true, false); return; }
+        if (reply["fill_job"].isMap()) fill_job = reply["fill_job"];   // (a fill the server's removal queued is kept)
         finish(words + elsewhereWords(reply["layout"]["laid"]) + (replacing ? f->mLaidNote : std::string()), false, true);
     };
 
@@ -3791,6 +4424,7 @@ void WolfFloaterTrack::removalCoro(LLHandle<LLFloater> h, U32 gen, LLSD layout, 
         still_there = res["still_there"].asInteger();
         left = res["left"].asInteger();
         laid_left = res.has("laid_left") ? res["laid_left"].asInteger() : -1;
+        if (res.has("fill_job") && res["fill_job"].isDefined()) fill_job = res["fill_job"];   // [CUTTINGS] its last piece went
         LL_INFOS("WolfTrack") << "remove_server " << state << " (" << job["code"].asString() << "): deleted " << deleted << ", not found "
                               << not_found << ", still there " << still_there << ", not looked at " << left << ", on record here "
                               << laid_left << LL_ENDL;
@@ -3943,6 +4577,7 @@ void WolfFloaterTrack::penStopped()
 void WolfFloaterTrack::setStatus(const std::string& text, bool error)
 {
     if (!mStatus) return;
+    mStatusError = error && !text.empty();
     mStatus->setText(text);
     mStatus->setColor(LLUIColorTable::instance().getColor(error ? "AlertCautionTextColor" : "LabelTextColor"));
 }
@@ -4000,9 +4635,9 @@ void WolfFloaterTrack::relayout()
 {
     // the floater's height in floater_wolf_track.xml, and the Your railways panel under it when it is open. The skin's
     // header pushes every child ~22 px below its XUI top, so the closed height leaves room under the Your railways
-    // check box (top 600 + 18): at 624 it drew below the floater and a click on it fell through to the world (live
+    // check box (top 600 + 18 then, 628 + 18 now): at 624 it drew below the floater and a click on it fell through to the world (live
     // test 14 Nov 14:22Z: the click started a new line instead of opening Your railways)
-    constexpr S32 CLOSED_H = 652;
+    constexpr S32 CLOSED_H = 680;   // [CUTTINGS 2026-11-17] 652 + the hill choice's third row (28 px)
     const bool open = mMineCheck && mMineCheck->get();
     if (mMinePanel) mMinePanel->setVisible(open);
     const S32 h = CLOSED_H + (open ? (S32)MINE_PANEL_H : 0);
@@ -4043,6 +4678,15 @@ void WolfFloaterTrack::updateControls()
         // rise_m or highest_m); the plan's whole sentence is the row's tool tip
         const LLSD& tun = sug["tunnel"];
         const LLSD& climb = sug["climb"];
+        const LLSD& cut = sug["cutting"];
+        // [CUTTINGS] a hill with no tunnel choice (PLAN cut_suggestions): Dig a cutting and Climb the hill in the first two rows
+        const bool cut_only = sug["cut_only"].asBoolean();
+        mSugTunnelBtn->setVisible(!cut_only);
+        mSugTunnelText->setVisible(!cut_only);
+        mSugCutBtn->setRect(mSugRowRect[cut_only ? 0 : 1][0]);
+        mSugCutText->setRect(mSugRowRect[cut_only ? 0 : 1][1]);
+        mSugClimbBtn->setRect(mSugRowRect[cut_only ? 1 : 2][0]);
+        mSugClimbText->setRect(mSugRowRect[cut_only ? 1 : 2][1]);
         setTextIfChanged(mSugText, std::string("A hill is in the way of your line:"));
         // and how much of the whole line each leaves up on viaducts (layout.py _viaduct_m: viaduct_m)
         auto viaducts = [](const LLSD& o) -> std::string
@@ -4076,6 +4720,30 @@ void WolfFloaterTrack::updateControls()
         setTextIfChanged(mSugClimbText, ct);
         mSugClimbText->setToolTip(climb.isMap() ? climb["text"].asString() : std::string());
         mSugTunnelBtn->setEnabled(!b && mMayTunnel);
+        // [CUTTINGS] DESIGN.md 3.6 contract suggestions[].cutting / cut_suggestions[].cutting {possible, text, a, b, length_m,
+        // deepest_m, walls_m, viaduct_m}: its figures in a line or two (the plan's sentence is the tool tip); when it cannot be
+        // dug there, the plan's words say why and the button is off; "open" access.cut false: the region's reason
+        const bool cut_possible = cut.isMap() && cut["possible"].asBoolean();
+        std::string kt;
+        if (!mMayCut) kt = mNoCutReason.empty() ? std::string("You cannot dig cuttings in this region.") : mNoCutReason;
+        else if (!cut.isMap()) kt = "A cutting is not offered here.";
+        else if (!cut_possible || !cut.has("length_m"))
+        {
+            kt = cut["text"].asString();
+            static const std::string LEAD("Dig a cutting: ");   // the button says it already
+            if (kt.compare(0, LEAD.size(), LEAD) == 0) kt = kt.substr(LEAD.size());
+            if (kt.empty()) kt = cut_possible ? std::string("Dig the ground down along the line.") : std::string("Not possible here.");
+        }
+        else
+        {
+            kt = llformat("%d m of cutting, up to %d m deep", cut["length_m"].asInteger(), ll_round((F32)cut["deepest_m"].asReal()));
+            const S32 walls = ll_round((F32)cut["walls_m"].asReal());
+            if (walls > 0) kt += llformat(", %d m of it with stone walls", walls);
+            kt += viaducts(cut);
+        }
+        setTextIfChanged(mSugCutText, kt);
+        mSugCutText->setToolTip(cut.isMap() ? cut["text"].asString() : std::string());
+        mSugCutBtn->setEnabled(!b && mMayCut && cut_possible);
         // the climb cannot be chosen when it cannot be made (the plan says so in its words)
         mSugClimbBtn->setEnabled(!b && !(climb.isMap() && climb.has("possible") && climb["possible"].isBoolean() && !climb["possible"].asBoolean()));
     }
@@ -4138,7 +4806,28 @@ void WolfFloaterTrack::updateControls()
         if (arr(picked["laid"][r]).size() > 0)
             for (const LLSD& t : llsd::inArray(arr(picked["tunnels"][r]))) to_open = to_open || !t["recorded"].asBoolean();
     }
-    mLayPartBtn->setLabel(to_open ? std::string("Open the tunnel") : std::string("Lay its part here"));
-    mLayPartBtn->setEnabled(!b && picked.isMap() && (to_open || st == "built" || st == "partly_laid"));
-    mRemoveBtn->setEnabled(!b && picked.isMap() && st != "building");
+    // [CUTTINGS] a dig or fill that failed here: the same button asks again (DESIGN.md 3.6 "Window")
+    bool cut_failed = false, laid_here = false;
+    if (!to_open) cuttingWords(picked, cut_failed, laid_here);
+    const std::string part_label = to_open ? std::string("Open the tunnel")
+                                 : cut_failed ? (laid_here ? std::string("Dig again") : std::string("Put the ground back"))
+                                 : std::string("Lay its part here");
+    if (mLayPartBtn->getLabelSelected() != part_label)
+    {
+        mLayPartBtn->setLabel(part_label);
+        mLayPartBtn->setToolTip(to_open ? std::string("Open this railway's tunnel through the hill here")
+                                : cut_failed ? (laid_here ? std::string("Ask the region again to dig this railway's cutting here")
+                                                          : std::string("Ask the region again to put the ground back as it was"))
+                                : std::string("Put the part of this railway that is in the region you are in on the land"));
+    }
+    mLayPartBtn->setEnabled(!b && picked.isMap() && (to_open || cut_failed || st == "built" || st == "partly_laid"));
+    mRemoveBtn->setEnabled(!b && picked.isMap() && st != "building" && st != "removed");
+    // [CUTTINGS] Dig again / Put the ground back after a dig or fill this window followed failed (never with Look again)
+    const bool ground_retry = mGroundRetry.isMap() && !b && !mPartialShown && !mGroundJob.isDefined();
+    mGroundBtn->setVisible(ground_retry);
+    if (ground_retry)
+    {
+        const std::string gl = mGroundRetry["action"].asString() == "cut" ? std::string("Dig again") : std::string("Put the ground back");
+        if (mGroundBtn->getLabelSelected() != gl) mGroundBtn->setLabel(gl);
+    }
 }

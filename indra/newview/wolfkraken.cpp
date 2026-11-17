@@ -38,6 +38,7 @@
 #include "llworld.h"
 #include "pipeline.h"
 #include "wolfaltitudesky.h"
+#include "wolfboatrock.h"
 #include "wolfgrid.h"
 #include "wolfregionweather.h"
 #include "wolfsoundeffects.h"
@@ -1032,19 +1033,25 @@ void WolfKraken::buildMesh(F32 t, S32& verts)
             const F32 swirl = t > T_SINK ? 0.6f * powf(sink_f, 1.5f) * (t - T_SINK) : 0.f;
             const F32 shrink = t > T_SINK ? 1.f - 0.5f * smoothstep(T_SINK, (F32)SHOW_S, t) : 0.3f + 0.7f * smoothstep(0.f, T_CHURN, t);
             const LLVector3 up(0.f, 0.f, 1.f);
+            // on the waves as drawn (WolfBoatRock::drawnWaveHeight, as wolfbirds.cpp floats its gulls), not under them: on
+            // Blue Ocean's rough sea (2026-11-17) foam 6 cm over the calm level was mostly hidden by the waves
+            LLViewerRegion* foam_region = LLWorld::getInstance()->getRegionFromPosAgent(spot);
+            const bool waves = foam_region && WolfBoatRock::instanceExists();
             for (S32 q = 0; q < FOAM_N; ++q)
             {
                 const FoamLook& f = mLook.mFoam[q];
                 const F32 rho = f.mRho * shrink * size, al = f.mAlpha + swirl * (1.f + 4.f / llmax(1.f, f.mRho));
-                const LLVector3 c0(cosf(al) * rho, sinf(al) * rho, 0.06f);
+                const F32 fx = cosf(al) * rho, fy = sinf(al) * rho;
+                const F32 fz = (waves ? WolfBoatRock::instance().drawnWaveHeight(foam_region, spot.mV[VX] + fx, spot.mV[VY] + fy) : 0.f) + 0.06f;
+                const LLVector3 c0(fx, fy, fz);
                 const F32 sz = f.mSize * size * foam_amt;
                 const LLVector3 col = FOAM * (0.9f + 0.1f * mottle(200, q, 0));
                 for (S32 e = 0; e < 6; ++e)
                 {
                     const F32 a1 = (F32)e * F_PI / 3.f, a2 = (F32)(e + 1) * F_PI / 3.f;
                     const F32 j1 = 0.5f + 0.8f * mottle(201, q, e), j2 = 0.5f + 0.8f * mottle(201, q, (e + 1) % 6);   // ragged edges
-                    wr.flat(c0, LLVector3(c0.mV[VX] + cosf(a1) * sz * j1, c0.mV[VY] + sinf(a1) * sz * j1, 0.06f),
-                            LLVector3(c0.mV[VX] + cosf(a2) * sz * j2, c0.mV[VY] + sinf(a2) * sz * j2, 0.06f), up, col);
+                    wr.flat(c0, LLVector3(c0.mV[VX] + cosf(a1) * sz * j1, c0.mV[VY] + sinf(a1) * sz * j1, fz),
+                            LLVector3(c0.mV[VX] + cosf(a2) * sz * j2, c0.mV[VY] + sinf(a2) * sz * j2, fz), up, col);
                 }
             }
         }

@@ -6434,7 +6434,6 @@ void LLAppViewer::idle()
     // (wolfair.cpp); after WolfFlight so the deck it may switch on is there next frame. </WolfViewer>
     { WolfVRScreen::SubPart wsp_("WolfAir"); WolfAir::instance().idle(); }
     { WolfVRScreen::SubPart wsp_("WolfFarTerrain"); WolfFarTerrain::instance().idle(); }  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
-    { WolfVRScreen::SubPart wsp_("WolfFarProxy"); WolfFarProxy::instance().idle(); }     // [W107 FAR HLOD 2026-11-14/] the regions' far proxy models: fetches, building, each cell's hand-over
     { WolfVRScreen::SubPart wsp_("WolfFarGround"); WolfFarGround::instance().idle(); }   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     { WolfVRScreen::SubPart wsp_("WolfBirds"); WolfBirds::instance().idle(); }       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
     { WolfVRScreen::SubPart wsp_("WolfSeaLife"); WolfSeaLife::instance().idle(); }     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)
@@ -6456,6 +6455,11 @@ void LLAppViewer::idle()
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);
         { WolfVRScreen::SubPart wsp_("updateMove"); gPipeline.updateMove(); }
     }
+    // [W107 FAR HLOD 2026-11-14] the regions' far proxy models: fetches, building, each cell's hand-over. AFTER
+    // updateMove (review, 17 Nov): that is where an object that starts to move gets its spatial bridge and where every
+    // bridge's box is brought up to date, and the keep-real mask made here must hold this frame's boxes before the
+    // frame is culled - made before it, the mask was a frame old and a mover's first frame was hidden.
+    { WolfVRScreen::SubPart wsp_("WolfFarProxy"); WolfFarProxy::instance().idle(); }
 
     { WolfVRScreen::SubPart wsp_("updateParticles"); LLWorld::getInstance()->updateParticles(); }
 

@@ -32,6 +32,8 @@
 #include "llvertexbuffer.h"
 #include "llviewercamera.h"
 #include "llviewercontrol.h"
+#include "llviewerobject.h"
+#include "llviewerobjectlist.h"
 #include "llviewerregion.h"
 #include "llviewershadermgr.h"
 #include "llviewertexture.h"
@@ -41,6 +43,7 @@
 #include "wolfgrid.h"
 #include "workqueue.h"
 
+#include <sstream>
 #include <unordered_set>
 #include <zlib.h>
 
@@ -51,10 +54,15 @@ namespace
     // Source: firestorm/region-terrain-work/far-hlod-2026-11-14/DESIGN.md section 1 "File" (the baker's writer is
     // baker/ in the same folder) - every offset and size below is that table's.
     constexpr size_t HEADER_BYTES = 64;
-    constexpr U16 FORMAT_VERSION = 1;
+    // Source: baker/hlodfile.py VERSION = 2 - version 1 with the keep-real boxes (header offset 60). A version 1 file
+    // lists no place to keep real because it was baked before there were any, so it is not read: the region stays stock.
+    constexpr U16 FORMAT_VERSION = 2;
     constexpr size_t PART_BYTES = 24;
     constexpr size_t VERTEX_BYTES = 16;
     constexpr size_t KEEP_BOX_BYTES = 8;           // u16 x0, y0, x1, y1 (0..65535 = 0..region size)
+    // Source: baker/hlodfile.py KEEP_ID_BYTES = 16 and write(): after the boxes, the rest of the geometry block is the
+    // keep-real ids - a root prim's UUID each, its 16 bytes in the order of its text form (LLUUID::mData, lluuid.h:188)
+    constexpr size_t KEEP_ID_BYTES = 16;
     constexpr U32 MAX_KEEP_BOXES = 65535;          // the baker's cap
     constexpr U32 MAX_PART_VERTS = 65535;          // LLVertexBuffer indices are 16-bit (llvertexbuffer.cpp:1265)
     constexpr U32 MAX_REGION_M = 4096;             // DESIGN.md section 4: 16-bit positions, 6 cm at most
@@ -77,6 +85,7 @@ namespace
     constexpr F32 HYSTERESIS_M = 32.f;
     constexpr F32 DISSOLVE_SECS = 0.75f;
     constexpr F32 KEEP_CELL_M = 8.f;               // the keep-real mask's cells (what the model lists, and moving objects)
+    constexpr F32 KEEP_LIVE_MARGIN_M = 1.f;        // round a listed object's box
     constexpr F32 DISTANCE_MIN_M = 256.f, DISTANCE_MAX_M = 4096.f;   // WolfFarProxyDistance is held to this
     constexpr F64 REFRESH_SECS = 1.0;              // the region list is looked at this often
     constexpr F64 INFO_SECS = 600.0;               // hlod.php answers with max-age 600; a model is rebuilt hourly at most
@@ -138,6 +147,7 @@ namespace
         U32 mBuildTime = 0, mRegionSize = 0, mCellM = 0, mSide = 0, mParts = 0, mVerts = 0, mIndices = 0;
         F32 mZMin = 0.f, mZMax = 0.f;
         U32 mGeomZip = 0, mGeomRaw = 0, mAtlasBytes = 0, mAtlasW = 0, mAtlasH = 0, mCrc = 0, mKeepBoxes = 0;
+        U32 mKeepIds = 0;      // not a header field: what is left of the geometry block after the boxes, in ids
     };
 
     bool power_of_two(U32 v) { return v != 0 && (v & (v - 1)) == 0; }
@@ -175,13 +185,20 @@ namespace
             || h.mCellM * h.mSide != h.mRegionSize || h.mParts > h.mSide * h.mSide * MAX_PARTS_PER_CELL
             || !(h.mZMin <= h.mZMax) || !(h.mZMin >= -MAX_HEIGHT_M) || !(h.mZMax <= MAX_HEIGHT_M)
             || !power_of_two(h.mAtlasW) || !power_of_two(h.mAtlasH) || h.mAtlasW > MAX_ATLAS || h.mAtlasH > MAX_ATLAS
-            || h.mGeomRaw > MAX_GEOM_BYTES || h.mKeepBoxes > MAX_KEEP_BOXES
-            || (U64)h.mGeomRaw != (U64)h.mParts * PART_BYTES + (U64)h.mVerts * VERTEX_BYTES + (U64)h.mIndices * 2
-                                  + (U64)h.mKeepBoxes * KEEP_BOX_BYTES)
+            || h.mGeomRaw > MAX_GEOM_BYTES || h.mKeepBoxes > MAX_KEEP_BOXES)
         {
             error = "a header that does not add up";
             return false;
         }
+        // parts, vertices, indices and boxes, then whole ids to the end of the block
+        const U64 counted = (U64)h.mParts * PART_BYTES + (U64)h.mVerts * VERTEX_BYTES + (U64)h.mIndices * 2
+                            + (U64)h.mKeepBoxes * KEEP_BOX_BYTES;
+        if (counted > (U64)h.mGeomRaw || ((U64)h.mGeomRaw - counted) % KEEP_ID_BYTES != 0)
+        {
+            error = "a header that does not add up";
+            return false;
+        }
+        h.mKeepIds = (U32)(((U64)h.mGeomRaw - counted) / KEEP_ID_BYTES);
         return true;
     }
 }
@@ -201,6 +218,7 @@ struct WolfFarProxy::Decoded
     std::vector<P> mParts;                       // sorted by cell
     std::vector<U8> mGeom;                       // the geometry block, unpacked
     size_t mKeepAt = 0;                          // offset of the keep-real boxes in mGeom (mHeader.mKeepBoxes of them)
+    size_t mKeepIdAt = 0;                        // offset of the keep-real ids in mGeom (mHeader.mKeepIds of them)
     LLPointer<LLImageRaw> mAtlas;
 };
 
@@ -281,12 +299,13 @@ namespace
             }
         }
         if (verts != h.mVerts || indices != h.mIndices
-            || (U64)at + (U64)h.mKeepBoxes * KEEP_BOX_BYTES != (U64)h.mGeomRaw)
+            || (U64)at + (U64)h.mKeepBoxes * KEEP_BOX_BYTES + (U64)h.mKeepIds * KEEP_ID_BYTES != (U64)h.mGeomRaw)
         {
             d->mError = "parts that do not fill the file";
             return d;
         }
         d->mKeepAt = at;
+        d->mKeepIdAt = at + (size_t)h.mKeepBoxes * KEEP_BOX_BYTES;
         for (U32 i = 0; i < h.mKeepBoxes; ++i)
         {
             const U8* b = g + at + (size_t)i * KEEP_BOX_BYTES;
@@ -362,7 +381,6 @@ void WolfFarProxy::clear()
     sHiding.clear();
     sAnyHidden = false;
     mRegions.clear();
-    sAnyHidden = false;
     mActive = false;
 }
 
@@ -379,8 +397,6 @@ void WolfFarProxy::idle()
         {
             clear();
         }
-        sAnyHidden = false;
-        mActive = false;
         return;
     }
     const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -404,6 +420,9 @@ void WolfFarProxy::idle()
             }
         }
     }
+    // every frame (review, 17 Nov: once a second left a listed linkset that had just been sent to this viewer hidden
+    // until the next look); a look-up per listed linkset and a few bytes per prim of it
+    refreshKeepLive();
     // an object far away cannot be picked to edit while it is not drawn, so with the build tools open everything is
     // the real object (as WolfSubPixelCull stands down then, wolfsubpixelcull.cpp:75)
     // ... and without the proxy program (it failed to build, or the shaders are being reloaded) nothing may be hidden
@@ -733,6 +752,11 @@ bool WolfFarProxy::buildSome(Region& r)
             }
         }
     }
+    m.mKeepIds.resize(h.mKeepIds);
+    for (U32 i = 0; i < h.mKeepIds; ++i)
+    {
+        memcpy(m.mKeepIds[i].mData, d.mGeom.data() + d.mKeepIdAt + (size_t)i * KEEP_ID_BYTES, KEEP_ID_BYTES);
+    }
     // Source: wolffarterrain.cpp:1076 - a texture of the viewer's own from a raw picture, with mipmaps
     m.mAtlas = LLViewerTextureManager::getLocalTexture(r.mDecoded->mAtlas.get(), true);
     const U32 total_verts = h.mVerts, total_indices = h.mIndices;
@@ -755,6 +779,7 @@ bool WolfFarProxy::buildSome(Region& r)
     r.mAnyFade = false;
     r.mKeep.clear();
     r.mKeepSum.clear();
+    r.mKeepLive.clear();     // refreshKeepLive, later this frame, sizes it for this model
     return true;
 }
 
@@ -843,6 +868,13 @@ void WolfFarProxy::computeFades()
     {
         Region& r = const_cast<Region&>(*hiding);   // an entry of mRegions, listed just above
         r.mKeep = r.mModel->mKeepBaked;
+        if (r.mKeepLive.size() == r.mKeep.size())
+        {
+            for (size_t i = 0; i < r.mKeep.size(); ++i)
+            {
+                r.mKeep[i] |= r.mKeepLive[i];
+            }
+        }
     }
     if (any_hidden)
     {
@@ -859,7 +891,7 @@ void WolfFarProxy::computeFades()
                 if (hiding->mRegionp == part->mRegionp)
                 {
                     Region& r = const_cast<Region&>(*hiding);   // an entry of mRegions
-                    markKeep(r, r.mKeep, bridge->getSpatialExtents(), BRIDGE_MARGIN_M);
+                    markKeep(*r.mModel, r.mOriginAgent, r.mKeep, bridge->getSpatialExtents(), BRIDGE_MARGIN_M);
                     // for the log: a mover whose own centre stands on a cell drawn as its proxy, and whether the
                     // cull still let it through (the proof that moving objects are never hidden)
                     const LLVector4a* ext = bridge->getSpatialExtents();
@@ -869,8 +901,17 @@ void WolfFarProxy::computeFades()
                     if (mx >= 0.f && my >= 0.f && mx < (F32)m.mRegionSize && my < (F32)m.mRegionSize
                         && r.mHidden[(size_t)((U32)(my / (F32)m.mCellM)) * m.mSide + (U32)(mx / (F32)m.mCellM)])
                     {
+                        const bool seen = bridge->isRecentlyVisible();
+                        if (mFarMovers < FAR_MOVER_SAMPLES)
+                        {
+                            FarMover& sample = mFarSample[mFarMovers];
+                            sample.mGridX = r.mGridX;
+                            sample.mGridY = r.mGridY;
+                            sample.mLocal.set(mx, my, 0.5f * (ext[0][VZ] + ext[1][VZ]) - r.mOriginAgent.mV[VZ]);
+                            sample.mSeen = seen;
+                        }
                         ++mFarMovers;
-                        mFarMoversSeen += bridge->isRecentlyVisible() ? 1 : 0;
+                        mFarMoversSeen += seen ? 1 : 0;
                     }
                     break;
                 }
@@ -901,17 +942,82 @@ void WolfFarProxy::computeFades()
     sAnyHidden = any_hidden;
 }
 
-/** Marks the fine cells under a box (agent frame, with a margin) in a keep-real grid of the region. */
-void WolfFarProxy::markKeep(Region& r, std::vector<U8>& grid, const LLVector4a* ext, F32 margin)
+/** The linksets the models list by id (DESIGN.md: the keep-real ids), where they stand NOW: a train the baker saw at
+ *  platform 3 and that has since come to rest at platform 7 is kept real there, whether or not this viewer saw it
+ *  move. Each listed root prim this viewer has an object for, and its child prims, mark the fine cells under their
+ *  boxes on the region they stand on - when that region has a model. A drawable that is active is skipped: it and
+ *  its whole linkset are drawn through a spatial bridge (LLDrawable::makeActive, lldrawable.cpp:507-560: parent and
+ *  children all go active together), which computeFades marks every frame. */
+void WolfFarProxy::refreshKeepLive()
 {
-    const F32 size = (F32)r.mModel->mRegionSize;
-    const F32 x0 = ext[0][VX] - r.mOriginAgent.mV[VX] - margin, x1 = ext[1][VX] - r.mOriginAgent.mV[VX] + margin;
-    const F32 y0 = ext[0][VY] - r.mOriginAgent.mV[VY] - margin, y1 = ext[1][VY] - r.mOriginAgent.mV[VY] + margin;
+    mKeepIdsFound = 0;
+    for (auto& kv : mRegions)
+    {
+        Region& r = kv.second;
+        if (r.mModel)
+        {
+            r.mKeepLive.assign(r.mModel->mKeepBaked.size(), 0);
+        }
+        else
+        {
+            r.mKeepLive.clear();
+        }
+    }
+    for (auto& kv : mRegions)
+    {
+        if (!kv.second.mModel)
+        {
+            continue;
+        }
+        for (const LLUUID& id : kv.second.mModel->mKeepIds)
+        {
+            const LLViewerObject* root = gObjectList.findObject(id);
+            if (!root || root->isDead())
+            {
+                continue;   // not (yet) sent to this viewer: nothing of it is drawn, so nothing of it can be hidden
+            }
+            ++mKeepIdsFound;
+            markKeepLive(root);
+            for (const LLPointer<LLViewerObject>& child : root->getChildren())
+            {
+                if (child.notNull() && !child->isDead())
+                {
+                    markKeepLive(child.get());
+                }
+            }
+        }
+    }
+}
+
+void WolfFarProxy::markKeepLive(const LLViewerObject* object)
+{
+    const LLDrawable* drawable = object->mDrawable.get();
+    const LLViewerRegion* regionp = object->getRegion();
+    if (!drawable || drawable->isDead() || drawable->isActive() || !regionp)
+    {
+        return;
+    }
+    auto it = mRegions.find(regionp->getHandle());
+    if (it == mRegions.end() || !it->second.mModel || it->second.mKeepLive.empty())
+    {
+        return;   // a region with no model hides nothing
+    }
+    // a static drawable's box is in the agent frame, as an octree node's is (allHidden reads those the same way)
+    markKeep(*it->second.mModel, regionp->getOriginAgent(), it->second.mKeepLive, drawable->getSpatialExtents(), KEEP_LIVE_MARGIN_M);
+}
+
+/** Marks the fine cells under a box (agent frame, with a margin) in a keep-real grid of the region. */
+// static
+void WolfFarProxy::markKeep(const Model& m, const LLVector3& origin_agent, std::vector<U8>& grid, const LLVector4a* ext, F32 margin)
+{
+    const F32 size = (F32)m.mRegionSize;
+    const F32 x0 = ext[0][VX] - origin_agent.mV[VX] - margin, x1 = ext[1][VX] - origin_agent.mV[VX] + margin;
+    const F32 y0 = ext[0][VY] - origin_agent.mV[VY] - margin, y1 = ext[1][VY] - origin_agent.mV[VY] + margin;
     if (!(x0 <= x1) || !(y0 <= y1) || x1 < 0.f || y1 < 0.f || x0 >= size || y0 >= size)
     {
         return;   // an unset box, or wholly off the region
     }
-    const U32 n = r.mModel->mKeepSide;
+    const U32 n = m.mKeepSide;
     const U32 cx0 = (U32)(llmax(x0, 0.f) / KEEP_CELL_M), cx1 = llmin((U32)(llmin(x1, size) / KEEP_CELL_M), n - 1);
     const U32 cy0 = (U32)(llmax(y0, 0.f) / KEEP_CELL_M), cy1 = llmin((U32)(llmin(y1, size) / KEEP_CELL_M), n - 1);
     for (U32 cy = cy0; cy <= cy1; ++cy)
@@ -935,11 +1041,8 @@ bool WolfFarProxy::allHidden(const LLSpatialGroup* group, bool subtree)
     {
         return false;   // only a region's static volumes are in a model
     }
-    // the box is only as good as its last rebound (LLViewerOctreeGroup::unbound marks a changed node and its parents)
-    if (group->hasState(LLViewerOctreeGroup::DIRTY))
-    {
-        return false;
-    }
+    // (the node's box is current: LLSpatialPartition::cull rebounds the tree from its root before the cull walks it,
+    // llspatialpartition.cpp:1533 group->rebound())
     const Region* r = nullptr;
     for (const Region* candidate : sHiding)
     {
@@ -1149,7 +1252,7 @@ void WolfFarProxy::logStats(F64 now)
         return;
     }
     mNextLog = now + LOG_SECS;
-    U32 models = 0, far_cells = 0, band_cells = 0, boxes = 0;
+    U32 models = 0, far_cells = 0, band_cells = 0, boxes = 0, ids = 0;
     for (const auto& kv : mRegions)
     {
         const Region& r = kv.second;
@@ -1159,6 +1262,7 @@ void WolfFarProxy::logStats(F64 now)
         }
         ++models;
         boxes += r.mModel->mKeepBoxes;
+        ids += (U32)r.mModel->mKeepIds.size();
         for (size_t c = 0; c < r.mFade.size(); ++c)
         {
             far_cells += r.mFade[c] >= 1.f ? 1 : 0;
@@ -1166,11 +1270,26 @@ void WolfFarProxy::logStats(F64 now)
         }
     }
     LL_INFOS("WolfFarProxy") << "far proxies: " << models << " models of " << mRegions.size() << " regions, " << far_cells
-                             << " cells far, " << band_cells << " dissolving, " << boxes << " places listed by the models and " << sBridges.size()
+                             << " cells far, " << band_cells << " dissolving, " << boxes << " places and " << ids << " linksets listed by the models ("
+                             << mKeepIdsFound << " of them here now) and " << sBridges.size()
                              << " moving objects keep " << mKeepCells << " fine cells real (" << mFarMovers << " movers on proxy cells, "
                              << mFarMoversSeen << " of them passed a cull lately); a frame: " << mDrawnParts / llmax(mLogFrames, 1U)
                              << " parts drawn, " << mShadowParts / llmax(mLogFrames, 1U) << " as shadow casters; " << sHiddenNodes << " octree nodes not looked at in the last "
                              << (S32)LOG_SECS << " s" << (mActive ? "" : " (standing down: build tools open)") << LL_ENDL;
+    // where the first few of those movers are (region origin in 256 m cells: metres on the region), so that two log
+    // lines 10 s apart show an object moving over proxy cells and still passing the cull (an object behind the camera or
+    // behind a hill passes none, proxies or no proxies: LLDrawable::isRecentlyVisible, lldrawable.cpp:1175)
+    if (mFarMovers > 0)
+    {
+        std::ostringstream where;
+        for (U32 i = 0; i < llmin(mFarMovers, FAR_MOVER_SAMPLES); ++i)
+        {
+            const FarMover& sample = mFarSample[i];
+            where << (i ? "; " : "") << sample.mGridX << "," << sample.mGridY << ": " << ll_round(sample.mLocal.mV[VX]) << " "
+                  << ll_round(sample.mLocal.mV[VY]) << " " << ll_round(sample.mLocal.mV[VZ]) << (sample.mSeen ? " passed the cull" : " not in any view");
+        }
+        LL_INFOS("WolfFarProxy") << "movers on proxy cells: " << where.str() << LL_ENDL;
+    }
     sHiddenNodes = 0;
     mDrawnParts = 0;
     mShadowParts = 0;

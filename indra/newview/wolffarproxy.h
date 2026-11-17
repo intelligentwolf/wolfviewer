@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "llpointer.h"
+#include "lluuid.h"
 #include "llsingleton.h"
 #include "v3math.h"
 
@@ -32,6 +33,7 @@ class LLSpatialBridge;
 class LLSpatialGroup;
 class LLVector4a;
 class LLVertexBuffer;
+class LLViewerObject;
 class LLViewerRegion;
 class LLViewerTexture;
 
@@ -68,7 +70,10 @@ class LLViewerTexture;
  * the places the MODEL lists: the box of every linkset the baker left out because it can move or is scripted and to
  * be kept real (Paul, 15 Nov: "anything scripted or with a wolf-rail script stays a real object, even when it's
  * standing still" - a train at a platform that has not moved since the viewer connected is a static object here).
- * What is left out and what is kept real are so one list, made by the baker, never two guesses that must agree. Avatars, attachments, trees,
+ * What is left out and what is kept real are so one list, made by the baker, never two guesses that must agree: the
+ * model lists each such linkset twice, as the box where it stood at the bake and as its root prim's id, and the id
+ * keeps it real wherever it stands now (refreshKeepLive) - a train that has since come to rest at another platform.
+ * Avatars, attachments, trees,
  * grass, particles, terrain, water and sky are other partitions and are never touched.
  *
  * Wolf Territories regions only (WolfGrid::showsWolfRegion); the setting WolfFarProxy turns it off. With the setting off, on
@@ -81,7 +86,8 @@ class WolfFarProxy : public LLSingleton<WolfFarProxy>
     ~WolfFarProxy();
 
 public:
-    /** Every frame from LLAppViewer::idle(): which regions have models, fetches, building, and each cell's f. */
+    /** Every frame from LLAppViewer::idle(), after LLPipeline::updateMove (the keep-real mask needs this frame's
+     *  boxes): which regions have models, fetches, building, and each cell's f. */
     void idle();
 
     /** From LLPipeline::renderGeomDeferred, for the main camera only: the proxies of cells with f > 0. */
@@ -138,6 +144,7 @@ private:
         U32 mKeepSide = 0;                        // fine cells per side of the keep-real mask
         std::vector<U8> mKeepBaked;               // the places the baker left a mover or kept-real scripted object out
         U32 mKeepBoxes = 0;                       // how many the file listed
+        std::vector<LLUUID> mKeepIds;             // the root prims of those linksets: kept real wherever they stand now
     };
 
     struct Region
@@ -160,6 +167,9 @@ private:
         // (added every frame); mKeepSum is mKeep's summed-area table for the cull hooks
         std::vector<U8> mKeep;
         std::vector<U32> mKeepSum;
+        // the fine cells under the linksets any model lists by id, where they stand on this region now and are not
+        // (yet) moving objects (refreshKeepLive, every frame)
+        std::vector<U8> mKeepLive;
         bool mAnyFade = false;
         // the cull hooks compare this with the partition's region and never follow it
         const LLViewerRegion* mRegionp = nullptr;
@@ -175,7 +185,9 @@ private:
     void decoded(U64 handle, U32 serial, std::shared_ptr<Decoded> d);
     bool buildSome(Region& r);
     void computeFades();
-    void markKeep(Region& r, std::vector<U8>& grid, const LLVector4a* ext, F32 margin);
+    void refreshKeepLive();
+    void markKeepLive(const LLViewerObject* object);
+    static void markKeep(const Model& m, const LLVector3& origin_agent, std::vector<U8>& grid, const LLVector4a* ext, F32 margin);
     void drawParts(LLCamera& camera, bool far_clip, bool opaque, bool cut, bool fade_uniform);
     void logStats(F64 now);
     void clear();
@@ -188,7 +200,17 @@ private:
     // into mRegions; set by computeFades, emptied before anything is erased from mRegions.
     static std::vector<const Region*> sHiding;
     U32 mKeepCells = 0;                   // fine cells kept real by scripted or moving objects, this frame
+    U32 mKeepIdsFound = 0;                // the listed linksets this viewer has an object for, at the last refreshKeepLive
     U32 mFarMovers = 0, mFarMoversSeen = 0;   // moving objects standing on proxy cells this frame; those a cull let through lately
+    // for the log line: the first few of those movers - which region, where on it, and whether a cull let it through
+    struct FarMover
+    {
+        U32 mGridX = 0, mGridY = 0;
+        LLVector3 mLocal;
+        bool mSeen = false;
+    };
+    static constexpr U32 FAR_MOVER_SAMPLES = 6;
+    FarMover mFarSample[FAR_MOVER_SAMPLES];
     F64 mLastFadeAt = 0.0;
     F64 mNextRefresh = 0.0;
     S32 mFetching = 0;

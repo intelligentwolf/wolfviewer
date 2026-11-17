@@ -63,9 +63,12 @@ class LLViewerTexture;
  * Moving objects are not in a model and must never be hidden. An object that has moved is active for good
  * (LLDrawable::updateMove -> makeActive, lldrawable.cpp:822; LLPipeline::updateMovedList only calls makeStatic for a
  * drawable that is not ACTIVE, pipeline.cpp:2258-2260, which makeStatic then ignores, lldrawable.cpp:574) and is drawn
- * through a spatial bridge - which sits IN the region's static volume octree (LLSpatialBridge's constructor,
- * lldrawable.cpp:1327-1337 part->put(this)) and is only drawn when its node passes the cull. So every cell a bridge
- * stands on (8 m fine cells under its box and 16 m round it, for what it moves in a frame) keeps its real objects,
+ * through a spatial bridge. The bridge is made IN the region's static volume octree (LLSpatialBridge's constructor,
+ * lldrawable.cpp:1329-1340 part->put(this)) and at its first LLSpatialBridge::updateMove goes over to the region's
+ * bridge partition (lldrawable.cpp:1694-1707; LLVolumeBridge is PARTITION_BRIDGE, llvovolume.cpp:5436), which the cull
+ * hooks never touch - found on the first round 2 sessions, 17 Nov, where no mover was ever counted in the volume
+ * octree. So a mover is safe twice over: in the bridge partition nothing hides it, and while a bridge is still in
+ * the volume octree every cell it stands on (8 m fine cells under its box and 16 m round it) keeps its real objects,
  * whatever its distance: no node holding the bridge, and no node above it, then passes the test. The same mask holds
  * the places the MODEL lists: the box of every linkset the baker left out because it can move or is scripted and to
  * be kept real (Paul, 15 Nov: "anything scripted or with a wolf-rail script stays a real object, even when it's

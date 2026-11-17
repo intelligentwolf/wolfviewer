@@ -115,7 +115,13 @@ namespace
 void WolfFarProxy::bridgeIn(LLSpatialBridge* bridge, LLSpatialGroup* group)
 {
     LLSpatialPartition* part = group ? group->getSpatialPartition() : nullptr;
-    if (bridge && part && part->mPartitionType == LLViewerRegion::PARTITION_VOLUME)
+    // A volume's bridge is made in the region's static volume partition (LLSpatialBridge's constructor,
+    // lldrawable.cpp:1329-1340) and goes over to the region's bridge partition at its first updateMove
+    // (LLVolumeBridge sets PARTITION_BRIDGE, llvovolume.cpp:5436; LLSpatialBridge::updateMove moves it there,
+    // lldrawable.cpp:1694-1707 and LLSpatialPartition::move, llspatialpartition.cpp:1065-1072). Both are followed:
+    // the first for the keep-real mask, the second for the log's count of movers on proxy cells.
+    if (bridge && part && (part->mPartitionType == LLViewerRegion::PARTITION_VOLUME
+                           || part->mPartitionType == LLViewerRegion::PARTITION_BRIDGE))
     {
         sBridges.insert(bridge);
     }
@@ -882,7 +888,8 @@ void WolfFarProxy::computeFades()
         {
             LLSpatialGroup* group = bridge->getSpatialGroup();
             LLSpatialPartition* part = group ? group->getSpatialPartition() : nullptr;
-            if (!part || part->mPartitionType != LLViewerRegion::PARTITION_VOLUME)
+            if (!part || (part->mPartitionType != LLViewerRegion::PARTITION_VOLUME
+                          && part->mPartitionType != LLViewerRegion::PARTITION_BRIDGE))
             {
                 continue;
             }
@@ -891,7 +898,12 @@ void WolfFarProxy::computeFades()
                 if (hiding->mRegionp == part->mRegionp)
                 {
                     Region& r = const_cast<Region&>(*hiding);   // an entry of mRegions
-                    markKeep(*r.mModel, r.mOriginAgent, r.mKeep, bridge->getSpatialExtents(), BRIDGE_MARGIN_M);
+                    // only a bridge still in the static volume octree can be hidden with its node; one in the
+                    // bridge partition is never looked at by the cull hooks (allHidden: PARTITION_VOLUME only)
+                    if (part->mPartitionType == LLViewerRegion::PARTITION_VOLUME)
+                    {
+                        markKeep(*r.mModel, r.mOriginAgent, r.mKeep, bridge->getSpatialExtents(), BRIDGE_MARGIN_M);
+                    }
                     // for the log: a mover whose own centre stands on a cell drawn as its proxy, and whether the
                     // cull still let it through (the proof that moving objects are never hidden)
                     const LLVector4a* ext = bridge->getSpatialExtents();

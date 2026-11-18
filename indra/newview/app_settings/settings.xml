@@ -22611,6 +22611,39 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<real>2.0</real>
 		</map>
+		<key>WolfAdaptiveDrawDistance</key>
+		<map>
+			<key>Comment</key>
+			<string>[ADAPTIVE DRAW DISTANCE 2026-11-18] When frames get slow the draw distance in use is lowered within about a second, and raised again slowly once they are smooth, never below WolfAdaptiveDrawDistanceFloor and never above your own draw distance (RenderFarClip, which is never changed). A note at the top of the view shows while it is lowered. Stands aside while Auto-tune is on and in VR. Wolf World &gt; Display &amp; Effects &gt; Adaptive Draw Distance. Every grid.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfAdaptiveDrawDistanceTargetFPS</key>
+		<map>
+			<key>Comment</key>
+			<string>[ADAPTIVE DRAW DISTANCE 2026-11-18] Frames a second WolfAdaptiveDrawDistance aims for: lowered when the last second's median is under 0.9 x this, raised when every one of 5 whole seconds is at 1.4 x this or better. 20 = on a 60 Hz display with vsync the steps are 60, 30, 20, 15: a view steady at 20 is not lowered, one at 15 is, and 30 raises (1.4 x 20 = 28). Never more than 2/3 of the frame limit (FramePerSecondLimit) or vsync rate. Held between 5 and 120.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>20.0</real>
+		</map>
+		<key>WolfAdaptiveDrawDistanceFloor</key>
+		<map>
+			<key>Comment</key>
+			<string>[ADAPTIVE DRAW DISTANCE 2026-11-18] Metres: WolfAdaptiveDrawDistance never lowers the draw distance below this, and does nothing for a draw distance set at or under it. 128 = the draw distance the viewer itself gives the Mid, MidHigh, High and HighUltra graphics levels (featuretable.txt RenderFarClip 128), half a standard region round you. Held between 32 and 4096 (the Preferences slider's range).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>128.0</real>
+		</map>
 		<key>WolfFarProxy</key>
 		<map>
 			<key>Comment</key>
@@ -22625,7 +22658,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfFarProxyDistance</key>
 		<map>
 			<key>Comment</key>
-			<string>[W107 FAR HLOD 2026-11-14] Metres from the camera beyond which WolfFarProxy draws a region's low-detail model instead of its objects (the model dissolves in over the next 64 m). Held between 256 and 4096.</string>
+			<string>[W107 FAR HLOD 2026-11-14] Metres from the camera beyond which WolfFarProxy draws a region's low-detail model instead of its objects (a cell goes over at this distance + 32 m and comes back at this distance, each change a 0.75 s dissolve: wolffarproxy.cpp HYSTERESIS_M, DISSOLVE_SECS). Held between 256 and 4096.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

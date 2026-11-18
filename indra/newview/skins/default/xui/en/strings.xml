@@ -845,6 +845,8 @@ Click to pick it in the list and zoom to it.</string>
 
 	<!-- mouselook -->
 	<string name="LeaveMouselook">Press ESC to return to World View</string>
+	<!-- [ADAPTIVE DRAW DISTANCE 2026-11-18] the note over the world view while the draw distance in use is lowered (wolfadaptivedrawdistance.cpp drawNote) -->
+	<string name="WolfAdaptiveDrawNote">Draw distance eased to [NOW] m to keep things smooth (your setting: [YOURS] m)</string>
 
 	<!-- inventory -->
 	<string name="InventoryNoMatchingItems">Didn't find what you're looking for? Try [secondlife:///app/search/all/[SEARCH_TERM] Search].</string>

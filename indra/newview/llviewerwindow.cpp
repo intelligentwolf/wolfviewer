@@ -242,6 +242,7 @@
 #include "llnetmap.h"
 #include "lggcontactsets.h"
 #include "fspanellogin.h"
+#include "wolfadaptivedrawdistance.h"   // [ADAPTIVE DRAW DISTANCE 2026-11-18/] drawNote
 
 #include "lltracerecording.h"
 
@@ -3166,6 +3167,8 @@ void LLViewerWindow::draw()
             drawMouselookInstructions();
             stop_glerror();
         }
+
+        WolfAdaptiveDrawDistance::drawNote();   // [ADAPTIVE DRAW DISTANCE 2026-11-18/] under the floaters, over the world
 
         // Draw all nested UI views.
         // No translation needed, this view is glued to 0,0

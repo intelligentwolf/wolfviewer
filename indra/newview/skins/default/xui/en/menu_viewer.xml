@@ -2612,6 +2612,14 @@
                 <menu_item_check.on_check function="CheckControl" parameter="WolfViewerToolbarSingleBar" />
                 <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerToolbarSingleBar" />
             </menu_item_check>
+            <!-- [ADAPTIVE DRAW DISTANCE 2026-11-18] Paul: "i'm not starting the viewer again till adaptive draw distance is
+             done". When frames get slow the draw distance in use is lowered at once and raised slowly when they are smooth;
+             your own draw distance setting never changes (wolfadaptivedrawdistance.cpp, WolfAdaptiveDrawDistance, on by
+             default). Every grid. -->
+            <menu_item_check label="Adaptive Draw Distance" name="WolfAdaptiveDrawDistance">
+                <menu_item_check.on_check function="CheckControl" parameter="WolfAdaptiveDrawDistance" />
+                <menu_item_check.on_click function="ToggleControl" parameter="WolfAdaptiveDrawDistance" />
+            </menu_item_check>
             <menu_item_separator />
             <!-- [WOLF FX 2026-10-10] script effects and camera shake (wolffx.cpp, wolfcamerafx.cpp) -->
             <menu_item_check label="Show Script Effects (explosions, fire...)" name="WolfFXEnabled">

@@ -129,6 +129,7 @@
 #include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/>
 #include "wolfaurora.h"   // <WolfViewer 2026-10-15/> WolfForceAurora: WolfAurora::idle
 #include "wolfswim.h"    // [WOLF SWIM 2026-10-20/] WolfSwim::beforeAgentUpdate
+#include "wolfadaptivedrawdistance.h"   // [ADAPTIVE DRAW DISTANCE 2026-11-18/] idle, userDrawDistance
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -4616,7 +4617,8 @@ void LLAppViewer::cleanupSavedSettings()
     // Some things are cached in LLAgent.
     if (gAgent.isInitialized())
     {
-        gSavedSettings.setF32("RenderFarClip", gAgentCamera.mDrawDistance);
+        // [ADAPTIVE DRAW DISTANCE 2026-11-18] the resident's own draw distance, never the lowered one in use
+        gSavedSettings.setF32("RenderFarClip", WolfAdaptiveDrawDistance::userDrawDistance());
     }
 }
 
@@ -6462,6 +6464,7 @@ void LLAppViewer::idle()
     // bridge's box is brought up to date, and the keep-real mask made here must hold this frame's boxes before the
     // frame is culled - made before it, the mask was a frame old and a mover's first frame was hidden.
     { WolfVRScreen::SubPart wsp_("WolfFarProxy"); WolfFarProxy::instance().idle(); }
+    { WolfVRScreen::SubPart wsp_("WolfAdaptiveDD"); WolfAdaptiveDrawDistance::idle(); }   // [ADAPTIVE DRAW DISTANCE 2026-11-18/] before display_update_camera reads mDrawDistance
 
     { WolfVRScreen::SubPart wsp_("updateParticles"); LLWorld::getInstance()->updateParticles(); }
 

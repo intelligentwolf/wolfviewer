@@ -4,9 +4,9 @@
      should be". Design: firestorm/region-terrain-work/track-tool-2026-11-14/DESIGN.md (sections 1, 5, 10).
      Persona: a resident aged 35-65 who owns some land and has never built a railway.
      Story: "I draw a line on my land, see the track along it, add a station and a branch, press Lay track, and run my train."
-     Flow: the window opens drawing (camera from above, the Tunnel tool's pen) -> 1. pick what the next clicks make (a line, a
-     branch, a station, a signal) and click on the ground; the plan shows in the world at once, with any problem as a red mark
-     and in the window -> 2. Lay track. Your railways (closed) lists what is laid here: Show, Change, Remove.
+     Flow: the window opens drawing (camera from above, the Tunnel tool's pen) -> 1. draw the track (a line, a branch) and
+     click on the ground; 2. then add a station, signal, turntable, tunnel or cutting on it; the plan shows in the world at once, with any problem as a red mark
+     and in the window -> 3. Lay track. Your railways (closed) lists what is laid here: Show, Change, Remove.
      The hint says the next step; the line under the drawing says the length, curves and stations, or what is wrong; the
      status line under Lay track says what is happening. No codes, no countdowns; failures stay in the caution colour until
      the next action; questions are asked inside the window (Start over, Remove). -->
@@ -23,26 +23,31 @@
  title="Lay Railway Track"
  width="500">
     <text follows="left|top" font="SansSerifBold" height="40" layout="topleft" left="16" name="track_hint" top="26" width="468" word_wrap="true" />
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="draw_heading" top="68" width="468">1. Draw your railway - what do your clicks make?</text>
-    <radio_group follows="left|top" height="22" layout="topleft" left="16" name="track_mode" top="90" width="468"
-     tool_tip="Each choice makes something different with your next clicks on the ground. The words at the top of the world view say what to click.">
-        <!-- [TRACK TOOL CUTTINGS 2026-11-17] seven choices in the row: the labels lost their "A " so that A cutting fits beside A
-             tunnel (DESIGN.md 3.6 "Window": a Cutting pen beside the Tunnel pen) -->
-        <radio_item height="20" label="Line" layout="topleft" left="0" name="line" top="0" value="line" width="48"
+    <!-- [TRACK STEPS 2026-11-18] Paul (W106 beta): "there needs to be better instructions its not obvious that you have to lay
+         the track first THEN do the tunnels and cuttings". The pens are in two numbered rows, the order the planner needs them
+         in (a station, signal, turntable, tunnel or cutting goes on a line already drawn: wolffloatertrack.cpp clickAt onALine),
+         and Lay track is step 3. The radio items keep their order: EMode in wolffloatertrack.h is the selected index. -->
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="draw_heading" top="70" width="112"
+     tool_tip="Draw the track first: tunnels, cuttings, stations and signals go on a line you have drawn.">1. Draw track:</text>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="add_heading" top="94" width="112"
+     tool_tip="When your line is drawn, add these to it. A hill in the way? The window offers a tunnel or a cutting by itself.">2. Then add:</text>
+    <radio_group follows="left|top" height="46" layout="topleft" left="130" name="track_mode" top="68" width="354"
+     tool_tip="Each choice makes something different with your next clicks on the ground. The words at the top of the window say what to click.">
+        <radio_item height="20" label="Line" layout="topleft" left="0" name="line" top="0" value="line" width="50"
          tool_tip="Click where the line starts, at each bend, and where it ends. Click the first point again to make a loop." />
-        <radio_item height="20" label="Branch" layout="topleft" left="50" name="branch" top="0" value="branch" width="62"
+        <radio_item height="20" label="Branch" layout="topleft" left="54" name="branch" top="0" value="branch" width="66"
          tool_tip="Click on a line where the branch leaves it, then its bends and its end. End it on a line to join that line." />
-        <radio_item height="20" label="Station" layout="topleft" left="114" name="station" top="0" value="station" width="66"
+        <radio_item height="20" label="Station" layout="topleft" left="0" name="station" top="24" value="station" width="66"
          tool_tip="Click on a line where the platform starts, then where it ends." />
-        <radio_item height="20" label="Signal" layout="topleft" left="182" name="signal" top="0" value="signal" width="58"
+        <radio_item height="20" label="Signal" layout="topleft" left="68" name="signal" top="24" value="signal" width="58"
          tool_tip="Click on a line to put a signal there. Signals are also put in by themselves." />
-        <radio_item height="20" label="Turntable" layout="topleft" left="242" name="turntable" top="0" value="turntable" width="84"
+        <radio_item height="20" label="Turntable" layout="topleft" left="128" name="turntable" top="24" value="turntable" width="84"
          tool_tip="Click on the end of a line to put a turntable there, with stall roads round it." />
         <!-- [TRACK TOOL TUNNELS 2026-11-15] DESIGN.md 3.4: a stretch of a line through the hill -->
-        <radio_item height="20" label="Tunnel" layout="topleft" left="328" name="tunnel" top="0" value="tunnel" width="62"
+        <radio_item height="20" label="Tunnel" layout="topleft" left="214" name="tunnel" top="24" value="tunnel" width="62"
          tool_tip="Click on a line before a hill where the tunnel starts, then beyond the hill where it ends. The ends are fitted to the hill." />
         <!-- [TRACK TOOL CUTTINGS 2026-11-17] DESIGN.md 3.6: a stretch of a line where the ground is dug down to the rails -->
-        <radio_item height="20" label="Cutting" layout="topleft" left="392" name="cutting" top="0" value="cutting" width="70"
+        <radio_item height="20" label="Cutting" layout="topleft" left="278" name="cutting" top="24" value="cutting" width="72"
          tool_tip="Click on a line where the cutting starts, then where it ends. The ground there is dug down to the rails when the railway is laid, and put back if you remove it." />
     </radio_group>
     <button follows="left|top" height="26" label="Undo last point" layout="topleft" left="16" name="track_undo" top="118" width="128"
@@ -121,7 +126,7 @@
      tool_tip="Take the line, branch, station, signal, turntable, tunnel or cutting picked in the list out of the drawing" />
     <text follows="left|top" height="34" layout="topleft" left="16" name="track_summary" top="394" width="468" word_wrap="true" />
     <text follows="left|top" height="52" layout="topleft" left="16" name="track_problems" top="428" width="468" word_wrap="true" />
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="lay_heading" top="484" width="468">2. Lay it</text>
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="lay_heading" top="484" width="468">3. Lay it</text>
     <button follows="left|top" font="SansSerifLarge" height="34" label="Lay track" layout="topleft" left="16" name="track_lay" top="506" width="180"
      tool_tip="Make the track, stations and signals and put them on your land (free)" />
     <progress_bar color_bar="0.3 0.85 0.4 1" follows="left|top" height="10" layout="topleft" left="208" name="track_progress" top="518" visible="false" width="276" />

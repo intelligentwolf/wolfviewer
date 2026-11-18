@@ -92,6 +92,7 @@ public:
     std::string escapeText() const override;
     std::string markerLabel(size_t k) const override;
     std::string routeHint() const override;
+    std::string needsLineWords(S32 mode) const;   // [TRACK STEPS 2026-11-18] "Then mark the tunnel on it." etc.
     void renderRouteExtras(LLViewerRegion* rgn) override;
     void drawRouteExtras(LLViewerRegion* rgn) override;
     bool customSurface() const override { return true; }

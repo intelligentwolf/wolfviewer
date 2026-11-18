@@ -787,6 +787,13 @@ void WolfFloaterTrack::clickAt(F32 x, F32 y)
             g = picked;
         }
     }
+    // [TRACK STEPS 2026-11-18] a station, signal, turntable, tunnel, cutting or a branch's start goes on a line already drawn:
+    // with none drawn yet, say so plainly (the click was otherwise answered "Click right on a line")
+    if (mode != MODE_LINE && usableLines() == 0 && !(mode == MODE_BRANCH && mCurLine >= 0))
+    {
+        setStatus("There is no track here yet. First draw your line: choose Line (step 1) and click on the ground. " + needsLineWords(mode), true);
+        return;
+    }
     if (mode == MODE_LINE || mode == MODE_BRANCH)
     {
         if (mCurLine >= 0 && (size_t)mCurLine < mLines.size() && mLines[mCurLine].mBranch != (mode == MODE_BRANCH)) mCurLine = -1;
@@ -1621,10 +1628,15 @@ std::string WolfFloaterTrack::markerLabel(size_t k) const
         case REF_LINE_START: return "Branch";
         case REF_LINE_CLICK:
         {
+            // [TRACK STEPS 2026-11-18] each point shows its number: the plan names points by them ("points 2 and 3 were
+            // merged", "Moving point 4 about 20 m to the north would fix it" - tracktool/geom.py repair / _advice number a line's
+            // clicks from 1, and a branch's clicks after the one on the line from 1)
             const Line& l = mLines[r.mItem];
-            if (!l.mBranch && r.mPoint == 0) return l.mClosed ? "Loop" : "Start";
-            if (r.mPoint + 1 == l.mClicks.size() && (S32)r.mItem != mCurLine && !l.mClosed) return l.mJoins ? "Joins" : "End";
-            return std::string();
+            const S32 num = (S32)r.mPoint + 1;
+            if (!l.mBranch && r.mPoint == 0) return l.mClosed ? std::string("1 Loop") : std::string("1 Start");
+            if (r.mPoint + 1 == l.mClicks.size() && (S32)r.mItem != mCurLine && !l.mClosed)
+                return l.mJoins ? std::string("Joins") : llformat("%d End", num);
+            return llformat("%d", num);
         }
         case REF_STATION_A:
             return mStations[r.mItem].mName.empty() ? std::string("Platform") : mStations[r.mItem].mName;
@@ -1649,12 +1661,31 @@ std::string WolfFloaterTrack::escapeText() const
     return "You are drawing a railway. Backspace takes the last point back; closing the window stops.";
 }
 
+std::string WolfFloaterTrack::needsLineWords(S32 mode) const
+{
+    // [TRACK STEPS 2026-11-18] what goes on the line, for the "draw the track first" sentences (routeHint, clickAt)
+    switch (mode)
+    {
+        case MODE_BRANCH: return "A branch leaves a line you have drawn.";
+        case MODE_STATION: return "Then put the station beside it.";
+        case MODE_SIGNAL: return "Then put signals on it.";
+        case MODE_TURNTABLE: return "Then put the turntable at its end.";
+        case MODE_TUNNEL: return "Then mark the tunnel on it.";
+        case MODE_CUTTING: return "Then mark the cutting on it.";
+    }
+    return std::string();
+}
+
 std::string WolfFloaterTrack::routeHint() const
 {
     if (mLaying) return "Your railway is being made - the window shows how far it has got.";
     if (mRezzing) return "Placing your railway on the land...";
     if (mRemoving) return "Taking the railway's pieces away...";
     const S32 mode = mMode ? mMode->getSelectedIndex() : MODE_LINE;
+    // [TRACK STEPS 2026-11-18] Paul: "its not obvious that you have to lay the track first THEN do the tunnels and cuttings" -
+    // step 2's pens (and a branch, which leaves a line) need a line drawn first: the hint says so before a click is wasted
+    if (mode != MODE_LINE && usableLines() == 0 && !(mode == MODE_BRANCH && mCurLine >= 0))
+        return "Step 1 first: choose Line and draw your track. " + needsLineWords(mode);
     if (mode == MODE_BRANCH)
     {
         if (mCurLine >= 0 && mLines[mCurLine].mBranch)
@@ -1680,12 +1711,18 @@ std::string WolfFloaterTrack::routeHint() const
         return mCurCutting >= 0 ? "Click on the same line where the cutting ENDS."
                                 : "Click on a line where the cutting STARTS, before the rising ground.";
     }
-    if (mCurLine < 0) return mLines.empty() ? "Click on the ground where your line STARTS." : "Click on the ground to start another line.";
+    if (mCurLine < 0)
+    {
+        if (mLines.empty()) return "Step 1: click on the ground where your line STARTS.";
+        if (usableLines() > 0 && !mPlanDirty && !mPlanInFlight && mPlan.mOk)
+            return "Next: add a station, tunnel or cutting (step 2), or press Lay track (step 3). A click on the ground starts another line.";
+        return "Click on the ground to start another line.";
+    }
     const Line& l = mLines[mCurLine];
-    if (l.mClicks.size() < 2) return "Click at each bend, then where the line ends. Too far to click? Alt + drag moves the camera.";
+    if (l.mClicks.size() < 2) return "Step 1: click at each bend, then where the line ends. Too far to click? Alt + drag moves the camera.";
     if (mPlanDirty || mPlanInFlight) return "Working out your track...";
     if (!mPlan.mOk) return "This railway cannot be laid yet - the window says why. Drag a point to move it.";
-    return "Keep clicking to make the line longer, or press Lay track in the window.";
+    return "Keep clicking to make the line longer, then add a station, tunnel or cutting (step 2) or press Lay track (step 3).";
 }
 
 // ---- the request (DESIGN.md 10 REQ) ----------------------------------------------------------------------------------------------

@@ -1519,7 +1519,7 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
             atmosphere.setRuntimeUniforms(sh, f.pre_exposure);
             m.cloudsMaterialUniforms(sh, p, f);
             u2f(sh, "resolution", resolution.x, resolution.y);
-            u2f(sh, "targetUvScale", resolution.x / f.width, resolution.y / f.height);   // CloudsMaterial.setSize (:406-414)
+            u2f(sh, "targetUvScale", resolution.x / (F32)f.width, resolution.y / (F32)f.height);   // CloudsMaterial.setSize (:406-414)
             const glm::mat4 prevP = m.havePrev ? m.prevProj : f.proj;   // `previousProjectionMatrix ?? camera.projectionMatrix`
             const glm::mat4 prevV = m.havePrev ? m.prevView : f.view;
             m.cameraUniforms(sh, f, true, resolution, bottomRadius, prevP, prevV, f.view);
@@ -1541,7 +1541,7 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
             LLGLSLShader& sh = cloudsResolveSh;
             sh.bind();
             const S32 ri = m.resolveIndex, hi = 1 - m.resolveIndex;
-            u2f(sh, "texelSize", 1.f / f.width, 1.f / f.height);   // setSize (:83-85)
+            u2f(sh, "texelSize", 1.f / (F32)f.width, 1.f / (F32)f.height);   // setSize (:83-85)
             u1i(sh, "frame", (S32)m.frame);
             // onBeforeRender (:87-101)
             const glm::vec2 off = bayerOffset((S32)(m.frame % 16));

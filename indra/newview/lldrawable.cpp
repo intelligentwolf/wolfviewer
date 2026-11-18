@@ -48,6 +48,7 @@
 #include "llvosurfacepatch.h" // for debugging
 #include "llworld.h"
 #include "pipeline.h"
+#include "wolffarproxy.h"   // [W107 FAR HLOD 2026-11-14/] bridgeOut
 #include "llspatialpartition.h"
 #include "llviewerobjectlist.h"
 #include "llviewerwindow.h"
@@ -1349,6 +1350,7 @@ LLSpatialBridge::~LLSpatialBridge()
             group->getSpatialPartition()->remove(this, group);
         }
     }
+    WolfFarProxy::bridgeOut(this);   // [W107 FAR HLOD 2026-11-14/] never kept past its life (wolffarproxy.cpp sBridges)
 
     //delete octree here so listeners will still be able to access bridge specific state
     destroyTree();

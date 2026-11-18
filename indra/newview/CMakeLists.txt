@@ -1006,6 +1006,7 @@ set(viewer_SOURCE_FILES
     wolfscreenshare.cpp
     wolfaltitudesky.cpp
     wolffarground.cpp
+    wolffarproxy.cpp
     wolffarterrain.cpp
     wolfaurora.cpp
     wolfweather.cpp
@@ -2073,6 +2074,7 @@ set(viewer_HEADER_FILES
     wolfscreenshare.h
     wolfaltitudesky.h
     wolffarground.h
+    wolffarproxy.h
     wolffarterrain.h
     wolfaurora.h
     wolfweather.h

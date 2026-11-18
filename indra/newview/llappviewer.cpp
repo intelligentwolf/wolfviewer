@@ -108,6 +108,7 @@
 #include "wolfskis.h"     // [SKIS 2026-11-06/] skis and snowboards
 #include "wolfair.h"      // <WolfViewer 2026-11-01/> Wolf Air (warplanes: the dogfight band, the kill feed)
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
+#include "wolffarproxy.h"    // [W107 FAR HLOD 2026-11-14/] the regions' far proxy models
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
 #include "wolfkraken.h"      // [KRAKEN 2026-11-17/] ticket 823
@@ -6456,6 +6457,11 @@ void LLAppViewer::idle()
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);
         { WolfVRScreen::SubPart wsp_("updateMove"); gPipeline.updateMove(); }
     }
+    // [W107 FAR HLOD 2026-11-14] the regions' far proxy models: fetches, building, each cell's hand-over. AFTER
+    // updateMove (review, 17 Nov): that is where an object that starts to move gets its spatial bridge and where every
+    // bridge's box is brought up to date, and the keep-real mask made here must hold this frame's boxes before the
+    // frame is culled - made before it, the mask was a frame old and a mover's first frame was hidden.
+    { WolfVRScreen::SubPart wsp_("WolfFarProxy"); WolfFarProxy::instance().idle(); }
 
     { WolfVRScreen::SubPart wsp_("updateParticles"); LLWorld::getInstance()->updateParticles(); }
 

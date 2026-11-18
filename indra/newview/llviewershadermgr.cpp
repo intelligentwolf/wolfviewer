@@ -354,6 +354,7 @@ LLGLSLShader        gWolfSurfCurlProgram;
 LLGLSLShader        gWolfGodRaysProgram;
 LLGLSLShader        gWolfCloudDeckProgram;   // <WolfViewer 2026-10-07/>
 LLGLSLShader        gWolfUnderSeaProgram;    // [UNDERSEA 2026-11-09/] ticket 652: the swaying sea plants (wolfundersea.cpp)
+LLGLSLShader        gWolfFarProxyProgram;    // [W107 FAR HLOD 2026-11-14/] a region's far proxy model (wolffarproxy.cpp)
 LLGLSLShader        gWolfShadowBatchProgram; // [W107 STATIC BATCH 2026-11-14/] shadow casters from shared buffers (wolfstaticshadowbatch.cpp)
 LLGLSLShader        gWolfEnvSkyProgram;            // [WOLF ENV TAKRAM 2026-10-12] wolfenvironmentrender.cpp
 LLGLSLShader        gWolfEnvCompositeProgram[2];
@@ -1555,6 +1556,7 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         gDeferredNonIndexedDiffuseAlphaMaskNoColorProgram.unload();
         gWolfUnderSeaProgram.unload();   // [UNDERSEA 2026-11-09/]
         gWolfShadowBatchProgram.unload();   // [W107 STATIC BATCH 2026-11-14/]
+        gWolfFarProxyProgram.unload();      // [W107 FAR HLOD 2026-11-14/]
         gDeferredBumpProgram.unload();
         gDeferredSkinnedBumpProgram.unload();
         gDeferredImpostorProgram.unload();
@@ -1711,6 +1713,24 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         add_common_permutations(&gDeferredNonIndexedDiffuseAlphaMaskProgram);
         success = gDeferredNonIndexedDiffuseAlphaMaskProgram.createShader();
         llassert(success);
+    }
+
+    // [W107 FAR HLOD 2026-11-14] wolffarproxy.cpp: the program above with deferred/wolfFarProxyF.glsl as its fragment
+    // shader (the atlas colour alone, an emissive weight, the hand-over dither). As the Wolf static shadow batch
+    // shader below: its failing loses only the far proxies (WolfFarProxy::renderDeferred tests the program object and
+    // every object is then drawn the stock way), never the rest of the deferred shaders.
+    if (success)
+    {
+        gWolfFarProxyProgram.mName = "Wolf Far Proxy Shader";
+        gWolfFarProxyProgram.mShaderFiles.clear();
+        gWolfFarProxyProgram.mShaderFiles.push_back(make_pair("deferred/diffuseV.glsl", GL_VERTEX_SHADER));
+        gWolfFarProxyProgram.mShaderFiles.push_back(make_pair("deferred/wolfFarProxyF.glsl", GL_FRAGMENT_SHADER));
+        gWolfFarProxyProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        add_common_permutations(&gWolfFarProxyProgram);
+        if (!gWolfFarProxyProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf far proxy shader failed: far objects are drawn the stock way" << LL_ENDL;
+        }
     }
 
     if (success)

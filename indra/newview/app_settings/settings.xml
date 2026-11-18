@@ -22611,6 +22611,28 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<real>2.0</real>
 		</map>
+		<key>WolfFarProxy</key>
+		<map>
+			<key>Comment</key>
+			<string>[W107 FAR HLOD 2026-11-14] Beyond WolfFarProxyDistance a region's static objects are drawn as one low-detail model of the region (baked by the grid, served by wolf-grid.com) and the real objects standing there are not drawn. Nearer, everything is the real object. Wolf Territories only; off = every object is drawn as before.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfFarProxyDistance</key>
+		<map>
+			<key>Comment</key>
+			<string>[W107 FAR HLOD 2026-11-14] Metres from the camera beyond which WolfFarProxy draws a region's low-detail model instead of its objects (the model dissolves in over the next 64 m). Held between 256 and 4096.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>512.0</real>
+		</map>
 		<key>WolfViewerFarTerrain</key>
 		<map>
 			<key>Comment</key>

@@ -28,6 +28,7 @@
 
 #include "llspatialpartition.h"
 #include "wolfsubpixelcull.h"   // [W107 FARPERF 2026-11-14/] static prims and mesh under one pixel across
+#include "wolffarproxy.h"   // [W107 FAR HLOD 2026-11-14/]
 #include "wolfstaticshadowbatch.h"   // [W107 STATIC BATCH 2026-11-14/] releaseGroup: the group's part of the shared shadow buffers
 
 #include "llappviewer.h"
@@ -323,6 +324,7 @@ bool LLSpatialGroup::addObject(LLDrawable *drawablep)
         if (drawablep->isSpatialBridge())
         {
             mBridgeList.push_back((LLSpatialBridge*) drawablep);
+            WolfFarProxy::bridgeIn((LLSpatialBridge*) drawablep, this);   // [W107 FAR HLOD 2026-11-14/] a moving object's cells stay real
         }
         if (drawablep->getRadius() > 1.f)
         {
@@ -450,6 +452,7 @@ bool LLSpatialGroup::removeObject(LLDrawable *drawablep, bool from_octree)
                 if (*i == drawablep)
                 {
                     mBridgeList.erase(i);
+                    WolfFarProxy::bridgeOut((LLSpatialBridge*) drawablep);   // [W107 FAR HLOD 2026-11-14/]
                     break;
                 }
             }
@@ -1122,6 +1125,12 @@ public:
         }
 
         LLSpatialGroup* group = (LLSpatialGroup*)base_group;
+        // [W107 FAR HLOD 2026-11-14] a node standing wholly on cells drawn as their region's far proxy: neither it nor
+        // anything under it is looked at - no occlusion query, frustum test, draw or shadow caster (wolffarproxy.h)
+        if (WolfFarProxy::hidesSubtree(group))
+        {
+            return true;
+        }
         group->checkOcclusion();
 
         if (group->getOctreeNode() &&
@@ -1168,6 +1177,10 @@ public:
             group->doOcclusion(mCamera);
         }*/
         if (WolfSubPixelCull::skipObjects(group, *mCamera))   // [W107 FARPERF 2026-11-14/] see wolfsubpixelcull.h
+        {
+            return;
+        }
+        if (WolfFarProxy::hidesObjects(group))   // [W107 FAR HLOD 2026-11-14/] this node's own objects stand on far proxy cells
         {
             return;
         }

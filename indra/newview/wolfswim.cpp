@@ -99,6 +99,25 @@ namespace
     const F64 HOLD_MIN_PRESS_S = 0.10, HOLD_MAX_PRESS_S = 0.40, HOLD_SETTLE_S = 0.40;
     const F32 HOLD_MAX_PITCH = 0.0872f;
 
+    // [SWIM DEPTH 2026-11-18] Ticket 910 (IndigoQueen King): a swimmer who did not choose a depth floats back up to just
+    // under the surface (riseToRest). Nothing else raises a swimmer. Since the region fix of ticket 802 (BulletSim
+    // BSActorAvatarMove.cs:288-310, ubODE OdeCharacter.Move: no flying ground-margin lift while the centre is under the
+    // water - region-terrain-work/swim-floor-t802-2026-11-12/README.md) the region holds a still flyer where it stopped
+    // (BSActorAvatarMove.cs:234-237 "Flying and not colliding and velocity nearly zero" -> ZeroMotion; ubODE measured in
+    // that README, test 2: "let go: stays"), so wherever the entry left the avatar - fallen in from a jetty, flown down
+    // past the surface (the region's move arrives 0.2-0.35 s after the release, measured above), waded in until the head
+    // went under, the push-down's overshoot (PUSH_LEAD_S) - is where it stayed, often near the seabed. Before that fix
+    // the region's lift (AvatarFlyingGroundMargin 5 m + AvatarFlyingGroundUpForce, BSParam.cs:650-653) pushed a MOVING
+    // swimmer up whenever the seabed was within 5 m below its centre: in her 5 m deep bay it kept her near the top.
+    //   RISE_TO_BELOW - the depth of the top the rise aims at (design value): halfway between TOP_STOP_BELOW, where steer
+    //     takes upward control away, and SURFACE_REACH, where the treading hold takes over. The rise starts only for a
+    //     top deeper than SURFACE_REACH and moves in the hold's measured pulses (HOLD_PER_M_S, HOLD_MIN / MAX_PRESS_S,
+    //     HOLD_SETTLE_S: the same NUDGE_UP_POS with STOP held, so the same measured 1.63 m/s);
+    //   DIVE_HOLD_S - Down carried in from the air (already held when the swim began) chooses the depth only once it has
+    //     been held this long in the water (design value: ~1.6 m at that speed); let go sooner, it was only the way in.
+    const F32 RISE_TO_BELOW = 0.15f;
+    const F64 DIVE_HOLD_S = 1.0;
+
     // Stroke when moving faster than this (m/s), back to the tread under STILL_SPEED for STILL_FOR_S (design values;
     // the swim itself is 3.28 m/s - wolfswim.h).
     const F32 MOVING_SPEED = 0.35f, STILL_SPEED = 0.2f;
@@ -151,6 +170,16 @@ namespace
         F64 mPressChangedAt = 0.0;
         F64 mPressFor = 0.0;           // the length of the pulse now pressed
         U32 mPressEdges = 0;           // press changes, counted for the debug line
+        // [SWIM DEPTH 2026-11-18] riseToRest: mDepthChosen - the swimmer moved up or down under the water themselves since
+        // the top was last near the surface, so it stays at that depth; mEntryDown - the Down held when the swim began is
+        // still held (DIVE_HOLD_S); mRising / mRiseChangedAt / mRiseFor - the rise's own pulse (holdHead's is reset by
+        // every stroke, the rise also works during one)
+        bool mDepthChosen = false;
+        bool mEntryDown = false;
+        F64 mSwimStartAt = 0.0;
+        bool mRising = false;
+        F64 mRiseChangedAt = 0.0;
+        F64 mRiseFor = 0.0;
         LLVOAvatarSelf* mChinOf = nullptr;   // chinJoint's cache: the avatar and head joint it was found for
         LLJoint* mChinHeadOf = nullptr;
         LLJoint* mChin = nullptr;
@@ -522,6 +551,49 @@ namespace
         }
     }
 
+    // [SWIM DEPTH 2026-11-18] Ticket 910: float a swimmer who did not choose its depth back up to just under the surface
+    // (RISE_TO_BELOW), in holdHead's measured pulses, upward only. Steer runs after this and still takes upward control
+    // away once the top is past TOP_STOP_BELOW, so the rise can never lift the avatar out of the water.
+    void riseToRest(F32 top, F32 water)
+    {
+        State& s = st();
+        const F64 t = now();
+        bool rising = s.mRising;
+        if (!rising)
+        {
+            if (t - s.mRiseChangedAt >= HOLD_SETTLE_S && top < water - SURFACE_REACH)
+            {
+                rising = true;
+                s.mRiseFor = llclamp((F64)((water - RISE_TO_BELOW - top) * HOLD_PER_M_S), HOLD_MIN_PRESS_S, HOLD_MAX_PRESS_S);
+            }
+        }
+        else if (t - s.mRiseChangedAt >= s.mRiseFor)
+        {
+            rising = false;   // the pulse is long enough for the distance; look again once its move has arrived
+        }
+        if (rising != s.mRising)
+        {
+            s.mRising = rising;
+            s.mRiseChangedAt = t;
+            ++s.mPressEdges;
+        }
+        if (rising)
+        {
+            gAgent.setControlFlags(AGENT_CONTROL_NUDGE_UP_POS);
+        }
+    }
+
+    void endRise()
+    {
+        State& s = st();
+        if (s.mRising)
+        {
+            s.mRising = false;
+            s.mRiseChangedAt = now();
+            ++s.mPressEdges;
+        }
+    }
+
     void request(const LLUUID& id, bool start)
     {
         if (id.notNull())
@@ -646,6 +718,11 @@ namespace
         s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
         s.mUpAtSurfaceSince = 0.0;
         s.mRisingOut = false;
+        // [SWIM DEPTH 2026-11-18] a new dip: no depth chosen yet; a Down already held is the way in (DIVE_HOLD_S)
+        endRise();
+        s.mDepthChosen = false;
+        s.mEntryDown = (gAgent.getControlFlags() & (AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_UP_NEG)) != 0;
+        s.mSwimStartAt = now();
         s.mStillSince = now();
         s.mWeTurnedFlyOn = false;
         if (!gAgent.getFlying())
@@ -667,8 +744,10 @@ namespace
         if (!s.mToldStart)
         {
             s.mToldStart = true;
-            tip("Swimming. The movement keys swim you in any direction. To leave the water, swim to the shore, or hold Up "
-                "for a moment at the surface to fly out. Wolf World > Swimming switches it off.");
+            // [SWIM DEPTH 2026-11-18] says the float (riseToRest)
+            tip("Swimming. The movement keys swim you in any direction, and you float up near the surface unless you swim "
+                "down. To leave the water, swim to the shore, or hold Up for a moment at the surface to fly out. "
+                "Wolf World > Swimming switches it off.");
         }
     }
 
@@ -689,6 +768,7 @@ namespace
         s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
         s.mUpAtSurfaceSince = 0.0;
         s.mRisingOut = false;
+        endRise();   // [SWIM DEPTH 2026-11-18/]
         if (end_fly && s.mWeTurnedFlyOn && gAgent.getFlying())
         {
             gAgent.setFlying(false);
@@ -830,6 +910,7 @@ namespace WolfSwim
         {
             s.mSwimming = false;   // nothing to send to: the region forgets our animations with us
             endHold();
+            endRise();   // [SWIM DEPTH 2026-11-18/]
             s.mHeadUp = false;   // [SWIM HEAD 2026-11-13/]
             s.mChinOf = nullptr;   // [SWIM HEAD 2026-11-13/] the next self avatar looks its chin up again
             if (s.mMode == EMode::AO_PADDLE && AOEngine::instanceExists())
@@ -970,6 +1051,26 @@ namespace WolfSwim
             s.mRisingOut = true;
         }
         const bool level = std::fabs(gAgent.getFrameAgent().getAtAxis().mV[VZ]) <= HOLD_MAX_PITCH;
+        // [SWIM DEPTH 2026-11-18] Ticket 910: the depth is the swimmer's own choice once they move up or down under the
+        // water themselves - Up, Down (a Down carried in from the air only after DIVE_HOLD_S), or forward / back with a
+        // pitched body (mouselook: the region turns the move by the body's pitch, see HOLD_MAX_PITCH) - until the top
+        // is near the surface again. Otherwise riseToRest floats them up to just under it.
+        const bool down_key = (keys & (AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_UP_NEG)) != 0;
+        if (!down_key)
+        {
+            s.mEntryDown = false;
+        }
+        if (top >= water - SURFACE_REACH)
+        {
+            s.mDepthChosen = false;
+        }
+        const bool pitched_move = !level && (keys & (AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_NUDGE_AT_POS
+                                                     | AGENT_CONTROL_NUDGE_AT_NEG)) != 0;
+        if ((keys & (AGENT_CONTROL_UP_POS | AGENT_CONTROL_NUDGE_UP_POS)) != 0 || pitched_move
+            || (down_key && (!s.mEntryDown || now() - s.mSwimStartAt >= DIVE_HOLD_S)))
+        {
+            s.mDepthChosen = true;
+        }
         if (!have_surface || scripted || !level || across_or_down || across.length() > MOVING_SPEED || s.mRisingOut)
         {
             endHold();
@@ -982,10 +1083,22 @@ namespace WolfSwim
         if (s.mHolding)
         {
             s.mHeadUp = true;
+            endRise();   // [SWIM DEPTH 2026-11-18/] the hold works the depth now
             holdHead(av, chin_z, surface);
         }
         else
         {
+            // [SWIM DEPTH 2026-11-18] floating up: not against the swimmer's own Down, not while a script has the up / down
+            // control (it would be sent the presses, as for the hold), not with a pitched body (each press would drift
+            // across the water, HOLD_MAX_PITCH). Before steer, which cuts it at TOP_STOP_BELOW.
+            if (!s.mDepthChosen && !down_key && !scripted && level)
+            {
+                riseToRest(top, water);
+            }
+            else
+            {
+                endRise();
+            }
             steer(av, top, water, s.mRisingOut);
         }
         animate(av);
@@ -998,6 +1111,7 @@ namespace WolfSwim
             static U32 last_edges = 0;
             LL_DEBUGS("WolfSwim") << "swim hold=" << s.mHolding << " headup=" << s.mHeadUp << " stroke=" << s.mStroke
                                   << " rising=" << s.mRisingOut
+                                  << " chosen=" << s.mDepthChosen << " float=" << s.mRising   // [SWIM DEPTH 2026-11-18/]
                                   << " press=" << s.mPress << " edges=" << (s.mPressEdges - last_edges) << "/0.25s"
                                   << " edges_total=" << s.mPressEdges << " scripted=" << scripted << " level=" << level
                                   << " chin=" << chin_z << " head=" << (av->mHeadp ? av->mHeadp->getWorldPosition().mV[VZ] : 0.f)

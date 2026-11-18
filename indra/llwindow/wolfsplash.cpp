@@ -354,12 +354,12 @@ void WolfSplashRenderer::init(const WolfSplashConfig& cfg, int w, int h, float s
             for (int y = std::max(0, int(oy)); y < std::min(mH, int(std::ceil(oy + dh))); ++y)
             {
                 // the source rows under this screen row (at least one: above 3x the source is stretched)
-                const int sy0 = std::min(bh - 1, std::max(0, int((y - oy) * k)));
-                const int sy1 = std::min(bh, std::max(sy0 + 1, int(std::ceil((y + 1 - oy) * k))));
+                const int sy0 = std::min(bh - 1, std::max(0, int((float(y) - oy) * k)));
+                const int sy1 = std::min(bh, std::max(sy0 + 1, int(std::ceil((float(y + 1) - oy) * k))));
                 for (int x = std::max(0, int(ox)); x < std::min(mW, int(std::ceil(ox + dw))); ++x)
                 {
-                    const int sx0 = std::min(bw - 1, std::max(0, int((x - ox) * k)));
-                    const int sx1 = std::min(bw, std::max(sx0 + 1, int(std::ceil((x + 1 - ox) * k))));
+                    const int sx0 = std::min(bw - 1, std::max(0, int((float(x) - ox) * k)));
+                    const int sx1 = std::min(bw, std::max(sx0 + 1, int(std::ceil((float(x + 1) - ox) * k))));
                     // both images come out of loadJpeg as RGB (out_color_space JCS_RGB): 3 bytes a pixel
                     float sum[4] = { 0.f, 0.f, 0.f, 0.f };
                     for (int sy = sy0; sy < sy1; ++sy)

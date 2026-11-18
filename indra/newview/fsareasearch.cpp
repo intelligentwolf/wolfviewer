@@ -66,6 +66,7 @@
 #include "lltoolmgr.h"
 #include "rlvhandler.h"
 #include "llclipboard.h"
+#include "wolfadaptivedrawdistance.h"   // [TRACK PICK 2026-11-18/] userDrawDistance
 
 // max number of objects that can be (de-)selected in a single packet.
 constexpr S32 MAX_OBJECTS_PER_PACKET = 255;
@@ -1695,7 +1696,9 @@ bool FSPanelAreaSearchList::onContextMenuItemEnable(const LLSD& userdata)
         {
             const LLUUID& object_id = mResultList->getFirstSelected()->getUUID();
             LLViewerObject* objectp = gObjectList.findObject(object_id);
-            return (objectp && calculateObjectDistance(gAgent.getPositionGlobal(), objectp) < gAgentCamera.mDrawDistance);
+            // [TRACK PICK 2026-11-18] Zoom (menu_fs_area_search.xml look_at_object) is limited by the resident's own draw
+            // distance, not the adaptive value in use (llagentcamera.cpp getCameraMaxZoomDistance, the same)
+            return (objectp && calculateObjectDistance(gAgent.getPositionGlobal(), objectp) < WolfAdaptiveDrawDistance::userDrawDistance());
         }
         else
         {

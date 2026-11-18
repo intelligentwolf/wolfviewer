@@ -57,6 +57,7 @@
 #include "lluicolortable.h"
 #include "wolfcave.h"
 #include "wolfgrid.h"
+#include "wolfadaptivedrawdistance.h"   // [TRACK PICK 2026-11-18/] userDrawDistance
 
 namespace
 {
@@ -1106,9 +1107,10 @@ void WolfFloaterLifts::lookFromAbove()
     const F32 g = rgn->getLand().resolveHeightRegion(c.mV[0], c.mV[1]);
     const F32 half = llmax(0.05f, tanf(LLViewerCamera::getInstance()->getView() * 0.5f));
     // A click finds the ground only within the draw distance (llviewerwindow.cpp mousePointOnLandGlobal walks the ray to
-    // gAgentCamera.mDrawDistance; the default is 128 m): the camera stays low enough for the whole view to be clickable.
+    // the resident's own draw distance since [TRACK PICK 2026-11-18], WolfAdaptiveDrawDistance::userDrawDistance; the default
+    // is 128 m): the camera stays low enough for the whole view to be clickable.
     // A longer line is laid out by moving the camera along it (Alt + drag, or the camera controls) between clicks.
-    const F32 reach = llmax(40.f, gAgentCamera.mDrawDistance * 0.55f);
+    const F32 reach = llmax(40.f, WolfAdaptiveDrawDistance::userDrawDistance() * 0.55f);
     const F32 h = llmin(reach, llmax(TOP_VIEW_M, 0.6f * span / half));
     const LLVector3d focus = rgn->getPosGlobalFromRegion(LLVector3(c.mV[0], c.mV[1], g));
     const LLVector3d cam = focus + LLVector3d(0.0, -(F64)(h * TOP_VIEW_TILT), (F64)h);

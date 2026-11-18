@@ -69,6 +69,7 @@
 #include "wolfcave.h"
 #include "wolfgrid.h"
 #include "wolfobjectprops.h"
+#include "wolfadaptivedrawdistance.h"   // [TRACK PICK 2026-11-18/] userDrawDistance
 
 namespace
 {
@@ -4524,8 +4525,9 @@ void WolfFloaterTrack::lookFromAbove()
     const LLVector3d c = rgn->getPosGlobalFromRegion(LLVector3((F32)cx, (F32)cy, 0.f));
     const F32 g = LLWorld::getInstance()->resolveLandHeightGlobal(c);
     const F32 half = llmax(0.05f, tanf(LLViewerCamera::getInstance()->getView() * 0.5f));
-    // a click finds the ground only within the draw distance (wolffloaterlifts.cpp:1108-1111): the camera stays low enough
-    const F32 reach = llmax(40.f, gAgentCamera.mDrawDistance * 0.55f);
+    // a click finds the ground only within the draw distance (wolffloaterlifts.cpp:1109-1113): the camera stays low enough.
+    // [TRACK PICK 2026-11-18] the resident's own draw distance, as the pick (llviewerwindow.cpp mousePointOnLandGlobal)
+    const F32 reach = llmax(40.f, WolfAdaptiveDrawDistance::userDrawDistance() * 0.55f);
     const F32 h = llmin(reach, llmax(TOP_VIEW_M, 0.6f * (F32)span / half));
     const LLVector3d focus(c.mdV[VX], c.mdV[VY], (F64)g);
     const LLVector3d cam = focus + LLVector3d(0.0, -(F64)(h * TOP_VIEW_TILT), (F64)h);

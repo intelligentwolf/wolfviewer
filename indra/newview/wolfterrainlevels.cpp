@@ -45,6 +45,7 @@
 #include "patch_code.h"
 #include "patch_dct.h"
 #include "pipeline.h"
+#include "wolfadaptivedrawdistance.h"   // [TRACK PICK 2026-11-18/] userDrawDistance
 
 U32 WolfTerrainLevels::sChangeCount = 0;
 U32 WolfTerrainLevels::sNextSerial = 1;
@@ -831,7 +832,9 @@ bool WolfTerrainLevels::pickLand(S32 mx, S32 my, LLVector3d& hit_global, LLViewe
     const bool have_ground = gViewerWindow->mousePointOnLandGlobal(mx, my, &ground);
     const LLVector3d cam = gAgentCamera.getCameraPositionGlobal();
     const LLVector3 dir = gViewerWindow->mouseDirectionGlobal(mx, my);
-    F32 best = have_ground ? (F32)(ground - cam).magVec() : gAgentCamera.mDrawDistance;
+    // [TRACK PICK 2026-11-18] a pick reaches the resident's own draw distance, as mousePointOnLandGlobal above
+    // (llviewerwindow.cpp), not the adaptive value in use
+    F32 best = have_ground ? (F32)(ground - cam).magVec() : WolfAdaptiveDrawDistance::userDrawDistance();
     bool found = false;
     for (LLViewerRegion* r : LLWorld::getInstance()->getRegionList())
     {
@@ -879,7 +882,8 @@ bool WolfTerrainLevels::pickOnLevel(S32 mx, S32 my, LLViewerRegion* regionp, S32
     const LLVector3d cam = gAgentCamera.getCameraPositionGlobal();
     const LLVector3 dir = gViewerWindow->mouseDirectionGlobal(mx, my);
     F32 t;
-    if (sky->rayTop(*level, regionp->getPosRegionFromGlobal(cam), dir, gAgentCamera.mDrawDistance, t))
+    // [TRACK PICK 2026-11-18/] the resident's own draw distance, as pickLand
+    if (sky->rayTop(*level, regionp->getPosRegionFromGlobal(cam), dir, WolfAdaptiveDrawDistance::userDrawDistance(), t))
     {
         hit_global = cam + LLVector3d(dir * t);
         return true;

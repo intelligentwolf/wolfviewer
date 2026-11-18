@@ -57,6 +57,7 @@
 // [/RLVa:KB]
 #include "fscommon.h"
 #include "wolfcamerafx.h"   // <WolfViewer 2026-10-10/>
+#include "wolfadaptivedrawdistance.h"   // [TRACK PICK 2026-11-18/] userDrawDistance
 #include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels: the camera in a tunnel
 #include "lltrans.h"
 #include "wolfvrscreen.h"   // <WolfViewer 2026-11-07/> VR camera controls
@@ -2161,7 +2162,11 @@ LLVector3d LLAgentCamera::calcCameraPositionTargetGlobal(bool *hit_limit)
         }
         if(constrain)
         {
-            F32 max_dist = (CAMERA_MODE_CUSTOMIZE_AVATAR == mCameraMode) ? APPEARANCE_MAX_ZOOM : mDrawDistance;
+            // [TRACK PICK 2026-11-18] Shadow: the zoom limit must not shrink when adaptive draw distance lowers the value in
+            // use (wolfadaptivedrawdistance.cpp putInUse, floor 128 m): it limits what the resident can do, not what is drawn,
+            // so it is the resident's own draw distance again (WolfAdaptiveDrawDistance::userDrawDistance, = mDrawDistance
+            // whenever nothing is held down), as before adaptive draw distance.
+            F32 max_dist = (CAMERA_MODE_CUSTOMIZE_AVATAR == mCameraMode) ? APPEARANCE_MAX_ZOOM : WolfAdaptiveDrawDistance::userDrawDistance();
 
             LLVector3d camera_offset = camera_position_global - gAgent.getPositionGlobal();
             F32 camera_distance = (F32)camera_offset.magVec();
@@ -2385,7 +2390,8 @@ F32 LLAgentCamera::getCameraMaxZoomDistance(bool allow_disabled_constraints /* =
     static LLCachedControl<bool> disable_constraints(gSavedSettings,"DisableCameraConstraints");
     // <WolfViewer 2026-10-17/> the director camera's session-only lift counts as the setting (llagentcamera.h)
     return (allow_disabled_constraints && (disable_constraints || mConstraintsLiftedForSession)) ? INT_MAX : llmin(MAX_CAMERA_DISTANCE_FROM_OBJECT,
-                 mDrawDistance - 1, // convenience, don't hit draw limit when focusing on something
+                 // [TRACK PICK 2026-11-18/] the resident's own draw distance, not the adaptive value in use (as max_dist above)
+                 WolfAdaptiveDrawDistance::userDrawDistance() - 1, // convenience, don't hit draw limit when focusing on something
                  LLWorld::getInstance()->getRegionWidthInMeters() - CAMERA_FUDGE_FROM_OBJECT);
 }
 

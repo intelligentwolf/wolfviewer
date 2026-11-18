@@ -217,6 +217,9 @@ namespace
         F64    ms[4] = {};
         U32    msFrames[4] = {};
         F64    lastLog = 0.0;
+        // [ADAPTIVE DD CHECKS ITS CUTS 2026-11-18] the sky dome pass's last GPU time and when it was collected (skyPassGpuMs)
+        F32    skyMsLast = -1.f;
+        F64    skyMsWhen = -1.0e9;
     };
     Gpu sGpu;
 
@@ -409,7 +412,12 @@ namespace
             GLuint64 a = 0, b = 0;
             glGetQueryObjectui64v(sGpu.q[slot][s][0], GL_QUERY_RESULT, &a);
             glGetQueryObjectui64v(sGpu.q[slot][s][1], GL_QUERY_RESULT, &b);
-            if (b > a) { sGpu.ms[s] += (b - a) / 1.0e6; sGpu.msFrames[s]++; }
+            if (b > a)
+            {
+                const F64 ms = (F64)(b - a) / 1.0e6;
+                sGpu.ms[s] += ms; sGpu.msFrames[s]++;
+                if (s == SEC_SKY) { sGpu.skyMsLast = (F32)ms; sGpu.skyMsWhen = LLFrameTimer::getElapsedSeconds(); }
+            }
             sGpu.qPending[slot][s] = false;
         }
     }
@@ -2446,6 +2454,13 @@ void WolfEnvironmentRender::verifyFrame(LLRenderTarget* displayed, LLRenderTarge
     }
     if (rows == 0) o << " no sky in view";
     LL_INFOS("WolfEnvTrace") << o.str() << LL_ENDL;
+}
+
+// static
+F32 WolfEnvironmentRender::skyPassGpuMs()
+{
+    // timerCollect reads queries three frames deep: a sample older than a second means the dome is not being drawn
+    return LLFrameTimer::getElapsedSeconds() - sGpu.skyMsWhen < 1.0 ? sGpu.skyMsLast : -1.f;
 }
 
 // static

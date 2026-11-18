@@ -36,6 +36,16 @@
  * pick (llviewerwindow.cpp mousePointOnLandGlobal) costs no frames and reaches userDrawDistance() too: with the value in
  * use the Lay Railway Track pen could not find the ground more than 128 m from the camera.
  *
+ * [ADAPTIVE DD CHECKS ITS CUTS 2026-11-18] Paul at Tafelberg the same day: "when i came out of the tunnel the auto draw
+ * distance had dramatically reduced - this region has nothing but the railway on it". His frames stayed at ~20 fps (dips
+ * to ~9) from 4096 m down to 136 m: the GPU was throttling, the distance was not what held the frames. So every cut is
+ * now a trial: the frame time after it is compared with the frame time before; a cut that did not clearly help is checked
+ * by a few seconds at a much shorter distance, and if that is no faster either the cut is undone (back to the distance
+ * before it, or the resident's own when no cut has helped) and no cut is tried for a while unless frames get clearly worse.
+ * A trial during which the GPU itself changed speed (the fixed-size sky dome pass, WolfEnvironmentRender::skyPassGpuMs) is
+ * void: the distance before it goes back. Raising is proportional to how far frames are above the target, and quicker when
+ * they are well above it.
+ *
  * It stands aside (the cap goes, the resident's value is back at once) while it is switched off
  * (WolfAdaptiveDrawDistance, Wolf World > Display & Effects), while LL's Auto-tune is on or locked (it moves RenderFarClip
  * itself: llperfstats.cpp updateAvatarParams / Tunables::applyUpdates), and while a VR headset has the viewer (VR has its

@@ -74,6 +74,12 @@ public:
     static void verifyFrame(LLRenderTarget* displayed, LLRenderTarget* depthSource);
     /** Volumetric clouds replace the EEP clouds (and the cloud deck). */
     static bool volumetricActive();
+    /** [ADAPTIVE DD CHECKS ITS CUTS 2026-11-18] The GPU time of the last native sky dome pass in ms (GL_TIMESTAMP queries,
+     *  collected three frames late), or -1 when none was collected in the last second (the native sky off, no timer
+     *  queries). The dome covers every pixel whatever is in view ("sky dome drew <W x H> samples" in every log line of
+     *  Paul's 18 Nov session and of the Xvfb tests), so its cost is a fixed piece of work: when it changes, the GPU's own
+     *  speed changed (a laptop GPU throttled by heat), not the scene. wolfadaptivedrawdistance.cpp reads it. */
+    static F32 skyPassGpuMs();
     /** [WolfViewer 2026-10-13, round 16] THE STOCK EEP CLOUDS, MEASURED. When the volumetric clouds replace the EEP's 2D layer,
      *  the sky pass asks whether a reading of that layer is due (once a second, with measureCloudCover's own reading) and, if so,
      *  hands `draw` (LLDrawPoolWLSky's own cloud draw: the stock shader, textures and dome, blending off) to be drawn into a small

@@ -32,7 +32,9 @@
  *    and the land's far clip (LLWorld::setLandFarClip).
  * This module only ever lowers the second, to min(the resident's own, its cap), and puts it back. The one stock line that
  * copied the value in use into the setting at exit (LLAppViewer::cleanupSavedSettings -> RenderFarClip) now saves
- * userDrawDistance() instead, so a lowered value can never become the resident's setting.
+ * userDrawDistance() instead, so a lowered value can never become the resident's setting. [TRACK PICK 2026-11-18] A land
+ * pick (llviewerwindow.cpp mousePointOnLandGlobal) costs no frames and reaches userDrawDistance() too: with the value in
+ * use the Lay Railway Track pen could not find the ground more than 128 m from the camera.
  *
  * It stands aside (the cap goes, the resident's value is back at once) while it is switched off
  * (WolfAdaptiveDrawDistance, Wolf World > Display & Effects), while LL's Auto-tune is on or locked (it moves RenderFarClip

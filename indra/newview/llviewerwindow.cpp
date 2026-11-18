@@ -5819,7 +5819,17 @@ bool LLViewerWindow::mousePointOnLandGlobal(const S32 x, const S32 y, LLVector3d
     F32         land_z;
     const F32   FIRST_PASS_STEP = 1.0f;     // meters
     const F32   SECOND_PASS_STEP = 0.1f;    // meters
-    const F32   draw_distance = ignore_distance ? MAX_FAR_CLIP : gAgentCamera.mDrawDistance;
+    // [TRACK PICK 2026-11-18] Paul, W106 beta: "i couldnt get the railway builder to work it just says click on the
+    // ground". The walk below stops at the draw distance. Stock reads gAgentCamera.mDrawDistance, which was always the
+    // resident's own (RenderFarClip, llviewercontrol.cpp handleRenderFarClipChanged); adaptive draw distance now lowers that
+    // value in use to as little as its 128 m floor (wolfadaptivedrawdistance.cpp putInUse), so every land pick further than
+    // 128 m failed - the Lay Railway Track pen (wolffloatertunnels.cpp:4168 WolfToolTunnel::surface -> wolffloatertrack.cpp:632
+    // WolfFloaterTrack::pickSurface) said "Point at the ground" for any click once the camera was zoomed out (proved on
+    // Xvfb at Tafelberg: the same click failed with WolfAdaptiveDrawDistance on and drew the line with it off).
+    // The pick reaches the resident's own draw distance again, as before adaptive draw distance;
+    // userDrawDistance() is gAgentCamera.mDrawDistance whenever nothing is held down
+    // (wolfadaptivedrawdistance.cpp userDrawDistance).
+    const F32   draw_distance = ignore_distance ? MAX_FAR_CLIP : WolfAdaptiveDrawDistance::userDrawDistance();
     LLVector3d  camera_pos_global;
 
     camera_pos_global = gAgentCamera.getCameraPositionGlobal();

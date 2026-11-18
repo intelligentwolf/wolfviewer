@@ -392,7 +392,7 @@ void WolfPlaneSound::idle()
     const F32 dt = mLastIdle > 0.0 ? (F32)llclamp(now - mLastIdle, 0.0, 0.25) : 0.f;
     mLastIdle = now;
     if (!gAudiop) return;
-    const F32 level = WolfSoundEffects::level(WolfSoundEffects::PLANES);
+    const F32 level = WolfSoundEffects::level(WolfSoundEffects::PLANE_ENGINES);
     const bool want = level > 0.f && WolfGrid::showsWolfRegionWeather();
     if (!want && mPlanes.empty()) return;
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();

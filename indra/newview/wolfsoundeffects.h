@@ -22,7 +22,7 @@
 
 namespace WolfSoundEffects
 {
-    enum Group { WEATHER, THUNDER, BIRDS, NATURE, SEA_LIFE, BUBBLES, TELEPORT, PLANES, GROUP_COUNT };   // PLANES: [PLANE SOUND 2026-11-15/] t865
+    enum Group { WEATHER, THUNDER, BIRDS, NATURE, SEA_LIFE, BUBBLES, TELEPORT, PLANE_ENGINES, GROUP_COUNT };   // PLANE_ENGINES: [PLANE SOUND 2026-11-15/] t865 (not "PLANES": wingdi.h #define PLANES 14 reaches every .cpp on Windows through the precompiled header)
 
     /** 0 when the group is switched off here, else its volume (0 to 1). */
     float level(Group group);

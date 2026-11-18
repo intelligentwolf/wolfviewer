@@ -1516,8 +1516,28 @@ void WolfFloaterTrack::fillItemList()
         const Tunnel& t = mTunnels[i];
         std::string w = llformat("Tunnel %d - ", (S32)i + 1);
         const LLSD& fitted = mPlan.mTunnels;
+        // [PAUL FMV 2026-11-18] track-tool DESIGN.md 3.8: PLAN layout.tunnels[].marks names the marks each tunnel was made
+        // from, so marks the plan joined (overlapping, or under 24 m apart) still show the tunnel they became
+        S32 in_tunnel = -1, first_mark = -1;
+        if (fitted.isArray() && !mPlanDirty)
+        {
+            for (S32 k = 0; k < fitted.size() && in_tunnel < 0; ++k)
+            {
+                const LLSD& m = fitted[k]["marks"];
+                for (S32 q = 0; m.isArray() && q < m.size(); ++q)
+                    if (m[q].asInteger() == (S32)i) { in_tunnel = k; first_mark = m[0].asInteger(); }
+            }
+        }
         if (!t.mHasB) w += "(click where it ends)";
-        else if (fitted.isArray() && (size_t)fitted.size() == mTunnels.size() && !mPlanDirty)
+        else if (in_tunnel >= 0 && first_mark != (S32)i)
+            w += llformat("joined into tunnel %d (the two were too close to be separate tunnels)", first_mark + 1);
+        else if (in_tunnel >= 0)
+        {
+            const LLSD& f = fitted[in_tunnel];
+            w += llformat("%d m through the hill, climbs at most ", f["length_m"].asInteger()) + f["grade"].asString();
+            if (f["marks"].size() > 1) w += llformat(" (%d of your marks joined into one)", (S32)f["marks"].size());
+        }
+        else if (fitted.isArray() && (size_t)fitted.size() == mTunnels.size() && !mPlanDirty && !fitted[(S32)i].has("marks"))
             w += llformat("%d m through the hill, climbs at most ", fitted[(S32)i]["length_m"].asInteger()) + fitted[(S32)i]["grade"].asString();
         else w += llformat("%d m as marked", (S32)ll_round((F32)sqrt((t.mB.x - t.mA.x) * (t.mB.x - t.mA.x) + (t.mB.y - t.mA.y) * (t.mB.y - t.mA.y))));
         row(llformat("N:%d", (S32)i), w);
@@ -3757,7 +3777,9 @@ void WolfFloaterTrack::startGroundJob(const LLSD& job, const std::string& kind, 
     mGroundRegion = region;
     mGroundLead = lead;
     mGroundRetry = LLSD();
-    const std::string words = kind == "cut" ? "Digging the cutting..." : "Putting the ground back...";
+    // [EMBANKMENTS 2026-11-18] track-tool DESIGN.md 3.8: a dig that only raises embankments (JOB shape) is "shaping the ground"
+    mGroundShape = job.isMap() && job["shape"].asBoolean();
+    const std::string words = kind == "cut" ? (mGroundShape ? "Shaping the ground..." : "Digging the cutting...") : "Putting the ground back...";
     mGroundSaid = words;
     setStatus(lead.empty() ? words : lead + " " + words, !lead.empty());
     const U32 gen = mGen, ground_gen = ++mGroundGen;   // an older job's coroutine stops at its next wake-up
@@ -3790,7 +3812,9 @@ void WolfFloaterTrack::groundJobCoro(LLHandle<LLFloater> h, U32 gen, U32 ground_
         const bool got = callNow("status", LLSD().with("job", id), r, e);
         f = self();
         if (!f) return;
+        if (got && r["job"].isMap() && r["job"].has("shape")) f->mGroundShape = r["job"]["shape"].asBoolean();
         const bool cut = f->mGroundKind == "cut";
+        const bool shape = cut && f->mGroundShape;   // [EMBANKMENTS] only raised banks: "the ground", not "the cutting"
         auto say = [f](const std::string& words, bool error)
         {
             f->setStatus(f->mGroundLead.empty() ? words : f->mGroundLead + " " + words, error || !f->mGroundLead.empty());
@@ -3808,7 +3832,7 @@ void WolfFloaterTrack::groundJobCoro(LLHandle<LLFloater> h, U32 gen, U32 ground_
         {
             // JOB result {layout, region, cells, kept, state}: kept = cells left on record, land no longer the resident's
             const LLSD& res = job["result"];
-            std::string words = cut ? "The cutting is dug." : "The ground is back as it was.";
+            std::string words = shape ? "The ground is shaped." : cut ? "The cutting is dug." : "The ground is back as it was.";
             if (!cut && res["kept"].asInteger() > 0)
                 words = "The ground is back as it was, except on land that is no longer yours: that part could not be put back, and "
                         "is left as it is.";
@@ -3827,7 +3851,7 @@ void WolfFloaterTrack::groundJobCoro(LLHandle<LLFloater> h, U32 gen, U32 ground_
             retry["layout"] = f->mGroundLayout;
             retry["region"] = f->mGroundRegion;
             f->mGroundRetry = retry;
-            say((cut ? "The cutting was not dug: " : "The ground was not put back: ")
+            say((shape ? "The ground was not shaped: " : cut ? "The cutting was not dug: " : "The ground was not put back: ")
                 + (err.empty() ? std::string("the region did not say why.") : err)
                 + (cut ? " Press Dig again to try once more." : " Press Put the ground back to try once more."), true);
             stop();
@@ -3837,8 +3861,10 @@ void WolfFloaterTrack::groundJobCoro(LLHandle<LLFloater> h, U32 gen, U32 ground_
         {
             fails = 0;
             const std::string progress = job["progress"].asString();
-            const std::string words = (cut ? "Digging the cutting: " : "Putting the ground back: ")
-                                    + (progress.empty() ? std::string("waiting for its turn...") : progress);
+            const std::string lead = shape ? "Shaping the ground" : cut ? "Digging the cutting" : "Putting the ground back";
+            // the server's own progress often begins with the same words ("Digging the cutting: 3 of 77"): said once
+            const std::string words = progress.compare(0, lead.size(), lead) == 0 ? progress
+                                    : lead + ": " + (progress.empty() ? std::string("waiting for its turn...") : progress);
             if (words != f->mGroundSaid)   // said only when it changes, so the resident's own steps meanwhile stay readable
             {
                 f->mGroundSaid = words;
@@ -3847,14 +3873,14 @@ void WolfFloaterTrack::groundJobCoro(LLHandle<LLFloater> h, U32 gen, U32 ground_
         }
         else if (++fails >= REMOVE_POLL_FAILS)
         {
-            say(std::string("This window has stopped waiting for ") + (cut ? "the cutting to be dug" : "the ground to be put back")
+            say(std::string("This window has stopped waiting for ") + (shape ? "the ground to be shaped" : cut ? "the cutting to be dug" : "the ground to be put back")
                 + (e.empty() ? std::string(".") : ": " + e) + " Open Your railways in a while to see how it went.", true);
             stop();
             return;
         }
         if (LLFrameTimer::getElapsedSeconds() - started > GROUND_JOB_MAX_S)
         {
-            say(std::string("The region has not finished ") + (cut ? "digging the cutting" : "putting the ground back")
+            say(std::string("The region has not finished ") + (shape ? "shaping the ground" : cut ? "digging the cutting" : "putting the ground back")
                 + " after 20 minutes, so this window has stopped waiting. It may still be at work: open Your railways in a while "
                   "to see how it went.", true);
             stop();
@@ -3908,6 +3934,23 @@ std::string WolfFloaterTrack::cuttingWords(const LLSD& layout, bool& failed, boo
     const std::string st = cut["state"].asString();
     const std::string kept = cut["kept"].asInteger() > 0
         ? " Some of the ground could not be put back, because that land is no longer yours." : std::string();
+    // [EMBANKMENTS 2026-11-18] track-tool DESIGN.md 3.8: a part that only raises embankments (LAYOUT cuttings[r].shape) is
+    // said as its ground, not a cutting
+    if (cut["shape"].asBoolean())
+    {
+        if (st == "waiting") return laid_here ? "Its ground here is waiting its turn to be shaped." : "Its ground here is waiting its turn to be put back.";
+        if (st == "digging") return "Its ground here is being shaped.";
+        if (st == "dug") return "Its ground here is shaped.";
+        if (st == "filling") return "Its ground here is being put back.";
+        if (st == "filled") return "Its ground here is back as it was." + kept;
+        if (st == "failed")
+        {
+            failed = true;
+            return laid_here ? std::string("Shaping its ground here did not finish - press Dig again.")
+                             : "Putting its ground back here did not finish - press Put the ground back." + kept;
+        }
+        return std::string();
+    }
     if (st == "waiting") return laid_here ? "Its cutting here is waiting its turn to be dug." : "Its ground here is waiting its turn to be put back.";
     if (st == "digging") return "Its cutting here is being dug.";
     if (st == "dug") return "Its cutting here is dug.";

@@ -443,6 +443,7 @@ private:
     // [CUTTINGS] the dig / fill job being followed (one at a time; a newer one takes its place)
     LLSD mGroundJob;                   // its id, undefined when none
     std::string mGroundKind;           // "cut" | "fill"
+    bool mGroundShape = false;         // [EMBANKMENTS 2026-11-18] JOB shape: the dig only raises embankments (track-tool DESIGN.md 3.8)
     LLSD mGroundLayout;
     LLUUID mGroundRegion;
     std::string mGroundLead;           // words said before its progress (an earlier error that stays)

@@ -25,6 +25,9 @@
  * [KRAKEN 2026-11-17] "Kraken sightings on this region" (ticket 823): the record's `kraken` (wolf_ambient.php view/set what
  * "kraken", wolf_ambient_lib.php wa_kraken_block: ON unless switched off). wolfkraken.cpp reads it from weather.php; this
  * viewer shows the choice at once (WolfRegionWeather::setKrakenLocal), every other within a minute.
+ * [METEOR SHOWERS 2026-11-18] "Meteor showers on this region" (ticket 895): the record's `meteors` (wolf_ambient.php view/set
+ * what "meteors", wolf_ambient_lib.php wa_meteors_block: ON unless switched off), read from weather.php the same way
+ * (WolfRegionWeather::setMeteorsLocal).
  *
  * [STYLES 2026-11-10] t712 / t715 (Jimmy Olsen; Paul approved): "Kind of planes", "Kind of ships" and "Kind of birds", a
  * drop-down under each of those switches: the record's planes_style / boats_style / birds_zone (wolf_ambient.php view/set
@@ -111,7 +114,7 @@ namespace
     }
 
     /** [NATURE SOUNDS 2026-11-03] Which switch a save is for (wolf_ambient.php set {what}). */
-    enum What { WHAT_PLANES, WHAT_BIRDS, WHAT_SOUNDS, WHAT_SHIPS, WHAT_SEALIFE, WHAT_UNDERSEA, WHAT_KRAKEN };   // WHAT_KRAKEN: [KRAKEN 2026-11-17/]   // not PLANES: wingdi.h #defines PLANES (GetDeviceCaps index 14)
+    enum What { WHAT_PLANES, WHAT_BIRDS, WHAT_SOUNDS, WHAT_SHIPS, WHAT_SEALIFE, WHAT_UNDERSEA, WHAT_KRAKEN, WHAT_METEORS };   // WHAT_KRAKEN: [KRAKEN 2026-11-17/] WHAT_METEORS: [METEOR SHOWERS 2026-11-18/]   // not PLANES: wingdi.h #defines PLANES (GetDeviceCaps index 14)
 
     /** [STYLES 2026-11-10] Which kind a drop-down saves (wolf_ambient.php set {what}). */
     enum Kind { KIND_PLANES, KIND_SHIPS, KIND_BIRDS };
@@ -198,6 +201,8 @@ namespace
         text("wolf_undersea_state", AFTER_TEXT);
         check("wolf_kraken_check");               // [KRAKEN 2026-11-17/]
         text("wolf_kraken_state", AFTER_TEXT);
+        check("wolf_meteors_check");              // [METEOR SHOWERS 2026-11-18/]
+        text("wolf_meteors_state", AFTER_TEXT);
         text("wolf_planes_status", 0);
         return top;
     }
@@ -387,6 +392,22 @@ namespace
         return str(panel, on ? "kraken_on_default" : "off_unless");
     }
 
+    /** [METEOR SHOWERS 2026-11-18] "Meteor showers on this region": the reply's `meteors` block {ambient, default (true), on}
+     *  (wolf_ambient.php view/set, wolf_ambient_lib.php wa_meteors_block); absent from an older grid: line empty, greyed. */
+    bool have_meteors()
+    {
+        return sState.mHave && sState.mReply["meteors"].isMap() && sState.mReply["meteors"]["on"].isBoolean();
+    }
+
+    std::string meteors_line(LLPanel* panel)
+    {
+        if (!have_meteors()) return std::string();
+        const LLSD& b = sState.mReply["meteors"];
+        const bool on = b["on"].asBoolean();
+        if (b["ambient"].isBoolean()) return str(panel, on ? "on_chosen" : "off_chosen");
+        return str(panel, on ? "meteors_on_default" : "off_unless");
+    }
+
     /** [STYLES 2026-11-10] The reply carries this kind (an older grid does not: the drop-down stays greyed). */
     bool have_kind(Kind k)
     {
@@ -520,6 +541,17 @@ namespace
             kraken_state->setEnabled(true);
             kraken_state->setText(kraken_line(panel));
         }
+        // [METEOR SHOWERS 2026-11-18] the meteor showers box and its line, from the same reply
+        if (LLCheckBoxCtrl* meteors = panel->findChild<LLCheckBoxCtrl>("wolf_meteors_check"))
+        {
+            meteors->set(have_meteors() && sState.mReply["meteors"]["on"].asBoolean());
+            meteors->setEnabled(may && !sState.mBusy && have_meteors());
+        }
+        if (LLTextBox* meteors_state = panel->findChild<LLTextBox>("wolf_meteors_state"))
+        {
+            meteors_state->setEnabled(true);
+            meteors_state->setText(meteors_line(panel));
+        }
         // [STYLES 2026-11-10] the three kinds, from the same reply; the labels stay readable for everyone
         for (Kind k : { KIND_PLANES, KIND_SHIPS, KIND_BIRDS })
         {
@@ -605,6 +637,7 @@ namespace
         if (what == WHAT_SEALIFE) o["what"] = "sealife";   // [SEA LIFE 2026-11-03/] wolf_ambient.php set {what: "sealife"}
         if (what == WHAT_UNDERSEA) o["what"] = "undersea"; // [UNDERSEA 2026-11-09/] wolf_ambient.php set {what: "undersea"}
         if (what == WHAT_KRAKEN) o["what"] = "kraken";     // [KRAKEN 2026-11-17/] wolf_ambient.php set {what: "kraken"}
+        if (what == WHAT_METEORS) o["what"] = "meteors";   // [METEOR SHOWERS 2026-11-18/] wolf_ambient.php set {what: "meteors"}
         if (ambient >= 0) o["ambient"] = ambient == 1;
         return boost::json::serialize(o);
     }
@@ -658,6 +691,7 @@ namespace
         const bool sealife = (what == WHAT_SEALIFE); // [SEA LIFE 2026-11-03/]
         const bool undersea = (what == WHAT_UNDERSEA);   // [UNDERSEA 2026-11-09/]
         const bool kraken = (what == WHAT_KRAKEN);       // [KRAKEN 2026-11-17/]
+        const bool meteors = (what == WHAT_METEORS);     // [METEOR SHOWERS 2026-11-18/]
         LLCore::HttpStatus status;
         const LLSD reply = post_and_wait(request_body("set", region, on ? 1 : 0, what), true, status);
         const bool ok = status && reply.isMap() && reply["success"].asBoolean();
@@ -672,6 +706,7 @@ namespace
                             : ships ? "Could not save passing ships: " : sealife ? "Could not save dolphins and whales: "
                             : undersea ? "Could not save fish and sea plants: "
                             : kraken ? "Could not save Kraken sightings: "
+                            : meteors ? "Could not save meteor showers: "
                             : "Could not save passing planes: ")
                 + why_failed(status, reply)));
         }
@@ -683,6 +718,7 @@ namespace
             {
                 set_status(str(panel, birds ? "birds_save_failed" : sounds ? "sounds_save_failed" : ships ? "ships_save_failed"
                                : sealife ? "sealife_save_failed" : undersea ? "undersea_save_failed" : kraken ? "kraken_save_failed"
+                               : meteors ? "meteors_save_failed"
                                : "planes_save_failed") + " "
                            + why_failed(status, reply), true);
                 write_controls(panel);   // the check box goes back to what the grid has
@@ -708,6 +744,19 @@ namespace
                 std::string msg = str(panel, saved_on ? "ships_saved_on" : "ships_saved_off");
                 if (!told) msg += " " + str(panel, "ships_later");
                 set_status(msg, false);
+                write_controls(panel);
+            }
+            return;
+        }
+        if (meteors)
+        {
+            // [METEOR SHOWERS 2026-11-18] No plugin to tell: the viewers schedule them from weather.php, which every viewer
+            // here reads within the minute. This viewer shows the choice now.
+            const bool saved_on = have_meteors() && sState.mReply["meteors"]["on"].asBoolean();
+            if (WolfRegionWeather::instanceExists()) WolfRegionWeather::instance().setMeteorsLocal(region, saved_on);
+            if (panel)
+            {
+                set_status(str(panel, saved_on ? "meteors_saved_on" : "meteors_saved_off"), false);
                 write_controls(panel);
             }
             return;
@@ -886,12 +935,14 @@ namespace
         LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>(
             what == WHAT_BIRDS ? "wolf_birds_check" : what == WHAT_SOUNDS ? "wolf_sounds_check"
             : what == WHAT_SHIPS ? "wolf_ships_check" : what == WHAT_SEALIFE ? "wolf_sealife_check"
-            : what == WHAT_UNDERSEA ? "wolf_undersea_check" : what == WHAT_KRAKEN ? "wolf_kraken_check" : "wolf_planes_check");
+            : what == WHAT_UNDERSEA ? "wolf_undersea_check" : what == WHAT_KRAKEN ? "wolf_kraken_check"
+            : what == WHAT_METEORS ? "wolf_meteors_check" : "wolf_planes_check");
         if (!check) return;
         if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean() || (what == WHAT_BIRDS && !have_birds())
             || (what == WHAT_SOUNDS && !have_sounds()) || (what == WHAT_SHIPS && !have_ships())
             || (what == WHAT_SEALIFE && !have_sealife()) || (what == WHAT_UNDERSEA && !have_undersea())
-            || (what == WHAT_KRAKEN && !have_kraken()))   // [KRAKEN 2026-11-17/]
+            || (what == WHAT_KRAKEN && !have_kraken())    // [KRAKEN 2026-11-17/]
+            || (what == WHAT_METEORS && !have_meteors())) // [METEOR SHOWERS 2026-11-18/]
         {
             write_controls(panel);
             return;
@@ -937,6 +988,10 @@ void WolfPassingPlanes::postBuild(LLPanel* panel)
     {
         kraken->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_KRAKEN); });
     }
+    if (LLCheckBoxCtrl* meteors = panel->findChild<LLCheckBoxCtrl>("wolf_meteors_check"))   // [METEOR SHOWERS 2026-11-18/]
+    {
+        meteors->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_METEORS); });
+    }
     for (Kind k : { KIND_PLANES, KIND_SHIPS, KIND_BIRDS })   // [STYLES 2026-11-10/]
     {
         if (LLComboBox* combo = panel->findChild<LLComboBox>(kind_combo(k)))
@@ -958,6 +1013,7 @@ void WolfPassingPlanes::sync(LLPanel* panel, LLViewerRegion* region, bool reread
                               "wolf_sealife_check", "wolf_sealife_state",   // [SEA LIFE 2026-11-03/]
                               "wolf_undersea_check", "wolf_undersea_state",   // [UNDERSEA 2026-11-09/]
                               "wolf_kraken_check", "wolf_kraken_state",       // [KRAKEN 2026-11-17/]
+                              "wolf_meteors_check", "wolf_meteors_state",     // [METEOR SHOWERS 2026-11-18/]
                               "wolf_planes_kind_label", "wolf_planes_kind", "wolf_ships_kind_label", "wolf_ships_kind",   // [STYLES 2026-11-10/]
                               "wolf_birds_kind_label", "wolf_birds_kind", "wolf_birds_kind_state" })
     {

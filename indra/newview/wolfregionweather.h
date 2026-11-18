@@ -249,6 +249,14 @@ public:
      *  the next minute's poll. Ignored for any region but the agent's. */
     void setKrakenLocal(const LLUUID& region, bool on);
 
+    /** [METEOR SHOWERS 2026-11-18] ticket 895: weather.php's `meteors` block for this region (wolfstorm/php/wolf_ambient_lib.php
+     *  wa_meteors_payload: {ambient, default (true), on}). The annual meteor showers show in this region's night sky unless the
+     *  estate owner or a manager switched them off; no block (an older grid) or no row yet is off. wolfmeteors.cpp schedules them. */
+    bool meteorsAllowed() const { return mHaveRow && mMeteorsOn; }
+    /** [METEOR SHOWERS 2026-11-18] Region/Estate saved a new choice for `region` (wolfpassingplanes.cpp): show it now instead of
+     *  at the next minute's poll. Ignored for any region but the agent's. */
+    void setMeteorsLocal(const LLUUID& region, bool on);
+
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
 
@@ -274,6 +282,7 @@ private:
     void readSeaLife(const LLSD& row);   ///< [SEA LIFE 2026-11-03/] weather.php region payload `sealife` (absent = off)
     void readUnderSea(const LLSD& row);  ///< [UNDERSEA 2026-11-09/] weather.php region payload `undersea` (absent = off)
     void readKraken(const LLSD& row);    ///< [KRAKEN 2026-11-17/] weather.php region payload `kraken` (absent = off)
+    void readMeteors(const LLSD& row);   ///< [METEOR SHOWERS 2026-11-18/] weather.php region payload `meteors` (absent = off)
 
     bool               mHaveRow = false;
     bool               mBirdsOn = false;        // [BIRDS 2026-11-02/] weather.php `birds.on`
@@ -290,6 +299,7 @@ private:
     std::vector<LLUUID> mUnderSeaNear;          // [UNDERSEA 2026-11-09/] weather.php `undersea.near`
     bool               mKrakenOn = false;       // [KRAKEN 2026-11-17/] weather.php `kraken.on`
     std::vector<LLUUID> mKrakenNear;            // [KRAKEN 2026-11-17/] weather.php `kraken.near`
+    bool               mMeteorsOn = false;      // [METEOR SHOWERS 2026-11-18/] weather.php `meteors.on`
     bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
     bool               mAutoEnvSky = false;
     bool               mAutoEnvWeather = false;

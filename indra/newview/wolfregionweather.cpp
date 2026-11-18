@@ -248,6 +248,7 @@ void WolfRegionWeather::onRegionChanged()
     readSeaLife(LLSD());     // [SEA LIFE 2026-11-03/] the old region's answer
     readUnderSea(LLSD());    // [UNDERSEA 2026-11-09/] the old region's answer
     readKraken(LLSD());      // [KRAKEN 2026-11-17/] the old region's answer
+    readMeteors(LLSD());     // [METEOR SHOWERS 2026-11-18/] the old region's answer
     mProfile = WolfWeatherProfile();
     mKind.clear();
     mRegionName.clear();
@@ -485,6 +486,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     self.readSeaLife(r); // [SEA LIFE 2026-11-03/]
     self.readUnderSea(r); // [UNDERSEA 2026-11-09/]
     self.readKraken(r);   // [KRAKEN 2026-11-17/]
+    self.readMeteors(r);  // [METEOR SHOWERS 2026-11-18/]
     self.mLastError.clear();
     if (include_parcel && self.mParcelGate.accepts(parcel_generation))
     {
@@ -872,6 +874,24 @@ void WolfRegionWeather::setKrakenLocal(const LLUUID& region, bool on)
     mKrakenOn = on;
 }
 
+// [METEOR SHOWERS 2026-11-18] ticket 895. Source: wolfstorm/php/weather.php region_payload `meteors` = wolf_ambient_lib.php
+// wa_meteors_payload {ambient, default (true), on}. No block, or anything malformed, is off.
+void WolfRegionWeather::readMeteors(const LLSD& row)
+{
+    const LLSD b = (row.isMap() && row.has("meteors") && row["meteors"].isMap()) ? row["meteors"] : LLSD();
+    const bool on = b.isMap() && b["on"].isBoolean() && b["on"].asBoolean();
+    if (on != mMeteorsOn) LL_INFOS("WolfMeteors") << "Meteor showers on this region: " << (on ? "on" : "off") << LL_ENDL;
+    mMeteorsOn = on;
+}
+
+void WolfRegionWeather::setMeteorsLocal(const LLUUID& region, bool on)
+{
+    LLViewerRegion* here = gAgent.getRegion();
+    if (!here || here->getRegionID() != region) return;
+    LL_INFOS("WolfMeteors") << "Meteor showers on this region: " << (on ? "on" : "off") << " (saved in Region/Estate)" << LL_ENDL;
+    mMeteorsOn = on;
+}
+
 void WolfRegionWeather::applyPush(const LLSD& row)
 {
     if (!row.isMap()) return;
@@ -894,6 +914,7 @@ void WolfRegionWeather::applyPush(const LLSD& row)
     readSeaLife(row); // [SEA LIFE 2026-11-03/] and `sealife`
     readUnderSea(row); // [UNDERSEA 2026-11-09/] and `undersea`
     readKraken(row);   // [KRAKEN 2026-11-17/] and `kraken` (weather.php's POST reply passes $robust: the block is in it)
+    readMeteors(row);  // [METEOR SHOWERS 2026-11-18/] and `meteors`
     recomputeParcelApplies();
     mLastError.clear();
     mGeneration++;
@@ -1056,6 +1077,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
             self.readSeaLife(reply); // [SEA LIFE 2026-11-03/]
             self.readUnderSea(reply); // [UNDERSEA 2026-11-09/]
             self.readKraken(reply);   // [KRAKEN 2026-11-17/]
+            self.readMeteors(reply);  // [METEOR SHOWERS 2026-11-18/]
             self.recomputeParcelApplies();
         }
     }

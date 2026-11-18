@@ -61,11 +61,13 @@
 #include "wolfaurora.h"
 #include "wolfcloudgenus.h"
 #include "wolfcloudclearance.h"   // [CLOUDS CLEAR OF BUILDS 2026-10-26]
+#include "lltimer.h"              // [METEOR SHOWERS 2026-11-18/] time_corrected (meteorUtcNow)
 #include "llsurface.h"            // [2026-10-26] updateLight: the destination's terrain loaded before the arrival's one switch (hasZData)
 #include "wolfenvironmentstate.h"
 #include "wolfexposure.h"
 #include "wolfgrid.h"
 #include "wolfregionweather.h"
+#include "wolfmeteors.h"           // [METEOR SHOWERS 2026-11-18/]
 #include "wolfframegovernor.h"   // [HURRICANE 2026-10-30/] the frame budget
 #include "wolftkatmosphere.h"
 #include "wolftkclouds.h"
@@ -2240,55 +2242,71 @@ namespace
 
     // [WolfViewer 2026-10-14] Paul: "add shooting stars back and meteors because they were there some time ago just one or
     // two in the night sky occasionally" (WolfStorm drew them until January 2026), then: "one or two every 6 hours rarely
-    // appearing". How often is Paul's - one every one to six hours of night, not a real sporadic rate - the rest is what a
-    // meteor looks like: a streak a few to twenty degrees long
-    // lasting under a second, now and then a brighter, slower fireball. Only at night (the sun 10 degrees or more below
-    // the horizon), and only well up the sky. skyF.glsl wolfMeteors draws them.
-    struct Meteor
+    // appearing". [METEOR SHOWERS 2026-11-18] Ticket 895 (Luke Koda: "in RL we have leonid meteor showers going on... would
+    // be cool if we could have in here"; Paul: "yes definitely as an option"): those shooting stars and the seven big annual
+    // showers on their real dates now come from wolfmeteors.cpp (a port of WolfStorm's wolf_meteors.js): a hash of the UTC
+    // minute and the sky's place, so everyone under the same sky sees the same meteor at the same second. Only at night
+    // (the sun 10 degrees or more below the horizon, Paul's 10-14 rule) and only well up the sky; skyF.glsl wolfMeteors
+    // draws them under the clouds' composite, so cloud hides them.
+    struct MeteorSky
     {
-        LLVector3 start, axis;   // world (x east, y north, z up): where it starts, the axis it turns about
-        F32 arc = 0.f;           // the path's length, radians
-        F64 born = 0.0;
-        F32 life = 0.f;          // seconds
-        F32 peak = 0.f;          // the head's brightness, the frame's linear units
-        F32 tail = 0.35f;        // the tail's share of the path
+        F64 utcAnchor = 0.0, elapsedAnchor = -1.0;   // utcNow
+        U32 slot = 0;                                // the plans below are for slot - 1 and slot
+        std::string key;                             // and this context (updateMeteors key: cell, switches, shift, place)
+        std::vector<WolfMeteors::Meteor> plans;
+        WolfMeteors::Drawn drawn[WolfMeteors::MAX_DRAWN];
+        S32 count = 0;
     };
-    Meteor sMeteors[2];
-    F64 sNextMeteor = 0.0;
+    MeteorSky sMeteorSky;
 
-    void updateMeteors(F64 now, const LLVector3& sunWorld)
+    /** UTC seconds with a fraction, on the grid's clock. Source: wolfkraken.cpp WolfKraken::utcNow (time_corrected(),
+     *  lltimer.cpp: time(NULL) + gUTCOffset, whole seconds; the frame timer the fraction, re-anchored when they drift apart). */
+    F64 meteorUtcNow()
     {
-        const bool night = sunWorld.mV[VZ] < -sinf(10.f * DEG_TO_RAD);
-        for (Meteor& m : sMeteors) if (m.peak > 0.f && now - m.born >= m.life) m.peak = 0.f;
-        if (!night) { sNextMeteor = 0.0; return; }
-        if (sNextMeteor <= 0.0) sNextMeteor = now + 3600.0 + ll_frand(18000.f);   // dark (or a teleport): one to six hours on
-        if (now < sNextMeteor) return;
-        sNextMeteor = now + 3600.0 + ll_frand(18000.f);
-        Meteor* slot = nullptr;
-        for (Meteor& m : sMeteors) if (m.peak <= 0.f) { slot = &m; break; }
-        if (!slot) return;
-        Meteor m;
-        const F32 el = (25.f + ll_frand(50.f)) * DEG_TO_RAD, az = ll_frand(F_TWO_PI);
-        m.start.set(cosf(el) * sinf(az), cosf(el) * cosf(az), sinf(el));
-        // a direction along the sky at the start: its two tangents (along the azimuth, and start x that one, along the
-        // elevation) mixed at a random angle
-        LLVector3 east(cosf(az), -sinf(az), 0.f);
-        LLVector3 alongEl = m.start % east;
-        alongEl.normalize();
-        const F32 turn = ll_frand(F_TWO_PI);
-        LLVector3 travel = east * cosf(turn) + alongEl * sinf(turn);
-        const bool fireball = ll_frand() < 0.125f;
-        m.arc = (fireball ? 25.f + ll_frand(15.f) : 6.f + ll_frand(14.f)) * DEG_TO_RAD;
-        m.life = fireball ? 1.5f + ll_frand(1.f) : 0.4f + ll_frand(0.6f);
-        m.peak = fireball ? 2.5f : 0.7f + ll_frand(0.7f);
-        m.tail = fireball ? 0.5f : 0.35f;
-        // keep the whole path 10 degrees or more above the horizon: the other way if it would end lower
-        const LLVector3 endA = m.start * cosf(m.arc) + travel * sinf(m.arc);
-        if (endA.mV[VZ] < sinf(10.f * DEG_TO_RAD)) travel = -travel;
-        m.axis = m.start % travel;   // turning start about it moves it toward travel (skyF.glsl wolfMeteors)
-        m.axis.normalize();
-        m.born = now;
-        *slot = m;
+        const F64 el = LLFrameTimer::getElapsedSeconds();
+        const F64 whole = (F64)time_corrected();
+        F64 est = sMeteorSky.utcAnchor + (el - sMeteorSky.elapsedAnchor);
+        if (sMeteorSky.elapsedAnchor < 0.0 || est < whole - 1.0 || est > whole + 2.0)
+        {
+            sMeteorSky.utcAnchor = whole + 0.5;
+            sMeteorSky.elapsedAnchor = el;
+            est = sMeteorSky.utcAnchor;
+        }
+        return est;
+    }
+
+    /** This frame's meteors into sMeteorSky.drawn / count (none by day, none with every switch off). */
+    void updateMeteors(const LLVector3& sunWorld)
+    {
+        sMeteorSky.count = 0;
+        if (!(sunWorld.mV[VZ] < (F32)WolfMeteors::nightSunSin())) return;
+        static LLCachedControl<bool> showers(gSavedSettings, "WolfViewerMeteorShowers", true);
+        static LLCachedControl<S32> force(gSavedSettings, "WolfViewerMeteorShowerForce", 0);
+        WolfRegionWeather& rw = WolfRegionWeather::instance();
+        WolfMeteors::Context ctx;
+        // the place and the moment the sky shows: as the real stars (llvowlsky.cpp updateRealStars: autoEnvLat/Lon at
+        // autoEnvSkyTime) while the sky follows a real place; otherwise no place and UTC (wolf_meteors.js _ctx the same)
+        ctx.hasPlace = rw.autoEnvRealSky();
+        ctx.lat = ctx.hasPlace ? rw.autoEnvLat() : 0.0;
+        ctx.lon = ctx.hasPlace ? rw.autoEnvLon() : 0.0;
+        // whole seconds (wolf_meteors.js _ctx: Math.round); autoEnvSkyTime = LLDate::now + preview + skyShift
+        ctx.skyShift = ctx.hasPlace ? std::floor(rw.autoEnvSkyTime() - LLDate::now().secondsSinceEpoch() + 0.5) : 0.0;
+        ctx.showersOn = showers() && rw.meteorsAllowed();
+        ctx.force = llclamp((S32)force(), 0, WolfMeteors::SHOWER_COUNT);
+        WolfMeteors::cellOf(ctx.hasPlace, ctx.lat, ctx.lon, ctx.cx, ctx.cy);
+        const F64 utc = meteorUtcNow();
+        const U32 slot = (U32)std::floor(utc / WolfMeteors::SLOT_S);
+        const std::string key = llformat("%d,%d,%d,%d,%.0f,%.6f,%.6f", ctx.cx, ctx.cy, ctx.showersOn ? 1 : 0, ctx.force, ctx.skyShift, ctx.lat, ctx.lon);
+        if (slot != sMeteorSky.slot || key != sMeteorSky.key)
+        {
+            sMeteorSky.slot = slot;
+            sMeteorSky.key = key;
+            sMeteorSky.plans = WolfMeteors::plan(slot - 1, ctx);
+            const std::vector<WolfMeteors::Meteor> now = WolfMeteors::plan(slot, ctx);
+            sMeteorSky.plans.insert(sMeteorSky.plans.end(), now.begin(), now.end());
+        }
+        // the light: lux x the frame's pre-exposure (as the real planets: realPlanets lux x e, wolfBodies)
+        sMeteorSky.count = WolfMeteors::uniforms(sMeteorSky.plans, utc, (F64)sFrame.exposure, sMeteorSky.drawn);
     }
 }
 
@@ -4401,23 +4419,22 @@ bool WolfEnvironmentRender::renderSkyDome()
     sh.uniform1f(s_mss, sFrame.moonSkyScale);
     sh.uniform1f(s_unight, sFrame.night);   // [2026-10-25] skyF.glsl: the moon's aureole outside the EEP gains by night
     {
-        // [WolfViewer 2026-10-14] the shooting stars (updateMeteors, skyF.glsl wolfMeteors); none in a reflection probe's faces
-        static LLStaticHashedString s_ma("uMeteorA"), s_mb("uMeteorB"), s_mc("uMeteorC");
-        const F64 now = LLFrameTimer::getElapsedSeconds();
-        if (!gCubeSnapshot) updateMeteors(now, sFrame.sunWorld);
-        F32 a[8] = {}, b[8] = {}, c[8] = {};
-        for (S32 i = 0; i < 2; ++i)
+        // [WolfViewer 2026-10-14] the shooting stars (updateMeteors, skyF.glsl wolfMeteors); none in a reflection probe's faces.
+        // [METEOR SHOWERS 2026-11-18] and the showers: up to WolfMeteors::MAX_DRAWN at once (wolfmeteors.h Drawn)
+        static LLStaticHashedString s_ma("uMeteorA"), s_mb("uMeteorB"), s_mc("uMeteorC"), s_md("uMeteorD"), s_mn("uMeteorCount");
+        if (!gCubeSnapshot) updateMeteors(sFrame.sunWorld);
+        const S32 n = gCubeSnapshot ? 0 : sMeteorSky.count;
+        F32 a[4 * WolfMeteors::MAX_DRAWN] = {}, b[4 * WolfMeteors::MAX_DRAWN] = {}, c[4 * WolfMeteors::MAX_DRAWN] = {}, dd[4 * WolfMeteors::MAX_DRAWN] = {};
+        for (S32 i = 0; i < n; ++i)
         {
-            const Meteor& m = sMeteors[i];
-            if (gCubeSnapshot || m.peak <= 0.f) continue;
-            a[i * 4 + 0] = m.start.mV[VX]; a[i * 4 + 1] = m.start.mV[VY]; a[i * 4 + 2] = m.start.mV[VZ]; a[i * 4 + 3] = m.arc;
-            b[i * 4 + 0] = m.axis.mV[VX];  b[i * 4 + 1] = m.axis.mV[VY];  b[i * 4 + 2] = m.axis.mV[VZ];
-            b[i * 4 + 3] = (F32)((now - m.born) / m.life);
-            c[i * 4 + 0] = m.peak; c[i * 4 + 1] = m.tail;
+            const WolfMeteors::Drawn& m = sMeteorSky.drawn[i];
+            for (S32 k = 0; k < 4; ++k) { a[i * 4 + k] = m.A[k]; b[i * 4 + k] = m.B[k]; c[i * 4 + k] = m.C[k]; dd[i * 4 + k] = m.D[k]; }
         }
-        sh.uniform4fv(s_ma, 2, a);
-        sh.uniform4fv(s_mb, 2, b);
-        sh.uniform4fv(s_mc, 2, c);
+        sh.uniform4fv(s_ma, WolfMeteors::MAX_DRAWN, a);
+        sh.uniform4fv(s_mb, WolfMeteors::MAX_DRAWN, b);
+        sh.uniform4fv(s_mc, WolfMeteors::MAX_DRAWN, c);
+        sh.uniform4fv(s_md, WolfMeteors::MAX_DRAWN, dd);
+        sh.uniform1i(s_mn, n);
     }
     WolfAurora::bindUniforms(&sh);
     if (eepDriven() && !WolfAurora::forced())   // [2026-10-15] WolfForceAurora: shown under an EEP sky too

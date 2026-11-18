@@ -698,6 +698,30 @@
      visible="false"
      width="442"
      wrap="true" />
+    <!-- [METEOR SHOWERS 2026-11-18] ticket 895: the annual meteor showers in this region's night sky (wolfmeteors.cpp); on
+         unless switched off. Stacked by wolfpassingplanes.cpp like the rows above. -->
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Meteor showers on this region"
+     layout="topleft"
+     left="10"
+     name="wolf_meteors_check"
+     tool_tip="On clear nights, during the real yearly meteor showers (the Perseids in August, the Geminids in December and five more), shooting stars streak across this region's sky from the shower's own point in the sky, on the real dates. Each visitor sees them in their own viewer and can switch them off for themselves. Saved at once. Only the estate owner or an estate manager can change it."
+     top="730"
+     visible="false"
+     width="460" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="28"
+     name="wolf_meteors_state"
+     top="750"
+     visible="false"
+     width="442"
+     wrap="true" />
     <text
      follows="left|top"
      font="SansSerifSmall"
@@ -705,7 +729,7 @@
      layout="topleft"
      left="28"
      name="wolf_planes_status"
-     top="730"
+     top="768"
      visible="false"
      width="442"
      wrap="true" />
@@ -748,6 +772,11 @@
     <string name="kraken_saved_on">Saved: the Kraken may now be seen in this region's sea.</string>
     <string name="kraken_saved_off">Saved: no more Kraken sightings here.</string>
     <string name="kraken_save_failed">Could not save Kraken sightings:</string>
+    <!-- [METEOR SHOWERS 2026-11-18] the same texts as WolfStorm's region_passing_planes.js TEXT meteors* -->
+    <string name="meteors_on_default">On: the default.</string>
+    <string name="meteors_saved_on">Saved: meteor showers may now be seen in this region's night sky.</string>
+    <string name="meteors_saved_off">Saved: no more meteor showers here.</string>
+    <string name="meteors_save_failed">Could not save meteor showers:</string>
     <!-- [STYLES 2026-11-10] the kinds' words (the same as WolfStorm's region_passing_planes.js TEXT) -->
     <string name="kind_auto">automatic</string>
     <string name="kind_vintage">classic propeller planes</string>

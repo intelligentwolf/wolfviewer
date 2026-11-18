@@ -448,27 +448,32 @@ vec3 wolfEepMoon(vec3 dirWorld, vec3 color)
 }
 
 // [WolfViewer 2026-10-14] Paul: "add shooting stars back and meteors ... just one or two in the night sky occasionally".
-// Up to two at once (wolfenvironmentrender.cpp updateMeteors picks them). Each runs along a great circle: it starts at
-// uMeteorA.xyz and turns about the axis uMeteorB.xyz through uMeteorA.w radians over its life, uMeteorB.w the life gone
-// (0..1); uMeteorC.x its peak brightness in the frame's linear units (0: none), .y the tail's share of the path. A thin
-// line - a pixel or two wide, never thinner than the pixel (fragmentAngle) - brightest at the head and fading back along
-// the tail, the whole flaring up and dying away over the life. The meteor layer (80-120 km) is far above the clouds, so
-// the clouds composited over the dome cover it as they cover the stars.
-uniform vec4 uMeteorA[2];
-uniform vec4 uMeteorB[2];
-uniform vec4 uMeteorC[2];
+// [METEOR SHOWERS 2026-11-18] Ticket 895: and the real annual showers. Up to eight at once (wolfmeteors.cpp picks them, the
+// brightest first; WolfStorm's wolf_meteors.js GLSL is the same geometry). Each runs along a great circle: it starts at
+// uMeteorA.xyz and turns about the axis uMeteorB.xyz through uMeteorA.w radians; uMeteorB.w is the head's angle from the start
+// now. uMeteorC.x the head's illuminance x pre-exposure (lux x e; 0 once it has burnt out), .y the tail's length (rad), .z the
+// train's illuminance x pre-exposure along the path flown (fast bright meteors and fireballs), .w the width factor (2 for a
+// fireball); uMeteorD.rgb the colour (luminance 1). A thin line - a pixel or two wide, never thinner than the pixel
+// (fragmentAngle) - whose luminance is the illuminance over the Gaussian's solid angle (pi w^2), as a real planet's disc is
+// E / omega (wolfenvironmentrender.cpp realPlanets), brightest at the head and fading back along the tail. The meteor layer
+// (80-120 km) is far above the clouds, so the clouds composited over the dome cover it as they cover the stars.
+uniform vec4 uMeteorA[8];
+uniform vec4 uMeteorB[8];
+uniform vec4 uMeteorC[8];
+uniform vec4 uMeteorD[8];
+uniform int uMeteorCount;
 
 vec3 wolfMeteors(vec3 dirWorld, float fragmentAngle)
 {
     vec3 sum = vec3(0.0);
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 8; ++i)
     {
-        float peak = uMeteorC[i].x;
-        if (peak <= 0.0) continue;
+        if (i >= uMeteorCount) break;
+        vec4 C = uMeteorC[i];
+        if (C.x <= 0.0 && C.z <= 0.0) continue;
         vec3 start = uMeteorA[i].xyz;
         vec3 axis = uMeteorB[i].xyz;
         float arc = uMeteorA[i].w;
-        float life = clamp(uMeteorB[i].w, 0.0, 1.0);
         // the pixel's angle off the meteor's great circle, and its angle along it from the start
         float off = asin(clamp(dot(dirWorld, axis), -1.0, 1.0));
         vec3 inPlane = dirWorld - axis * dot(dirWorld, axis);
@@ -476,15 +481,28 @@ vec3 wolfMeteors(vec3 dirWorld, float fragmentAngle)
         if (len < 1e-5) continue;
         inPlane /= len;
         float along = atan(dot(cross(start, inPlane), axis), dot(start, inPlane));
-        float head = arc * life;
-        float tail = max(arc * uMeteorC[i].y, 1e-4);
+        float width = max(0.0005, fragmentAngle * 0.7) * C.w;
+        // [METEOR SHOWERS 2026-11-18] the line's profile ends at 1.8 widths, as a star's sprite has a fixed size whatever its
+        // magnitude: a meteor's luminance is hundreds of times the display's white at night (lux x pre-exposure over pi w^2),
+        // and an unbounded Gaussian kept widening with it into a thick bar (seen in world on Blue Ocean). Brighter = brighter,
+        // not fatter.
+        float across = exp(-(off * off) / (width * width)) * (1.0 - smoothstep(1.0, 1.8, abs(off) / width));
+        if (across < 1e-4) continue;
+        float head = min(uMeteorB[i].w, arc);
         float behind = head - along;   // > 0 behind the head
-        if (behind < -2.0 * fragmentAngle || behind > tail) continue;
-        float width = max(0.0005, fragmentAngle * 0.7);
-        float across = exp(-(off * off) / (width * width));
-        float lengthFade = behind < 0.0 ? exp(-(behind * behind) / (width * width)) : pow(1.0 - behind / tail, 2.0);
-        float flare = sin(3.14159265 * life);
-        sum += vec3(0.86, 0.95, 1.0) * peak * flare * across * lengthFade;
+        float light = 0.0;
+        if (C.x > 0.0 && behind >= -1.8 * width && behind <= C.y)
+        {
+            // ahead of the head the same bounded profile; behind it the tail falls by 10 magnitudes (10^-4) to its end, so the
+            // fade shows through the tone curve's shoulder instead of staying white to a square end
+            float x = behind / max(C.y, 1e-4);
+            float lengthFade = behind < 0.0 ? exp(-(behind * behind) / (width * width)) * (1.0 - smoothstep(1.0, 1.8, -behind / width))
+                                            : pow(10.0, -4.0 * x) * (1.0 - x) * (1.0 - x);
+            light += C.x * lengthFade / (3.14159265 * width * width);
+        }
+        // the train: its illuminance spread along the path flown (a line: per radian of length, over the profile's width)
+        if (C.z > 0.0 && along >= 0.0 && along <= head) light += C.z / (1.7724539 * width * max(head, width));
+        sum += uMeteorD[i].rgb * (light * across);
     }
     return sum;
 }

@@ -109,7 +109,7 @@ namespace
     // went under, the push-down's overshoot (PUSH_LEAD_S) - is where it stayed, often near the seabed. Before that fix
     // the region's lift (AvatarFlyingGroundMargin 5 m + AvatarFlyingGroundUpForce, BSParam.cs:650-653) pushed a MOVING
     // swimmer up whenever the seabed was within 5 m below its centre: in her 5 m deep bay it kept her near the top.
-    //   RISE_TO_BELOW - the depth of the top the rise aims at (design value): halfway between TOP_STOP_BELOW, where steer
+    //   RISE_TO_BELOW - the depth of the top the rise aims at (design value): between TOP_STOP_BELOW, where steer
     //     takes upward control away, and SURFACE_REACH, where the treading hold takes over. The rise starts only for a
     //     top deeper than SURFACE_REACH and moves in the hold's measured pulses (HOLD_PER_M_S, HOLD_MIN / MAX_PRESS_S,
     //     HOLD_SETTLE_S: the same NUDGE_UP_POS with STOP held, so the same measured 1.63 m/s);
@@ -117,6 +117,18 @@ namespace
     //     been held this long in the water (design value: ~1.6 m at that speed); let go sooner, it was only the way in.
     const F32 RISE_TO_BELOW = 0.15f;
     const F64 DIVE_HOLD_S = 1.0;
+
+    // [SWIM WAVES 2026-11-18] The treading hold in a big sea (found in the ticket 910 test, Sandbox 2, drawn surface
+    // swinging 19.6-21.4 over still water 20, log 20:57:52Z): the hold followed a crest with the chin until the centre was
+    // 0.8 m above the still water; when the trough passed, the chin was more than EXIT_ABOVE_IN_AIR over the drawn surface,
+    // the swim ended "out of the water", flying went off and the avatar dropped into the sea at 8 m/s.
+    //   HOLD_CREST_ABOVE - the highest the hold lifts the chin over the STILL water (design value): it follows the drawn
+    //     surface up to there, a higher crest washes over the face as a real one does. On the standard shape the top of the
+    //     head then stays under ~0.76 m over the still water (the cap, chin to top 0.33 m - see chinJoint - and a pulse's
+    //     overshoot of up to ~0.13 m: a pulse starts past HOLD_START_BAND and moves ~0.29 m at HOLD_MIN_PRESS_S), well
+    //     inside the in-air band. While the head is held, out of the water is judged by the chin against the still water, not
+    //     against the drawn trough under it (see `out` in beforeAgentUpdate).
+    const F32 HOLD_CREST_ABOVE = 0.30f;
 
     // Stroke when moving faster than this (m/s), back to the tread under STILL_SPEED for STILL_FOR_S (design values;
     // the swim itself is 3.28 m/s - wolfswim.h).
@@ -967,15 +979,19 @@ namespace WolfSwim
         }
         // Out of the water: the top past the band (EXIT_ABOVE_IN_AIR for a swimmer touching nothing) - or, while the head
         // is held up (its top is then ~0.33 m over the water on the standard shape, by design), the chin past the band
-        // over the drawn surface.
+        // over the still water ([SWIM WAVES 2026-11-18] was the drawn surface).
         // (Run 4, 10:30:40Z: a hold pulse that overshot to the chin 0.33 m over the surface ended the swim in mid-air
         // with the plain band - the in-air band for the chin too.) Review W3: the wider band changes nothing for any
         // other swimmer, because nothing else of the swim's own can put a swimmer touching nothing that high: Up is taken
         // away at TOP_STOP_BELOW and the push-down starts at PUSH_DOWN_ABOVE, so a top 0.35-1.0 m up in the air is
         // always momentum, a hold pulse or a wave, and the push-down / the hold bring it back. Rising out on purpose
         // (RISE_OUT_HOLD_S) uses the plain band on the top and keeps flying, as plain flying out of the water does.
-        const F32 exit_above = (s.mSwimming && av->mInAir && !s.mRisingOut) ? EXIT_ABOVE_IN_AIR : EXIT_ABOVE;
-        const bool out = (s.mHeadUp && !s.mRisingOut) ? chin_z > surface + exit_above : top > water + exit_above;
+        // [SWIM WAVES 2026-11-18] a held head (mHolding) has the in-air band also while touching the bottom: the crest cap's
+        // pulse overshoot (HOLD_CREST_ABOVE) can take a chin past EXIT_ABOVE over the still water (review)
+        const F32 exit_above = (s.mSwimming && (av->mInAir || s.mHolding) && !s.mRisingOut) ? EXIT_ABOVE_IN_AIR : EXIT_ABOVE;
+        // [SWIM WAVES 2026-11-18] the held chin against the STILL water: against the drawn surface a passing trough ended
+        // the swim of a head held on the crest before it (HOLD_CREST_ABOVE)
+        const bool out = (s.mHeadUp && !s.mRisingOut) ? chin_z > water + exit_above : top > water + exit_above;
 
         // [WOLF SEA TUNNEL 2026-10-28] a head inside an air-filled volume (a sea tunnel, wolfdryvolumes.h) is out of the
         // water: walk, as on land
@@ -1075,16 +1091,26 @@ namespace WolfSwim
         {
             endHold();
         }
-        else if (!s.mHolding && top >= surface - SURFACE_REACH)
+        // [SWIM WAVES 2026-11-18] not under a swimmer who chose a deeper depth (riseToRest): in a big sea a passing trough
+        // brings the drawn surface down within SURFACE_REACH of a diver's top, and the hold would lift them out of it
+        // (independent review of the swim-depth branch)
+        else if (!s.mHolding && !s.mDepthChosen && top >= surface - SURFACE_REACH)
         {
             s.mHolding = true;
+            if (s.mRising)
+            {
+                // [SWIM DEPTH 2026-11-18] taking over from a rise pulse: the hold's first pulse waits HOLD_SETTLE_S for
+                // the rise's move to arrive, as after its own pulses (review)
+                s.mPressChangedAt = now();
+            }
         }
 
         if (s.mHolding)
         {
             s.mHeadUp = true;
             endRise();   // [SWIM DEPTH 2026-11-18/] the hold works the depth now
-            holdHead(av, chin_z, surface);
+            // [SWIM WAVES 2026-11-18] the drawn surface, its crests capped at HOLD_CREST_ABOVE over the still water
+            holdHead(av, chin_z, llmin(surface, water + HOLD_CREST_ABOVE));
         }
         else
         {

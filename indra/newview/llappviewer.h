@@ -395,6 +395,9 @@ private:
     // <FS:Zi> Backup Settings
 public:
     void setSaveSettingsOnExit(bool state) {mSaveSettingsOnExit = state; };
+    // [T931 2026-11-19] read by handleAvatarComplexityModeChanged (llviewercontrol.cpp): a settings restore turns this off
+    // (FSPanelPreferenceBackup::onQuitConfirmed, llfloaterpreference.cpp) so the restored files survive, and no save may follow
+    bool getSaveSettingsOnExit() const { return mSaveSettingsOnExit; }
 
 private:
     bool mSaveSettingsOnExit;

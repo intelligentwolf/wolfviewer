@@ -1249,6 +1249,13 @@ void handleAvatarComplexityModeChanged(const LLSD& newValue)
     {
         return;     // still starting: nothing chosen by the resident yet
     }
+    // A settings restore has copied the backup over the settings files and turned the save at quit off
+    // (FSPanelPreferenceBackup::onQuitConfirmed, llfloaterpreference.cpp; LLAppViewer::cleanup skips its saveToFile when
+    // mSaveSettingsOnExit is false): saving now would write this session's settings over the restored ones.
+    if (!LLAppViewer::instance()->getSaveSettingsOnExit())
+    {
+        return;
+    }
     gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
 }
 void handleUserImpostorDistanceChanged(const LLSD& newValue)

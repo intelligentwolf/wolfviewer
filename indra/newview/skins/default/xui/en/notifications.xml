@@ -8268,6 +8268,8 @@ Do you want to remember your choice and [LCONDITION] allow music from this sourc
 
 Domain: [AUDIODOMAIN]
 URL: [AUDIOURL]
+
+The media filter asks about each new site, even with music auto-play on. To stop being asked about this site, choose Whitelist. To stop it for every site, untick 'Ask before playing music from a site I have not allowed yet' in Preferences &gt; Sound &amp; Media &gt; Music.
    <form name="form">
 		<button
          index="0"

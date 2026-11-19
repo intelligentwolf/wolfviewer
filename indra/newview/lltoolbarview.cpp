@@ -137,6 +137,13 @@ bool LLToolBarView::postBuild()
     if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM])
     {
         mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->setFollows(FOLLOWS_LEFT | FOLLOWS_BOTTOM);
+        // [T922 2026-11-19] "Icons and labels" / "Labels only" chosen on this bar while single bar is on switches single
+        // bar off (LLToolBar::onSettingEnable). draw() sees the setting change on the next frame and gives the bar
+        // setWolfSingleRow(false), which rebuilds the buttons with the chosen type.
+        mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->setWolfLeaveSingleRowCallback([]()
+        {
+            gSavedSettings.setBOOL("WolfViewerToolbarSingleBar", false);
+        });
     }
     // <WolfViewer 2026-09-10> hide / show arrow for the bottom bar (Paul)
     mWolfToolbarToggle = findChild<LLButton>("wolf_toolbar_toggle");

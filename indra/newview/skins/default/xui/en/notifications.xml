@@ -8222,6 +8222,8 @@ This parcel provides music from:
 
 Domain: [AUDIODOMAIN]
 URL: [AUDIOURL]
+
+The media filter asks about each new site, even with music auto-play on. To stop being asked about this site, choose Allow and then 'Always Allow This Domain'. To stop it for every site, untick 'Ask before playing music from a site I have not allowed yet' in Preferences &gt; Sound &amp; Media &gt; Music.
    <form name="form">
     <button
          index="0"

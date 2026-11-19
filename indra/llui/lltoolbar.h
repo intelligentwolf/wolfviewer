@@ -28,6 +28,7 @@
 #ifndef LL_LLTOOLBAR_H
 #define LL_LLTOOLBAR_H
 
+#include <functional>   // [T922 2026-11-19/] std::function (setWolfLeaveSingleRowCallback)
 #include "llbutton.h"
 #include "llcommandmanager.h"
 #include "lllayoutstack.h"
@@ -328,6 +329,11 @@ public:
     // user's own choice, and turning it off draws exactly what they had (Paul: "DO NOT CHANGE PEOPLES
     // BUTTONS"). The viewer drives it from WolfViewerToolbarSingleBar (LLToolBarView::draw).
     void setWolfSingleRow(bool single_row);
+    // [T922 2026-11-19] Ticket 922 (Malachi Coltrane): "On the toolbar, when 'icons and labels' enabled, labels do not
+    // appear". In single bar the buttons are built icons-only (displayButtonType below), so choosing "Icons and labels"
+    // or "Labels only" from this bar's menu changed the saved type and nothing on screen. Choosing one of those now asks
+    // the viewer to leave single bar (the viewer owns that setting; LLToolBarView sets this), so the labels appear.
+    void setWolfLeaveSingleRowCallback(const std::function<void()>& cb) { mWolfLeaveSingleRow = cb; }
     // </WolfViewer>
     command_id_list_t& getCommandsList() { return mButtonCommands; }
     void clearCommandsList();
@@ -370,6 +376,7 @@ private:
     const S32                       mMaxRows;
     const S32                       mRows;      // <WolfViewer> exact row count, 0 = off
     bool                            mWolfSingleRow = false; // <WolfViewer 2026-10-20> single bar display override
+    std::function<void()>           mWolfLeaveSingleRow;    // [T922 2026-11-19] asks the viewer to switch single bar off
     // <WolfViewer 2026-10-20> the button type the buttons are BUILT with: icons only in single bar, else mButtonType
     LLToolBarEnums::ButtonType displayButtonType() const
     {

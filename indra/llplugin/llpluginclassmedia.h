@@ -409,6 +409,8 @@ protected:
     F64         mZoomFactor;
 
     float       mRequestedVolume;
+    // [T931 2026-11-19] false until the first "set_volume" has gone to this plugin (setVolume, llpluginclassmedia.cpp)
+    bool        mVolumeSent;
 
     // Priority of this media stream
     EPriority   mPriority;

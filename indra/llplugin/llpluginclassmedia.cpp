@@ -124,6 +124,7 @@ void LLPluginClassMedia::reset()
     mDirtyRect = LLRect::null;
     mAutoScaleMedia = false;
     mRequestedVolume = 0.0f;
+    mVolumeSent = false;   // [T931 2026-11-19] see setVolume
     mPriority = PRIORITY_NORMAL;
     mLowPrioritySizeLimit = LOW_PRIORITY_TEXTURE_SIZE_DEFAULT;
     mAllowDownsample = false;
@@ -1640,8 +1641,19 @@ void LLPluginClassMedia::setLoop(bool loop)
 
 void LLPluginClassMedia::setVolume(float volume)
 {
-    if(volume != mRequestedVolume)
+    // [T931 2026-11-19] Ticket 931 (Mel): parcel music played at full volume with the speaker off. The first request
+    // always goes to the plugin, even when it equals the 0.0 that reset() starts mRequestedVolume at. Before, a stream
+    // started with the sound muted asked for 0.0, matched that start value, and no "set_volume" was ever sent, so the
+    // plugin kept its own starting volume. The GStreamer plugin (Linux: audio/mpeg in mime_types_linux.xml) builds its
+    // playbin in load() on "init" and only sets the playbin's "volume" property on a "set_volume" message
+    // (media_plugin_gstreamer10.cpp load(), setVolume()); playbin's own default is full volume. The stream plugin is made
+    // fresh for every stream start (LLStreamingAudio_MediaPlugins::start/stop, llviewermedia_streamingaudio.cpp), and
+    // WolfViewer builds have no FMOD (.github/workflows/wolfviewer.yml AUTOBUILD_CONFIG ReleaseOS), so parcel music
+    // always goes through a plugin. Turning the speaker on and off again sent two real changes, which is why Mel's
+    // work-round silenced it.
+    if (!mVolumeSent || volume != mRequestedVolume)
     {
+        mVolumeSent = true;
         mRequestedVolume = volume;
 
         LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA_TIME, "set_volume");

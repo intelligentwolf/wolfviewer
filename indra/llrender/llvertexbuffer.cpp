@@ -920,10 +920,20 @@ void LLVertexBuffer::setLabel(const char* label) {
 
 void LLVertexBuffer::clone(LLVertexBuffer& target) const
 {
+    // <WolfViewer 2026-11-19 ticket 928> a changed type mask needs the offsets laid out again, even when the counts match.
+    // Source: llvertexbuffer.cpp calcOffsets() sets mOffsets[] only for the types in the mask it is given, and only
+    // updateNumVerts() (via allocateBuffer()) calls it. The one caller, llface.cpp getGeometryVolume() (the GLTF selection
+    // copy, mVertexBufferGLTF), re-clones the face's current buffer, whose mask can differ from the last one. Before this,
+    // a copy laid out for a mask without TYPE_EMISSIVE kept the emissive offset of an earlier, larger layout; the next
+    // clone from a buffer with emissive and the same counts skipped the allocation, and getEmissiveStrider() pointed past
+    // the end of mMappedData (W105 crash, ticket 928: write fault in the emissive loop of the recursive getGeometryVolume).
+    const bool mask_changed = target.mTypeMask != mTypeMask;
+    // </WolfViewer>
     target.mTypeMask = mTypeMask;
     target.mIndicesType = mIndicesType;
     target.mIndicesStride = mIndicesStride;
-    if (target.getNumVerts() != getNumVerts() ||
+    if (mask_changed ||   // <WolfViewer 2026-11-19 ticket 928/>
+        target.getNumVerts() != getNumVerts() ||
         target.getNumIndices() != getNumIndices())
     {
         target.allocateBuffer(getNumVerts(), getNumIndices());

@@ -1235,6 +1235,22 @@ void handleUserImpostorByDistEnabledChanged(const LLSD& newValue)
     }
     LLPerfStats::tunables.userImpostorDistanceTuningEnabled = auto_tune_newval;
 }
+// [T931 2026-11-19] Ticket 931 (Mel): World > Avatar Display came back as "Limit by Complexity" after a restart although
+// "Always Show Friends" had been chosen. The choice (RenderAvatarComplexityMode, Persist 1, app_settings/settings.xml)
+// reaches the settings file only when the viewer quits cleanly (LLAppViewer::cleanup, llappviewer.cpp, saveToFile), so a
+// session that ends any other way (a crash or hang while quitting, the process ended) loses it. Nothing resets it at
+// start-up: it is written only by the menu (llviewermenu.cpp FSRenderAvatarComplexityMode), the four combo boxes bound to
+// it and a graphics preset the resident loads (graphic_preset_controls.xml). So the file is saved as soon as the choice
+// changes, as wolfvkbridge.cpp does for its own keys. The signal fires only on a real change (llcontrol.cpp
+// LLControlVariable::setValue, value_changed).
+void handleAvatarComplexityModeChanged(const LLSD& newValue)
+{
+    if (LLStartUp::getStartupState() < STATE_STARTED)
+    {
+        return;     // still starting: nothing chosen by the resident yet
+    }
+    gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+}
 void handleUserImpostorDistanceChanged(const LLSD& newValue)
 {
     const auto newval = gSavedSettings.getF32("AutoTuneImpostorFarAwayDistance");
@@ -1365,6 +1381,7 @@ void settings_setup_listeners()
     setting_setup_signal_listener(gSavedSettings, "FSOverrideVRAMDetection", handleOverrideVRAMDetectionChanged); // <FS:Beq/> Override VRAM detection support
     setting_setup_signal_listener(gSavedSettings, "RenderVolumeLODFactor", handleVolumeLODChanged);
     setting_setup_signal_listener(gSavedSettings, "RenderAvatarComplexityMode", handleUserImpostorByDistEnabledChanged);
+    setting_setup_signal_listener(gSavedSettings, "RenderAvatarComplexityMode", handleAvatarComplexityModeChanged);   // [T931 2026-11-19]
     setting_setup_signal_listener(gSavedSettings, "RenderAvatarLODFactor", handleAvatarLODChanged);
     setting_setup_signal_listener(gSavedSettings, "RenderAvatarPhysicsLODFactor", handleAvatarPhysicsLODChanged);
     setting_setup_signal_listener(gSavedSettings, "RenderTerrainLODFactor", handleTerrainLODChanged);

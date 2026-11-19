@@ -38,6 +38,8 @@
 #include "wolfdrive.h"   // [WOLF DRIVE 2026-10-09/] the Car Dashboard toolbar button
 #include "wolfhelm.h"   // <WolfViewer 2026-10-28/> Captain's Helm
 #include "wolftraincab.h"   // [TRAIN CAB 2026-11-13] the Train Cab (Wolf Rail)
+#include "wolffloatertunnels.h"   // [T934 2026-11-19/] a taken or returned tunnel rock takes its holes with it
+#include "wolftunnelgone.h"
 // <WolfViewer 2026-09-06> Wolf Territories-only features
 #include "wolfgrid.h"
 #include "wolfai.h"   // [FLOATER SPLIT 2026-09-11] WolfAI.CanUse
@@ -6513,6 +6515,17 @@ static void derez_objects(
             msg->sendReliable(first_region->getHost());
         }
         make_ui_sound("UISndObjectRezOut");
+
+        // <WolfViewer> [T934 2026-11-19] Take, Delete and Return take the object out of the world: a Wolf tunnel's rock among
+        // them takes its walkable boxes (the holes in the ground) and its record with it (wolffloatertunnels.h objectsLeaving)
+        if (WolfTunnelGone::leavesWorld((S32)dest))
+        {
+            std::vector<LLUUID> roots;
+            for (const LLViewerObjectPtr& object : *objectsp)
+                if (object.notNull()) roots.push_back(object->getID());
+            WolfTunnels::objectsLeaving(roots);
+        }
+        // </WolfViewer>
 
         // Busy count decremented by inventory update, so only increment
         // if will be causing an update.

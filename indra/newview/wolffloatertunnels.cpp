@@ -53,6 +53,7 @@
 #include "message.h"
 #include "wolfcave.h"
 #include "wolftunnelcamera.h"   // [2026-10-23] the camera in a tunnel (keepCameraInside)
+#include "wolftunnelgone.h"     // [T934 2026-11-19] a deleted rock takes its tunnel with it (objectsLeaving)
 #include "wolfcavelights.h"
 #include "wolfdigprogress.h"
 #include "wolfburrow.h"
@@ -1175,17 +1176,20 @@ namespace
     }
 
     /** Take a built tunnel's object and walkable boxes away (the record is kept). `forget`: the object is not in view and the
-     *  user chose to leave it. */
+     *  user chose to leave it. `rock_leaving` [T934]: the user's own Delete / Take / Return is already taking the rock out of
+     *  the world (WolfTunnels::objectsLeaving), so it is not sent a second DeRezObject (a Take still under way would also put
+     *  a copy in the Trash). */
     bool capPostRetry(const std::string& url, const LLSD& body, LLSD& answer, std::string& error);
 
-    bool takeAway(const WolfTunnels::Record& rec, const std::string& cap, const LLUUID& region, bool forget, std::string& error)
+    bool takeAway(const WolfTunnels::Record& rec, const std::string& cap, const LLUUID& region, bool forget, std::string& error,
+                  bool rock_leaving = false)
     {
         // [WOLF TUNNELS 2026-10-23] Paul (editing a built tunnel): the old one goes in this order - its rock, its holes and
         // walkable parts (a box taken away closes its hole), then its lights - and only then is the new design built.
         if (rec.mBuilt.isMap())
         {
-            LLViewerObject* obj = findTunnelObject(rec.mBuilt);
-            if (!obj && rec.mBuilt["objects"].size() > 0 && !forget)
+            LLViewerObject* obj = rock_leaving ? nullptr : findTunnelObject(rec.mBuilt);
+            if (!obj && rec.mBuilt["objects"].size() > 0 && !forget && !rock_leaving)
             {
                 error = "the tunnel's rock is not in view from here. Stand nearer the tunnel and try again.";
                 return false;
@@ -1406,6 +1410,89 @@ namespace
         s_jobProgress = -1.f;
         if (!putRecord(LLSD().with("region", region_uuid).with("op", "delete").with("id", rec.mId), err)) jobFail("The tunnel's record could not be removed: " + err);
         else { s_jobStatus = "\"" + rec.mName + "\" is taken away."; s_jobOk = true; }
+        s_jobBusy = false;
+        ++s_jobSerial;
+    }
+
+    // [T934 2026-11-19] A tunnel's rock deleted, taken or returned outside the Tunnels window (WolfTunnels::objectsLeaving).
+    // Source: deleteCoro above with forget (its rock is leaving already) - the boxes, the lights, then the record.
+    const F32 GONE_WAIT_JOB_S = 120.f;   // a window job (Build, Delete, lights) still running finishes first
+
+    void notifyGone(const std::string& text, bool failed)
+    {
+        // A failure stays until the user closes it (GenericAlert); a success is a tip (SystemMessageTip).
+        LLNotificationsUtil::add(failed ? "GenericAlert" : "SystemMessageTip", LLSD().with("MESSAGE", text));
+    }
+
+    void objectsLeavingCoro(std::vector<std::string> gone, std::string cap, LLUUID region, std::string region_uuid)
+    {
+        // 1. This region's records as they are now (php/tunnels.php GET, the window's fetchRecordsCoro read).
+        LLSD result = WolfCaves::serviceRequest(std::string(TUNNELS_URL) + "?region=" + region_uuid, nullptr, 20.f);
+        LLSD reply;
+        std::string transport;
+        const S32 status = WolfCaves::serviceReply(result, reply, transport);
+        if (status != 200 || !reply["success"].asBoolean())
+        {
+            LL_WARNS("WolfTunnels") << "objects left the world, but this region's tunnels could not be read (HTTP " << status << " "
+                                    << transport << "); a tunnel among them keeps its holes until Delete in the Tunnels window" << LL_ENDL;
+            return;
+        }
+        std::vector<WolfTunnels::Record> recs;
+        std::vector<std::vector<std::string>> built;
+        for (const LLSD& t : llsd::inArray(reply["region"]["tunnels"]))
+        {
+            WolfTunnels::Record r;
+            r.mId = t["id"].asString();
+            r.mName = t["name"].asString();
+            r.mBuilt = t["built"].isMap() ? t["built"] : LLSD();
+            r.mLights = t["lights"].isMap() ? t["lights"] : LLSD();
+            std::vector<std::string> objs;
+            for (const LLSD& o : llsd::inArray(r.mBuilt["objects"])) objs.push_back(o.asString());
+            built.push_back(objs);
+            recs.push_back(r);
+        }
+        const std::vector<size_t> hit = WolfTunnelGone::recordsHit(built, gone);
+        if (hit.empty()) return;   // no tunnel's rock among them: nothing to do, nothing said
+        if (regionUuid() == region_uuid) readRecords(reply["region"]);   // the window's list is up to date too
+
+        // 2. One job at a time with the Tunnels window (s_job*: the window shows the steps if it is open).
+        for (F32 waited = 0.f; s_jobBusy && waited < GONE_WAIT_JOB_S; waited += 0.5f) llcoro::suspendUntilTimeout(0.5f);
+        if (s_jobBusy)
+        {
+            notifyGone("Your tunnel's rock is gone, but its holes in the ground are still open: the Tunnels window was busy. "
+                       "Open Wolf World > Tunnels..., tick \"This region's tunnels\", pick the tunnel and press Delete.", true);
+            return;
+        }
+        s_jobBusy = true;
+        s_jobOk = false;
+        s_jobErrors.clear();
+        for (size_t i : hit)
+        {
+            const WolfTunnels::Record& rec = recs[i];
+            const std::string name = rec.mName.empty() ? std::string("Your tunnel") : "\"" + rec.mName + "\"";
+            std::string err;
+            if (!gAgent.getRegion() || gAgent.getRegion()->getRegionID() != region)
+                err = "you left the region before its holes could be closed.";
+            else if (takeAway(rec, cap, region, true, err, true))
+            {
+                s_jobStatus = "Forgetting the tunnel...";
+                s_jobProgress = -1.f;
+                if (putRecord(LLSD().with("region", region_uuid).with("op", "delete").with("id", rec.mId), err))
+                {
+                    LL_INFOS("WolfTunnels") << "tunnel " << rec.mId << " taken away with its rock (" << rec.mBuilt["volumes"].size()
+                                            << " walkable box(es))" << LL_ENDL;
+                    s_jobStatus = name + " is taken away.";
+                    s_jobOk = true;
+                    notifyGone(name + " is taken away with its rock: the holes it made in the ground are closed.", false);
+                    continue;
+                }
+                err = "its holes are closed, but the tunnel list could not be updated: " + err;
+            }
+            jobFail(name + " was deleted, but: " + err);
+            if (!err.empty() && err.back() != '.') err += ".";
+            notifyGone(name + "'s rock is gone, but " + err + " Open Wolf World > Tunnels..., tick \"This region's tunnels\", pick "
+                       "the tunnel and press Delete (only the region's owner and estate managers can).", true);
+        }
         s_jobBusy = false;
         ++s_jobSerial;
     }
@@ -4770,4 +4857,23 @@ bool WolfTunnels::capChange(const LLSD& body, LLSD& answer, std::string& error)
 bool WolfTunnels::recordChange(const LLSD& body, std::string& error)
 {
     return putRecord(body, error);
+}
+
+// [T934 2026-11-19] Ticket 934 (Indi, Indigo Blue Realm): "I deleted the tunnel and now there is an alpha hole left ... three holes".
+// The rock left the world but its walkable boxes did not. Called from the viewer's own Delete / Take / Return (header comment).
+void WolfTunnels::objectsLeaving(const std::vector<LLUUID>& roots)
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (roots.empty() || !rgn || !WolfCaves::onWolf()) return;
+    // No walkable boxes read for this region = no holes a tunnel could leave (the boxes are read on every arrival, init()).
+    if (s_boxes.empty() || s_boxesRegion != rgn->getRegionID()) return;
+    const std::string cap = rgn->getCapability(CAP);
+    const std::string region_uuid = regionUuid();
+    if (cap.empty() || region_uuid.empty()) return;
+    std::vector<std::string> gone;
+    for (const LLUUID& id : roots) if (id.notNull()) gone.push_back(id.asString());
+    if (gone.empty()) return;
+    const LLUUID region = rgn->getRegionID();
+    LLCoros::instance().launch("WolfTunnelsObjectsLeaving", [gone, cap, region, region_uuid]()
+                               { objectsLeavingCoro(gone, cap, region, region_uuid); });
 }

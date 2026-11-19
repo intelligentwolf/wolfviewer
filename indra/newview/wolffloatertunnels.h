@@ -122,6 +122,14 @@ namespace WolfTunnels
      */
     bool capChange(const LLSD& body, LLSD& answer, std::string& error);
     bool recordChange(const LLSD& body, std::string& error);
+    /**
+     * [T934 2026-11-19] Indi deleted her tunnel's rock with the ordinary Delete and its mouths stayed as holes in her hills.
+     * Called with the root objects the user is deleting, taking or returning (LLSelectMgr::confirmDelete, llviewermenu.cpp
+     * derez_objects; WolfTunnelGone::leavesWorld): a tunnel whose rock (or railway bore) is among them is taken away the way the
+     * Tunnels window's Delete does it - its walkable boxes (the holes close), its lights, then its record - and the user is told.
+     * Nothing is read unless the agent's region has walkable boxes.
+     */
+    void objectsLeaving(const std::vector<LLUUID>& roots);
     LLUUID boxesRegion();
     S32 selectedId();
 

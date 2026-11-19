@@ -31,6 +31,7 @@
 #include "llselectmgr.h"
 #include "wolfobjectprops.h" // <WolfViewer> the shared name/description store
 #include "wolfbuilder.h"     // [WOLF BUILDER 2026-10-13/] the builder's own snap origin
+#include "wolffloatertunnels.h"   // [T934 2026-11-19/] a deleted tunnel rock takes its holes with it
 #include "llmaterialmgr.h"
 
 // library includes
@@ -4453,6 +4454,18 @@ bool LLSelectMgr::confirmDelete(const LLSD& notification, const LLSD& response, 
                                                           logNoOp,
                                                           (void*) &info,
                                                           SEND_ONLY_ROOTS);
+            // <WolfViewer> [T934 2026-11-19] a Wolf tunnel's rock among them takes its walkable boxes (the holes in the
+            // ground) and its record with it, as the Tunnels window's Delete does (wolffloatertunnels.h objectsLeaving)
+            {
+                std::vector<LLUUID> roots;
+                for (LLObjectSelection::root_iterator it = handle->root_begin(); it != handle->root_end(); ++it)
+                {
+                    LLViewerObject* root = (*it)->getObject();
+                    if (root && !root->isAttachment()) roots.push_back(root->getID());
+                }
+                WolfTunnels::objectsLeaving(roots);
+            }
+            // </WolfViewer>
             // VEFFECT: Delete Object - one effect for all deletes
             if (LLSelectMgr::getInstance()->mSelectedObjects->mSelectType != SELECT_TYPE_HUD)
             {

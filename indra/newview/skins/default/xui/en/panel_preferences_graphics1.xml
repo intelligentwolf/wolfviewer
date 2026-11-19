@@ -1266,13 +1266,20 @@ If you do not understand the distinction then leave this control alone."
      name="Rendering" >
       <!-- <WolfViewer 2026-10-22> The Wolf rows (sea, lights, snow line...) made this tab taller than the window: at UI
            scale 1.2 the snow line, sharpening and tone mapping rows were cut off with no way to reach them (Indi, Discord).
-           The tab's rows now scroll; the pattern is panel_classified_info.xml's scroll_container + content panel. -->
+           The tab's rows now scroll; the pattern is panel_classified_info.xml's scroll_container + content panel.
+           [T925 2026-11-19] The scroll area's bottom is the tab's own bottom (bottom="-1"), not a fixed height="450":
+           this tab panel has no height of its own (the tab container sizes it after its rows are built), and the
+           follows="all" growth from its build-time size to the real tab size was added on top of 450, so the scroll
+           area hung far below the floater (on the W106 test rig its centre was level with the snow line row). No
+           scroll bar showed and the snow line row was cut in half at the floater's bottom (Miss Zenn, ticket 925).
+           The content height is now 556 (was 610): scrolled to the end, Tone Mapping Mix is the last row with a
+           small margin under it instead of 64 px of empty tab. -->
       <scroll_container
        follows="all"
        layout="topleft"
        left="0"
        top="0"
-       height="450"
+       bottom="-1"
        width="537"
        name="rendering_scroll"
        reserve_scroll_corner="false">
@@ -1281,7 +1288,7 @@ If you do not understand the distinction then leave this control alone."
        layout="topleft"
        left="0"
        top="0"
-       height="610"
+       height="556"
        width="520"
        background_visible="false"
        name="rendering_scroll_content">

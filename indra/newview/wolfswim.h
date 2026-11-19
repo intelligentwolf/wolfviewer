@@ -44,6 +44,9 @@
 //     sees it. A stroke away ducks the head back under first (as before); down still dives. Not while a script has
 //     taken the up / down control, nor with a pitched body (mouselook): the swim as before then. Up held for a moment
 //     at the surface flies the swimmer out of the water (review W2; before, the only way out was the shore).
+//   - [SWIM DEPTH 2026-11-18] Ticket 910: a swimmer floats up to just under the surface unless they chose their depth
+//     (moved up or down under the water themselves: Up, Down, or a pitched swim in mouselook), so falling, flying or
+//     wading in no longer leaves them near the seabed; a dive with Down still stays down until they come up again.
 namespace WolfSwim
 {
     /** The whole per-frame step: decide, set the agent's fly state and control flags, start / stop the animations.

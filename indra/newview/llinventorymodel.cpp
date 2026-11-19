@@ -1052,19 +1052,77 @@ const LLUUID LLInventoryModel::getMarketplaceListingsUUID()
     return mMarketplaceListingsUUID;
 }
 
+// [T913 AO 2026-11-18] IndigoQueen King, ticket 913: "I did try to put animations in our WolfViewer and it did take.
+// However they do not save. If I log out and return the animations are gone."
+// Her inventory (robust.inventoryfolders) holds TWO "#Firestorm" folders directly under My Inventory: 508e88cf...
+// (newer, almost empty: an "#AO" with one empty set) and b92b7a46... (her real "#AO" with three sets and the links she
+// made on 10 Nov). 149 accounts on the grid have a duplicate "#Firestorm" in the root (query of 18 Nov).
+// The AO (aoengine.cpp AOEngine::tick), Wearable Favourites (fsfloaterwearablefavorites.cpp
+// getWearableFavoritesFolderID / initCategory), the LSL bridge (fslslbridge.cpp setupFSCategory / findFSCategory) and
+// the particle editor all find "#Firestorm" through this function, which returned the FIRST child of the root with the
+// name. At login that order is the order of mCategoryMap (a std::map, llinventorymodel.h cat_map_t), which
+// buildParentChildMap walks to fill mParentChildCategoryTree (llinventorymodel.cpp buildParentChildMap), i.e. the
+// lowest UUID by LLUUID::operator< (lluuid.cpp, byte by byte) - so which duplicate is used depends on the random UUIDs,
+// not on which one holds the resident's things. Her inventory shows it: Wearable Favourites links were made in
+// b92b7a46's tree until 3 Nov and the AO links on 10 Nov, then from 11 Nov only in 508e88cf's tree (the lower UUID),
+// so from that login on the AO read the empty "#AO" and her sets seemed to have gone.
+// Now, when several root folders share the name, the one with the most folders below it is used. The folder tree is
+// complete from the login skeleton (llstartup.cpp "inventory-skeleton" -> loadSkeleton), before any contents are
+// fetched, so the choice is the same in every session and is the one holding the AO sets (each set and each state is a
+// folder: aoengine.cpp addSet / addAnimation createNewCategory). Equal counts keep the old order (first found).
+// With a single match the result is the same as before.
 LLUUID LLInventoryModel::findCategoryByName(std::string_view name)
 {
     if (LLUUID root_id = gInventory.getRootFolderID(); root_id.notNull())
     {
         if (auto cats = get_ptr_in_map(mParentChildCategoryTree, root_id); cats)
         {
+            // Every folder below cat_id, at any depth.
+            auto countFoldersBelow = [this](const LLUUID& cat_id, const auto& self) -> S32
+            {
+                S32 count = 0;
+                if (auto children = get_ptr_in_map(mParentChildCategoryTree, cat_id); children)
+                {
+                    for (const auto& child : *children)
+                    {
+                        count += 1 + self(child->getUUID(), self);
+                    }
+                }
+                return count;
+            };
+
+            LLUUID best_id;
+            S32 best_count = -1;
+            S32 matches = 0;
             for (const auto& cat : *cats)
             {
-                if (cat->getName() == name)
+                if (cat->getName() != name)
                 {
-                    return cat->getUUID();
+                    continue;
+                }
+                if (++matches == 1)
+                {
+                    best_id = cat->getUUID();
+                    continue;
+                }
+                // A second folder with the same name: compare the folder trees (counted only when there is more than
+                // one match, so the usual single match costs no more than a scan of the root's folders).
+                if (best_count < 0)
+                {
+                    best_count = countFoldersBelow(best_id, countFoldersBelow);
+                }
+                if (const S32 count = countFoldersBelow(cat->getUUID(), countFoldersBelow); count > best_count)
+                {
+                    best_id = cat->getUUID();
+                    best_count = count;
                 }
             }
+            if (matches > 1)
+            {
+                LL_INFOS_ONCE(LOG_INV) << matches << " folders named '" << name << "' in My Inventory; using " << best_id
+                                  << " (" << best_count << " folders below it)" << LL_ENDL;
+            }
+            return best_id;
         }
     }
     return LLUUID::null;

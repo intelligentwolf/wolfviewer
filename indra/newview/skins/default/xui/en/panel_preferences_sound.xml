@@ -1050,6 +1050,23 @@
          label="Allow audio streams to auto-play"
          top_pad="10"
          left="25"/>
+        <!-- [T922 2026-11-19] Ticket 922 (Malachi Coltrane): "Even with media>music auto-play>enabled, I still have toast
+             asking permission to play." The question is the media filter's (MediaEnableFilter, on by default:
+             llviewerparcelmgr.cpp optionallyStartMusic -> llviewerparcelmedia.cpp filterAudioUrl -> "AudioAlert" for a site
+             on neither list), not auto-play's, and its only switch was on the Media tab. The same switch here, where
+             people set music up. -->
+        <check_box
+         name="music_media_filter"
+         control_name="MediaEnableFilter"
+         enabled_control="AudioStreamingMusic"
+         follows="left|top"
+         layout="topleft"
+         height="16"
+         width="460"
+         tool_tip="This is the media filter, the same switch as 'Enable media filter' on the Media tab, so it covers parcel media (video) as well as music. While it is on, music from a site you have not allowed yet asks first, even with auto-play ticked. In that question choose Allow, then 'Always Allow This Domain', and that site plays without asking again."
+         label="Ask before playing music from a site I have not allowed yet"
+         top_pad="3"
+         left="25"/>
 
         <check_box
          name="FSFadeAudioStream"

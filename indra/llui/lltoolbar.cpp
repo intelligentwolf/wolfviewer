@@ -516,19 +516,22 @@ bool LLToolBar::isSettingChecked(const LLSD& userdata)
     bool retval = false;
 
     const std::string setting_name = userdata.asString();
+    // [T922 2026-11-19] the tick shows what the bar DRAWS: in single bar that is icons only whatever the saved type
+    // (displayButtonType, lltoolbar.h), so the menu no longer ticks "Icons and labels" over a bar with no labels
+    const LLToolBarEnums::ButtonType shown = displayButtonType();
 
     if (setting_name == "icons_with_text")
     {
-        retval = (mButtonType == BTNTYPE_ICONS_WITH_TEXT);
+        retval = (shown == BTNTYPE_ICONS_WITH_TEXT);
     }
     else if (setting_name == "icons_only")
     {
-        retval = (mButtonType == BTNTYPE_ICONS_ONLY);
+        retval = (shown == BTNTYPE_ICONS_ONLY);
     }
     // <FS:Zi> Add text only buttons
     else if (setting_name == "text_only")
     {
-        retval = (mButtonType == BTNTYPE_TEXT_ONLY);
+        retval = (shown == BTNTYPE_TEXT_ONLY);
     }
     // </FS:Zi>
 
@@ -555,6 +558,12 @@ void LLToolBar::onSettingEnable(const LLSD& userdata)
         setButtonType(BTNTYPE_TEXT_ONLY);
     }
     // </FS:Zi>
+    // [T922 2026-11-19] labels asked for while single bar draws icons only: leave single bar so they show
+    // (setWolfLeaveSingleRowCallback, lltoolbar.h). The type just saved is what the rebuilt bar is drawn with.
+    if (mWolfSingleRow && mButtonType != BTNTYPE_ICONS_ONLY && mWolfLeaveSingleRow)
+    {
+        mWolfLeaveSingleRow();
+    }
 }
 
 void LLToolBar::onRemoveSelectedCommand()

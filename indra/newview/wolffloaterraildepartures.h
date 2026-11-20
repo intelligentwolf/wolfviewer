@@ -18,9 +18,9 @@
 
 #include "llfloater.h"
 #include "lltimer.h"
+#include "lluuid.h"
 
 class LLComboBox;
-class LLLineEditor;
 class LLScrollListCtrl;
 class LLTextBox;
 
@@ -39,12 +39,18 @@ public:
 
 private:
     void read();
+    void findHere();
     static void readCoro(LLHandle<LLFloater> h, std::string url);
+    static void hereCoro(LLHandle<LLFloater> h, std::string url);
+    void onHere(S32 status, const LLSD& reply);
+    void choose(const std::string& network);
+    void fillRailways();
+    static std::vector<std::string> recent();
     void onReply(S32 status, const LLSD& reply, const std::string& error);
     void fill(const LLSD& reply);
     void setStatus(const std::string& text, bool problem);
 
-    LLLineEditor* mNetwork = nullptr;
+    LLComboBox* mNetwork = nullptr;
     LLComboBox* mStation = nullptr;
     LLScrollListCtrl* mDepartures = nullptr;
     LLScrollListCtrl* mArrivals = nullptr;
@@ -54,6 +60,8 @@ private:
     bool mBusy = false;
     std::string mTag;           // the slice last shown: an unchanged answer redraws nothing
     std::string mStationsKey;   // the station list last put in the combo
+    LLSD mHere;                 // the railways with a station in the avatar's region: [{network, title, stations}]
+    LLUUID mHereRegion;         // the region mHere is for (asked again when the avatar is in another)
 };
 
 #endif // WOLF_FLOATERRAILDEPARTURES_H

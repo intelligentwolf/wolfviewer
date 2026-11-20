@@ -2200,12 +2200,6 @@
             <!-- [TRAIN BUILDER 2026-11-14] Paul: "a whole range of trains and a customiser to build trains" (wolffloatertrainbuilder.cpp),
              beside the Train Cab: choose a train, make it yours, the yard builds it into your inventory in a train box. The same
              window and gate as Wolf World > Build & Land > Train Builder... -->
-            <!-- [RAIL BRAIN 2026-11-20] Railway Departures (wolffloaterraildepartures.cpp): a station's board from its railway's one
-             timetable (region-terrain-work/wolf-rail-brain-2026-11-20/DESIGN.md 3.3a). Wolf Territories only. -->
-            <menu_item_call label="Railway Departures..." name="WolfVehiclesRailDepartures">
-                <menu_item_call.on_click function="Floater.Show" parameter="wolf_rail_departures" />
-                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
-            </menu_item_call>
             <menu_item_call label="Train Builder..." name="WolfVehiclesTrainBuilder">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_train_builder" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
@@ -2423,6 +2417,15 @@
                 <menu_item_check.on_click function="ToggleControl" parameter="WolfShowAstronomy" />
                 <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
             </menu_item_check>
+        </menu>
+        <!-- [RAIL BRAIN 2026-11-20] Wolf World > Railways (paul-wolf-features-under-wolf-world-menu): Railway Departures
+             (wolffloaterraildepartures.cpp), a station's board from its railway's one timetable (region-terrain-work/
+             wolf-rail-brain-2026-11-20/DESIGN.md 3.3a). Wolf Territories only. -->
+        <menu create_jump_keys="true" label="Railways" name="WolfGroupRailways" tear_off="true">
+            <menu_item_call label="Railway Departures..." name="WolfWorldRailDepartures">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_rail_departures" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
         </menu>
         <menu create_jump_keys="true" label="Build &amp; Land" name="WolfGroupBuild" tear_off="true">
             <!-- [WOLF BUILDER 2026-10-13] wolffloaterbuilder.cpp: the builder's helper - a grid on the ground,

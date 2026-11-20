@@ -2,8 +2,9 @@
  * @file wolffloaterraildepartures.cpp
  * @brief WolfViewer: Railway Departures. Who and why: a resident at a station (35-65, maybe with weaker eyesight) wants to know when
  *        the next train to where they are going leaves - one look, no codes (DESIGN.md 3.3a). Flow: open it from Wolf World >
- *        Railways > Railway Departures...; it shows the last railway and station looked at; type another railway's name or pick
- *        another station; read; close. Data: wolfstorm's rail_board.php (the railway's public board, or a private one for its
+ *        Railways > Railway Departures...; it opens on the station the avatar stands in (the railways with a station in this
+ *        region, rail_board.php ?region=); another railway is picked from that list or the ones looked at before, and a name is
+ *        typed only as the last resort (the coordinator, 20 Nov: older and disabled users should not have to type); read; close. Data: wolfstorm's rail_board.php (the railway's public board, or a private one for its
  *        owner), read only while the window is open, at most every READ_S. Wolf Territories only.
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
@@ -27,7 +28,8 @@
 
 #include "llcombobox.h"
 #include "llcoros.h"
-#include "lllineeditor.h"
+#include "llagent.h"
+#include "llviewerregion.h"
 #include "llscrolllistctrl.h"
 #include "llsdutil.h"
 #include "lltextbox.h"
@@ -56,21 +58,109 @@ WolfFloaterRailDepartures::WolfFloaterRailDepartures(const LLSD& key)
 {
 }
 
+// the railways looked at before, newest first (WolfRailDeparturesRecent: names, comma separated; at most RECENT)
+std::vector<std::string> WolfFloaterRailDepartures::recent()
+{
+    std::vector<std::string> out;
+    std::string s = gSavedSettings.getString("WolfRailDeparturesRecent");
+    size_t a = 0;
+    while (a <= s.size() && out.size() < 8)
+    {
+        size_t b = s.find(',', a);
+        std::string n = s.substr(a, b == std::string::npos ? std::string::npos : b - a);
+        if (networkOk(n) && std::find(out.begin(), out.end(), n) == out.end()) out.push_back(n);
+        if (b == std::string::npos) break;
+        a = b + 1;
+    }
+    return out;
+}
+
+void WolfFloaterRailDepartures::choose(const std::string& network)
+{
+    if (!networkOk(network)) { setStatus(getString("bad_railway"), true); return; }
+    gSavedSettings.setString("WolfRailDeparturesNetwork", network);
+    std::vector<std::string> r = recent();
+    r.erase(std::remove(r.begin(), r.end(), network), r.end());
+    r.insert(r.begin(), network);
+    if (r.size() > 8) r.resize(8);
+    std::string joined;
+    for (const std::string& n : r) joined += (joined.empty() ? "" : ",") + n;
+    gSavedSettings.setString("WolfRailDeparturesRecent", joined);
+    mTag.clear(); mStationsKey.clear();
+    read();
+}
+
+// the list: the railways with a station here first (their titles), then the ones looked at before
+void WolfFloaterRailDepartures::fillRailways()
+{
+    const std::string cur = gSavedSettings.getString("WolfRailDeparturesNetwork");
+    mNetwork->removeall();
+    std::vector<std::string> seen;
+    for (const LLSD& n : llsd::inArray(mHere))
+    {
+        const std::string name = n["network"].asString();
+        if (!networkOk(name)) continue;
+        mNetwork->add(n["title"].asString() + " (" + name + ")", LLSD(name));
+        seen.push_back(name);
+    }
+    for (const std::string& n : recent()) if (std::find(seen.begin(), seen.end(), n) == seen.end()) mNetwork->add(n, LLSD(n));
+    if (!cur.empty()) mNetwork->setValue(LLSD(cur));
+}
+
+void WolfFloaterRailDepartures::findHere()
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) return;
+    mHereRegion = rgn->getRegionID();
+    setStatus(getString("finding"), false);
+    mBusy = true;
+    LLHandle<LLFloater> h = getHandle();
+    const std::string url = std::string(BOARD_URL) + "?region=" + mHereRegion.asString();
+    LLCoros::instance().launch("WolfRailDeparturesHere", [h, url]() { hereCoro(h, url); });
+}
+
+// static
+void WolfFloaterRailDepartures::hereCoro(LLHandle<LLFloater> h, std::string url)
+{
+    LLSD result = WolfCaves::serviceRequest(url, nullptr, TIMEOUT_S);
+    LLSD reply;
+    std::string transport;
+    const S32 status = WolfCaves::serviceReply(result, reply, transport);
+    if (WolfFloaterRailDepartures* f = dynamic_cast<WolfFloaterRailDepartures*>(h.get())) f->onHere(status, reply);
+}
+
+void WolfFloaterRailDepartures::onHere(S32 status, const LLSD& reply)
+{
+    mBusy = false;
+    mHere = status == 200 && reply.isMap() ? reply["railways"] : LLSD::emptyArray();
+    // standing at a station: that railway and that station (the first of them when there are several)
+    if (mHere.isArray() && mHere.size() > 0 && networkOk(mHere[0]["network"].asString()))
+    {
+        const std::string net = mHere[0]["network"].asString();
+        if (mHere[0]["stations"].isArray() && mHere[0]["stations"].size() > 0) gSavedSettings.setString("WolfRailDeparturesStation", mHere[0]["stations"][0].asString());
+        fillRailways();
+        choose(net);
+        return;
+    }
+    fillRailways();
+    if (status != 200) { setStatus(getString("unavailable"), true); return; }
+    read();   // nothing here: the last railway looked at, if any
+}
+
 bool WolfFloaterRailDepartures::postBuild()
 {
-    mNetwork = getChild<LLLineEditor>("railway");
+    mNetwork = getChild<LLComboBox>("railway");
     mStation = getChild<LLComboBox>("station");
     mDepartures = getChild<LLScrollListCtrl>("departures");
     mArrivals = getChild<LLScrollListCtrl>("arrivals");
     mTitle = getChild<LLTextBox>("title_text");
     mStatus = getChild<LLTextBox>("status");
-    mNetwork->setText(gSavedSettings.getString("WolfRailDeparturesNetwork"));
-    mNetwork->setCommitOnFocusLost(true);
+    // picked from the list, or (the last resort) typed and Enter
     mNetwork->setCommitCallback([this](LLUICtrl*, const LLSD&)
     {
-        gSavedSettings.setString("WolfRailDeparturesNetwork", mNetwork->getText());
-        mTag.clear(); mStationsKey.clear();
-        read();
+        std::string n = mNetwork->getValue().asString();
+        if (n.empty()) n = mNetwork->getSimple();
+        choose(n);
     });
     mStation->setCommitCallback([this](LLUICtrl*, const LLSD&)
     {
@@ -84,7 +174,8 @@ bool WolfFloaterRailDepartures::postBuild()
 void WolfFloaterRailDepartures::onOpen(const LLSD& key)
 {
     mTag.clear();
-    read();
+    fillRailways();
+    findHere();   // opens on the station the avatar stands in
 }
 
 void WolfFloaterRailDepartures::draw()
@@ -96,7 +187,10 @@ void WolfFloaterRailDepartures::draw()
         return;
     }
     // only while open (draw runs only then), never closer than READ_S, one request at a time
-    if (!mBusy && mSince.getElapsedTimeF32() >= READ_S) read();
+    // a new region: the railways here again; else the board, never closer than READ_S
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!mBusy && rgn && rgn->getRegionID() != mHereRegion) findHere();
+    else if (!mBusy && mSince.getElapsedTimeF32() >= READ_S) read();
     LLFloater::draw();
 }
 
@@ -110,7 +204,7 @@ void WolfFloaterRailDepartures::setStatus(const std::string& text, bool problem)
 void WolfFloaterRailDepartures::read()
 {
     mSince.reset();
-    const std::string net = mNetwork->getText();
+    const std::string net = gSavedSettings.getString("WolfRailDeparturesNetwork");
     if (net.empty()) { setStatus(getString("type_railway"), false); return; }
     if (!networkOk(net)) { setStatus(getString("bad_railway"), true); return; }
     std::string url = std::string(BOARD_URL) + "?network=" + LLURI::escapeQueryValue(net);

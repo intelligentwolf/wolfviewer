@@ -16,7 +16,8 @@
  single_instance="true"
  title="Railway Departures"
  width="640">
-    <string name="type_railway">Type the railway's name (as its boards show it), then press Enter.</string>
+    <string name="type_railway">No railway has a station here. Pick one you looked at before, or type a railway's name and press Enter.</string>
+    <string name="finding">Finding the railways here...</string>
     <string name="bad_railway">A railway's name has only letters A-Z, digits, - and _.</string>
     <string name="loading">Loading departures...</string>
     <string name="none">No departures for this station.</string>
@@ -25,8 +26,8 @@
     <string name="no_trains">No trains on the board just now.</string>
     <string name="all_stations">All stations</string>
     <text follows="left|top" font="SansSerifLarge" height="22" layout="topleft" left="14" name="railway_label" top="28" width="90">Railway</text>
-    <line_editor follows="left|top" font="SansSerifLarge" height="26" layout="topleft" left="104" max_length_chars="32" name="railway" top="26" width="200"
-     tool_tip="The railway's name, as its boards and timetable show it (for example TGWR). Press Enter to show it." />
+    <combo_box allow_text_entry="true" follows="left|top" font="SansSerifLarge" height="26" layout="topleft" left="104" max_chars="32" name="railway" top="26" width="200"
+     tool_tip="The railways with a station here, and the ones you looked at before. Or type a railway's name (as its boards show it) and press Enter." />
     <text follows="left|top" font="SansSerifLarge" height="22" layout="topleft" left="320" name="station_label" top="28" width="80">Station</text>
     <combo_box follows="left|top|right" font="SansSerifLarge" height="26" layout="topleft" left="400" name="station" top="26" width="226"
      tool_tip="The station whose trains to show." />

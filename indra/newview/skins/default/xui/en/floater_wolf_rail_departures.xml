@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [RAIL BRAIN 2026-11-20] Railway Departures (wolffloaterraildepartures.cpp; design region-terrain-work/wolf-rail-brain-2026-11-20/
+     DESIGN.md 3.3a). Who and why: a resident at a station wants the next train to where they are going, in one look. A departure
+     board's look: Time, Destination, Platform, Status, and the calling points; arrivals on their own tab. Big type, no codes; a
+     problem is said in words in the caution colour and stays until the next good read. Wolf Territories only. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="460"
+ layout="topleft"
+ min_height="300"
+ min_width="480"
+ name="wolf_rail_departures"
+ save_rect="true"
+ single_instance="true"
+ title="Railway Departures"
+ width="640">
+    <string name="type_railway">Type the railway's name (as its boards show it), then press Enter.</string>
+    <string name="bad_railway">A railway's name has only letters A-Z, digits, - and _.</string>
+    <string name="loading">Loading departures...</string>
+    <string name="none">No departures for this station.</string>
+    <string name="unavailable">Departures are not available just now. They will be tried again shortly.</string>
+    <string name="not_updating">This board is not updating just now: the times may be out of date.</string>
+    <string name="no_trains">No trains on the board just now.</string>
+    <string name="all_stations">All stations</string>
+    <text follows="left|top" font="SansSerifLarge" height="22" layout="topleft" left="14" name="railway_label" top="28" width="90">Railway</text>
+    <line_editor follows="left|top" font="SansSerifLarge" height="26" layout="topleft" left="104" max_length_chars="32" name="railway" top="26" width="200"
+     tool_tip="The railway's name, as its boards and timetable show it (for example TGWR). Press Enter to show it." />
+    <text follows="left|top" font="SansSerifLarge" height="22" layout="topleft" left="320" name="station_label" top="28" width="80">Station</text>
+    <combo_box follows="left|top|right" font="SansSerifLarge" height="26" layout="topleft" left="400" name="station" top="26" width="226"
+     tool_tip="The station whose trains to show." />
+    <text follows="left|top|right" font="SansSerifLargeBold" height="24" layout="topleft" left="14" name="title_text" top="62" width="612" />
+    <tab_container follows="all" height="300" layout="topleft" left="14" name="tabs" tab_position="top" top="90" width="612">
+        <panel label="Departures" name="departures_panel">
+            <scroll_list draw_heading="true" follows="all" font="SansSerifLarge" height="270" layout="topleft" left="0" multi_select="false" name="departures" top="0" width="610">
+                <scroll_list.columns label="Time" name="time" width="64" />
+                <scroll_list.columns label="Destination" name="place" relative_width="0.30" />
+                <scroll_list.columns label="Platform" name="platform" width="80" />
+                <scroll_list.columns label="Status" name="status" width="130" />
+                <scroll_list.columns label="Calling at" name="calls" relative_width="0.40" />
+            </scroll_list>
+        </panel>
+        <panel label="Arrivals" name="arrivals_panel">
+            <scroll_list draw_heading="true" follows="all" font="SansSerifLarge" height="270" layout="topleft" left="0" multi_select="false" name="arrivals" top="0" width="610">
+                <scroll_list.columns label="Time" name="time" width="64" />
+                <scroll_list.columns label="From" name="place" relative_width="0.45" />
+                <scroll_list.columns label="Platform" name="platform" width="80" />
+                <scroll_list.columns label="Status" name="status" width="150" />
+            </scroll_list>
+        </panel>
+    </tab_container>
+    <text follows="left|bottom|right" font="SansSerifLarge" height="44" layout="topleft" left="14" name="status" top="398" width="612" wrap="true" />
+</floater>

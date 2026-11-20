@@ -155,6 +155,7 @@
 #include "wolffloaterseatunnels.h"   // [WOLF SEA TUNNEL 2026-10-28/]
 #include "wolffloatershipbuilder.h"   // [SHIP BUILDER 2026-10-29/]
 #include "wolffloaterplanebuilder.h"   // [PLANE BUILDER 2026-11-01/]
+#include "wolffloaterraildepartures.h"   // [RAIL BRAIN 2026-11-20]
 #include "wolffloatertrainbuilder.h"   // [TRAIN BUILDER 2026-11-14/]
 #include "wolffloateraimode.h"   // [AI MODE 2026-11-05/]
 #include "wolffloateranimator.h"      // [WOLF ANIMATOR 2026-11-05/]
@@ -725,6 +726,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_sea_tunnels", "floater_wolf_sea_tunnels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSeaTunnels>);   // [WOLF SEA TUNNEL 2026-10-28/] air-filled glass tubes under the sea
     LLFloaterReg::add("wolf_ship_builder", "floater_wolf_ship_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterShipBuilder>);   // [SHIP BUILDER 2026-10-29/] design a ship, the shipyard builds her
     LLFloaterReg::add("wolf_plane_builder", "floater_wolf_plane_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPlaneBuilder>);   // [PLANE BUILDER 2026-11-01/] design a fighter, the yard builds it
+    LLFloaterReg::add("wolf_rail_departures", "floater_wolf_rail_departures.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterRailDepartures>);   // [RAIL BRAIN 2026-11-20] Railway Departures
     LLFloaterReg::add("wolf_train_builder", "floater_wolf_train_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTrainBuilder>);   // [TRAIN BUILDER 2026-11-14/] choose and make a train, the yard builds it
     LLFloaterReg::add("wolf_aimode", "floater_wolf_aimode.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAIMode>);   // [AI MODE 2026-11-05/] personality and voice
     LLFloaterReg::add("wolf_im_translate", "floater_wolf_im_translate.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterIMTranslate>);   // [IM TRANSLATOR 2026-11-10/] ticket 631

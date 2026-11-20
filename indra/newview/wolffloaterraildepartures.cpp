@@ -77,7 +77,8 @@ std::vector<std::string> WolfFloaterRailDepartures::recent()
 
 void WolfFloaterRailDepartures::choose(const std::string& network)
 {
-    if (!networkOk(network)) { setStatus(getString("bad_railway"), true); return; }
+    if (!networkOk(network)) { setStatus(getString("bad_railway"), true); mInputProblem = true; return; }
+    mInputProblem = false;
     gSavedSettings.setString("WolfRailDeparturesNetwork", network);
     std::vector<std::string> r = recent();
     r.erase(std::remove(r.begin(), r.end(), network), r.end());
@@ -147,7 +148,12 @@ void WolfFloaterRailDepartures::onHere(S32 status, const LLSD& reply)
     fillRailways();
     // the railways here could not be read: said only while no railway is chosen - once one is, the status line is its board's
     // (a bad name, "No departures for this station", ...), which this background retry must never replace
-    if (status != 200) { if (gSavedSettings.getString("WolfRailDeparturesNetwork").empty()) setStatus(getString("unavailable"), true); else read(); return; }
+    if (status != 200)
+    {
+        if (!gSavedSettings.getString("WolfRailDeparturesNetwork").empty()) read();
+        else if (!mInputProblem) setStatus(getString("unavailable"), true);   // never over the resident's own typing mistake
+        return;
+    }
     read();   // nothing here: the last railway looked at, if any
 }
 

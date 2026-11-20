@@ -112,7 +112,8 @@ void WolfFloaterRailDepartures::findHere()
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
     mHereRegion = rgn->getRegionID();
-    setStatus(getString("finding"), false);
+    mSince.reset();
+    if (!mProblem) setStatus(getString("finding"), false);
     mBusy = true;
     LLHandle<LLFloater> h = getHandle();
     const std::string url = std::string(BOARD_URL) + "?region=" + mHereRegion.asString();
@@ -132,6 +133,7 @@ void WolfFloaterRailDepartures::hereCoro(LLHandle<LLFloater> h, std::string url)
 void WolfFloaterRailDepartures::onHere(S32 status, const LLSD& reply)
 {
     mBusy = false;
+    mHereFailed = status != 200;
     mHere = status == 200 && reply.isMap() ? reply["railways"] : LLSD::emptyArray();
     // standing at a station: that railway and that station (the first of them when there are several)
     if (mHere.isArray() && mHere.size() > 0 && networkOk(mHere[0]["network"].asString()))
@@ -189,7 +191,7 @@ void WolfFloaterRailDepartures::draw()
     // only while open (draw runs only then), never closer than READ_S, one request at a time
     // a new region: the railways here again; else the board, never closer than READ_S
     LLViewerRegion* rgn = gAgent.getRegion();
-    if (!mBusy && rgn && rgn->getRegionID() != mHereRegion) findHere();
+    if (!mBusy && rgn && (rgn->getRegionID() != mHereRegion || (mHereFailed && mSince.getElapsedTimeF32() >= READ_S))) findHere();
     else if (!mBusy && mSince.getElapsedTimeF32() >= READ_S) read();
     LLFloater::draw();
 }
@@ -197,6 +199,7 @@ void WolfFloaterRailDepartures::draw()
 void WolfFloaterRailDepartures::setStatus(const std::string& text, bool problem)
 {
     // the words as well as the colour (never colour alone); a problem stays until the next good read
+    mProblem = problem;
     mStatus->setText(text);
     mStatus->setColor(LLUIColorTable::instance().getColor(problem ? "AlertCautionTextColor" : "LabelTextColor"));
 }
@@ -205,7 +208,8 @@ void WolfFloaterRailDepartures::read()
 {
     mSince.reset();
     const std::string net = gSavedSettings.getString("WolfRailDeparturesNetwork");
-    if (net.empty()) { setStatus(getString("type_railway"), false); return; }
+    // no railway chosen yet: the hint - but never over a problem (it stays until the next good read)
+    if (net.empty()) { if (!mProblem) setStatus(getString("type_railway"), false); return; }
     if (!networkOk(net)) { setStatus(getString("bad_railway"), true); return; }
     std::string url = std::string(BOARD_URL) + "?network=" + LLURI::escapeQueryValue(net);
     const std::string station = gSavedSettings.getString("WolfRailDeparturesStation");

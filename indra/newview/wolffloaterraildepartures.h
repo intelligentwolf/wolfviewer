@@ -62,6 +62,8 @@ private:
     std::string mStationsKey;   // the station list last put in the combo
     LLSD mHere;                 // the railways with a station in the avatar's region: [{network, title, stations}]
     LLUUID mHereRegion;         // the region mHere is for (asked again when the avatar is in another)
+    bool mHereFailed = false;   // the railways here could not be read: asked again every READ_S, and its message kept until then
+    bool mProblem = false;      // the status line says a problem: kept until the next good read (never replaced by a hint)
 };
 
 #endif // WOLF_FLOATERRAILDEPARTURES_H

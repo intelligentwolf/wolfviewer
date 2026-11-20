@@ -145,7 +145,9 @@ void WolfFloaterRailDepartures::onHere(S32 status, const LLSD& reply)
         return;
     }
     fillRailways();
-    if (status != 200) { setStatus(getString("unavailable"), true); return; }
+    // the railways here could not be read: said only while no railway is chosen - once one is, the status line is its board's
+    // (a bad name, "No departures for this station", ...), which this background retry must never replace
+    if (status != 200) { if (gSavedSettings.getString("WolfRailDeparturesNetwork").empty()) setStatus(getString("unavailable"), true); else read(); return; }
     read();   // nothing here: the last railway looked at, if any
 }
 

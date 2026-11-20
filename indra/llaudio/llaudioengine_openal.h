@@ -65,6 +65,8 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         // setting picks the same device next session; the null UUID is "the system default".
         virtual output_device_map_t getDevices();
         virtual void setDevice(const LLUUID& device_uuid);
+        // [T937 2026-11-20] see LLAudioEngine::getOutputDeviceSystemName
+        virtual std::string getOutputDeviceSystemName() const;
 
         void setInternalGain(F32 gain);
 

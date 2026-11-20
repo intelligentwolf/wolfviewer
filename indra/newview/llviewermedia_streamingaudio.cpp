@@ -34,6 +34,7 @@
 
 #include "llmimetypes.h"
 #include "lldir.h"
+#include "llaudioengine.h"      // [T937 2026-11-20] gAudiop, getOutputDeviceSystemName()
 
 #if LL_LINUX
 #include <dlfcn.h>
@@ -232,6 +233,10 @@ void LLStreamingAudio_MediaPlugins::start(const std::string& url)
     {
         mMediaPlugin = initializeMedia("audio/mpeg"); // assumes that whatever media implementation supports mp3 also supports vorbis.
         LL_INFOS() << "streaming audio mMediaPlugin is now " << mMediaPlugin << LL_ENDL;
+        if (mMediaPlugin)
+        {
+            syncOutputDevice(true);     // [T937 2026-11-20] before load_uri, so the stream starts on the chosen device
+        }
     }
 
     if(!mMediaPlugin)
@@ -301,7 +306,10 @@ void LLStreamingAudio_MediaPlugins::pause(int pause)
 void LLStreamingAudio_MediaPlugins::update()
 {
     if (mMediaPlugin)
+    {
+        syncOutputDevice(false);        // [T937 2026-11-20] follow a change made while the music plays
         mMediaPlugin->idle();
+    }
 
 #if LL_LINUX
     wolf_check_music_needs_gstreamer(mMediaPlugin);     // <WolfViewer 2026-10-23>
@@ -350,6 +358,31 @@ F32 LLStreamingAudio_MediaPlugins::getGain()
 std::string LLStreamingAudio_MediaPlugins::getURL()
 {
     return mURL;
+}
+
+// [T937 2026-11-20] Ticket 937 (Benny Moonstone, W107 Windows 11): "When I'm changing the output setting in the
+// preferences, the sounds are changing to the selected output, but not the music stream." The sounds play in the
+// viewer's OpenAL engine, which Preferences > Sound & Media moves (FSOutputDeviceUUID -> handleOutputDeviceChanged,
+// llviewercontrol.cpp -> LLAudioEngine_OpenAL::setDevice, alcReopenDeviceSOFT). Parcel music is not in that engine:
+// WolfViewer has no FMOD (ReleaseOS), so llstartup.cpp sets this class as the streaming audio, and the music plays in a
+// separate media plugin process (audio/mpeg: media_plugin_libvlc on Windows and macOS, mime_types.xml /
+// mime_types_mac.xml; media_plugin_gstreamer on Linux, mime_types_linux.xml), which was never told about the device
+// and always played on the system default. The engine's device name goes to the plugin now: when the plugin is made
+// (before the stream is loaded) and every frame it differs from what was last sent - a change in Preferences, the
+// chosen device unplugged (the engine falls back to the default) or plugged back in.
+void LLStreamingAudio_MediaPlugins::syncOutputDevice(bool force)
+{
+    if (!mMediaPlugin)
+    {
+        return;
+    }
+    const std::string name = gAudiop ? gAudiop->getOutputDeviceSystemName() : std::string();
+    if (force || name != mSentOutputDevice)
+    {
+        LL_INFOS("StreamingAudio") << "Parcel music output device: '" << (name.empty() ? "(system default)" : name) << "'" << LL_ENDL;
+        mMediaPlugin->setAudioOutputDevice(name);
+        mSentOutputDevice = name;
+    }
 }
 
 LLPluginClassMedia* LLStreamingAudio_MediaPlugins::initializeMedia(const std::string& media_type)

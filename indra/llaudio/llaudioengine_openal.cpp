@@ -366,6 +366,35 @@ void LLAudioEngine_OpenAL::setDevice(const LLUUID& device_uuid)
         mSelectedDeviceOpen = false;
     }
 }
+
+// [T937 2026-11-20] Ticket 937 (Benny Moonstone): parcel music did not follow the output device chosen in
+// Preferences. The music plays in the media plugin (libVLC on Windows/macOS, GStreamer on Linux), which is told this
+// name and finds the same device in its own list.
+// Source: OpenAL Soft 1.24.2 (the shipped library, autobuild.xml openal 1.24.2-r1; ticket log "ALSOFT 1.24.2")
+// alc/alc.cpp:291-295 GetDevicePrefix() - on _WIN32 every device name is "OpenAL Soft on " + the backend's name, and
+// alc.cpp:765 ProbeAllDevicesList() puts it in front of each enumerated name; elsewhere there is no prefix.
+// The backend's own name is the system's: Windows alc/backends/wasapi.cpp:346 GetDeviceNameAndGuid() = the
+// endpoint's DEVPKEY_Device_FriendlyName; macOS coreaudio.cpp:157 GetDeviceName() = kAudioDevicePropertyDeviceNameCFString;
+// Linux pipewire.cpp:1019 = the node's PW_KEY_NODE_DESCRIPTION (pulseaudio.cpp:401 = the sink's description, the
+// same text under pipewire-pulse). A second device with the same name gets " #2" (wasapi.cpp:747, coreaudio.cpp:294,
+// pulseaudio.cpp:403), which no other program's list has: it then matches nothing and the music
+// stays on the system default, as before.
+// virtual
+std::string LLAudioEngine_OpenAL::getOutputDeviceSystemName() const
+{
+    if (!mSelectedDeviceOpen || mSelectedDeviceName.empty())
+    {
+        return std::string();
+    }
+#if LL_WINDOWS
+    static const std::string prefix("OpenAL Soft on ");
+    if (mSelectedDeviceName.compare(0, prefix.size(), prefix) == 0)
+    {
+        return mSelectedDeviceName.substr(prefix.size());
+    }
+#endif
+    return mSelectedDeviceName;
+}
 // </WolfViewer>
 
 // <WolfViewer 2026-09-13> ─── output-device hot-plug ─────────────────────────────────────────

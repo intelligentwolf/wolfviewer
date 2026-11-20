@@ -338,6 +338,9 @@ public:
     void setLoop(bool loop);
     void setVolume(float volume);
     float getVolume();
+    // [T937 2026-11-20] Play this plugin's sound on the output device the system calls `name` (empty = the system
+    // default). Sent as "wolf_audio_device" (media_time); the libVLC and GStreamer plugins act on it, others ignore it.
+    void setAudioOutputDevice(const std::string& name);
 
     F64 getCurrentTime(void) const { return mCurrentTime; };
     F64 getDuration(void) const { return mDuration; };

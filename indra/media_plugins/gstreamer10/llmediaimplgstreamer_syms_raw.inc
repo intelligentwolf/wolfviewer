@@ -50,6 +50,16 @@ LL_GST_SYM(false, gst_message_get_structure, const GstStructure *, GstMessage *)
 LL_GST_SYM(false, gst_value_get_caps, const GstCaps *, const GValue *)
 LL_GST_SYM(false, gst_core_error_quark, GQuark, void)
 LL_GST_SYM(false, gst_stream_error_quark, GQuark, void)
+// [T937 2026-11-20] the output device chosen in the viewer's Preferences (MediaPluginGStreamer10::applyAudioDevice).
+// Optional: without them the music stays on the default device, as before. Signatures: gst/gstdevicemonitor.h
+// gst_device_monitor_new / _add_filter / _get_devices, gst/gstdevice.h gst_device_get_display_name /
+// gst_device_create_element (GStreamer 1.4+), glib/glist.h g_list_free.
+LL_GST_SYM(false, gst_device_monitor_new, GstDeviceMonitor *, void)
+LL_GST_SYM(false, gst_device_monitor_add_filter, guint, GstDeviceMonitor *, const gchar *, GstCaps *)
+LL_GST_SYM(false, gst_device_monitor_get_devices, GList *, GstDeviceMonitor *)
+LL_GST_SYM(false, gst_device_get_display_name, gchar *, GstDevice *)
+LL_GST_SYM(false, gst_device_create_element, GstElement *, GstDevice *, const gchar *)
+LL_GST_SYM(false, g_list_free, void, GList *)
 #endif
 
 LL_GST_SYM( true, gst_caps_new_simple, GstCaps*, const char *, const char*, ... )

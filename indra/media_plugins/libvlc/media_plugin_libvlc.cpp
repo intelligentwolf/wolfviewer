@@ -66,6 +66,12 @@ private:
     void resetVLC();
     void setVolume(const F64 volume);
     void setVolumeVLC();
+    // [T937 2026-11-20] the viewer's chosen sound output device ("wolf_audio_device"), see applyAudioDevice()
+    void applyAudioDevice();
+    bool mAudioDeviceWanted = false;                        // the viewer has said which device
+    std::string mAudioDevice;                               // the system's device name; empty = the system default
+    libvlc_media_player_t* mAudioDevicePlayer = nullptr;    // the player it was last applied to (null: none yet)
+    std::string mAudioDeviceApplied;                        // ...and the name applied there
     void updateTitle(const char* title);
     // <WolfViewer> Stream metadata (ICY "now playing") for the FMOD-less build — see updateStreamMetadata()
     void updateStreamMetadata();
@@ -375,6 +381,10 @@ void MediaPluginLibVLC::playMedia()
     }
     // </WolfViewer>
 
+    // [T937 2026-11-20] a new player starts on the default device (forget the last one: its address may be reused)
+    mAudioDevicePlayer = nullptr;
+    applyAudioDevice();
+
     libvlc_video_set_callbacks(mLibVLCMediaPlayer, lock, unlock, display, &mLibVLCCallbackContext);
     libvlc_video_set_format(mLibVLCMediaPlayer, "RV32", mWidth, mHeight, mWidth * mDepth);
 
@@ -532,6 +542,96 @@ void MediaPluginLibVLC::setVolumeVLC()
         // that's okay though because we saved the value in mCurVolume and
         // the next volume change after the VLC system is initilzied  will set it
     }
+}
+
+// [T937 2026-11-20] Ticket 937 (Benny Moonstone): parcel music stayed on the system's default output device when
+// Preferences > Sound & Media moved the viewer's sounds to another one. The viewer sends the device's system name
+// (LLAudioEngine_OpenAL::getOutputDeviceSystemName, without OpenAL Soft's "OpenAL Soft on " prefix) as
+// "wolf_audio_device"; this finds the device with that name in libVLC's list for the player and moves the player's
+// audio to it.
+// Source: libVLC 3.0.24 (autobuild.xml vlc-bin 3.0.24, include/vlc/libvlc_media_player.h):
+//   :98-104   libvlc_audio_output_device_t { p_next, psz_device (identifier), psz_description (user-friendly) };
+//   :1656     libvlc_audio_output_device_enum(mp) - the player's audio output's devices, freed with
+//   :1690     libvlc_audio_output_device_list_release();
+//   :1694-1732 libvlc_audio_output_device_set(mp, NULL, id) - "audio output will be moved to the device ... immediately.
+//             This is the recommended usage."; lib/audio.c:260 returns without doing anything for a NULL id.
+// The player has its audio output from the start (lib/media_player.c:748 input_resource_GetAout in
+// libvlc_media_player_new), and the output module has listed its devices before it is opened (Windows
+// modules/audio_output/mmdevice.c:1353 Open waits for MMThread, which runs DevicesEnum at :1110 first).
+// What the names are (the same text OpenAL Soft uses, see getOutputDeviceSystemName):
+//   Windows, mmdevice (libmmdevice_plugin.dll is in the package; set_capability("audio output", 150), the highest):
+//     description = DEVPKEY/PKEY_Device_FriendlyName (mmdevice.c:471-506 DeviceGetFriendlyName, DeviceHotplugReport);
+//     the default device is the id "" (mmdevice.c:81 default_device_b, reported :1332 as "Default"; DeviceSelectLocked
+//     :771 treats it as "no device chosen"); a change while playing restarts the output on the new device
+//     (DeviceRequestLocked :757-759 aout_RestartRequest).
+//   macOS, auhal: description = kAudioObjectPropertyName (auhal.c:500, the same property as OpenAL Soft's
+//     kAudioDevicePropertyDeviceNameCFString: AudioHardwareDeprecated.h:671), id = the AudioObjectID as text
+//     (:396 ReportDevice); the id "0" is the "System Sound Output Device" (:464), SwitchAudioDevice :895 atoi -> 0,
+//     and it restarts the output (:902 aout_RestartRequest).
+// The default is only set on a player that was moved off it: a new player is on the default already.
+void MediaPluginLibVLC::applyAudioDevice()
+{
+    if (!mAudioDeviceWanted || !mLibVLCMediaPlayer)
+    {
+        return;
+    }
+    const bool new_player = mAudioDevicePlayer != mLibVLCMediaPlayer;
+    if (!new_player && mAudioDeviceApplied == mAudioDevice)
+    {
+        return;
+    }
+
+    // This plugin is built for Windows and macOS only (media_plugins/CMakeLists.txt).
+#if LL_WINDOWS
+    static const char* const default_id = "";      // mmdevice.c:81 default_device_b
+#else
+    static const char* const default_id = "0";     // auhal.c:464 "System Sound Output Device"
+#endif
+    std::string id = default_id;
+    bool found = mAudioDevice.empty();
+    std::string names;      // what libVLC offers, for the viewer's log when nothing matches
+    if (!found)
+    {
+        libvlc_audio_output_device_t* list = libvlc_audio_output_device_enum(mLibVLCMediaPlayer);
+        for (libvlc_audio_output_device_t* dev = list; dev; dev = dev->p_next)
+        {
+            if (!dev->psz_device || !dev->psz_description)
+            {
+                continue;
+            }
+            if (mAudioDevice == dev->psz_description)
+            {
+                id = dev->psz_device;
+                found = true;
+                break;
+            }
+            if (!names.empty())
+            {
+                names += "; ";
+            }
+            names += dev->psz_description;
+        }
+        if (list)
+        {
+            libvlc_audio_output_device_list_release(list);
+        }
+    }
+
+    // A chosen device that is not in the list means the default (id is still default_id). The default needs nothing
+    // on a new player (it starts there), nor on one that is already on it.
+    const bool to_default = id == default_id;
+    if (!(to_default && (new_player || mAudioDeviceApplied.empty())))
+    {
+        libvlc_audio_output_device_set(mLibVLCMediaPlayer, NULL, id.c_str());
+    }
+    mAudioDevicePlayer = mLibVLCMediaPlayer;
+    mAudioDeviceApplied = found ? mAudioDevice : std::string();
+
+    LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA, "wolf_audio_device_result");
+    message.setValue("name", mAudioDevice);
+    message.setValueBoolean("found", found);
+    message.setValue("devices", names);
+    sendMessage(message);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -766,6 +866,14 @@ void MediaPluginLibVLC::receiveMessage(const char* message_string)
                     // volume comes in 0 -> 1.0
                     F64 volume = message_in.getValueReal("volume");
                     setVolume(volume);
+                }
+                else if (message_name == "wolf_audio_device")
+                {
+                    // [T937 2026-11-20] LLPluginClassMedia::setAudioOutputDevice; applied now if a player is
+                    // running, else when playMedia() makes one
+                    mAudioDevice = message_in.getValue("name");
+                    mAudioDeviceWanted = true;
+                    applyAudioDevice();
                 }
             }
     }

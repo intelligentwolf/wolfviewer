@@ -14,8 +14,10 @@
 #include "llbutton.h"
 #include "llfloaterreg.h"
 #include "llscrollcontainer.h"   // [HUDS TILES 2 2026-11-14/] tiles_scroll
+#include "lliconctrl.h"   // [T958 2026-11-21/] a hidden tile's picture, dimmed while choosing
 #include "lltextbox.h"
 #include "lluicolortable.h"
+#include "llviewercontrol.h"   // [T958 2026-11-21/] gSavedPerAccountSettings WolfHudsHidden
 #include "wolfdrive.h"
 #include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/]
 #include "wolfflight.h"
@@ -58,6 +60,20 @@ namespace
     // [HUDS SMALL 2026-11-14] the status line's two kinds of words, here once so fitToArea can measure the tallest
     // (they were written in onTile [W104 FEATFIX A7] and refreshTiles, unchanged)
     const char* const NOT_ON_WOLF_STATUS = "Wolf HUDs work on Wolf Territories regions only (Tessa's Compass works everywhere).";
+    // [T958 2026-11-21] the words while choosing and when tiles are hidden (plain, British; the resident is 35-65)
+    const char* const CHOOSE_INTRO = "Choosing: press a picture to show or hide it in this window. Hidden ones stay in the Wolf World menu. Press Done when you have finished.";
+    std::string hiddenWords(S32 n)
+    {
+        return n == 1 ? std::string("1 tile is hidden here. Choose tiles... brings it back.")
+                      : llformat("%d tiles are hidden here. Choose tiles... brings them back.", n);
+    }
+    const char* const ALL_HIDDEN = "Every tile is hidden here. Press Choose tiles... to show some again.";
+    std::string choosingWords(S32 n)
+    {
+        return n == 0 ? std::string("Every tile is showing. Press a picture to hide it here.")
+                      : llformat("%d hidden here. Show all brings every tile back.", n);
+    }
+
     std::string pressNote(WolfFloaterHuds::ETile t)
     {
         return std::string(TILE_NAMES[t]) + " did not come on. If a message popped up, it says why; otherwise try again in a moment.";
@@ -118,8 +134,14 @@ bool WolfFloaterHuds::postBuild()
         mTiles[i] = getChild<LLButton>(std::string("tile_") + TILE_IDS[i]);
         mTiles[i]->setCommitCallback([this, t](LLUICtrl*, const LLSD&) { onTile(t); });
         mStates[i] = getChild<LLTextBox>(std::string("state_") + TILE_IDS[i]);
+        mPics[i] = findChild<LLIconCtrl>(std::string("pic_") + TILE_IDS[i]);   // [T958 2026-11-21/]
     }
     mStatus = getChild<LLTextBox>("status");
+    // [T958 2026-11-21] Choose tiles... (a toggle: Done while choosing) and Show all
+    mChooseBtn = getChild<LLButton>("choose_btn");
+    mShowAllBtn = getChild<LLButton>("show_all_btn");
+    mChooseBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { setChoosing(mChooseBtn->getToggleState()); });
+    mShowAllBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { showAll(); });
     // [HUDS TILES 2 2026-11-14] the tiles scroll (floater_wolf_huds.xml tiles_scroll / tiles_panel). Tabbing to a tile below
     // the fold brings it into view, as Wolf Experiences' cards (wolffloaterexperiences.cpp): a tile's rect is in tiles_panel's
     // coordinates, which are the scroll's document coordinates (llscrollcontainer.cpp scrollToShowRect).
@@ -141,12 +163,15 @@ bool WolfFloaterHuds::postBuild()
         mStatusBottom = status.mBottom;
         mIntroMinH = intro.getHeight();
         mStatusMinH = status.getHeight();
+        mIntroToButtons = intro.mBottom - mChooseBtn->getRect().mTop;   // [T958 2026-11-21/] 6, as built
+        mIntroWords = mIntro->getText();
         mGrid.clear();
         std::vector<S32> lefts, tops;
         for (S32 i = 0; i < T_COUNT; ++i)
         {
             const std::string id = TILE_IDS[i];
             TileParts tp;
+            tp.tile = static_cast<ETile>(i);   // [T958 2026-11-21/]
             tp.views[0] = mTiles[i];
             tp.views[1] = getChild<LLView>("pic_" + id);
             tp.views[2] = getChild<LLView>("name_" + id);
@@ -202,6 +227,11 @@ void WolfFloaterHuds::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);
     mNote.clear();   // [A7/]
+    // [T958 2026-11-21] the resident's choice as saved; a window opens out of choosing
+    loadHidden();
+    mChoosing = false;
+    if (mChooseBtn) mChooseBtn->setToggleState(false);
+    if (mShowAllBtn) mShowAllBtn->setVisible(false);
     refreshTiles();
     // [HUDS TILES 2 2026-11-14] from the top every time (as WolfStorm's window), fitted to the floaters' area as it is now
     if (mScroll) mScroll->goToTop();
@@ -263,8 +293,17 @@ void WolfFloaterHuds::fitToArea()
     }
     const S32 narrower = (mXmlCols - cols) * mColStep;
     const S32 width = mXmlWidth - narrower;
-    const S32 tiles = (S32)mGrid.size();
-    const S32 rows = (tiles + cols - 1) / cols;
+    // [T958 2026-11-21] the tiles laid out: every one while choosing, else the ones not hidden (the rest close up); a hidden
+    // tile's parts are not shown at all, so Tab skips them too
+    std::vector<const TileParts*> shown;
+    for (const TileParts& tp : mGrid)
+    {
+        const bool show = mChoosing || !mHidden[tp.tile];
+        for (int p = 0; p < TileParts::N; ++p) tp.views[p]->setVisible(show);
+        if (show) shown.push_back(&tp);
+    }
+    const S32 tiles = (S32)shown.size();
+    const S32 rows = llmax(1, (tiles + cols - 1) / cols);   // [T958/] one empty row when every tile is hidden
     const S32 panel_h = mFirstTopGap + (rows - 1) * mRowStep + mTileH;   // 804 for three columns, as the XML
 
     // the tiles, in reading order, cols to a row; each part keeps its XML offset from its tile
@@ -273,7 +312,7 @@ void WolfFloaterHuds::fitToArea()
     {
         const S32 left = mFirstLeft + (k % cols) * mColStep;
         const S32 top = panel_h - mFirstTopGap - (k / cols) * mRowStep;
-        const TileParts& tp = mGrid[k];
+        const TileParts& tp = *shown[k];
         for (int p = 0; p < TileParts::N; ++p)
         {
             const LLRect vr = tp.views[p]->getRect();
@@ -286,6 +325,9 @@ void WolfFloaterHuds::fitToArea()
     // the intro's and the status line's heights at this width (never less than the XML gives them)
     const S32 intro_w = mIntroXmlWidth - narrower;
     const S32 status_w = mStatusXmlWidth - narrower;
+    // [T958 2026-11-21] the intro's words for choosing, measured like the XML's
+    const std::string intro_words = mChoosing ? std::string(CHOOSE_INTRO) : mIntroWords;
+    if (mIntro->getText() != intro_words) mIntro->setText(intro_words);
     mIntro->reshape(intro_w, mIntroMinH);
     const S32 intro_h = llmax(mIntroMinH, mIntro->getTextPixelHeight());
     const S32 status_h = statusHeight(status_w);
@@ -307,6 +349,14 @@ void WolfFloaterHuds::fitToArea()
     // intro and status heights)
     const LLRect intro_r = mIntro->getRect(), status_r = mStatus->getRect(), scroll_r = mScroll->getRect();
     mIntro->setShape(LLRect(intro_r.mLeft, height - mTopToIntro, intro_r.mLeft + intro_w, height - mTopToIntro - intro_h));
+    // [T958 2026-11-21] Choose tiles... / Show all: their XML gap under the intro, however many lines it wrapped to
+    for (LLButton* b : { mChooseBtn, mShowAllBtn })
+    {
+        if (!b) continue;
+        LLRect br = b->getRect();
+        br.setLeftTopAndSize(br.mLeft, height - mTopToIntro - intro_h - mIntroToButtons, br.getWidth(), br.getHeight());
+        b->setShape(br);
+    }
     mStatus->setShape(LLRect(status_r.mLeft, mStatusBottom + status_h, status_r.mLeft + status_w, mStatusBottom));
     const LLRect scroll_new(scroll_r.mLeft, height - above, width - mScrollRightPad, below);
     mScroll->setShape(scroll_new);
@@ -330,6 +380,12 @@ S32 WolfFloaterHuds::statusHeight(S32 width)
     for (S32 i = 0; i < T_COUNT; ++i)
     {
         mStatus->setText(pressNote(static_cast<ETile>(i)));
+        h = llmax(h, mStatus->getTextPixelHeight());
+    }
+    // [T958 2026-11-21] and the choosing / hidden words (the widest counts)
+    for (const std::string& w : { hiddenWords(T_COUNT - 1), std::string(ALL_HIDDEN), choosingWords(0), choosingWords(T_COUNT) })
+    {
+        mStatus->setText(w);
         h = llmax(h, mStatus->getTextPixelHeight());
     }
     mStatus->setText(now);
@@ -384,6 +440,12 @@ bool WolfFloaterHuds::tileOn(ETile t)
 // Source: lltoolbarview.cpp postBuild before 2026-11-10 - each icon's commit callback, unchanged.
 void WolfFloaterHuds::onTile(ETile t)
 {
+    // [T958 2026-11-21] choosing: a press shows or hides the tile here, never its HUD (on any grid: it is only this window)
+    if (mChoosing)
+    {
+        setHidden(t, !mHidden[t]);
+        return;
+    }
     if (!WolfGrid::isOnWolfTerritories() && TILE_WOLF_ONLY[t])
     {
         return;   // the tiles are disabled off Wolf (refreshTiles); a press that slips through does nothing, as the icons
@@ -467,8 +529,20 @@ void WolfFloaterHuds::refreshTiles()
         const ETile t = static_cast<ETile>(i);
         const bool usable = wolf || !TILE_WOLF_ONLY[i];   // [W104 FEATFIX 2026-11-11/] Tessa's Compass works on every grid
         const bool on = usable && tileOn(t);
-        mTiles[i]->setEnabled(usable);
-        mTiles[i]->setToggleState(on);
+        mTiles[i]->setEnabled(usable || mChoosing);   // [T958/] choosing works off Wolf too: it is only this window
+        mTiles[i]->setToggleState(on && !mChoosing);
+        // [T958 2026-11-21] choosing: the line says whether it shows here (words, not colour alone), a hidden one's picture dimmed
+        if (mPics[i]) mPics[i]->setColor(LLColor4(1.f, 1.f, 1.f, (mChoosing && mHidden[i]) ? 0.35f : 1.f));
+        if (mChoosing)
+        {
+            const std::string choose = mHidden[i] ? std::string("\xE2\x97\x8B Hidden here") : std::string("\xE2\x9C\x93 Shown here");   // U+25CB / U+2713
+            if (mStates[i]->getText() != choose)
+            {
+                mStates[i]->setText(choose);
+                mStates[i]->setColor(LLUIColorTable::instance().getColor(mHidden[i] ? "LabelTextColor" : "LtGreen"));
+            }
+            continue;
+        }
         // The word as well as the light (never colour alone): ON / OFF, and what the old tooltips said beside it.
         std::string state = on ? "ON" : "OFF";
         bool running = on;   // the filled dot and the green word: the HUD shows, or its mode runs with it hidden
@@ -513,11 +587,94 @@ void WolfFloaterHuds::refreshTiles()
     if (mStatus)
     {
         // [W104 FEATFIX 2026-11-11 A7] after a press that did not switch a HUD on: why the window stayed open
-        const std::string msg = wolf ? mNote : std::string(NOT_ON_WOLF_STATUS);   // [HUDS SMALL 2026-11-14/] words unchanged
+        // [T958 2026-11-21] then, in the plain label colour: choosing, or how many tiles are hidden here
+        std::string msg = wolf ? mNote : std::string(NOT_ON_WOLF_STATUS);   // [HUDS SMALL 2026-11-14/] words unchanged
+        bool caution = !msg.empty();
+        if (mChoosing && mNote.empty())
+        {
+            msg = choosingWords(hiddenCount());
+            caution = false;
+        }
+        else if (msg.empty() && hiddenCount() > 0)
+        {
+            msg = hiddenCount() == T_COUNT ? std::string(ALL_HIDDEN) : hiddenWords(hiddenCount());
+        }
         if (mStatus->getText() != msg)
         {
             mStatus->setText(msg);
-            mStatus->setColor(LLUIColorTable::instance().getColor(msg.empty() ? "LabelTextColor" : "AlertCautionTextColor"));
+            mStatus->setColor(LLUIColorTable::instance().getColor(caution ? "AlertCautionTextColor" : "LabelTextColor"));
         }
     }
+}
+
+// ---- [T958 2026-11-21] which tiles show here ------------------------------------------------------------------------------
+
+void WolfFloaterHuds::loadHidden()
+{
+    for (bool& h : mHidden) h = false;
+    // the TILE_IDS of the hidden ones; an id this viewer does not have (a later or older tile) is left alone in the setting
+    const LLSD ids = gSavedPerAccountSettings.getLLSD("WolfHudsHidden");
+    if (!ids.isArray()) return;
+    for (LLSD::array_const_iterator it = ids.beginArray(); it != ids.endArray(); ++it)
+    {
+        const std::string id = it->asString();
+        for (S32 i = 0; i < T_COUNT; ++i)
+        {
+            if (id == TILE_IDS[i]) mHidden[i] = true;
+        }
+    }
+}
+
+void WolfFloaterHuds::saveHidden() const
+{
+    // the ids this viewer knows, as chosen, plus any it does not know that were already there (kept for the viewer that does)
+    LLSD out = LLSD::emptyArray();
+    const LLSD old = gSavedPerAccountSettings.getLLSD("WolfHudsHidden");
+    if (old.isArray())
+    {
+        for (LLSD::array_const_iterator it = old.beginArray(); it != old.endArray(); ++it)
+        {
+            const std::string id = it->asString();
+            bool known = false;
+            for (S32 i = 0; i < T_COUNT; ++i) known = known || id == TILE_IDS[i];
+            if (!known && !id.empty()) out.append(id);
+        }
+    }
+    for (S32 i = 0; i < T_COUNT; ++i)
+    {
+        if (mHidden[i]) out.append(std::string(TILE_IDS[i]));
+    }
+    gSavedPerAccountSettings.setLLSD("WolfHudsHidden", out);
+}
+
+S32 WolfFloaterHuds::hiddenCount() const
+{
+    S32 n = 0;
+    for (bool h : mHidden) n += h ? 1 : 0;
+    return n;
+}
+
+void WolfFloaterHuds::setHidden(ETile t, bool hidden)
+{
+    mHidden[t] = hidden;
+    saveHidden();   // at once: nothing to press to keep it
+    refreshTiles();
+}
+
+void WolfFloaterHuds::setChoosing(bool on)
+{
+    mChoosing = on;
+    mNote.clear();
+    if (mChooseBtn) mChooseBtn->setToggleState(on);
+    if (mShowAllBtn) mShowAllBtn->setVisible(on);
+    refreshTiles();
+    mFitW = mFitH = -1;   // the tiles laid out and the intro's words change: fit again
+    fitToArea();
+}
+
+void WolfFloaterHuds::showAll()
+{
+    for (bool& h : mHidden) h = false;
+    saveHidden();
+    refreshTiles();
 }

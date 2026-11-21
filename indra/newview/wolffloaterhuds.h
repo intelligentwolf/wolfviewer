@@ -15,6 +15,7 @@
 #include <vector>
 
 class LLButton;
+class LLIconCtrl;
 class LLScrollContainer;
 class LLTextBox;
 
@@ -59,8 +60,19 @@ private:
     void fitToArea();
     S32  statusHeight(S32 width);   // [HUDS SMALL 2026-11-14] the tallest the status line's words get at this width
 
+    // [T958 2026-11-21] ticket 958 (Luke Koda): the resident picks which tiles show here (settings_per_account.xml
+    // WolfHudsHidden, the TILE_IDS of the hidden ones). Choosing: every tile shows and a press shows or hides it; otherwise
+    // the hidden ones are left out and the rest close up. A hidden tile's HUD still works (Wolf World menu, its own keys).
+    void loadHidden();
+    void saveHidden() const;
+    void setHidden(ETile t, bool hidden);
+    void setChoosing(bool on);
+    void showAll();
+    S32  hiddenCount() const;
+
     LLButton*  mTiles[T_COUNT] = { nullptr };
     LLTextBox* mStates[T_COUNT] = { nullptr };
+    LLIconCtrl* mPics[T_COUNT] = { nullptr };   // [T958 2026-11-21/] pic_<id>, dimmed while choosing when hidden
     LLTextBox* mStatus = nullptr;
     LLScrollContainer* mScroll = nullptr;   // [HUDS TILES 2 2026-11-14] floater_wolf_huds.xml tiles_scroll
 
@@ -73,6 +85,7 @@ private:
         LLView* views[N] = { nullptr };
         S32 dx[N] = { 0 };     // left, from the tile's left
         S32 dtop[N] = { 0 };   // down, from the tile's top
+        ETile tile = T_GAME;   // [T958 2026-11-21/] which tile these are (mGrid is sorted into reading order)
     };
     std::vector<TileParts> mGrid;   // reading order (rows top to bottom, each left to right), as the XML places them
     bool mGridOk = false;           // the XML gave at least two columns and two rows to measure the steps from
@@ -83,6 +96,13 @@ private:
     S32 mTopToIntro = 0, mIntroToScroll = 0, mScrollToStatus = 0, mStatusBottom = 0, mIntroMinH = 0, mStatusMinH = 0;
     S32 mFitW = -1, mFitH = -1;     // the floaters' area fitToArea last fitted to
     std::string mNote;   // [W104 FEATFIX 2026-11-11 A7] the status line's words after a press that did not switch a HUD on
+    // [T958 2026-11-21] floater_wolf_huds.xml choose_btn / show_all_btn, under the intro (mIntroToButtons below it, as built)
+    LLButton* mChooseBtn = nullptr;
+    LLButton* mShowAllBtn = nullptr;
+    S32 mIntroToButtons = 0;
+    std::string mIntroWords;           // the intro as the XML has it (choosing shows other words)
+    bool mChoosing = false;
+    bool mHidden[T_COUNT] = { false };
 };
 
 #endif // WOLF_FLOATERHUDS_H

@@ -20,6 +20,7 @@
 #include "wolffloaterexperiences.h"
 
 #include <boost/json.hpp>
+#include <set>                  // [2026-11-21] mineLoaded: the curated ids listed
 
 #include "llagent.h"
 #include "llbutton.h"
@@ -601,6 +602,10 @@ namespace
         if (status == "live") return "Live - shown in Wolf Experiences";
         if (status == "rejected") return "Not listed";   // [2026-11-21] taken off the list by a grid admin (nothing is reviewed first now)
         if (status == "withdrawn") return "Withdrawn";
+        // [2026-11-21] not submission statuses: a Wolf Territories (curated) entry on the person's own region
+        // (php/experiences.php GET ?mine=1 "curated"), and one they removed while this window is open.
+        if (status == "curated") return "Listed by Wolf Territories";
+        if (status == "removed") return "Removed from Experiences";
         return status;
     }
 
@@ -1648,6 +1653,9 @@ void WolfFloaterExperienceSubmit::updateButtons()
 
     LLScrollListItem* mine = mMineList->getFirstSelected();
     bool can_withdraw = false;
+    // [2026-11-21] the one button says what it does for the chosen row: Withdraw (own submission), Remove from
+    // Experiences (a Wolf Territories entry on the person's region) or Undo (one they removed just now).
+    std::string label = "Withdraw";
     if (mine)
     {
         for (const LLSD& s : llsd::inArray(mMine))
@@ -1655,9 +1663,12 @@ void WolfFloaterExperienceSubmit::updateButtons()
             if (s["id"].asString() != mine->getValue().asString()) continue;
             // Source: EXPERIENCES_V1.md - withdraw = "the submitter's own pending/live entry".
             const std::string st = s["status"].asString();
-            can_withdraw = st == "pending" || st == "live";
+            can_withdraw = st == "pending" || st == "live" || st == "curated" || st == "removed";
+            if (st == "curated") label = "Remove from Experiences";
+            else if (st == "removed") label = "Undo";
         }
     }
+    mWithdraw->setLabel(label);
     mWithdraw->setEnabled(wolf && can_withdraw && !mActionBusy);
 
     const bool picked = mReviewList->getFirstSelected() != nullptr;
@@ -1768,11 +1779,13 @@ void WolfFloaterExperienceSubmit::loadMine()
         WolfFloaterExperienceSubmit* self = static_cast<WolfFloaterExperienceSubmit*>(h.get());
         if (!self) return;
         const bool ok = status == 200 && reply.isMap() && reply["success"].asBoolean();
-        self->mineLoaded(ok, ok ? reply["submissions"] : LLSD(), ok ? std::string() : xpError(status, reply, transport));
+        // [2026-11-21] php/experiences.php exp_mine_curated: "curated" is left out when the server could not read them.
+        self->mineLoaded(ok, ok ? reply["submissions"] : LLSD(), ok ? reply["curated"] : LLSD(),
+            ok ? std::string() : xpError(status, reply, transport));
     });
 }
 
-void WolfFloaterExperienceSubmit::mineLoaded(bool ok, const LLSD& submissions, const std::string& error)
+void WolfFloaterExperienceSubmit::mineLoaded(bool ok, const LLSD& submissions, const LLSD& curated, const std::string& error)
 {
     mMineBusy = false;
     if (!ok)
@@ -1783,6 +1796,29 @@ void WolfFloaterExperienceSubmit::mineLoaded(bool ok, const LLSD& submissions, c
         return;
     }
     mMine = LLSD::emptyArray();
+    // [2026-11-21] Paul 21 Nov: a region's owner may take a Wolf Territories entry on their own region off Wolf
+    // Experiences. They come first, marked status "curated" (statusWords); then any removed while this window is
+    // open ("removed", with Undo); then the person's own submissions. Curated ids are [a-z0-9-] slugs and
+    // submission ids are uuids, so the list's values cannot clash.
+    std::set<std::string> listed;
+    for (const LLSD& c : llsd::inArray(curated))
+    {
+        if (!c.isMap() || c["id"].asString().empty() || c["title"].asString().empty()) continue;
+        const std::string id = c["id"].asString();
+        // Removed just now: shown as removed (with Undo) even if this read came from a database copy a moment behind.
+        if (mCuratedRemoved.has(id)) continue;
+        listed.insert(id);
+        LLSD e = c;
+        e["status"] = "curated";
+        mMine.append(e);
+    }
+    for (LLSD::map_const_iterator it = mCuratedRemoved.beginMap(); it != mCuratedRemoved.endMap(); ++it)
+    {
+        if (listed.count(it->first)) continue;
+        LLSD e = it->second["entry"];
+        e["status"] = "removed";
+        mMine.append(e);
+    }
     for (const LLSD& s : llsd::inArray(submissions))
     {
         if (s.isMap() && !s["id"].asString().empty()) mMine.append(s);
@@ -1829,6 +1865,15 @@ void WolfFloaterExperienceSubmit::onMineSelect()
             {
                 text += llformat("\nIn %s at %d, %d, %d", region.c_str(), s["x"].asInteger(), s["y"].asInteger(), s["z"].asInteger());
             }
+            // [2026-11-21] a Wolf Territories entry: what it is and what the button does
+            if (s["status"].asString() == "curated")
+            {
+                text += "\nWe list this on your region. You can take it off Wolf Experiences if you do not want it there.";
+            }
+            else if (s["status"].asString() == "removed")
+            {
+                text += "\nPeople no longer see it in Wolf Experiences. Undo puts it back where it was.";
+            }
             // Source: EXPERIENCES_V1.md - "status (pending/live/rejected with the note)".
             if (!s["review_note"].asString().empty())
             {
@@ -1852,7 +1897,15 @@ void WolfFloaterExperienceSubmit::onWithdraw()
     std::string title;
     for (const LLSD& s : llsd::inArray(mMine))
     {
-        if (s["id"].asString() == id) title = s["title"].asString();
+        if (s["id"].asString() != id) continue;
+        // [2026-11-21] a Wolf Territories entry: Remove from Experiences / Undo, no question first (Undo is there)
+        const std::string st = s["status"].asString();
+        if (st == "curated" || st == "removed")
+        {
+            onCuratedRemoveOrUndo(s);
+            return;
+        }
+        title = s["title"].asString();
     }
     // Medium risk, not undoable from here (it would have to be sent and reviewed again): ask first.
     // Source: wolfcave.cpp:2106-2113 - GenericAlertYesCancel (notifications.xml:171-180), option 0 = Yes.
@@ -1884,6 +1937,74 @@ void WolfFloaterExperienceSubmit::onWithdraw()
                 me->actionDone(SECTION_MINE, ok, ok ? std::string("Withdrawn.") : xpError(status, reply, transport));
             });
         });
+}
+
+// [2026-11-21] Paul 21 Nov: a region's owner (or its estate owner or an estate manager) may take a Wolf Territories
+// entry on their own region off Wolf Experiences. Who may is decided by the server (php/experiences_lib.php
+// exp_curated_owner_remove), never here. One clear button and no question first: the entry stays in the list as
+// "Removed from Experiences" and the same button becomes Undo while this window is open (Paul: simple is best for
+// older and disabled residents). The server keeps the removal so a grid admin can put it back later as well.
+//   Remove: POST {action:"remove_curated", id}             -> {success, id, status:"removed", undo}
+//   Undo:   POST {action:"undo_remove_curated", undo}      -> {success, id, status:"listed"}
+// Source: php/experiences.php exp_remove_curated / exp_undo_remove_curated (WolfStorm experiences-edit 4d65bbb).
+void WolfFloaterExperienceSubmit::onCuratedRemoveOrUndo(const LLSD& s)
+{
+    if (mActionBusy || !WolfGrid::isWolfTerritories()) return;
+    const std::string id = s["id"].asString();
+    const std::string title = s["title"].asString();
+    const bool undo = s["status"].asString() == "removed";
+    LLSD body;
+    if (undo)
+    {
+        if (!mCuratedRemoved.has(id)) return;
+        body["action"] = "undo_remove_curated";
+        body["undo"] = mCuratedRemoved[id]["undo"].asString();
+    }
+    else
+    {
+        body["action"] = "remove_curated";
+        body["id"] = id;
+    }
+    LLSD entry = s;
+    entry.erase("status");
+    mActionBusy = true;
+    updateButtons();
+    setStatus(mMineStatus, undo ? "Putting it back\xE2\x80\xA6" : "Removing\xE2\x80\xA6", false);
+    LLHandle<LLFloater> h = getHandle();
+    LLCoros::instance().launch("WolfExperienceCuratedRemove", [h, body, entry, id, title, undo]()
+    {
+        LLSD reply;
+        std::string transport;
+        const S32 status = xpReplyOf(xpRequest(EXPERIENCES_URL, &body), reply, transport);
+        const bool answered = status == 200 && reply.isMap() && reply["success"].asBoolean();
+        const bool ok = answered && (undo || !reply["undo"].asString().empty());
+        if (answered) startFetch();    // the chooser's list changes for everyone
+        WolfFloaterExperienceSubmit* me = static_cast<WolfFloaterExperienceSubmit*>(h.get());
+        if (!me) return;
+        if (ok && undo)
+        {
+            me->mCuratedRemoved.erase(id);
+        }
+        else if (ok)
+        {
+            LLSD kept;
+            kept["entry"] = entry;
+            kept["undo"] = reply["undo"].asString();
+            me->mCuratedRemoved[id] = kept;
+        }
+        std::string message;
+        if (ok) message = undo ? "Put back. \"" + title + "\" is in Wolf Experiences again."
+                               : "Removed. \"" + title + "\" is no longer in Wolf Experiences. Press Undo to put it back.";
+        else if (answered) message = "The grid did not say how to undo it. Press Refresh to see where it stands.";
+        else message = "\"" + title + "\" could not be " + (undo ? "put back: " : "removed: ") + xpError(status, reply, transport);
+        me->actionDone(SECTION_MINE, ok, message);
+    });
+}
+
+void WolfFloaterExperienceSubmit::onClose(bool app_quitting)
+{
+    mCuratedRemoved = LLSD::emptyMap();   // Undo is offered while the window is open
+    LLFloater::onClose(app_quitting);
 }
 
 void WolfFloaterExperienceSubmit::loadReview()

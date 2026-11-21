@@ -47,6 +47,7 @@
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
 #include "llregionhandle.h"     // [WolfViewer 2026-10-14] from_region_handle (Go teleports directly)
+#include "llrand.h"             // [2026-11-21] ll_frand: the order of each open
 #include "llslurl.h"
 #include "llworldmapmessage.h"
 #include "lldate.h"             // [WolfViewer 2026-10-14] What's on: LLDate::now (the feed sent no "now")
@@ -598,7 +599,7 @@ namespace
     {
         if (status == "pending") return "Waiting for review";
         if (status == "live") return "Live - shown in Wolf Experiences";
-        if (status == "rejected") return "Not approved";
+        if (status == "rejected") return "Not listed";   // [2026-11-21] taken off the list by a grid admin (nothing is reviewed first now)
         if (status == "withdrawn") return "Withdrawn";
         return status;
     }
@@ -813,7 +814,11 @@ void WolfFloaterExperiences::onOpen(const LLSD& key)
     // Opened by hand before the after-login decision: that counts as this login's showing.
     sShownThisSession = true;
     mDontShow->set(gSavedSettings.getBOOL(SETTING_NO_SHOW));
-    load(false);
+    // [2026-11-21] Paul: "reload the list every time the window is opened" (two new destinations did not show: the list
+    // was kept for FRESH_SECONDS, 5 minutes). Every open asks again (load(true)); the list held stays on show meanwhile
+    // (refreshView) and the carousel keeps its place when the answer is the same list (WolfExperienceCarousel::setData).
+    // The server reads the database on every request and answers an identified caller private, no-cache.
+    load(true);
     // The keyboard starts on the carousel (Left / Right spin, Enter opens the front card).
     if (!mWhatsOn) mCarousel->setFocus(true);
 }
@@ -821,6 +826,7 @@ void WolfFloaterExperiences::onOpen(const LLSD& key)
 void WolfFloaterExperiences::onClose(bool app_quitting)
 {
     mCentreOnOpen = true;
+    mShuffle.clear();   // [2026-11-21] the next open draws a new order
     LLFloater::onClose(app_quitting);
 }
 
@@ -950,6 +956,16 @@ void WolfFloaterExperiences::refreshView()
 void WolfFloaterExperiences::fillCarousel()
 {
     std::vector<WolfExperienceCarousel::Entry> entries;
+    // [2026-11-21] Paul: "randomise the order on every open, so it looks like there's more to explore". Each entry gets a
+    // random place for this open (mShuffle, emptied on close), so every category's ring and All come in a new order,
+    // featured ones mixed in (they keep their badge); the order holds while the window stays open, so a refetch or
+    // another category does not reshuffle under the resident. (clean() still keeps the list itself featured first.)
+    auto place = [this](const std::string& id) -> F32
+    {
+        auto it = mShuffle.find(id);
+        if (it == mShuffle.end()) it = mShuffle.emplace(id, ll_frand()).first;
+        return it->second;
+    };
     for (const LLSD& e : llsd::inArray(sReply["experiences"]))
     {
         WolfExperienceCarousel::Entry x;
@@ -969,6 +985,10 @@ void WolfFloaterExperiences::fillCarousel()
         x.mFeatured = e["featured"].asBoolean();
         entries.push_back(x);
     }
+    std::stable_sort(entries.begin(), entries.end(), [&place](const WolfExperienceCarousel::Entry& a, const WolfExperienceCarousel::Entry& b)
+    {
+        return place(a.mId) < place(b.mId);
+    });
     std::vector<WolfExperienceCarousel::Category> cats;
     WolfExperienceCarousel::Category all;
     all.mTitle = "All";
@@ -1702,11 +1722,13 @@ void WolfFloaterExperienceSubmit::onSubmit()
         WolfFloaterExperienceSubmit* self = static_cast<WolfFloaterExperienceSubmit*>(h.get());
         if (!self) return;
         const bool ok = status == 200 && reply.isMap() && reply["success"].asBoolean();
-        self->submitDone(ok, ok ? std::string() : xpError(status, reply, transport));
+        // [2026-11-21] the reply's status is what it was stored as: "live" (php/experiences.php EXP_AUTO_APPROVE), or
+        // "pending" if the grid goes back to reviewing first
+        self->submitDone(ok, ok ? std::string() : xpError(status, reply, transport), ok ? reply["status"].asString() : std::string());
     });
 }
 
-void WolfFloaterExperienceSubmit::submitDone(bool ok, const std::string& message)
+void WolfFloaterExperienceSubmit::submitDone(bool ok, const std::string& message, const std::string& stored_as)
 {
     mSubmitting = false;
     if (!ok)
@@ -1722,7 +1744,12 @@ void WolfFloaterExperienceSubmit::submitDone(bool ok, const std::string& message
     mArrive->clear();
     setStatus(mAddStatus, std::string(), false);
     showSection(SECTION_MINE);
-    setStatus(mMineStatus, "\"" + title + "\" was sent. A grid admin will look at it; its status shows here.", false);
+    // [2026-11-21] Paul: "we don't review them any more" - said as it is: listed at once (stored "live"); the old words only
+    // if the grid ever stores it "pending" again.
+    setStatus(mMineStatus, stored_as == "pending"
+        ? "\"" + title + "\" was sent. A grid admin will look at it; its status shows here."
+        : "\"" + title + "\" is now listed in Wolf Experiences.", false);
+    sReplyAt = -1.0;    // the chooser asks again (it does on every open too)
     loadMine();
 }
 

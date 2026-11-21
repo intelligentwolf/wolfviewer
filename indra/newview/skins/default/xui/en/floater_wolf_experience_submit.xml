@@ -21,12 +21,12 @@
     <button follows="left|top" height="24" is_toggle="true" label="Add" layout="topleft" left="12" name="sec_add" top="26" width="70"
      tool_tip="Fill in a card for a place you made." />
     <button follows="left|top" height="24" is_toggle="true" label="My experiences" layout="topleft" left="86" name="sec_mine" top="26" width="130"
-     tool_tip="The experiences you sent: waiting, live or not approved." />
+     tool_tip="The experiences you added: listed, not listed (with the grid admins' note) or withdrawn." />
     <button follows="left|top" height="24" is_toggle="true" label="Waiting for review" layout="topleft" left="220" name="sec_review" top="26" visible="false" width="190"
      tool_tip="Grid admins: experiences residents sent, to visit and approve or reject." />
 
     <!-- ===== Add ===== -->
-    <text follows="left|top" height="32" layout="topleft" left="12" name="add_intro" top="58" width="496" wrap="true">Stand where people should arrive and fill in the card. A grid admin checks it before new residents see it in Wolf Experiences.</text>
+    <text follows="left|top" height="32" layout="topleft" left="12" name="add_intro" top="58" width="496" wrap="true">Stand where people should arrive and fill in the card. It shows in Wolf Experiences as soon as you submit it.</text>
 
     <text follows="left|top" height="16" layout="topleft" left="12" name="add_region_lbl" top="98" width="118">Region</text>
     <line_editor follows="left|top" height="20" layout="topleft" left="134" max_length_chars="64" name="add_region" top="96" width="374"
@@ -75,8 +75,8 @@
 
     <button follows="left|top" height="24" label="Cancel" layout="topleft" left="274" name="add_cancel" top="474" width="96"
      tool_tip="Close without sending. What you typed is kept for next time." />
-    <button follows="left|top" height="24" label="Submit for review" layout="topleft" left="378" name="add_submit" top="474" width="130"
-     tool_tip="Send the card to the grid admins. You can follow it under My experiences." />
+    <button follows="left|top" height="24" label="Submit" layout="topleft" left="378" name="add_submit" top="474" width="130"
+     tool_tip="Add the card to Wolf Experiences now. You can follow or withdraw it under My experiences." />
 
     <!-- ===== My experiences ===== -->
     <scroll_list follows="left|top" height="230" layout="topleft" left="12" name="mine_list" top="58" width="496"
@@ -89,7 +89,7 @@
     <button follows="left|top" height="24" label="Refresh" layout="topleft" left="12" name="mine_refresh" top="474" width="96"
      tool_tip="Ask the grid for your experiences' status again." />
     <button follows="left|top" height="24" label="Withdraw" layout="topleft" left="378" name="mine_withdraw" top="474" width="130"
-     tool_tip="Take the chosen experience out of review, or out of Wolf Experiences if it is live." />
+     tool_tip="Take the chosen experience out of Wolf Experiences." />
 
     <!-- ===== Waiting for review (admins) ===== -->
     <scroll_list follows="left|top" height="160" layout="topleft" left="12" name="review_list" top="58" width="496"

@@ -60,6 +60,6 @@
      tool_tip="Ticked, this window no longer opens by itself after you log in. You can always open it from Wolf World &gt; Experiences..." />
     <!-- [WolfViewer 2026-10-14] Builder tools (EXPERIENCES_V1.md v1.1): opens floater_wolf_experience_submit.xml. -->
     <button follows="left|bottom" height="28" label="Add your experience" layout="topleft" left="244" name="add_btn" top="641" width="170"
-     tool_tip="Made somewhere worth visiting? Add it here. A grid admin checks it before new residents see it." />
+     tool_tip="Made somewhere worth visiting? Add it here: it shows in Wolf Experiences as soon as you submit it." />
     <button follows="right|bottom" height="28" label="Close" layout="topleft" left="790" name="close_btn" top="641" width="94" />
 </floater>

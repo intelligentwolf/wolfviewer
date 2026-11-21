@@ -18,6 +18,8 @@
 
 #include "llfloater.h"
 
+#include <map>
+
 class LLButton;
 class LLCheckBoxCtrl;
 class LLComboBox;
@@ -110,6 +112,8 @@ private:
     // [2026-11-21] Paul: "the Experiences floater should ALWAYS appear in the middle of the screen, not just random
     // places": every open of a closed window centres it (onClose sets this, onOpen centres and clears it).
     bool mCentreOnOpen = true;
+    // [2026-11-21] Paul: "randomise the order on every open": each entry's random place for this open (fillCarousel).
+    std::map<std::string, F32> mShuffle;
 };
 
 // [WolfViewer 2026-10-14] Builder tools (EXPERIENCES_V1.md "Builder tools - Add your experience (v1.1)";
@@ -164,7 +168,7 @@ private:
     void setStatus(LLTextBox* box, const std::string& text, bool error);
 
     // The coroutines' answers (only when this window still exists: they hold its handle).
-    void submitDone(bool ok, const std::string& message);
+    void submitDone(bool ok, const std::string& message, const std::string& stored_as);   // [2026-11-21] stored_as: the reply's status
     void mineLoaded(bool ok, const LLSD& submissions, const std::string& error);
     void reviewLoaded(bool ok, const LLSD& submissions, const std::string& error);
     void actionDone(ESection section, bool ok, const std::string& message);

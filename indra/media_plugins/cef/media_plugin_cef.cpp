@@ -52,6 +52,58 @@
 #include "dullahan.h"
 #include "dullahan_version.h"
 
+#if LL_LINUX
+#include <dlfcn.h>
+#include <iostream>
+
+// [T982 2026-11-21] Copy from a web page reached nothing on Linux: the browser's X connection was never read.
+// Source: dullahan v1.50.0 src/dullahan_impl.cpp:303,306 - external_message_pump = true, multi_threaded_message_loop = false;
+//         this plugin drives CEF with CefDoMessageLoopWork() on each "idle" (dullahan_impl.cpp:549-556 update()).
+// Source: CEF 7977 libcef/browser/browser_message_loop.cc:23-50 MessagePumpExternal - derives from
+//         base::MessagePumpForUI (MessagePumpGlib on Linux, base/message_loop/message_pump_for_ui.h:44-45) but its
+//         Run() only calls DoWork()/DoIdleWork(); it never iterates the glib main context.
+// Source: Chromium 152.0.7977.83 ui/events/platform/x11/x11_event_watcher_glib.cc:87-114 StartWatching() - the X11
+//         connection is read and dispatched ONLY by a GSource on g_main_context_default(). With nobody iterating that
+//         context the X selection requests other programs send (paste) go unanswered: CEF owns CLIPBOARD and PRIMARY
+//         but never hands the text over (rig, 21 Nov: owner present, no reply in 20 s).
+// Source: CEF 7977 tests/shared/browser/main_message_loop_external_pump_linux.cc:160,209,219 - CEF's own external pump
+//         on Linux runs g_main_context_iteration() on g_main_context_default() next to CefDoMessageLoopWork(); this does
+//         the same. Chromium's own work source does nothing when iterated outside its Run(): HandlePrepare/HandleCheck
+//         return 0/FALSE while state_ is null (message_pump_glib.cc:661-665, 680-683), as do the observer source's
+//         (626-629, 642-645).
+// glib is looked up in the copy libcef.so already loaded (RTLD_NOLOAD), never linked here: the prebuilt glib package
+// is a static libglib-2.0.a (cmake/GLIB.cmake:8), and a second glib would have its own, different default context.
+static const int WOLF_GLIB_MAX_DISPATCH_PER_IDLE = 32;
+
+static void wolfPumpGlibMainContext()
+{
+    typedef int (*glib_iteration_fn)(void* context, int may_block);   // gboolean g_main_context_iteration(GMainContext*, gboolean)
+    static glib_iteration_fn iterate = nullptr;
+    static bool looked_up = false;
+    if (!looked_up)
+    {
+        looked_up = true;
+        void* glib = dlopen("libglib-2.0.so.0", RTLD_NOW | RTLD_NOLOAD);
+        if (glib)
+        {
+            iterate = reinterpret_cast<glib_iteration_fn>(dlsym(glib, "g_main_context_iteration"));
+        }
+        if (!iterate)
+        {
+            std::cerr << "media_plugin_cef: glib main context not found - copying from web pages will not reach other programs" << std::endl;
+        }
+    }
+    if (!iterate)
+    {
+        return;
+    }
+    // non-blocking (may_block 0) on the default context (nullptr); TRUE = something was dispatched, so look again
+    for (int i = 0; i < WOLF_GLIB_MAX_DISPATCH_PER_IDLE && iterate(nullptr, 0); ++i)
+    {
+    }
+}
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // [SEARCH RESIZE 2026-11-14] how long a resize waits for CEF's frame at the new size before nudging CEF (see
@@ -584,6 +636,9 @@ void MediaPluginCEF::receiveMessage(const char* message_string)
             else if (message_name == "idle")
             {
                 mCEFLib->update();
+#if LL_LINUX
+                wolfPumpGlibMainContext();   // [T982] CEF's X11 events, e.g. a paste asking for copied text
+#endif
 
                 // [SEARCH RESIZE 2026-11-14] still no frame at the size the viewer asked for: nudge the page zoom for
                 // one "idle" (see onPageChangedCallback), then put it back. Repeats every WOLF_RESIZE_NUDGE_MS until

@@ -568,6 +568,20 @@
          width="128">
           m
         </text>
+        <!-- [AUTO DRAW DISTANCE CHECKBOX 2026-11-21] Paul: "in the graphics settings add the checkbox to control auto draw
+         distance". The same setting as Wolf World > Display & Effects > Adaptive Draw Distance (WolfAdaptiveDrawDistance,
+         on by default, wolfadaptivedrawdistance.cpp). The slider above stays the resident's own RenderFarClip, which that
+         module never changes: it only lowers the distance in use, never above the slider. -->
+        <check_box
+         control_name="WolfAdaptiveDrawDistance"
+         height="16"
+         label="Ease draw distance automatically when things get slow"
+         layout="topleft"
+         left="196"
+         name="WolfAdaptiveDrawDistance"
+         tool_tip="When things get slow, WolfViewer shortens the draw distance for a while to keep moving smooth, then brings it back slowly once things are smooth again. The Draw distance slider above stays your own setting and is the furthest it will ever go; a note shows above the bottom toolbar while it is shortened. It rests while Auto Tune (in the Performance window) is running, and in VR. Also in Wolf World &gt; Display &amp; Effects."
+         top_pad="5"
+         width="320" />
         <slider
          control_name="RenderMaxPartCount"
          decimal_digits="0"

@@ -19957,6 +19957,39 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfRailDeparturesNetwork</key>
+		<map>
+			<key>Comment</key>
+			<string>[RAIL BRAIN 2026-11-20] Railway Departures: the railway last looked at (its name, as its boards show it).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string></string>
+		</map>
+		<key>WolfRailDeparturesRecent</key>
+		<map>
+			<key>Comment</key>
+			<string>[RAIL BRAIN 2026-11-20] Railway Departures: the railways looked at before, newest first (names, comma separated; at most 8).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string></string>
+		</map>
+		<key>WolfRailDeparturesStation</key>
+		<map>
+			<key>Comment</key>
+			<string>[RAIL BRAIN 2026-11-20] Railway Departures: the station last looked at ("" = all stations).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string></string>
+		</map>
 		<key>WolfViewerWeatherProps</key>
 		<map>
 			<key>Comment</key>

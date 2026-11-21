@@ -102,6 +102,9 @@ private:
     bool mAudioDeviceWanted = false;    // the viewer has said which device
     std::string mAudioDevice;           // the system's device name; empty = the system default
     std::string mAudioDeviceApplied;    // the name playbin's audio sink is on now; empty = playbin's default sink
+    // [W109 2026-11-21] the state playbin was set back to after a sink swap; when playbin reaches it, the viewer's volume is put
+    // back once more (processGSTEvents). GST_STATE_VOID_PENDING = no swap waiting.
+    GstState mVolumeAfterSwap = GST_STATE_VOID_PENDING;
 #endif
 
     double MIN_LOOP_SEC = 1.0F;
@@ -192,6 +195,20 @@ gboolean MediaPluginGStreamer10::processGSTEvents(GstBus *bus, GstMessage *messa
                                               &old_state,
                                               &new_state,
                                               &pending_state);
+#if LL_LINUX
+            // [W109 2026-11-21] Ticket 937, back to "System default" while music plays: the explicit autoaudiosink builds its
+            // pulsesink only on the way back up, and playsink then takes over that stream's volume as the sound server
+            // remembers it for "SLPlugin" - after applyAudioDevice() had already put the viewer's volume back. On the W109 rig
+            // the remembered level was 0 %, so the music went silent (rig step 4b). Measured with a harness doing the same
+            // calls as SLPlugin (~/.cache/w109/gstharness): playbin "volume" read 0.0 after the swap and the sink was silent;
+            // set again once playbin had reached its state, it read 0.5 and the music played (-27.7 dBFS).
+            if (mVolumeAfterSwap != GST_STATE_VOID_PENDING && mPlaybin && GST_MESSAGE_SRC(message) == GST_OBJECT(mPlaybin)
+                && new_state == mVolumeAfterSwap)
+            {
+                mVolumeAfterSwap = GST_STATE_VOID_PENDING;
+                llg_object_set(mPlaybin, "volume", (gdouble)mVolume, NULL);
+            }
+#endif
 
             switch (new_state)
             {
@@ -726,6 +743,9 @@ void MediaPluginGStreamer10::applyAudioDevice()
             // (measured on the rig: a remembered 0 % silenced the music, also after moving on to the next device).
             // The viewer only sends "set_volume" when its volume changes, so put the viewer's volume back here.
             llg_object_set(mPlaybin, "volume", (gdouble)mVolume, NULL);
+            // [W109 2026-11-21] and once more when playbin is back at that state (processGSTEvents): a sink that is made
+            // on the way up (autoaudiosink) has its remembered volume taken over after the line above
+            mVolumeAfterSwap = target;
         }
         mAudioDeviceApplied = now_on;
     }

@@ -53,6 +53,7 @@
 #include "lluicolortable.h"     // [WolfViewer 2026-10-14] What's on: AccentColor for LIVE NOW
 #include "llurlaction.h"        // [WolfViewer 2026-10-14] What's on: follow an off-grid event's link
 #include "wolfgrid.h"
+#include "wolfexperiencecarousel.h"   // [2026-11-21] the 3D carousel
 #include "llappviewer.h"        // [WolfViewer 2026-10-14] gDisconnected (upload_new_resource does nothing then)
 #include "llagentbenefits.h"    // [WolfViewer 2026-10-14] builder tools "Upload a picture...": the upload cost
 #include "llfloaterperms.h"     //   the default upload permissions
@@ -76,18 +77,13 @@ namespace
     const char* const FLOATER_NAME = "wolf_experiences";
     const char* const SUBMIT_FLOATER_NAME = "wolf_experience_submit";   // [WolfViewer 2026-10-14] builder tools
 
-    // Card geometry (panel_wolf_experience_card.xml holds the looks, these the places). Featured
-    // cards are taller with a bigger picture (contract: "shown first, larger").
-    const S32 CARD_W = 500;
-    const S32 CARD_H = 108;
-    const S32 CARD_H_FEATURED = 148;
+    // What's on's card geometry (panel_wolf_experience_card.xml holds the looks, these the places).
+    // [2026-11-21] The experience cards are the carousel's now (wolfexperiencecarousel.cpp); an event card is as wide
+    // as the list (the window is bigger and resizable): buildEventCards.
     const S32 CARD_GAP = 8;
     const S32 PAD = 6;
     const S32 GO_W = 70;
     const S32 GO_H = 28;
-    const S32 CHIP_H = 22;      // the chips' height in floater_wolf_experiences.xml
-    const S32 CHIP_GAP = 4;
-    const S32 CHIP_MARGIN = 12; // the window's side margin (the chips' left in the layout file)
 
     // ---- the shared list (main thread only: coroutines run on it) ----
     LLSD sReply;                  // the last good reply, cleaned (see clean())
@@ -720,27 +716,15 @@ bool WolfFloaterExperiences::postBuild()
     mRetry = getChild<LLButton>("retry");
     mDontShow = getChild<LLCheckBoxCtrl>("dont_show");
 
-    // The scrolled view, made here so Escape passes through it (PassEscapePanel).
+    // The scrolled view (What's on's event cards), made here so Escape passes through it (PassEscapePanel).
     mCards = new PassEscapePanel();
-    mCards->setRect(LLRect(0, 0, CARD_W, 0));
+    mCards->setRect(LLRect(0, 0, mScroll->getRect().getWidth(), 0));
     mCards->setFollows(FOLLOWS_LEFT | FOLLOWS_TOP);
     mScroll->addChild(mCards);
 
-    // Where the chip rows start and where the card list ends, as the layout file places them
-    // (buildChips wraps the chips from here and stretches the list up to the last row).
-    mChipLeft0 = getChild<LLButton>("cat_0")->getRect().mLeft;
-    mChipTop0 = getChild<LLButton>("cat_0")->getRect().mTop;
-    mScrollBottom = mScroll->getRect().mBottom;
-    for (S32 i = 0; i <= MAX_CATEGORIES; ++i)
-    {
-        LLButton* chip = getChild<LLButton>(llformat("cat_%d", i));
-        chip->setCommitCallback([this, i](LLUICtrl*, const LLSD&)
-        {
-            if (i < (S32)mChipIds.size()) mCategory = mChipIds[i];
-            refreshView();
-        });
-        mChips.push_back(chip);
-    }
+    // [2026-11-21] The carousel: Visit goes to the same Go as the cards did.
+    mCarousel = getChild<WolfExperienceCarousel>("carousel");
+    mCarousel->mOnVisit = [this](const std::string& id) { onGo(id); };
 
     mDontShow->set(gSavedSettings.getBOOL(SETTING_NO_SHOW));
     mDontShow->setCommitCallback([](LLUICtrl* c, const LLSD&)
@@ -771,10 +755,37 @@ bool WolfFloaterExperiences::postBuild()
 void WolfFloaterExperiences::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);
+    // [2026-11-21] Paul: "the Experiences floater should ALWAYS appear in the middle of the screen, not just random
+    // places". Each open of a closed window centres it on the screen as it is now: in the floater view's snap area,
+    // the part the toolbars leave free (llfloater.cpp:3335 LLFloaterView::getSnapRect), after shrinking it to fit
+    // there if the screen is small or UI Size large (never below the layout's min_width / min_height), so its footer is
+    // never under the bottom toolbar (the first rig run, 1280 x 775: the 680-high window ran under it). An open of the
+    // window already showing (the toolbar button again) leaves it where it is. The layout has save_rect off, so no
+    // stored place comes back either.
+    if (mCentreOnOpen && gFloaterView && !getHost())
+    {
+        const LLRect snap = gFloaterView->getSnapRect();
+        const S32 w = llmax(getMinWidth(), llmin(getRect().getWidth(), snap.getWidth()));
+        const S32 h = llmax(getMinHeight(), llmin(getRect().getHeight(), snap.getHeight()));
+        if (w != getRect().getWidth() || h != getRect().getHeight())
+        {
+            reshape(w, h);
+        }
+        centerWithin(snap);
+        mCentreOnOpen = false;
+    }
     // Opened by hand before the after-login decision: that counts as this login's showing.
     sShownThisSession = true;
     mDontShow->set(gSavedSettings.getBOOL(SETTING_NO_SHOW));
     load(false);
+    // The keyboard starts on the carousel (Left / Right spin, Enter opens the front card).
+    if (!mWhatsOn) mCarousel->setFocus(true);
+}
+
+void WolfFloaterExperiences::onClose(bool app_quitting)
+{
+    mCentreOnOpen = true;
+    LLFloater::onClose(app_quitting);
 }
 
 bool WolfFloaterExperiences::handleKeyHere(KEY key, MASK mask)
@@ -846,11 +857,11 @@ void WolfFloaterExperiences::setStatus(const std::string& text, bool error, bool
 void WolfFloaterExperiences::refreshView()
 {
     mAddBtn->setVisible(WolfGrid::isOnWolfTerritories() && !mWhatsOn);   // [WolfViewer 2026-10-14] builder tools
+    // [2026-11-21] Experiences = the carousel; What's on = its sky behind the event list.
+    mCarousel->setSkyOnly(mWhatsOn);
+    mScroll->setVisible(mWhatsOn);
     if (mWhatsOn)
     {
-        // [WolfViewer 2026-10-14] What's on: no chips; the cards start under the subtitle.
-        for (LLButton* chip : mChips) chip->setVisible(false);
-        placeScroll(mChipTop0);
         if (!WolfGrid::isOnWolfTerritories())
         {
             clearCards();
@@ -874,17 +885,16 @@ void WolfFloaterExperiences::refreshView()
         buildEventCards();
         return;
     }
+    clearCards();
     if (!WolfGrid::isOnWolfTerritories())
     {
-        buildChips(LLSD::emptyArray());
-        clearCards();
+        mCarousel->clearData();
         setStatus("Experiences are on Wolf Territories only.", true, false);
         return;
     }
     if (!haveReply())
     {
-        buildChips(LLSD::emptyArray());
-        clearCards();
+        mCarousel->clearData();
         if (sFetching || sError.empty())
         {
             setStatus("Finding experiences\xE2\x80\xA6", false, false);
@@ -896,63 +906,53 @@ void WolfFloaterExperiences::refreshView()
         return;
     }
     // An older list stays on show while a newer one is fetched; a failed refresh keeps it too.
-    buildChips(sReply["categories"]);
-    buildCards();
+    fillCarousel();
 }
 
-void WolfFloaterExperiences::buildChips(const LLSD& categories)
+// [2026-11-21] The carousel's pills and cards from the list: "All" first, then each category that has something in it
+// (WolfStorm shows the same), each with how many it holds; the entries featured first (clean() already ordered them).
+void WolfFloaterExperiences::fillCarousel()
 {
-    mChipIds.clear();
-    mChipIds.push_back(std::string());
-    for (const LLSD& c : llsd::inArray(categories))
+    std::vector<WolfExperienceCarousel::Entry> entries;
+    for (const LLSD& e : llsd::inArray(sReply["experiences"]))
     {
-        mChipIds.push_back(c["id"].asString());
+        WolfExperienceCarousel::Entry x;
+        x.mId = e["id"].asString();
+        x.mTitle = e["title"].asString();
+        x.mRegion = e["region"].asString();
+        // [WolfViewer 2026-10-14] Source: EXPERIENCES_V1.md "Builder tools" - approved community entries carry
+        // "community": true and "by": "<avatar name>"; they show a small "by <name>".
+        x.mBy = e["community"].asBoolean() ? e["by"].asString() : std::string();
+        x.mBlurb = e["blurb"].asString();
+        x.mArrive = e["arrive"].asString();
+        x.mCategory = e["category"].asString();
+        x.mIcon = categoryIcon(x.mCategory);
+        // A null uuid: the category's icon (contract). The site fills a missing picture with the region's map image
+        // (php/experiences.php exp_fill_map_images, "imageIsMap"), so the icon is rare.
+        x.mImage = e["image"].asUUID();
+        x.mFeatured = e["featured"].asBoolean();
+        entries.push_back(x);
     }
-    // A category that is no longer in the list: back to All.
-    if (std::find(mChipIds.begin(), mChipIds.end(), mCategory) == mChipIds.end())
+    std::vector<WolfExperienceCarousel::Category> cats;
+    WolfExperienceCarousel::Category all;
+    all.mTitle = "All";
+    all.mIcon = "Command_WolfCompass_Icon";   // textures.xml:199, the Wolf compass rose
+    all.mCount = (S32)entries.size();
+    cats.push_back(all);
+    for (const LLSD& c : llsd::inArray(sReply["categories"]))
     {
-        mCategory.clear();
-    }
-    // [WolfViewer 2026-10-14] Paul's screenshot: seven chips in one row ran far past the window's right
-    // edge. They now wrap into rows inside the window, and the card list starts below the last row.
-    // The chips' tooltips are gone: the label says what each does, and the "All" one hung over the first
-    // card's picture.
-    const LLFontGL* font = LLFontGL::getFontSansSerifSmall();
-    const S32 right_edge = getRect().getWidth() - CHIP_MARGIN;
-    S32 left = mChipLeft0, top = mChipTop0, rows = 0;
-    const bool any = categories.size() > 0;
-    for (size_t i = 0; i < mChips.size(); ++i)
-    {
-        LLButton* chip = mChips[i];
-        const bool used = any && i < mChipIds.size();
-        chip->setVisible(used);
-        if (!used) continue;
-        const std::string label = i == 0 ? std::string("All") : categories[(S32)i - 1]["title"].asString();
-        chip->setLabel(label);
-        chip->setToolTip(std::string());
-        const S32 w = llmax(48, font->getWidth(label) + 24);
-        if (rows == 0) rows = 1;
-        if (left > mChipLeft0 && left + w > right_edge)
+        WolfExperienceCarousel::Category x;
+        x.mId = c["id"].asString();
+        x.mTitle = c["title"].asString();
+        x.mIcon = categoryIcon(x.mId);
+        for (const WolfExperienceCarousel::Entry& e : entries)
         {
-            left = mChipLeft0;
-            top -= CHIP_H + CHIP_GAP;
-            ++rows;
+            if (e.mCategory == x.mId) ++x.mCount;
         }
-        chip->setRect(LLRect(left, top, left + w, top - CHIP_H));
-        left += w + CHIP_GAP;
-        chip->setToggleState(mChipIds[i] == mCategory);
+        if (x.mCount > 0) cats.push_back(x);
     }
-    // The cards fill from just under the chips (or under the subtitle when there are none) to the
-    // scroll's own bottom, which stays where the layout put it.
-    placeScroll(rows ? mChipTop0 - rows * (CHIP_H + CHIP_GAP) - CHIP_GAP : mChipTop0);
-}
-
-// [WolfViewer 2026-10-14] The card list from `top` down to the scroll's own bottom, which stays where the
-// layout put it.
-void WolfFloaterExperiences::placeScroll(S32 top)
-{
-    LLRect sr = mScroll->getRect();
-    mScroll->setRect(LLRect(sr.mLeft, top, sr.mRight, mScrollBottom));
+    mCarousel->setData(cats, entries);
+    setStatus(entries.empty() ? std::string("There are no experiences to choose from yet.") : std::string(), false, false);
 }
 
 // [WolfViewer 2026-10-14] Every card goes, and with it What's on's pointers to their time lines.
@@ -960,111 +960,6 @@ void WolfFloaterExperiences::clearCards()
 {
     mEventTimes.clear();
     mCards->deleteAllChildren();
-}
-
-void WolfFloaterExperiences::buildCards()
-{
-    clearCards();
-
-    std::vector<LLSD> shown;
-    for (const LLSD& e : llsd::inArray(sReply["experiences"]))
-    {
-        if (mCategory.empty() || e["category"].asString() == mCategory) shown.push_back(e);
-    }
-
-    S32 total_h = 0;
-    for (const LLSD& e : shown)
-    {
-        total_h += (e["featured"].asBoolean() ? CARD_H_FEATURED : CARD_H) + CARD_GAP;
-    }
-    mCards->setRect(LLRect(0, total_h, CARD_W, 0));
-
-    S32 top = 0;
-    for (const LLSD& e : shown)
-    {
-        const bool featured = e["featured"].asBoolean();
-        const S32 h = featured ? CARD_H_FEATURED : CARD_H;
-        const S32 pic_h = h - 2 * PAD;
-        const S32 pic_w = pic_h * 4 / 3;    // parcel snapshots are 4:3
-        const S32 text_left = PAD + pic_w + 10;
-        // [WolfViewer 2026-10-14] Paul's screenshot: titles were cut short ("Fly Concorde over the
-        // Territor..."). The title and blurb now use the card's whole width; Go sits bottom right,
-        // beside the "In <region>" line.
-        const S32 text_w = CARD_W - text_left - PAD;
-        const S32 where_w = text_w - GO_W - 8;
-
-        PassEscapePanel* card = new PassEscapePanel();
-        card->buildFromFile("panel_wolf_experience_card.xml");
-        card->setRect(topLeft(total_h, 0, top, CARD_W, h));
-        mCards->addChild(card);   // added in order: Tab reaches the Go buttons top to bottom
-
-        // Picture: the texture by uuid, as LLAvatarIconCtrl shows a profile picture
-        // (lliconctrl.cpp:122-146 LLIconCtrl::setValue -> LLUI::getUIImageByID, a fetched texture).
-        // A null uuid: the category's icon (contract).
-        LLIconCtrl* pic = card->getChild<LLIconCtrl>("picture");
-        const LLUUID image = e["image"].asUUID();
-        if (image.notNull())
-        {
-            pic->setRect(topLeft(h, PAD, PAD, pic_w, pic_h));
-            pic->setValue(image);
-        }
-        else
-        {
-            const S32 icon = llmin(pic_h, 64);
-            pic->setRect(topLeft(h, PAD + (pic_w - icon) / 2, (h - icon) / 2, icon, icon));
-            pic->setValue(categoryIcon(e["category"].asString()));
-        }
-
-        const std::string title = e["title"].asString();
-        const std::string region = e["region"].asString();
-        LLTextBox* title_text = card->getChild<LLTextBox>("title");
-        title_text->setRect(topLeft(h, text_left, PAD, text_w, 18));
-        title_text->setText(title);
-
-        LLTextBox* blurb = card->getChild<LLTextBox>("blurb");
-        blurb->setRect(topLeft(h, text_left, PAD + 20, text_w, h - 2 * PAD - 20 - GO_H - 4));
-        blurb->setText(e["blurb"].asString());
-
-        LLTextBox* where = card->getChild<LLTextBox>("where");
-        where->setRect(topLeft(h, text_left, h - PAD - (GO_H + 16) / 2, where_w, 16));
-        // [WolfViewer 2026-10-14] Source: EXPERIENCES_V1.md "Builder tools" - approved community entries
-        // carry "community": true and "by": "<avatar name>"; their cards show a small "by <name>".
-        std::string where_text = "In " + region;
-        if (e["community"].asBoolean() && !e["by"].asString().empty())
-        {
-            where_text += "  \xC2\xB7  by " + e["by"].asString();
-        }
-        where->setText(where_text);
-
-        LLButton* go = card->getChild<LLButton>("go");
-        go->setRect(topLeft(h, CARD_W - PAD - GO_W, h - PAD - GO_H, GO_W, GO_H));
-        go->setToolTip("Go to " + title + ": teleport to " + region);
-        const std::string id = e["id"].asString();
-        go->setCommitCallback([this, id](LLUICtrl*, const LLSD&) { onGo(id); });
-        // Tabbing to a card below the fold brings it into view.
-        LLHandle<LLFloater> fh = getHandle();
-        go->setFocusReceivedCallback([fh, card](LLFocusableElement*)
-        {
-            if (WolfFloaterExperiences* self = static_cast<WolfFloaterExperiences*>(fh.get()))
-            {
-                self->mScroll->scrollToShowRect(card->getRect());
-            }
-        });
-
-        top += h + CARD_GAP;
-    }
-    mScroll->goToTop();
-
-    if (shown.empty())
-    {
-        setStatus(sReply["experiences"].size() == 0 ? std::string("There are no experiences to choose from yet.")
-                                                   : std::string("Nothing in this category yet. Choose All to see everything."),
-                  false, false);
-    }
-    else
-    {
-        setStatus(std::string(), false, false);
-    }
 }
 
 // Go: look the region up by name and teleport to the card's position at once (see onGo for why there is
@@ -1138,6 +1033,8 @@ void WolfFloaterExperiences::buildEventCards()
     clearCards();
     const S32 count = (S32)sEvents.size();
     const S32 total_h = count * (EVENT_CARD_H + CARD_GAP);
+    // [2026-11-21] As wide as the list, less room for its scroll bar (the window is bigger and resizable now).
+    const S32 CARD_W = llmax(320, mScroll->getRect().getWidth() - 24);
     mCards->setRect(LLRect(0, total_h, CARD_W, 0));
 
     S32 top = 0;
@@ -1155,7 +1052,7 @@ void WolfFloaterExperiences::buildEventCards()
         card->setRect(topLeft(total_h, 0, top, CARD_W, h));
         mCards->addChild(card);   // in order: Tab reaches the Go buttons top to bottom
 
-        // Picture: the event's texture as buildCards shows one (lliconctrl.cpp:122-146 LLIconCtrl::setValue
+        // Picture: the event's texture as the experience cards showed one (lliconctrl.cpp:122-146 LLIconCtrl::setValue
         // with a uuid); the null uuid (contract "<uuid or null-uuid>"): the viewer's events icon.
         LLIconCtrl* pic = card->getChild<LLIconCtrl>("picture");
         const LLUUID image = e["image"].asUUID();

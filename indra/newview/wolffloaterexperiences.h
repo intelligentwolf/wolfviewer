@@ -29,6 +29,7 @@ class LLScrollListCtrl;
 class LLSpinCtrl;
 class LLTextBox;
 class LLTextureCtrl;
+class WolfExperienceCarousel;
 
 // [WolfViewer 2026-10-14] Paul: "we need to build experiences so when someone lands at welcome they
 // choose experiences". Contract: wolfstorm/tools/EXPERIENCES_V1.md.
@@ -41,6 +42,8 @@ class LLTextureCtrl;
 // "newAccount", once per login; Paul: "when a user first logs in they should SHOW experiences when
 // they have just signed up"), or any time from Wolf World > Experiences... / the toolbar button -> pick a card (optionally narrow by category)
 // -> Go -> teleport -> on arrival, a notice with the card's "arrive" line.
+// [2026-11-21] Now: a category pill -> spin the 3D carousel -> Visit (or Details, then Visit) -> the same teleport
+// (wolfexperiencecarousel.h).
 //
 // The list is https://wolfstorm.app/php/experiences.php (GET with X-Wolf-Agent/X-Wolf-Session so the
 // site can say newAccount; the list itself is public), so Paul can change it without a viewer release.
@@ -59,6 +62,7 @@ public:
 
     bool postBuild() override;
     void onOpen(const LLSD& key) override;
+    void onClose(bool app_quitting) override;          // [2026-11-21] the next open is centred again
     bool handleKeyHere(KEY key, MASK mask) override;   // Escape closes
 
     // The shared list was fetched (or the fetch failed): redraw the open window, if any.
@@ -73,14 +77,12 @@ public:
 private:
     void load(bool force);
     void refreshView();
-    void buildChips(const LLSD& categories);
-    void buildCards();
+    void fillCarousel();    // [2026-11-21] the pills and the ring from the list (replaces the chips and the card list)
     void onGo(const std::string& id);
     void setStatus(const std::string& text, bool error, bool offer_retry);
 
     // [WolfViewer 2026-10-14] What's on: the toggle at the top switches the window between the two.
     void showWhatsOn(bool whats_on);
-    void placeScroll(S32 top);
     void clearCards();
     void buildEventCards();
     void updateEventTimes();
@@ -101,14 +103,13 @@ private:
     LLTextBox* mStatus = nullptr;
     LLButton* mRetry = nullptr;
     LLCheckBoxCtrl* mDontShow = nullptr;
-    std::vector<LLButton*> mChips;      // cat_0 ("All") .. cat_6
-    std::vector<std::string> mChipIds;  // the category id each chip shows ("" = All)
-    std::string mCategory;              // "" = All
-    // [WolfViewer 2026-10-14] where the chip rows start and where the card list ends, as the layout
-    // places them (buildChips wraps the chips and stretches the list up to the last row)
-    S32 mChipLeft0 = 12;
-    S32 mChipTop0 = 0;
-    S32 mScrollBottom = 0;
+    // [2026-11-21] Paul: "far more exciting, with a 3D scrolling carousel ... a space background like the map":
+    // the pills, the ring and the details, drawn over the whole window (wolfexperiencecarousel.h); in What's on only
+    // its sky shows, behind the event list. (Was: the category chips cat_0..cat_6 and a scrolled card list.)
+    WolfExperienceCarousel* mCarousel = nullptr;
+    // [2026-11-21] Paul: "the Experiences floater should ALWAYS appear in the middle of the screen, not just random
+    // places": every open of a closed window centres it (onClose sets this, onOpen centres and clears it).
+    bool mCentreOnOpen = true;
 };
 
 // [WolfViewer 2026-10-14] Builder tools (EXPERIENCES_V1.md "Builder tools - Add your experience (v1.1)";

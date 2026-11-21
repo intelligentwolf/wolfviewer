@@ -88,7 +88,7 @@
     <text follows="left|top" height="40" layout="topleft" left="12" name="mine_status" top="384" width="496" wrap="true" />
     <button follows="left|top" height="24" label="Refresh" layout="topleft" left="12" name="mine_refresh" top="474" width="96"
      tool_tip="Ask the grid for your experiences' status again." />
-    <button follows="left|top" height="24" label="Withdraw" layout="topleft" left="378" name="mine_withdraw" top="474" width="130"
+    <button follows="left|top" height="24" label="Withdraw" layout="topleft" left="318" name="mine_withdraw" top="474" width="190"
      tool_tip="Take the chosen experience out of Wolf Experiences." />
 
     <!-- ===== Waiting for review (admins) ===== -->

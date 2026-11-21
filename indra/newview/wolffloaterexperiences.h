@@ -138,6 +138,7 @@ public:
 
     bool postBuild() override;
     void onOpen(const LLSD& key) override;
+    void onClose(bool app_quitting) override;          // [2026-11-21] Undo of a removed Wolf Territories entry ends with the window
     bool handleKeyHere(KEY key, MASK mask) override;   // Escape closes
 
     // The chooser's list (and so its categories) changed.
@@ -163,13 +164,15 @@ private:
     void onMineSelect();
     void onReviewSelect();
     void onWithdraw();
+    void onCuratedRemoveOrUndo(const LLSD& s);   // [2026-11-21] a Wolf Territories entry on the person's own region
     void onReview(bool approve);
     void updateButtons();
     void setStatus(LLTextBox* box, const std::string& text, bool error);
 
     // The coroutines' answers (only when this window still exists: they hold its handle).
     void submitDone(bool ok, const std::string& message, const std::string& stored_as);   // [2026-11-21] stored_as: the reply's status
-    void mineLoaded(bool ok, const LLSD& submissions, const std::string& error);
+    // [2026-11-21] curated = ?mine=1's "curated": the Wolf Territories entries on regions the person owns or manages.
+    void mineLoaded(bool ok, const LLSD& submissions, const LLSD& curated, const std::string& error);
     void reviewLoaded(bool ok, const LLSD& submissions, const std::string& error);
     void actionDone(ESection section, bool ok, const std::string& message);
 
@@ -182,6 +185,9 @@ private:
     bool mUploading = false;        // [WolfViewer 2026-10-14] a picture upload in flight (picker or upload)
     LLUUID mDefaultPicture;         // the parcel snapshot the picture was last filled with
     LLSD mMine = LLSD::emptyArray();
+    // [2026-11-21] Wolf Territories entries removed while this window is open: id -> { entry, undo key }. They stay in
+    // My experiences as "Removed from Experiences" with Undo until the window closes (onClose).
+    LLSD mCuratedRemoved = LLSD::emptyMap();
     LLSD mReview = LLSD::emptyArray();
 
     LLButton* mSecAdd = nullptr;

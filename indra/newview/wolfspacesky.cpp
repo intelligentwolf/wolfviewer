@@ -251,7 +251,7 @@ WolfSpaceSky::View WolfSpaceSky::experiencesView()
 LLPointer<LLImageRaw> WolfSpaceSky::paint(S32 width, S32 height, F32 scale, const View& view)
 {
     ensure();
-    const S32 W = llmax(1, ll_round(width * scale)), H = llmax(1, ll_round(height * scale));
+    const S32 W = llmax(1, ll_round((F32)width * scale)), H = llmax(1, ll_round((F32)height * scale));
     std::vector<F32> buf((size_t)W * H * 3);
     for (size_t i = 0; i < (size_t)W * H; ++i)
     {
@@ -270,9 +270,9 @@ LLPointer<LLImageRaw> WolfSpaceSky::paint(S32 width, S32 height, F32 scale, cons
             const F32 x1 = x * cyw - z * syw, z1 = x * syw + z * cyw;
             const F32 y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
             if (z2 < 0.05f) continue;
-            const F32 cx = (width * 0.5f + f * x1 / z2) * scale, cy = (height * 0.5f + f * y2 / z2) * scale;
+            const F32 cx = ((F32)width * 0.5f + f * x1 / z2) * scale, cy = ((F32)height * 0.5f + f * y2 / z2) * scale;
             const F32 h = s.size * 0.5f * scale;
-            if (cx < -h || cy < -h || cx > W + h || cy > H + h) continue;
+            if (cx < -h || cy < -h || cx > (F32)W + h || cy > (F32)H + h) continue;
             const F32 gain = over ? 1.f : (s.size >= CLOUD_PX ? view.cloudGain : view.starGain);
             const F32 alpha = llmin(1.f, s.a * gain);
             const S32 bx0 = llmax(0, (S32)floorf(cx - h)), bx1 = llmin(W - 1, (S32)ceilf(cx + h));
@@ -280,10 +280,10 @@ LLPointer<LLImageRaw> WolfSpaceSky::paint(S32 width, S32 height, F32 scale, cons
             const F32 inv = 1.f / (h * h);
             for (S32 py = by0; py <= by1; ++py)
             {
-                const F32 dy = py + 0.5f - cy;
+                const F32 dy = (F32)py + 0.5f - cy;
                 for (S32 px = bx0; px <= bx1; ++px)
                 {
-                    const F32 dx = px + 0.5f - cx;
+                    const F32 dx = (F32)px + 0.5f - cx;
                     const F32 r2 = (dx * dx + dy * dy) * inv;
                     if (r2 > 1.f) continue;
                     // wolfmapglobe.cpp makeSky's dot: alpha exp(-4 r^2)
@@ -304,7 +304,7 @@ LLPointer<LLImageRaw> WolfSpaceSky::paint(S32 width, S32 height, F32 scale, cons
     splat(starlight(), false);
     splat(dust(), true);
 
-    LLPointer<LLImageRaw> raw = new LLImageRaw(W, H, 3);
+    LLPointer<LLImageRaw> raw = new LLImageRaw((U16)W, (U16)H, 3);
     U8* out = raw->getData();
     if (!out) return nullptr;
     const F32 ex = view.exposure;

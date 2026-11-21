@@ -146,7 +146,7 @@ namespace
         const S32 seg = 16;
         for (S32 i = 0; i < seg; ++i)
         {
-            const F32 a0 = F_PI * 0.5f + F_PI * i / seg, a1 = F_PI * 0.5f + F_PI * (i + 1) / seg;
+            const F32 a0 = F_PI * 0.5f + F_PI * (F32)i / (F32)seg, a1 = F_PI * 0.5f + F_PI * (F32)(i + 1) / (F32)seg;
             gGL.color4fv(fill.mV);
             gGL.vertex2f(l + rad, cy);
             gGL.vertex2f(l + rad + rad * cosf(a0), cy + rad * sinf(a0));
@@ -399,7 +399,7 @@ void WolfExperienceCarousel::drawSky()
         {
             const S32 rw = raw->getWidth(), rh = raw->getHeight();
             const S32 tw = llmin(nextPow2(rw), 4096), th = llmin(nextPow2(rh), 4096);
-            LLPointer<LLImageRaw> pot = new LLImageRaw(tw, th, 3);
+            LLPointer<LLImageRaw> pot = new LLImageRaw((U16)tw, (U16)th, 3);
             U8* dst = pot->getData();
             const U8* src = raw->getData();
             if (dst && src)
@@ -411,8 +411,8 @@ void WolfExperienceCarousel::drawSky()
                     memcpy(dst + (size_t)y * tw * 3, src + (size_t)y * rw * 3, (size_t)cw * 3);
                 }
                 sSky = LLViewerTextureManager::getLocalTexture(pot.get(), false);
-                sSkyU = (F32)cw / tw;
-                sSkyV = (F32)chh / th;
+                sSkyU = (F32)cw / (F32)tw;
+                sSkyV = (F32)chh / (F32)th;
             }
             sSkyW = pw;
             sSkyH = ph;
@@ -575,7 +575,7 @@ void WolfExperienceCarousel::drawRing()
         const S32 seg = 48;
         for (S32 j = 0; j < seg; ++j)
         {
-            const F32 a0 = 2.f * F_PI * j / seg, a1 = 2.f * F_PI * (j + 1) / seg;
+            const F32 a0 = 2.f * F_PI * (F32)j / (F32)seg, a1 = 2.f * F_PI * (F32)(j + 1) / (F32)seg;
             const LLVector2 m0(c.mV[0] + rx * 0.55f * cosf(a0), c.mV[1] + ry * 0.55f * sinf(a0));
             const LLVector2 m1(c.mV[0] + rx * 0.55f * cosf(a1), c.mV[1] + ry * 0.55f * sinf(a1));
             const LLVector2 e0(c.mV[0] + rx * cosf(a0), c.mV[1] + ry * sinf(a0));
@@ -688,7 +688,7 @@ void WolfExperienceCarousel::drawRing()
                 for (const std::string& line : lines)
                 {
                     textL(tf, line, tx, ty, alpha(TEXT, fade), LLFontGL::LEFT, LLFontGL::TOP, band_w);
-                    ty -= tf->getLineHeight();
+                    ty -= (F32)tf->getLineHeight();
                 }
                 textL(small, e.mRegion, tx, ty - 2.f, alpha(TEXT_DIM, fade), LLFontGL::LEFT, LLFontGL::TOP, band_w);
             }
@@ -829,32 +829,32 @@ void WolfExperienceCarousel::drawDetail()
     for (const std::string& line : wrapLines(fontHuge(), e.mTitle, tw, 2))
     {
         textL(fontHuge(), line, tl, y, TEXT, LLFontGL::LEFT, LLFontGL::TOP, tw);
-        y -= fontHuge()->getLineHeight();
+        y -= (F32)fontHuge()->getLineHeight();
     }
     if (!e.mBy.empty())
     {
         textL(fontSmall(), "by " + e.mBy, tl, y, TEXT_DIM, LLFontGL::LEFT, LLFontGL::TOP, tw);
-        y -= fontSmall()->getLineHeight() + 2.f;
+        y -= (F32)fontSmall()->getLineHeight() + 2.f;
     }
     y -= 6.f;
     const LLFontGL* body = fontBody();
     for (const std::string& line : wrapLines(body, e.mBlurb, tw, 4))
     {
         textL(body, line, tl, y, LLColor4(230.f / 255.f, 235.f / 255.f, 245.f / 255.f, 1.f), LLFontGL::LEFT, LLFontGL::TOP, tw);
-        y -= body->getLineHeight();
+        y -= (F32)body->getLineHeight();
     }
     y -= 8.f;
     if (!e.mArrive.empty())
     {
         const std::vector<std::string> lines = wrapLines(body, "When you arrive: " + e.mArrive, tw - 22.f, 3);
-        const F32 box_h = lines.size() * body->getLineHeight() + 14.f;
+        const F32 box_h = (F32)lines.size() * (F32)body->getLineHeight() + 14.f;
         rect(tl, y - box_h, tl + tw, y, alpha(AMBER, 0.12f));
         rect(tl, y - box_h, tl + 4.f, y, AMBER);
         F32 ly = y - 7.f;
         for (const std::string& line : lines)
         {
             textL(body, line, tl + 14.f, ly, LLColor4(230.f / 255.f, 235.f / 255.f, 245.f / 255.f, 1.f), LLFontGL::LEFT, LLFontGL::TOP, tw - 22.f);
-            ly -= body->getLineHeight();
+            ly -= (F32)body->getLineHeight();
         }
         y -= box_h + 8.f;
     }
@@ -883,7 +883,7 @@ const WolfExperienceCarousel::Hit* WolfExperienceCarousel::hitAt(S32 x, S32 y) c
     const bool detail = mDetail >= 0;
     for (auto it = mHits.rbegin(); it != mHits.rend(); ++it)
     {
-        if (x >= it->mL && x <= it->mR && y >= it->mB && y <= it->mT)
+        if ((F32)x >= it->mL && (F32)x <= it->mR && (F32)y >= it->mB && (F32)y <= it->mT)
         {
             // With the details open only the panel's own hits (and the scrim) count.
             if (detail && it->mId != H_D_BACK && it->mId != H_D_VISIT && it->mId != H_D_PANEL && it->mId != H_D_SCRIM) continue;
@@ -986,12 +986,12 @@ void WolfExperienceCarousel::onMouseCaptureLost()
 bool WolfExperienceCarousel::handleScrollWheel(S32 x, S32 y, S32 clicks)
 {
     if (mSkyOnly || !mHaveData || mDetail >= 0 || clicks == 0) return mDetail >= 0;
-    if (y >= mPillB && y <= mPillT)
+    if ((F32)y >= mPillB && (F32)y <= mPillT)
     {
-        mPillScroll += clicks * 60.f;   // over the pills: scroll them sideways
+        mPillScroll += (F32)clicks * 60.f;   // over the pills: scroll them sideways
         return true;
     }
-    if (y >= mStageB && y <= mStageT && count())
+    if ((F32)y >= mStageB && (F32)y <= mStageT && count())
     {
         step(clicks > 0 ? 1 : -1);     // one card a notch
         return true;

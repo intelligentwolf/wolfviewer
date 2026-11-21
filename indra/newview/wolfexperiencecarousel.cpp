@@ -70,13 +70,13 @@ namespace
     // transparent in the first rig run).
     const LLColor4 AMBER(245.f / 255.f, 165.f / 255.f, 36.f / 255.f, 1.f);
     const LLColor4 INK_ON_AMBER(17.f / 255.f, 17.f / 255.f, 17.f / 255.f, 1.f);   // #111, 9.6:1 on amber
-    const LLColor4 TEXT(1.f, 1.f, 1.f, 1.f);
+    const LLColor4 TEXT_MAIN(1.f, 1.f, 1.f, 1.f);
     const LLColor4 TEXT_DIM(201.f / 255.f, 211.f / 255.f, 230.f / 255.f, 1.f);    // #c9d3e6, 12.6:1 on the sky
     const LLColor4 PLATE(10.f / 255.f, 16.f / 255.f, 34.f / 255.f, 0.80f);        // rgba(10,16,34,.8)
     const LLColor4 EDGE(201.f / 255.f, 211.f / 255.f, 230.f / 255.f, 0.35f);
     const LLColor4 BAND_TOP(15.f / 255.f, 24.f / 255.f, 48.f / 255.f, 1.f);       // #0f1830
     const LLColor4 BAND_BOT(10.f / 255.f, 16.f / 255.f, 34.f / 255.f, 1.f);       // #0a1022
-    const LLColor4 SPACE(0.010f, 0.015f, 0.040f, 1.f);                           // wolfspacesky.cpp SPACE_RGB
+    const LLColor4 SPACE(0.010f, 0.015f, 0.040f, 1.f);                           // wolfspacesky.cpp SKY_SPACE_RGB
     const LLColor4 FLOOR_WARM(245.f / 255.f, 165.f / 255.f, 36.f / 255.f, 0.42f);
     const LLColor4 FLOOR_COOL(120.f / 255.f, 150.f / 255.f, 1.f, 0.20f);
 
@@ -171,7 +171,7 @@ namespace
         disc(cx, cy, SPIN_R, PLATE, 40);
         arc(cx, cy, SPIN_R - 1.f, 2.f, 0.f, 2.f * F_PI, hover ? AMBER : alpha(TEXT_DIM, 0.6f), 48);
         const F32 s = 9.f, d = left ? 1.f : -1.f;
-        const LLColor4 ink = hover ? AMBER : TEXT;
+        const LLColor4 ink = hover ? AMBER : TEXT_MAIN;
         lineW(cx + d * s * 0.5f, cy + s, cx - d * s * 0.5f, cy, 3.5f, ink);
         lineW(cx - d * s * 0.5f, cy, cx + d * s * 0.5f, cy - s, 3.5f, ink);
     }
@@ -492,7 +492,7 @@ void WolfExperienceCarousel::drawPills()
             const bool on = i == mPill;
             const bool hover = mHoverHit == H_PILL && mHoverIndex == i;
             pill(l, mPillB, r, mPillT, on ? AMBER : PLATE, on ? AMBER : (hover ? AMBER : EDGE), 1.f);
-            const LLColor4 ink = on ? INK_ON_AMBER : TEXT;
+            const LLColor4 ink = on ? INK_ON_AMBER : TEXT_MAIN;
             LLPointer<LLUIImage> img = LLUI::getUIImage(c.mIcon);
             if (img.notNull())
             {
@@ -520,7 +520,7 @@ void WolfExperienceCarousel::drawPills()
             const bool hover = mHoverHit == id;
             disc(cx, cy, 17.f, PLATE, 32);
             arc(cx, cy, 16.f, 1.5f, 0.f, 2.f * F_PI, enabled ? (hover ? AMBER : EDGE) : alpha(EDGE, 0.4f), 32);
-            const LLColor4 ink = enabled ? (hover ? AMBER : TEXT) : alpha(TEXT_DIM, 0.4f);
+            const LLColor4 ink = enabled ? (hover ? AMBER : TEXT_MAIN) : alpha(TEXT_DIM, 0.4f);
             const F32 d = left ? 1.f : -1.f;
             lineW(cx + d * 3.f, cy + 6.f, cx - d * 3.f, cy, 2.5f, ink);
             lineW(cx - d * 3.f, cy, cx + d * 3.f, cy - 6.f, 2.5f, ink);
@@ -687,7 +687,7 @@ void WolfExperienceCarousel::drawRing()
                 const std::vector<std::string> lines = wrapLines(tf, e.mTitle, band_w, front ? 2 : 1);
                 for (const std::string& line : lines)
                 {
-                    textL(tf, line, tx, ty, alpha(TEXT, fade), LLFontGL::LEFT, LLFontGL::TOP, band_w);
+                    textL(tf, line, tx, ty, alpha(TEXT_MAIN, fade), LLFontGL::LEFT, LLFontGL::TOP, band_w);
                     ty -= (F32)tf->getLineHeight();
                 }
                 textL(small, e.mRegion, tx, ty - 2.f, alpha(TEXT_DIM, fade), LLFontGL::LEFT, LLFontGL::TOP, band_w);
@@ -769,7 +769,7 @@ void WolfExperienceCarousel::drawCaption()
     const F32 bw = 128.f, bh = 48.f, by = (mCapB + mCapT) * 0.5f - bh * 0.5f;
     const F32 visit_l = r - 14.f - bw, details_l = visit_l - 12.f - bw;
     const F32 text_w = details_l - (l + 14.f) - 12.f;
-    textL(fontHuge(), e.mTitle, l + 14.f, mCapT - 8.f, TEXT, LLFontGL::LEFT, LLFontGL::TOP, text_w);
+    textL(fontHuge(), e.mTitle, l + 14.f, mCapT - 8.f, TEXT_MAIN, LLFontGL::LEFT, LLFontGL::TOP, text_w);
     std::string where = e.mRegion;
     if (!e.mBy.empty()) where += "  \xC2\xB7  by " + e.mBy;
     textL(fontBody(), where, l + 14.f, mCapB + 26.f, TEXT_DIM, LLFontGL::LEFT, LLFontGL::BOTTOM, text_w);
@@ -828,7 +828,7 @@ void WolfExperienceCarousel::drawDetail()
     y -= 22.f;
     for (const std::string& line : wrapLines(fontHuge(), e.mTitle, tw, 2))
     {
-        textL(fontHuge(), line, tl, y, TEXT, LLFontGL::LEFT, LLFontGL::TOP, tw);
+        textL(fontHuge(), line, tl, y, TEXT_MAIN, LLFontGL::LEFT, LLFontGL::TOP, tw);
         y -= (F32)fontHuge()->getLineHeight();
     }
     if (!e.mBy.empty())

@@ -23,7 +23,7 @@
 namespace
 {
     // Source: wolfmapglobe.cpp SPACE (0.010, 0.015, 0.040) - the colour of empty space.
-    const F32 SPACE_RGB[3] = { 0.010f, 0.015f, 0.040f };
+    const F32 SKY_SPACE_RGB[3] = { 0.010f, 0.015f, 0.040f };
     // Points at least this big are clouds (the Milky Way's glow 40+ px, the nebulae 22+ px); smaller ones are stars.
     // Source: wolf_space_sky.js CLOUD_PX.
     const F32 CLOUD_PX = 18.f;
@@ -187,7 +187,7 @@ namespace
             F64 d[3];
             band(lon, lat, d);
             const F64 size = 18.0 + 26.0 * rnd();
-            push(over, d, size, SPACE_RGB, 0.12);
+            push(over, d, size, SKY_SPACE_RGB, 0.12);
         }
         // Nebulae: three faint coloured clouds away from the band.
         static const F32 NEB[3][3] = { { 1.0f, 0.45f, 0.62f }, { 0.42f, 0.80f, 0.85f }, { 0.70f, 0.50f, 1.0f } };
@@ -255,9 +255,9 @@ LLPointer<LLImageRaw> WolfSpaceSky::paint(S32 width, S32 height, F32 scale, cons
     std::vector<F32> buf((size_t)W * H * 3);
     for (size_t i = 0; i < (size_t)W * H; ++i)
     {
-        buf[i * 3] = SPACE_RGB[0];
-        buf[i * 3 + 1] = SPACE_RGB[1];
-        buf[i * 3 + 2] = SPACE_RGB[2];
+        buf[i * 3] = SKY_SPACE_RGB[0];
+        buf[i * 3 + 1] = SKY_SPACE_RGB[1];
+        buf[i * 3 + 2] = SKY_SPACE_RGB[2];
     }
     const F32 f = (F32)view.lens * (F32)llmax(width, height);
     const F32 cyw = (F32)cos(view.yaw), syw = (F32)sin(view.yaw), cp = (F32)cos(view.pitch), sp = (F32)sin(view.pitch);

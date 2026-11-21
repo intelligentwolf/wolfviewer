@@ -17,6 +17,7 @@
 #define WOLF_MAPGLOBE_H
 
 #include "llsingleton.h"
+#include "wolfspacesky.h"
 #include "llpointer.h"
 #include "v3dmath.h"
 #include <map>
@@ -150,13 +151,8 @@ private:
 
     // <WolfViewer 2026-10-03> The sky (makeSky): a direction on the unit sphere, a size in
     // pixels, a colour and an alpha per point; drawn as soft round dots (mStarDot).
-    struct SkyPoint
-    {
-        F32 d[3];
-        F32 size;
-        F32 c[3];
-        F32 a;
-    };
+    // [2026-11-21] the point type is WolfSpaceSky::Point (wolfspacesky.h), where the generator now lives
+    using SkyPoint = WolfSpaceSky::Point;
     std::vector<SkyPoint> mSkyAdd;    // starlight: added
     std::vector<SkyPoint> mSkyOver;   // the dust lane: drawn over
     bool mSkyMade = false;

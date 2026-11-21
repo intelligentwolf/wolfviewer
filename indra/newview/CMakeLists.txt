@@ -1002,6 +1002,8 @@ set(viewer_SOURCE_FILES
     wolftkclouds.cpp
     wolffloaterwatchwolf.cpp
     wolffloaterexperiences.cpp   # [WolfViewer 2026-10-14] Experiences welcome chooser
+    wolfexperiencecarousel.cpp   # [2026-11-21] Wolf Experiences' 3D carousel
+    wolfspacesky.cpp   # [2026-11-21] the map's sky, shared
     wolffloaterphotoeffects.cpp
     wolfmeshupload.cpp
     wolfmiddaysky.cpp
@@ -2072,6 +2074,8 @@ set(viewer_HEADER_FILES
     wolftkgl.h
     wolffloaterwatchwolf.h
     wolffloaterexperiences.h   # [WolfViewer 2026-10-14]
+    wolfexperiencecarousel.h   # [2026-11-21]
+    wolfspacesky.h   # [2026-11-21]
     wolffloaterphotoeffects.h
     wolfmeshupload.h
     wolfmiddaysky.h

@@ -16,6 +16,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "llappearancemgr.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] not held by Lock What I'm Wearing
 #include "llattachmentsmgr.h"
 #include "llfeaturemanager.h"
 #include "llgesturemgr.h"
@@ -1808,6 +1809,7 @@ void RlvForceWear::done()
 
     if (!remItems.empty())
     {
+        WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] an RLVa command, not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
         LLAppearanceMgr::instance().removeItemsFromAvatar(remItems, no_op, cb, true);
     }
 
@@ -1817,6 +1819,7 @@ void RlvForceWear::done()
         uuid_vec_t idClothing;
         for (const LLViewerInventoryItem* pItem : addClothing)
             idClothing.push_back(pItem->getUUID());
+        WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] an RLVa command, not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
         LLAppearanceMgr::instance().wearItemsOnAvatar(idClothing, false, false, cb);
     }
     else if ( (!addBodyParts.empty()) || (!addClothing.empty()) || (!m_addGestures.empty()) )

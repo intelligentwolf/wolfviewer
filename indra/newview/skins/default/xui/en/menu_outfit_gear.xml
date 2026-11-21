@@ -42,6 +42,16 @@
          parameter="take_off" />
     </menu_item_call>
     <menu_item_separator name="wear_separator" />
+    <!-- [T964 2026-11-21] ticket 964: Lock What I'm Wearing (wolfoutfitlock.cpp), as Avatar > Lock What I'm Wearing -->
+    <menu_item_check
+     label="Lock What I'm Wearing"
+     layout="topleft"
+     name="wolf_outfit_lock">
+        <on_click
+         function="WolfOutfitLock.Toggle" />
+        <on_check
+         function="WolfOutfitLock.IsLocked" />
+    </menu_item_check>
     <menu_item_call
      label="Image..."
      layout="topleft"

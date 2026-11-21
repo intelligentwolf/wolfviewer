@@ -26,6 +26,8 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "llsidepanelappearance.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] Lock What I'm Wearing
+#include "llviewercontrol.h"   // [T964/] gSavedPerAccountSettings
 
 #include "llaccordionctrltab.h"
 #include "llagent.h"
@@ -143,6 +145,19 @@ bool LLSidepanelAppearance::postBuild()
 
     mWearableLoadingIndicator = getChild<LLLoadingIndicator>("wearables_loading_indicator");
     mEditOutfitBtn = getChild<LLButton>("edit_outfit_btn");
+
+    // [T964 2026-11-21] ticket 964: the padlock toggles Lock What I'm Wearing (wolfoutfitlock.cpp); the per-account setting's
+    // signal keeps it, its tool tip and the status line true when the menu or the refusal note's Unlock changes it
+    mWolfLockBtn = findChild<LLButton>("wolf_outfit_lock_btn");
+    if (mWolfLockBtn)
+    {
+        mWolfLockBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { WolfOutfitLock::toggle(); refreshWolfLock(); });
+    }
+    if (LLControlVariable* c = gSavedPerAccountSettings.getControl("WolfOutfitLocked"))
+    {
+        mWolfLockConn = c->getSignal()->connect([this](LLControlVariable*, const LLSD&, const LLSD&) { refreshWolfLock(); });
+    }
+    refreshWolfLock();
 
     setVisibleCallback(boost::bind(&LLSidepanelAppearance::onVisibilityChanged,this,_2));
 
@@ -469,6 +484,8 @@ void LLSidepanelAppearance::refreshCurrentOutfitName(const std::string& name)
     // Set current outfit status (wearing/unsaved).
     bool dirty = LLAppearanceMgr::getInstance()->isOutfitDirty();
     std::string cof_status_str = getString(dirty ? "Unsaved Changes" : "Now Wearing");
+    // [T964 2026-11-21] "Now wearing - locked" while Lock What I'm Wearing is on (sidepanel_appearance.xml locked_suffix)
+    if (WolfOutfitLock::locked() && hasString("locked_suffix")) cof_status_str += getString("locked_suffix");
     mOutfitStatus->setText(cof_status_str);
 
     if (name == "")
@@ -633,3 +650,16 @@ bool LLSidepanelAppearance::handleKeyHere(KEY key, MASK mask)
     return LLPanel::handleKeyHere(key, mask);
 }
 // </FS:Ansariel>
+
+// [T964 2026-11-21] the padlock lit while the outfit is locked, its tool tip saying what a press does, and the status line
+void LLSidepanelAppearance::refreshWolfLock()
+{
+    const bool on = WolfOutfitLock::locked();
+    if (mWolfLockBtn)
+    {
+        mWolfLockBtn->setToggleState(on);
+        mWolfLockBtn->setToolTip(on ? std::string("Your outfit is locked: nothing is put on or taken off by your clicks. Press to unlock.")
+                                    : std::string("Lock what I'm wearing, so nothing is put on or taken off by accident"));
+    }
+    if (mOutfitStatus && mCurrentLookName) refreshCurrentOutfitName();
+}

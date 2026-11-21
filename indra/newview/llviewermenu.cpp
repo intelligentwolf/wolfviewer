@@ -45,6 +45,7 @@
 #include "wolfai.h"   // [FLOATER SPLIT 2026-09-11] WolfAI.CanUse
 #include "wolfaimode.h"   // [AI MODE 2026-11-05/]
 #include "wolffloatergreedy.h"   // [W104 FEATFIX 2026-11-11/] WolfGreedyGame (the Greedy HUD)
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] Lock What I'm Wearing
 #include "wolfspeech.h"
 #include "wolfscreenshare.h"
 #include "wolfweather.h"  // <WolfViewer> World > Weather
@@ -13055,6 +13056,9 @@ void initialize_menus()
     // [W104 FEATFIX 2026-11-11] Wolf World > Greedy: the Greedy HUD on / off (wolfgreedyhud.h)
     commit.add("WolfGreedy.ToggleHud", [](LLUICtrl*, const LLSD&) { WolfGreedyGame::toggleHud(); });
     enable.add("WolfGreedy.HudOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfGreedyGame::instanceExists() && WolfGreedyGame::instance().hudWanted(); });
+    // [T964 2026-11-21] Avatar > Lock What I'm Wearing and the Outfits gear menu's (wolfoutfitlock.cpp, ticket 964)
+    commit.add("WolfOutfitLock.Toggle", [](LLUICtrl*, const LLSD&) { WolfOutfitLock::toggle(); });
+    enable.add("WolfOutfitLock.IsLocked", [](LLUICtrl*, const LLSD&) -> bool { return WolfOutfitLock::locked(); });
     enable.add("WolfAIMode.IsOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfAIMode::instance().isOn(); });
     commit.add("WolfSpeech.ToggleDictation", boost::bind(&wolf_toggle_dictation));
     enable.add("WolfSpeech.IsDictating", boost::bind(&wolf_is_dictating));

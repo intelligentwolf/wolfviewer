@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "llinventorybridge.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] Lock What I'm Wearing
 
 // external projects
 #include "lltransfersourceasset.h"
@@ -7966,6 +7967,8 @@ void LLObjectBridge::performAction(LLInventoryModel* model, std::string action)
 {
     if (isAddAction(action))
     {
+        // [T964 2026-11-21] Lock What I'm Wearing: inventory Wear / Add / Attach (double-click too) refused with its note
+        if (WolfOutfitLock::refuse("attach from inventory")) return;
         LLUUID object_id = mUUID;
         LLViewerInventoryItem* item;
         item = (LLViewerInventoryItem*)gInventory.getItem(object_id);

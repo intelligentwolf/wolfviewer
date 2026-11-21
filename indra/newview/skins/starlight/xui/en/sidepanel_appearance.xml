@@ -21,6 +21,10 @@ width="333">
    <string
    name="Now Wearing"
    value="Now wearing..." />
+  <!-- [T964 2026-11-21] after the status while Lock What I'm Wearing is on (llsidepanelappearance.cpp refreshCurrentOutfitName) -->
+  <string
+   name="locked_suffix"
+   value=" - locked" />
    <string
    name="Changing outfits"
    value="Changing outfits" />
@@ -81,13 +85,27 @@ width="333">
       text_color="White"
       top="15"
       use_ellipses="true"
-      width="230"
+      width="198"
       follows="top|left|right"
       word_wrap="false"
       mouse_opaque="false"
       name="currentlook_name">
       MyOutfit With a really Long Name like MOOSE
       </text>
+      <!-- [T964 2026-11-21] ticket 964: Lock What I'm Wearing (wolfoutfitlock.cpp), lit while it is on; the status line says so
+           in words too (locked_suffix). Same switch as Avatar > Lock What I'm Wearing and the Outfits gear menu. -->
+      <button
+      follows="top|right"
+      height="24"
+      image_overlay="Lock2"
+      is_toggle="true"
+      label=""
+      layout="topleft"
+      left="237"
+      name="wolf_outfit_lock_btn"
+      tool_tip="Lock what I'm wearing, so nothing is put on or taken off by accident"
+      top="5"
+      width="24" />
       <button
       follows="top|right"
       height="28"

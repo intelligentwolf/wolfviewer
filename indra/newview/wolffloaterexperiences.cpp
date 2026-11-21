@@ -106,8 +106,23 @@ namespace
         bool mStarted = false;    // a teleport has begun since Go
         F64 mAt = 0.0;
         std::string mRegion, mTitle, mArrive;
+        // [2026-11-21] Paul (W109): "It whisked me over, and then said it could not be found... but I'm there already".
+        // WolfExperiences::idle does not run while the teleport screen is up (llappviewer.cpp LLAppViewer::idle returns
+        // early while gTeleportDisplay), so a teleport that shows that screen is never seen as running and mStarted
+        // stayed false: the 20 s "not found" fired after the arrival (Paul's log: teleport 14:08:36, alert 14:08:56).
+        // Now: mRequested = the region lookup answered and the teleport was asked for (so the region WAS found); then
+        // arrival is also known by the avatar having left mFromRegion / mFromPos, whatever idle saw in between.
+        U32 mSeq = 0;             // which Go this is: a late lookup answer for an earlier Go changes nothing
+        bool mRequested = false;
+        F64 mRequestedAt = 0.0;
+        LLUUID mFromRegion;
+        LLVector3d mFromPos;
     };
     PendingArrival sPending;
+    U32 sPendingSeq = 0;
+    // A teleport asked for by a Go that never shows as done (refused by the region, cancelled): stop watching after
+    // this long; the viewer's own teleport messages have said why.
+    const F64 REQUESTED_GIVE_UP_SECONDS = 120.0;
 
     // Source: wolffloaterwatchwolf.cpp:144-151 reply_of / wolfcave.cpp:96-103 json_to_llsd -
     // the raw body through boost::json into LLSD (llsdjson.h LlsdFromJson).
@@ -556,13 +571,23 @@ namespace
         sPending.mRegion = region;
         sPending.mTitle = e["title"].asString();
         sPending.mArrive = e["arrive"].asString();
+        // [2026-11-21] where the avatar is now, to know the arrival by (see PendingArrival)
+        sPending.mSeq = ++sPendingSeq;
+        if (gAgent.getRegion()) sPending.mFromRegion = gAgent.getRegion()->getRegionID();
+        sPending.mFromPos = gAgent.getPositionGlobal();
 
         const LLVector3d local((F64)x, (F64)y, (F64)z);
+        const U32 seq = sPending.mSeq;
         LLWorldMapMessage::getInstance()->sendNamedRegionRequest(region,
-            [local](U64 handle, const std::string&, const LLUUID&, bool teleport)
+            [local, seq](U64 handle, const std::string&, const LLUUID&, bool teleport)
             {
                 if (!teleport || handle == 0) return;
                 gAgent.teleportViaLocation(from_region_handle(handle) + local);
+                if (sPending.mActive && sPending.mSeq == seq)
+                {
+                    sPending.mRequested = true;   // the region was found: never "not found" for this Go now
+                    sPending.mRequestedAt = LLFrameTimer::getTotalSeconds();
+                }
             },
             LLSLURL(region, LLVector3((F32)x, (F32)y, (F32)z)).getSLURLString(),
             true);
@@ -630,11 +655,16 @@ void WolfExperiences::idle()
     // teleport inside the region the agent is in; both end at TELEPORT_NONE.
     if (sPending.mActive)
     {
+        // [2026-11-21] Arrived = a teleport was seen and is over, or (the teleport screen hid it from this idle) the
+        // teleport was asked for and the avatar is no longer where it stood at Go.
+        const bool moved = sPending.mRequested
+            && (gAgent.getRegion()->getRegionID() != sPending.mFromRegion
+                || dist_vec(gAgent.getPositionGlobal(), sPending.mFromPos) > 2.0);
         if (teleporting)
         {
             sPending.mStarted = true;
         }
-        else if (sPending.mStarted)
+        else if (sPending.mStarted || moved)
         {
             if (!sPending.mArrive.empty() && sameRegion(sPending.mRegion, gAgent.getRegion()->getName()))
             {
@@ -645,10 +675,16 @@ void WolfExperiences::idle()
             }
             sPending = PendingArrival();
         }
+        else if (sPending.mRequested)
+        {
+            // asked for but not done yet (or refused - the viewer says so itself): wait, then stop watching
+            if (now - sPending.mRequestedAt > REQUESTED_GIVE_UP_SECONDS) sPending = PendingArrival();
+        }
         else if (now - sPending.mAt > 20.0)
         {
             // [WolfViewer 2026-10-14] Go teleports at once (no "Teleport to ...?" any more), so no teleport
             // 20 s after Go means the grid did not find the region: say so instead of nothing happening.
+            // [2026-11-21] Only when the region lookup never answered (mRequested false): it really was not found.
             LLSD args;
             args["MESSAGE"] = "Could not take you to " + sPending.mTitle + ": the region " + sPending.mRegion
                             + " was not found or is not running right now. Try again in a little while.";

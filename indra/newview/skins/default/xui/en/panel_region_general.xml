@@ -536,7 +536,7 @@
      layout="topleft"
      left="10"
      name="wolf_birds_check"
-     tool_tip="Gulls and terns over the sea, small flocks over open land and starlings at dusk in winter. They keep clear of builds, stay low over land and sea, roost at night, and never fly in a space sky. With no category, they come over the sea and coast only: untick and tick again to have them over the land as well. Saved at once. Only the estate owner or an estate manager can change it."
+     tool_tip="Gulls and terns over the sea, small flocks over open land and starlings at dusk in winter. They keep clear of builds, stay low over land and sea, roost at night, and never fly in a space sky. On by default on every region; untick to keep them away. Saved at once. Only the estate owner or an estate manager can change it."
      top="538"
      visible="false"
      width="460" />
@@ -752,7 +752,9 @@
     <string name="ships_saved_off">Saved: no more passing ships here. Any at sea now sail away.</string>
     <string name="ships_later">The region takes it at its next start (the viewer could not tell it now).</string>
     <string name="ships_save_failed">Could not save passing ships:</string>
-    <string name="birds_on_default">On: the default under Parks or Marinas.</string>
+    <string name="birds_on_default">On: the default for every region.</string>
+    <string name="sounds_on_default">On: the default.</string>
+    <string name="sealife_on_default">On: the default.</string>
     <string name="birds_sea_default">Sea and coast only (the default).</string>
     <string name="birds_saved_on">Saved: birds may now fly over this region.</string>
     <string name="birds_saved_off">Saved: no more birds over this region.</string>

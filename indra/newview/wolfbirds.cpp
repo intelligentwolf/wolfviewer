@@ -152,6 +152,21 @@ namespace
     // The director: how often it decides, and how far round the camera birds live.
     constexpr F64 DIRECT_SECS = 3.0;
     constexpr F32 NEAR_M = 60.f, FAR_M = 220.f;      // where a flock's centre may be
+    // [WILDLIFE SHOWS 2026-11-21] Paul 2026-11-21: "I can't see any birds or anything" / "they all exist already, just need
+    // to get them so they actually appear". Three gates kept the birds out of sight in normal play:
+    //  - A sparrow's 0.23 m span 60..220 m away (NEAR_M..FAR_M) is about 4..1 pixels on a 1080p screen at the default
+    //    view (CameraAngle 1.047 rad: 0.23 / d x 1080 / 1.047): the small birds were there and could not be seen. Their
+    //    flock's centre now keeps SMALL_NEAR_M..SMALL_FAR_M (CHOSEN: about 9..3 px at the centre, a moving, flapping flock
+    //    of 8..18; the birds roam round it within the flock's 40 m).
+    //  - A flock left behind (the resident walked, flew or turned the camera away) still counted as "had" in direct(),
+    //    so no new flock came until a teleport: a flock whose centre is LEFT_BEHIND_M beyond its own reach (plus the 30 m
+    //    of drift move() allows) now flies off, as WolfSeaLife sends a group beyond FAR_M x 1.2 away (wolfsealife.cpp direct).
+    //  - Small flocks came only with 15% of the sampled ground open, unbuilt land, which a town (16 m cells, BUILT_WEIGHT)
+    //    rarely has: LAND_FLOCK_FRAC (CHOSEN 5%: a square, a park or gardens near the camera); two flocks over
+    //    LAND_TWO_FLOCKS_FRAC (was 50%). pickPlace still needs an open, unbuilt spot, so they never come inside a build.
+    constexpr F32 SMALL_NEAR_M = 25.f, SMALL_FAR_M = 90.f;
+    constexpr F32 LEFT_BEHIND_M = 60.f;
+    constexpr F32 LAND_FLOCK_FRAC = 0.05f, LAND_TWO_FLOCKS_FRAC = 0.3f;
     // [BIRDS MID 2026-11-02] ticket 463: the draw distance (RenderFarClip, the camera's far clip) also bounds the flocks.
     // Nothing past the far clip is drawn, and the Mid graphics level sets 128 m (featuretable_linux.txt "list Mid"
     // RenderFarClip 128; measured in a test viewer: far clip 133 m at Mid), so with 60..220 m most birds were out of
@@ -357,6 +372,14 @@ namespace
     {
         const F32 view_m = gAgentCamera.mDrawDistance + WolfAltitudeSky::farClipExtra();
         return llclamp(view_m - VIEW_MARGIN_M, MIN_REACH_M, FAR_M);
+    }
+
+    /** [WILDLIFE SHOWS 2026-11-21] How far out a flock of this kind may have its centre: the small birds nearer
+     *  (SMALL_FAR_M), the others flock_reach_m(). */
+    F32 kind_reach_m(WolfBirds::Kind kind)
+    {
+        const F32 reach = flock_reach_m();
+        return kind == WolfBirds::SMALL ? llmin(reach, SMALL_FAR_M) : reach;
     }
 
     /** The sun's height over the horizon, degrees, in the sky on screen (llenvironment.h getCurrentSky; as
@@ -608,7 +631,11 @@ bool WolfBirds::wanted(LLViewerRegion*& region) const
 bool WolfBirds::pickPlace(LLViewerRegion* region, Kind kind, F32 min_m, F32 max_m, LLVector3& out) const
 {
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
-    for (S32 attempt = 0; attempt < 16; ++attempt)
+    // [WILDLIFE SHOWS 2026-11-21] the small birds look harder for an open spot (a landscaped island or a town is a
+    // patchwork of built 16 m cells, and their ring 25..90 m out is small): 48 tries, the others 16 as before. Cheap: one
+    // pickPlace per spawn, at most one spawn per DIRECT_SECS.
+    const S32 tries = (kind == SMALL) ? 48 : 16;
+    for (S32 attempt = 0; attempt < tries; ++attempt)
     {
         const F32 a = ll_frand(F_TWO_PI), d = frand_range(min_m, max_m);
         LLVector3 p(cam.mV[VX] + cosf(a) * d, cam.mV[VY] + sinf(a) * d, 0.f);
@@ -673,7 +700,7 @@ void WolfBirds::direct(LLViewerRegion* region, F64 now)
         const U8 tz = (U8)WolfRegionWeather::instance().birdsZone();
         const bool all_year = tz == WolfRegionWeather::BIRDS_TROPICAL || tz == WolfRegionWeather::BIRDS_SUBTROPICAL;
         if (sea_f >= 0.08f && (all_year || tern_season()) && day > 0.9f) want[TERN] = 1;
-        if (land_f >= 0.15f && !sea_only) want[SMALL] = (land_f > 0.5f) ? 2 : 1;
+        if (land_f >= LAND_FLOCK_FRAC && !sea_only) want[SMALL] = (land_f > LAND_TWO_FLOCKS_FRAC) ? 2 : 1;   // [WILDLIFE SHOWS 2026-11-21/]
     }
     if (murmur) want[STARLING] = 1;
     // [BIRDS ZONES 2026-11-10] t715: a role no species does in this zone is not drawn; flocks of another zone (the owner
@@ -687,6 +714,12 @@ void WolfBirds::direct(LLViewerRegion* region, F64 now)
     {
         if (f.mLeaving || f.mRoosting) continue;
         if (f.mZone != zone) { leave(f, cam); continue; }   // [BIRDS ZONES 2026-11-10/]
+        // [WILDLIFE SHOWS 2026-11-21] left behind: off it goes, and a new flock may come where the resident is now
+        if (f.mKind != STARLING && flat(f.mCentre - cam).length() > kind_reach_m(f.mKind) + 30.f + LEFT_BEHIND_M)
+        {
+            leave(f, cam);
+            continue;
+        }
         if (have[f.mKind] >= want[f.mKind])
         {
             // more than wanted: the starlings go down to roost where they are; the others fly off
@@ -742,8 +775,8 @@ bool WolfBirds::spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now
     Flock f;
     f.mKind = kind;
     f.mZone = (U8)WolfRegionWeather::instance().birdsZone();   // [BIRDS ZONES 2026-11-10/] its species for its life
-    const F32 far_m = flock_reach_m();   // [BIRDS MID 2026-11-02] ticket 463
-    const F32 near_m = llmin(NEAR_M, far_m * 0.5f);
+    const F32 far_m = kind_reach_m(kind);   // [BIRDS MID 2026-11-02] ticket 463; [WILDLIFE SHOWS 2026-11-21] small birds nearer
+    const F32 near_m = llmin(kind == SMALL ? SMALL_NEAR_M : NEAR_M, far_m * 0.5f);
     if (!pickPlace(region, kind, near_m, far_m, f.mCentre)) return false;
     f.mTarget = f.mCentre;
     f.mRetarget = now + frand_range(8.f, 20.f);
@@ -1747,9 +1780,6 @@ void WolfBirds::move(F32 dt, F64 now)
     // the flocks' own movement
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
     LLViewerRegion* region = gAgent.getRegion();
-    // [BIRDS MID 2026-11-02] ticket 463: a drifting centre keeps within the reach + 30 m (FAR_M + 30 m as before when the
-    // draw distance is long; inside the draw distance less 10 m when it is short, see flock_reach_m)
-    const F32 drift_max = flock_reach_m() + 30.f;
     // [BIRDS LANDING 2026-11-02] the flocks' landing: a leaving flock's birds take off first; a small flock drops to feed
     // and lifts as one; gulls (below, one by one) look for somewhere to settle after a while aloft
     for (S32 fi = 0; fi < (S32)mFlocks.size(); ++fi)
@@ -1808,6 +1838,10 @@ void WolfBirds::move(F32 dt, F64 now)
             // drift the centre a little over the same kind of place, and pick the next target near it
             LLVector3 c = f.mCentre + LLVector3(frand_range(-25.f, 25.f), frand_range(-25.f, 25.f), 0.f);
             const bool sea_kind = (f.mKind == GULL || f.mKind == TERN);
+            // [BIRDS MID 2026-11-02] ticket 463: a drifting centre keeps within the reach + 30 m (FAR_M + 30 m when the draw
+            // distance is long; inside the draw distance less 10 m when it is short, see flock_reach_m);
+            // [WILDLIFE SHOWS 2026-11-21] the kind's own reach (kind_reach_m: the small birds nearer)
+            const F32 drift_max = kind_reach_m(f.mKind) + 30.f;
             if (inRegion(region, c, -8.f) && overWater(c) == sea_kind && !built(c) && (flat(c - cam).length() < drift_max))
             {
                 c.mV[VZ] = surfaceZ(c);

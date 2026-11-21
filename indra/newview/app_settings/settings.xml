@@ -19872,7 +19872,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerNatureSounds</key>
 		<map>
 			<key>Comment</key>
-			<string>[NATURE SOUNDS 2026-11-03] Play the nature sounds of Wolf Territories regions whose owner has turned them on: crickets on warm nights, soft lapping by still water and waves at the shore. They follow the Ambient volume. Off means no nature sounds for you only.</string>
+			<string>[NATURE SOUNDS 2026-11-03] Play the nature sounds of Wolf Territories regions whose owner has not switched them off ([WILDLIFE SHOWS 2026-11-21] on by default): crickets on warm nights, soft lapping by still water and waves at the shore. They follow the Ambient volume. Off means no nature sounds for you only.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
@@ -19883,7 +19883,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerSeaLife</key>
 		<map>
 			<key>Comment</key>
-			<string>[SEA LIFE 2026-11-03] Show the dolphins and whales of Wolf Territories regions whose owner has turned them on (open sea only). Off means none for you only.</string>
+			<string>[SEA LIFE 2026-11-03] Show the dolphins and whales of Wolf Territories regions whose owner has not switched them off ([WILDLIFE SHOWS 2026-11-21] on by default; open sea only). Off means none for you only.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

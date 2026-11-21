@@ -307,7 +307,8 @@ namespace
         const LLSD& b = sState.mReply["birds"];
         const bool on = b["on"].asBoolean();
         if (b["ambient"].isBoolean()) return str(panel, on ? "on_chosen" : "off_chosen");
-        // [BIRDS 2026-11-02] wolf_ambient_lib.php wa_birds_default: Parks / Marinas on, other categories off, none = sea
+        // [BIRDS 2026-11-02] wolf_ambient_lib.php wa_birds_default; [WILDLIFE SHOWS 2026-11-21] on every region since Paul's
+        // 21 Nov "birds on everywhere" (default true, seaCoast false); a grid still on the 11-02 rule may send seaCoast
         if (!b["default"].asBoolean() && b["seaCoast"].asBoolean()) return str(panel, "birds_sea_default");
         return str(panel, on ? "birds_on_default" : "off_unless");
     }
@@ -325,7 +326,8 @@ namespace
         const LLSD& b = sState.mReply["sounds"];
         const bool on = b["on"].asBoolean();
         if (b["ambient"].isBoolean()) return str(panel, on ? "on_chosen" : "off_chosen");
-        return str(panel, "off_unless");   // nobody has chosen: off (there is no other default)
+        // [WILDLIFE SHOWS 2026-11-21] nobody has chosen: the grid's default (wa_sounds_block: on since 21 Nov; off before)
+        return str(panel, on ? "sounds_on_default" : "off_unless");
     }
 
     /** [SHIP OPT-IN 2026-11-03] "Passing ships on this region": the reply's `boats` block {ambient, default (Lone Wolf's
@@ -357,7 +359,8 @@ namespace
         const LLSD& b = sState.mReply["sealife"];
         const bool on = b["on"].asBoolean();
         if (b["ambient"].isBoolean()) return str(panel, on ? "on_chosen" : "off_chosen");
-        return str(panel, "off_unless");   // nobody has chosen: off (there is no other default)
+        // [WILDLIFE SHOWS 2026-11-21] nobody has chosen: the grid's default (wa_sealife_block: on since 21 Nov; off before)
+        return str(panel, on ? "sealife_on_default" : "off_unless");
     }
 
     /** [UNDERSEA 2026-11-09] "Fish and sea plants on this region": the reply's `undersea` block {ambient, default (true),

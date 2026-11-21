@@ -1043,6 +1043,21 @@ void LLPluginClassMedia::receivePluginMessage(const LLPluginMessage &message)
             mArtist = message.getValue( "artist" );
         }
         else // </FS:ND>
+        // [T937 2026-11-20] the plugin's answer to "wolf_audio_device" (setAudioOutputDevice): which device it is on
+        if (message_name == "wolf_audio_device_result")
+        {
+            const std::string name = message.getValue("name");
+            if (message.getValueBoolean("found"))
+            {
+                LL_INFOS("Plugin") << "Media plugin sound is on the output device '" << (name.empty() ? "(system default)" : name) << "'" << LL_ENDL;
+            }
+            else
+            {
+                LL_WARNS("Plugin") << "Media plugin has no output device called '" << name << "' - its sound stays on the system default ("
+                                   << message.getValue("devices") << ")" << LL_ENDL;
+            }
+        }
+        else
 #if LL_LINUX
         // <WolfViewer 2026-10-23> media_plugin_gstreamer10.cpp reportMissingPlugin()
         if (message_name == "wolf_gst_missing_plugin")
@@ -1667,6 +1682,14 @@ void LLPluginClassMedia::setVolume(float volume)
 float LLPluginClassMedia::getVolume()
 {
     return mRequestedVolume;
+}
+
+// [T937 2026-11-20] see llpluginclassmedia.h. Queued like any message until the plugin is running (sendMessage).
+void LLPluginClassMedia::setAudioOutputDevice(const std::string& name)
+{
+    LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA_TIME, "wolf_audio_device");
+    message.setValue("name", name);
+    sendMessage(message);
 }
 
 void LLPluginClassMedia::initializeUrlHistory(const LLSD& url_history)

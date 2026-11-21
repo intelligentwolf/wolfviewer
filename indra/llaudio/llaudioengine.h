@@ -200,6 +200,11 @@ public:
     virtual void setDevice(const LLUUID& device_uuid) { };
     /** <WolfViewer 2026-09-13> Follow the default output device across hot-plugs (OpenAL only). */
     virtual void setDeviceWatchEnabled(bool enabled) { };
+    /** [T937 2026-11-20] The operating system's name for the output device the engine is playing on because the
+     *  resident chose it in Preferences > Sound & Media; empty = the system default (nothing chosen, or the chosen
+     *  device is not plugged in). Parcel music plays in a media plugin process, not in this engine, and is sent this
+     *  name so it plays on the same device (LLStreamingAudio_MediaPlugins::syncOutputDevice). */
+    virtual std::string getOutputDeviceSystemName() const { return std::string(); }
 
     typedef boost::signals2::signal<void(output_device_map_t output_device_map)> output_device_list_changed_callback_t;
     boost::signals2::connection setOutputDeviceListChangedCallback(const output_device_list_changed_callback_t::slot_type& cb)

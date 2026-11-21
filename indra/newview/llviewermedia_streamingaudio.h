@@ -61,6 +61,11 @@ private:
 
     std::string mURL;
 
+    // [T937 2026-11-20] Ticket 937: tell the plugin which output device the sound engine plays on (Preferences >
+    // Sound & Media), when the plugin is made and whenever that changes. force = send even if unchanged (new plugin).
+    void syncOutputDevice(bool force);
+    std::string mSentOutputDevice;
+
     // <FS:ND> stream metadata from plugin
     void updateMetadata() noexcept;
 

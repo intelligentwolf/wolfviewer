@@ -97,6 +97,11 @@ private:
     void reportMissingPlugin();
     std::string mMissingPlugin;     // what is missing, e.g. "decoder for audio/mpeg"; empty = nothing
     // </WolfViewer>
+    // [T937 2026-11-20] the viewer's chosen sound output device ("wolf_audio_device"), see applyAudioDevice()
+    void applyAudioDevice();
+    bool mAudioDeviceWanted = false;    // the viewer has said which device
+    std::string mAudioDevice;           // the system's device name; empty = the system default
+    std::string mAudioDeviceApplied;    // the name playbin's audio sink is on now; empty = playbin's default sink
 #endif
 
     double MIN_LOOP_SEC = 1.0F;
@@ -626,6 +631,111 @@ void MediaPluginGStreamer10::reportMissingPlugin()
     mMissingPlugin.clear();
 }
 // </WolfViewer>
+#endif
+
+#if LL_LINUX
+// [T937 2026-11-20] Ticket 937 (Benny Moonstone): parcel music stayed on the system's default output device when
+// Preferences > Sound & Media moved the viewer's sounds to another one. The viewer sends the device's system name
+// (LLAudioEngine_OpenAL::getOutputDeviceSystemName) as "wolf_audio_device"; this finds the audio sink device with that
+// name and makes playbin play into it.
+// Names: OpenAL Soft's PipeWire backend names a device by its node's PW_KEY_NODE_DESCRIPTION (alc/backends/pipewire.cpp
+// :1019), its PulseAudio backend by the sink's description (pulseaudio.cpp:401). A GstDevice's display name is the same
+// text: GStreamer's PipeWire device provider shows node.description ("gst-device-monitor-1.0 Audio/Sink" on PipeWire
+// 1.6.9: name = node.description), and the PulseAudio provider the sink's description.
+// Source: GStreamer 1.28 gst/gstdevicemonitor.c:411 gst_device_monitor_get_devices() - with a filter set it asks
+// every provider for its devices (probing them if the monitor is not started), highest rank first, without the
+// providers another one hides (PipeWire hides PulseAudio); gst/gstdevice.h gst_device_create_element() makes the sink
+// element for that device (pipewiresink target-object=..., pulsesink device=...).
+// playbin: "audio-sink" = "the audio output element to use (NULL = default sink)" (gstplaybin2.c:841); it is used when
+// a group is activated on READY -> PAUSED (activate_group :5292) and dropped on PAUSED -> READY (deactivate_group), so a
+// running stream is taken to READY, given the new sink and set going again (a radio stream reconnects).
+void MediaPluginGStreamer10::applyAudioDevice()
+{
+    if (!mDoneInit || !mPlaybin || !mAudioDeviceWanted)
+    {
+        return;
+    }
+    GstElement* sink = NULL;
+    bool found = mAudioDevice.empty();
+    std::string names;      // what GStreamer offers, for the viewer's log when nothing matches
+    if (!found)
+    {
+        if (!llgst_device_monitor_new || !llgst_device_monitor_add_filter || !llgst_device_monitor_get_devices
+            || !llgst_device_get_display_name || !llgst_device_create_element || !llg_list_free)
+        {
+            names = "this GStreamer has no device monitor";
+        }
+        else if (GstDeviceMonitor* monitor = llgst_device_monitor_new())
+        {
+            llgst_device_monitor_add_filter(monitor, "Audio/Sink", NULL);
+            GList* devices = llgst_device_monitor_get_devices(monitor);
+            for (GList* item = devices; item; item = item->next)
+            {
+                GstDevice* device = (GstDevice*)item->data;
+                gchar* display = llgst_device_get_display_name(device);
+                if (display)
+                {
+                    if (!found && mAudioDevice == display)
+                    {
+                        sink = llgst_device_create_element(device, NULL);
+                        found = sink != NULL;
+                    }
+                    if (!found)
+                    {
+                        if (!names.empty())
+                        {
+                            names += "; ";
+                        }
+                        names += display;
+                    }
+                    llg_free(display);
+                }
+                llgst_object_unref(device);     // the list holds a reference to each device (transfer full)
+            }
+            if (devices)
+            {
+                llg_list_free(devices);
+            }
+            llgst_object_unref(monitor);
+        }
+    }
+
+    // Not found = the default sink. Change playbin only when the sink is really changing.
+    const std::string now_on = found ? mAudioDevice : std::string();
+    if (sink || now_on != mAudioDeviceApplied)
+    {
+        if (!sink)
+        {
+            // Back to the default: an explicit autoaudiosink, which is what playsink makes when it has no sink
+            // (gstplaysink.c:2716-2717 gen_audio_chain). "audio-sink" = NULL is not enough: playsink keeps the audio
+            // chain it built, and gst_play_sink_get_sink() (gstplaysink.c:943-986) hands activate_group that chain's
+            // sink - the device's - again (measured on the rig 2026-11-20: the music stayed on the chosen device).
+            sink = llgst_element_factory_make("autoaudiosink", NULL);
+        }
+        const GstState target = GST_STATE_TARGET(mPlaybin);
+        if (target > GST_STATE_READY)
+        {
+            llgst_element_set_state(mPlaybin, GST_STATE_READY);
+        }
+        llg_object_set(mPlaybin, "audio-sink", sink, NULL);     // playbin takes the new sink (NULL only if autoaudiosink is missing)
+        if (target > GST_STATE_READY)
+        {
+            llgst_element_set_state(mPlaybin, target);
+            // The new sink's stream starts at whatever volume the sound server remembers for this program (a
+            // PulseAudio/PipeWire stream restore), and playsink takes that volume over from a sink that has its own
+            // (measured on the rig: a remembered 0 % silenced the music, also after moving on to the next device).
+            // The viewer only sends "set_volume" when its volume changes, so put the viewer's volume back here.
+            llg_object_set(mPlaybin, "volume", (gdouble)mVolume, NULL);
+        }
+        mAudioDeviceApplied = now_on;
+    }
+
+    LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA, "wolf_audio_device_result");
+    message.setValue("name", mAudioDevice);
+    message.setValueBoolean("found", found);
+    message.setValue("devices", names);
+    sendMessage(message);
+}
 #endif
 
 bool MediaPluginGStreamer10::stop()
@@ -1163,6 +1273,15 @@ void MediaPluginGStreamer10::receiveMessage(const char *message_string)
                 double volume = message_in.getValueReal("volume");
                 setVolume(volume);
             }
+#if LL_LINUX
+            else if(message_name == "wolf_audio_device")
+            {
+                // [T937 2026-11-20] LLPluginClassMedia::setAudioOutputDevice
+                mAudioDevice = message_in.getValue("name");
+                mAudioDeviceWanted = true;
+                applyAudioDevice();
+            }
+#endif
         }
     }
 }

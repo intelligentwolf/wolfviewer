@@ -881,6 +881,9 @@ void LLFontGL::initClass(F32 screen_dpi, F32 x_scale, F32 y_scale, const std::st
                 if (xml_paths.empty())
                 {
                     // We didn't even find one single XUI file
+                    // [T943 2026-11-20] a missing program file: through the viewer's handler (llappviewer.cpp
+                    // errorHandler -> wolfExitProgramFilesMissing), which closes the viewer cleanly instead of this LL_ERRS
+                    LLError::LLUserWarningMsg::showMissingFiles();
                     LL_ERRS() << "No fonts.xml found: " << LL_ENDL;
                 }
 

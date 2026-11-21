@@ -27,6 +27,9 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfcrashreport.h"   // [CRASH REPORTS 2026-10-28/]
+#include <atomic>              // [T943 2026-11-20] wolfExitProgramFilesMissing
+#include <chrono>
+#include <thread>              // [/T943]
 #include "wolfmemorylog.h"     // [W106 MEMLOG 2026-11-13/] WolfMemoryLog::anotherCopyStillOpen, defined here
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
@@ -2883,6 +2886,77 @@ void errorCallback(LLError::ELevel level, const std::string &error_string)
     }
 }
 
+// [T943 2026-11-20] Lacey Nutmeg, fourth time, each the first start after an update: W107's folder had no
+// skins/default/xui/en/strings.xml, so initStrings showed LLUserWarningMsg::showMissingFiles ("couldn't access some of the
+// files ... reinstall"), then its LL_ERRS showed errorCallback's "We are sorry ... crashed" and crashed on purpose
+// (LAST_EXEC_LLERROR_CRASH, a crash stack, a staff crash ticket). Paul: one plain, kind message and a clean exit instead.
+// Declared in llappviewer.h.
+// Clean exit, as LLAppViewer::fastQuit: removeMarkerFiles (the next start is not taken as a crash or a freeze), then
+// _exit - not exit(), "because normal cleanup depends too much on successful startup" (the QAModeTermCode fatal function in
+// LLAppViewer::init). No error marker either: the next start, after a reinstall, is an ordinary one. removeDumpDir as on
+// any clean exit; a crash report is only ever made from a dump folder holding crash_stack.txt or the minidump
+// (wolfcrashreport.cpp find_crashes), which only a crash handler writes, and nothing here crashes.
+// The installer's marker: installer_template.nsi writes "$INSTDIR\WolfViewerInstalling.txt" with the WolfViewerInstallerRunning
+// mutex and deletes it at the end of its section; the viewer's exe is in $INSTDIR (llappviewerwin32.cpp wolfInstallerState).
+// wWinMain has already stopped, before this, for an installer still at work on this folder, so a marker found here was left
+// by an installer that stopped part way (or has been stuck for more than WOLF_INSTALLER_STUCK_SECS). Only the Windows
+// installer writes it; elsewhere the general wording is used.
+void wolfExitProgramFilesMissing(const std::string& detail)
+{
+    // One message. A second thread that arrives here waits for the first one's _exit; the same thread arriving again (from
+    // inside the message box) leaves at once.
+    static std::atomic_flag s_entered = ATOMIC_FLAG_INIT;
+    static std::atomic<std::thread::id> s_owner{};
+    if (s_entered.test_and_set())
+    {
+        if (s_owner.load() == std::this_thread::get_id())
+        {
+            _exit(WOLF_EXIT_PROGRAM_FILES_MISSING);
+        }
+        for (;;)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+    s_owner.store(std::this_thread::get_id());
+
+    LLError::setAlwaysFlush(true);
+    const std::string marker = gDirUtilp->getExecutableDir() + gDirUtilp->getDirDelimiter() + "WolfViewerInstalling.txt";
+    const bool unfinished_install = LLFile::isfile(marker);
+    LL_WARNS("InitInfo") << "WolfViewer's own program files are missing or unreadable: " << detail
+                         << (unfinished_install ? " (installer marker " + marker + " left behind)" : std::string())
+                         << "; telling the resident and exiting with code " << WOLF_EXIT_PROGRAM_FILES_MISSING << LL_ENDL;
+    LL_WARNS("InitInfo") << LLError::LLStacktrace() << LL_ENDL;
+    gDirUtilp->dumpCurrentDirectories(LLError::LEVEL_WARN);
+
+    // Plain English, not LLTrans: strings.xml may be one of the missing files.
+#if LL_WINDOWS
+    const std::string reinstall = "Please download WolfViewer again from wolf-grid.com and run the installer.";
+#else
+    const std::string reinstall = "Please download WolfViewer again from wolf-grid.com and install it.";
+#endif
+    const std::string text = (unfinished_install
+        ? std::string("The last WolfViewer update didn't finish installing, so some of its files are missing.")
+        : std::string("Some of WolfViewer's files are missing, so it can't start. This usually means the last update "
+                      "didn't finish installing."))
+        + "\n\n" + reinstall + "\n\nYour account, inventory and settings are safe.";
+
+    LLAppViewer* app = LLAppViewer::instance();
+    if (app && on_main_thread())
+    {
+        app->pauseMainloopTimeout();   // no watchdog kill while the box is up (as errorHandler)
+    }
+    OSMessageBox(text, "WolfViewer", OSMB_OK);
+
+    if (app)
+    {
+        app->removeMarkerFiles();
+        app->removeDumpDir();
+    }
+    LL_INFOS("InitInfo") << "Closed: program files missing" << LL_ENDL;
+    _exit(WOLF_EXIT_PROGRAM_FILES_MISSING);
+}
+
 // Callback for LLError::LLUserWarningMsg
 void errorHandler(const std::string& title_string, const std::string& message_string, S32 code)
 {
@@ -2900,8 +2974,10 @@ void errorHandler(const std::string& title_string, const std::string& message_st
         gDisconnected = true;
         break;
     case LLError::LLUserWarningMsg::ERROR_MISSING_FILES:
-        LLAppViewer::instance()->createErrorMarker(LAST_EXEC_MISSING_FILES);
-        break;
+        // [T943 2026-11-20] was: createErrorMarker(LAST_EXEC_MISSING_FILES), this message box, then the caller's LL_ERRS
+        // (a second "crashed" box and a deliberate crash). The callers' file names are in their LL_ERRS, which is not
+        // reached now: the log gets the stack instead (wolfExitProgramFilesMissing).
+        wolfExitProgramFilesMissing("reported through LLUserWarningMsg ERROR_MISSING_FILES");
     default:
         break;
     }
@@ -3095,9 +3171,9 @@ bool LLAppViewer::loadSettingsFromDirectory(const std::string& location_key,
             {   // failed to load
                 if(file.required)
                 {
-                    LLError::LLUserWarningMsg::showMissingFiles();
-                    LL_ERRS() << "Error: Cannot load required settings file from: " << full_settings_path << LL_ENDL;
-                    return false;
+                    // [T943 2026-11-20] was showMissingFiles + LL_ERRS; required="true" is only on the program's own
+                    // Default group (app_settings/settings_files.xml)
+                    wolfExitProgramFilesMissing("cannot load required settings file " + full_settings_path);
                 }
                 else
                 {
@@ -3194,21 +3270,10 @@ bool LLAppViewer::initConfiguration()
     if (!success)
     {
         LL_WARNS() << "Cannot load default configuration file " << settings_file_list << LL_ENDL;
-        LLError::LLUserWarningMsg::showMissingFiles();
-        if (gDirUtilp->fileExists(settings_file_list))
-        {
-            LL_ERRS() << "Cannot load default configuration file settings_files.xml. "
-                << "Please reinstall viewer from https://www.firestormviewer.org/choose-your-platform/ "
-                << "and contact https://www.firestormviewer.org/support if issue persists after reinstall."
-                << LL_ENDL;
-        }
-        else
-        {
-            LL_ERRS() << "Default configuration file settings_files.xml not found. "
-                << "Please reinstall viewer from https://www.firestormviewer.org/choose-your-platform/ "
-                << "and contact https://www.firestormviewer.org/support if issue persists after reinstall."
-                << LL_ENDL;
-        }
+        // [T943 2026-11-20] was showMissingFiles + LL_ERRS ("... not found" / "Cannot load ...", Firestorm's reinstall links)
+        wolfExitProgramFilesMissing(gDirUtilp->fileExists(settings_file_list)
+                                    ? "cannot load default configuration file " + settings_file_list
+                                    : "default configuration file " + settings_file_list + " not found");
     }
 
     mSettingsLocationList = new SettingsFiles();
@@ -3218,8 +3283,7 @@ bool LLAppViewer::initConfiguration()
 
     if (!mSettingsLocationList->validateBlock())
     {
-        LLError::LLUserWarningMsg::showMissingFiles();
-        LL_ERRS() << "Invalid settings file list " << settings_file_list << LL_ENDL;
+        wolfExitProgramFilesMissing("invalid settings file list " + settings_file_list);   // [T943 2026-11-20] was showMissingFiles + LL_ERRS
     }
 
     // The settings and command line parsing have a fragile
@@ -3236,11 +3300,9 @@ bool LLAppViewer::initConfiguration()
     bool set_defaults = true;
     if (!loadSettingsFromDirectory("Default", set_defaults))
     {
-        OSMessageBox(
-            "Unable to load default settings file. The installation may be corrupted.",
-            LLStringUtil::null,OSMB_OK);
-        LLAppViewer::instance()->createErrorMarker(LAST_EXEC_MISSING_FILES);
-        return false;
+        // [T943 2026-11-20] was OSMessageBox("Unable to load default settings file. The installation may be corrupted."),
+        // createErrorMarker(LAST_EXEC_MISSING_FILES), return false (wWinMain / main: "Application init failed")
+        wolfExitProgramFilesMissing("unable to load the Default settings group from " + settings_file_list);
     }
 
     //<FS:Techwolf Lupindo>
@@ -3860,10 +3922,8 @@ void LLAppViewer::initStrings()
         }
 
         // initial check to make sure files are there failed
-        gDirUtilp->dumpCurrentDirectories(LLError::LEVEL_WARN);
-        LLError::LLUserWarningMsg::showMissingFiles();
-        LL_ERRS() << "Viewer failed to open some of localization and UI files."
-            << " " << crash_reason << "." << LL_ENDL;
+        // [T943 2026-11-20] was dumpCurrentDirectories + showMissingFiles + LL_ERRS (ticket 943: W107 left no strings.xml)
+        wolfExitProgramFilesMissing("viewer failed to open some of localization and UI files. " + crash_reason);
     }
     LLTransUtil::parseStrings(strings_file, default_trans_args);
     LLTransUtil::parseLanguageStrings("language_settings.xml");
@@ -5622,8 +5682,8 @@ void LLAppViewer::loadKeyBindings()
         key_bindings_file = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "key_bindings.xml");
         if (!gViewerInput.loadBindingsXML(key_bindings_file))
         {
-            LLError::LLUserWarningMsg::showMissingFiles();
-            LL_ERRS("InitInfo") << "Unable to open default key bindings from " << key_bindings_file << LL_ENDL;
+            // [T943 2026-11-20] was showMissingFiles + LL_ERRS
+            wolfExitProgramFilesMissing("unable to open default key bindings from " + key_bindings_file);
         }
     }
     LLUrlRegistry::instance().setKeybindingHandler(&gViewerInput);

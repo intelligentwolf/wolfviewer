@@ -2281,8 +2281,8 @@ void LLViewerWindow::initBase()
     MainPanel* main_view = new MainPanel();
     if (!main_view->buildFromFile("main_view.xml"))
     {
-        LL_ERRS() << "Failed to initialize viewer: Viewer couldn't process file main_view.xml, "
-                << "if this problem happens again, please validate your installation." << LL_ENDL;
+        // [T943 2026-11-20] was LL_ERRS (a crash): a missing program file, as llappviewer.cpp initStrings
+        wolfExitProgramFilesMissing("failed to initialize viewer: couldn't process file main_view.xml");
     }
     main_view->setShape(full_window);
     getRootView()->addChild(main_view);
@@ -2310,8 +2310,8 @@ void LLViewerWindow::initBase()
     gToolBarView = LLUICtrlFactory::getInstance()->createFromFile<LLToolBarView>("panel_toolbar_view.xml", panel_holder, LLDefaultChildRegistry::instance());
     if (!gToolBarView)
     {
-        LL_ERRS() << "Failed to initialize viewer: Viewer couldn't process file panel_toolbar_view.xml, "
-                << "if this problem happens again, please validate your installation." << LL_ENDL;
+        // [T943 2026-11-20] was LL_ERRS (a crash): a missing program file, as llappviewer.cpp initStrings
+        wolfExitProgramFilesMissing("failed to initialize viewer: couldn't process file panel_toolbar_view.xml");
     }
     gToolBarView->setShape(panel_holder->getLocalRect());
     // Hide the toolbars for the moment: we'll make them visible after logging in world (see LLViewerWindow::initWorldUI())

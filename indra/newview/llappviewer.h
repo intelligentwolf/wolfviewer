@@ -466,4 +466,12 @@ extern bool gDoDisconnect;
 
 extern bool gSimulateMemLeak;
 
+// [T943 2026-11-20] Source: llappviewer.cpp wolfExitProgramFilesMissing(). WolfViewer's own program files (app_settings,
+// skins, fonts, ...) are missing or unreadable: one plain message, then a clean exit with WOLF_EXIT_PROGRAM_FILES_MISSING.
+// No LL_ERRS, so no "We are sorry... crashed" box, no crash stack and no crash report. Every "required file missing"
+// fatal path goes here: directly from the viewer's own code, and through LLError::LLUserWarningMsg ERROR_MISSING_FILES
+// (llappviewer.cpp errorHandler) from the libraries. Never returns.
+constexpr int WOLF_EXIT_PROGRAM_FILES_MISSING = 66;   // (CHOSEN) sysexits.h EX_NOINPUT "cannot open input"; not 3 (abort() on Windows)
+[[noreturn]] void wolfExitProgramFilesMissing(const std::string& detail);
+
 #endif // LL_LLAPPVIEWER_H

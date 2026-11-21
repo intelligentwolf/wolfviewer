@@ -18,7 +18,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="920"
+ height="950"
  layout="topleft"
  name="wolf_huds"
  save_rect="true"
@@ -26,6 +26,15 @@
  title="Wolf HUDs"
  width="824">
     <text follows="left|top" font="SansSerifLarge" height="28" layout="topleft" left="12" name="intro" top="30" width="784" wrap="true">Press a picture to show or hide that HUD. A green dot and ON mean it is showing.</text>
+    <!-- [T958 2026-11-21] ticket 958, Luke Koda: "hide buttons on the HUD that I dont use... pick and choose". Choose tiles... turns
+         choosing on (a press then shows or hides a tile here instead of running its HUD; hidden ones are dimmed and say so),
+         Done turns it off and the hidden tiles go, the rest closing up. Show all brings every tile back. The choice is the
+         resident's own (settings_per_account.xml WolfHudsHidden). Hidden tiles stay in the Wolf World menu, and a HUD keeps
+         running when its tile is hidden. wolffloaterhuds.cpp fitToArea keeps this row under the intro however it wraps. -->
+    <button follows="left|top" height="24" label="Choose tiles..." label_selected="Done" layout="topleft" left="12" name="choose_btn" top="64" width="150" is_toggle="true"
+     tool_tip="Pick which tiles show in this window. Hidden ones stay in the Wolf World menu, and their HUDs still work." />
+    <button follows="left|top" height="24" label="Show all" layout="topleft" left="170" name="show_all_btn" top="64" width="100" visible="false"
+     tool_tip="Show every tile in this window again" />
     <!-- [HUDS TILES 2 2026-11-14] the tiles scroll. Seven rows (804 high) no longer fit every screen: 920 tall at UI size 1.0
          is more than the floaters' area of a 1080-high screen at a larger UI size (llfloater.cpp LLFloaterView::adjustToFitScreen
          only shrinks resizable floaters, and this one is not). So the tiles sit in tiles_panel inside tiles_scroll, and
@@ -38,7 +47,7 @@
          made small: 640 pixels wide, 474 UI units at UI size 1.35) wolffloaterhuds.cpp fitToArea lays the same tiles out two or
          one to a row (560 / 296 wide) in this reading order, each picture and its words kept at these offsets from its tile, and
          the intro and status line wrap to the narrower width. A new tile still goes in the next free slot of this 3-wide grid. -->
-    <scroll_container follows="all" layout="topleft" left="0" top="64" width="824" height="804" name="tiles_scroll" opaque="false" border_visible="false" reserve_scroll_corner="false">
+    <scroll_container follows="all" layout="topleft" left="0" top="94" width="824" height="804" name="tiles_scroll" opaque="false" border_visible="false" reserve_scroll_corner="false">
     <panel follows="left|top" layout="topleft" left="0" top="0" width="796" height="804" name="tiles_panel" background_visible="false" mouse_opaque="false">
         <!-- Game Mode -->
         <button follows="left|top" layout="topleft" left="12" top="0" width="256" height="108" name="tile_game" is_toggle="true" label="" tab_stop="true" tool_tip="Game Mode: Your character, actions and bag across the bottom of the screen." />
@@ -167,5 +176,5 @@
         <text follows="left|top" layout="topleft" left="112" top="778" width="148" height="18" name="state_track" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
     </panel>
     </scroll_container>
-    <text follows="left|bottom" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="876" width="784" wrap="true" />
+    <text follows="left|bottom" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="906" width="784" wrap="true" />
 </floater>

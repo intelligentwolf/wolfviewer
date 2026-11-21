@@ -1919,6 +1919,17 @@
         <key>Value</key>
             <integer>0</integer>
         </map>
+     <key>WolfHudsHidden</key>
+        <map>
+        <key>Comment</key>
+            <string>[T958 2026-11-21] The Wolf HUDs window's tiles this resident has hidden (wolffloaterhuds.cpp TILE_IDS); the HUDs still work from the Wolf World menu.</string>
+        <key>Persist</key>
+            <integer>1</integer>
+        <key>Type</key>
+            <string>LLSD</string>
+        <key>Value</key>
+            <array/>
+        </map>
      <key>FSProtectedFolders</key>
         <map>
         <key>Comment</key>

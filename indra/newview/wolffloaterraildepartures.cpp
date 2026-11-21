@@ -141,8 +141,12 @@ void WolfFloaterRailDepartures::onHere(S32 status, const LLSD& reply)
     {
         const std::string net = mHere[0]["network"].asString();
         if (mHere[0]["stations"].isArray() && mHere[0]["stations"].size() > 0) gSavedSettings.setString("WolfRailDeparturesStation", mHere[0]["stations"][0].asString());
-        fillRailways();
+        // [W109 2026-11-21] choose first, then fill: fillRailways selects WolfRailDeparturesNetwork, which choose() writes.
+        // The other way round, on a first open (setting empty) the Railway box stayed blank over the chosen railway's board
+        // (w109 rig shot w109-raildep-departures: TGWR board shown, box empty) - LLComboBox::setValue selects only an item
+        // already in the list (llcombobox.cpp setValue -> mList->selectByValue).
         choose(net);
+        fillRailways();
         return;
     }
     fillRailways();

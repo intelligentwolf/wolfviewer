@@ -368,6 +368,12 @@ private:
     LLProgressBar* mProgress = nullptr;
     LLCheckBoxCtrl* mMineCheck = nullptr;
     LLPanel* mMinePanel = nullptr;
+    // [T961 2026-11-21] the window's height as built, Your railways closed: floater_wolf_track.xml's height plus the header
+    // stretch LLFloater::initFloaterXML adds (llfloater.cpp: header_height - legacy_header_height, by setRect, widgets not
+    // moved). Measured at the start of postBuild; relayout sizes the window from it.
+    S32 mBaseH = 0;
+    // [T961 2026-11-21] the height with Your railways open: down to the panel's foot as built, plus the margin under it
+    S32 mOpenH = 0;
     LLScrollListCtrl* mMineList = nullptr;
     LLButton *mShowBtn = nullptr, *mChangeBtn = nullptr, *mLayPartBtn = nullptr, *mRemoveBtn = nullptr;
 

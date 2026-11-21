@@ -121,7 +121,6 @@ namespace
     constexpr F32 TOP_VIEW_M = 120.f;          // wolffloaterlifts.cpp:85
     constexpr F32 TOP_VIEW_TILT = 0.35f;       // wolffloaterlifts.cpp:86
     constexpr F32 LABEL_FAR_M = 400.f;         // CHOSEN: names further from the camera than this are not written
-    constexpr F32 MINE_PANEL_H = 140.f;        // floater_wolf_track.xml track_mine_panel height
 
     // the preview's colours (DESIGN.md 1.2: ground green, embankment brown, viaduct brick red, over water blue)
     const LLColor4 COL_GROUND(0.35f, 0.85f, 0.35f, 1.f);
@@ -412,6 +411,8 @@ WolfFloaterTrack::~WolfFloaterTrack()
 
 bool WolfFloaterTrack::postBuild()
 {
+    // [T961 2026-11-21] before the first relayout (below): the height as built, header stretch included
+    mBaseH = getRect().getHeight();
     mHint = getChild<LLTextBox>("track_hint");
     mMode = getChild<LLRadioGroup>("track_mode");
     mUndoBtn = getChild<LLButton>("track_undo");
@@ -457,6 +458,9 @@ bool WolfFloaterTrack::postBuild()
     mStatus = getChild<LLTextBox>("track_status");
     mMineCheck = getChild<LLCheckBoxCtrl>("track_mine_check");
     mMinePanel = getChild<LLPanel>("track_mine_panel");
+    // [T961 2026-11-21] open, the window reaches the panel's foot (it follows the top, so this distance never changes) and
+    // 5 px under it: W108 opened to 680 + 140 = 820 with the foot 815 below the top (rig, 21 Nov), so open is as it was.
+    mOpenH = mBaseH - mMinePanel->getRect().mBottom + 5;
     mMineList = mMinePanel->getChild<LLScrollListCtrl>("track_mine_list");
     mShowBtn = mMinePanel->getChild<LLButton>("track_show");
     mChangeBtn = mMinePanel->getChild<LLButton>("track_change");
@@ -4715,14 +4719,16 @@ void WolfFloaterTrack::setTextIfChanged(LLTextBox* box, const std::string& text)
 
 void WolfFloaterTrack::relayout()
 {
-    // the floater's height in floater_wolf_track.xml, and the Your railways panel under it when it is open. The skin's
-    // header pushes every child ~22 px below its XUI top, so the closed height leaves room under the Your railways
-    // check box (top 600 + 18 then, 628 + 18 now): at 624 it drew below the floater and a click on it fell through to the world (live
-    // test 14 Nov 14:22Z: the click started a new line instead of opening Your railways)
-    constexpr S32 CLOSED_H = 680;   // [CUTTINGS 2026-11-17] 652 + the hill choice's third row (28 px)
+    // the window's height as built, and the Your railways panel under it when it is open. Every child sits a header stretch
+    // below its XUI top (LLFloater::initFloaterXML: header_height - legacy_header_height, 25 px in the default skin), and on
+    // 14 Nov a closed height of 624 drew the Your railways check box below the floater, where a click fell through to the world
+    // (live test 14:22Z: the click started a new line). [T961 2026-11-21] That fix was a constant (680, the XML's own height),
+    // which still cut the stretch off the foot: the box fitted by 9 px only, so one more row would have broken it again, as
+    // ticket 961 did the Terraform window. Now the base is the height as built (mBaseH, postBuild), the same in every skin and
+    // whatever rows the XML gains. Source: wolffloaterterraform.cpp relayout (ticket 961).
     const bool open = mMineCheck && mMineCheck->get();
     if (mMinePanel) mMinePanel->setVisible(open);
-    const S32 h = CLOSED_H + (open ? (S32)MINE_PANEL_H : 0);
+    const S32 h = open ? llmax(mBaseH, mOpenH) : mBaseH;
     LLRect r = getRect();
     if (r.getHeight() != h)
     {

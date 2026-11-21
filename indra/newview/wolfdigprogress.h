@@ -44,7 +44,8 @@ public:
     };
 
     /** Make one and put it in `owner` at `rect` (floater-local), in front of the controls it covers. Hidden until shown. */
-    static WolfDigProgress* add(LLFloater* owner, const LLRect& rect);
+    // [T961 2026-11-21] any view: a window, or the scrolled panel its controls are in (wolffloaterterraform.cpp tf_content)
+    static WolfDigProgress* add(LLView* owner, const LLRect& rect);
 
     /** Working on `line` (the job's own words, e.g. "Step 2 of 5: making the rock..."). `fraction` 0..1 from real counts, or
      *  below 0 when the step cannot be counted (the bar then sweeps, and no percent is shown). */

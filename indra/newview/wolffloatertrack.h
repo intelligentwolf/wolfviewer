@@ -36,6 +36,7 @@ class LLCheckBoxCtrl;
 class LLComboBox;
 class LLLineEditor;
 class LLPanel;
+class LLScrollContainer;
 class LLProgressBar;
 class LLRadioGroup;
 class LLScrollListCtrl;
@@ -368,6 +369,13 @@ private:
     LLProgressBar* mProgress = nullptr;
     LLCheckBoxCtrl* mMineCheck = nullptr;
     LLPanel* mMinePanel = nullptr;
+    // [T961 2026-11-21] every control is in track_content, scrolled by track_scroll (floater_wolf_track.xml), so the window
+    // never runs past the floaters' area. Measured in postBuild: mHeaderH the window's height above track_scroll (the title
+    // bar; LLFloater::initFloaterXML's header stretch included), mContentW / mClosedH track_content as built, mOpenH down to
+    // the Your railways panel's foot plus a margin. mAreaH: the floaters' area height relayout last fitted (draw refits on a change).
+    LLScrollContainer* mScroll = nullptr;
+    LLPanel* mContent = nullptr;
+    S32 mHeaderH = 0, mContentW = 0, mClosedH = 0, mOpenH = 0, mAreaH = -1;
     LLScrollListCtrl* mMineList = nullptr;
     LLButton *mShowBtn = nullptr, *mChangeBtn = nullptr, *mLayPartBtn = nullptr, *mRemoveBtn = nullptr;
 

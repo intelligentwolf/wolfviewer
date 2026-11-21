@@ -250,7 +250,7 @@ LLRect WolfBurrow::around(const std::vector<LLView*>& views, const LLView* owner
     return LLRect(out.mLeft - pad, out.mTop + pad + heading_room, out.mRight + pad, out.mBottom - pad);
 }
 
-WolfBurrow::Sheet* WolfBurrow::Sheet::add(LLFloater* owner, const std::function<void()>& painter)
+WolfBurrow::Sheet* WolfBurrow::Sheet::add(LLView* owner, const std::function<void()>& painter)
 {
     // Source: wolffloatermeshupload.cpp postBuild (llfloaterwolfavatars.cpp:1014-1024): behind every control; the caller then
     // sends its drag handle behind it, so empty paper drags the window.

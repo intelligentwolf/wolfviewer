@@ -8,7 +8,10 @@
      Flow: 1. pick a tool tile -> click (or draw) on the ground; the hint line says what -> 2. its two or three settings (the rest
      under More options, closed) -> 3. the preview in the world (red = cut, green = fill), Apply and the summary under it (the mole plate lies over the summary and the status line, never over Apply or Stop) -> the mole plate
      while it works -> 4. the step in History, Undo / Redo.
-     Layout: 646 high with More options closed (620 until the Shape row, 2026-11-10 sky land) (596 until the brush shape row, ticket 355); More options adds 64 at the bottom (WolfFloaterTerraform::relayout). The burrow
+     Layout: 646 high with More options closed (620 until the Shape row, 2026-11-10 sky land) (596 until the brush shape row, ticket 355); More options adds 86 at the bottom (WolfFloaterTerraform::relayout; [T961 2026-11-21] was 64 with the panels at 646, where the MORE
+     OPTIONS plate's heading lay over the More options box - unseen while the box was cut off; now the panels start at 668). [T961 2026-11-21] The window is built 25 px taller than this
+     height (LLFloater::initFloaterXML header stretch, the widgets keep their place), and relayout sizes it from that built height,
+     never from this number: sized to 646 the foot (More options) fell outside the window and its clicks went to the world. The burrow
      look (wolfburrow.cpp): fixed colours on fixed paint, so every text pair keeps its contrast in every skin
      (region-terrain-work/cave-lights/check/burrow_contrast.py: CREAM on a plate 13.4:1, MUTED 9.1:1, DIS 6.8:1, CREAM on stone
      8.1:1+, INK on amber 6.7:1+). The tool tiles' pictures and words are painted (paintBurrow). -->
@@ -24,6 +27,13 @@
  single_instance="true"
  title="Terraform"
  width="460">
+ <!-- [T961 2026-11-21] Shadow: nothing ever off screen (small laptop screens; at 1366 x 650 the floaters' area is 631 high). Every
+      control, and the painted burrow sheet behind them, is in tf_content, scrolled by tf_scroll: WolfFloaterTerraform::relayout
+      sizes tf_content (More options closed or open), makes the window that plus its header but never taller than the floaters'
+      area, and the scroll bar shows when it is cut short (the window then widens by the bar). Coordinates below are tf_content's,
+      the same numbers as before. -->
+    <scroll_container follows="all" layout="topleft" left="0" top="0" width="460" height="646" name="tf_scroll" opaque="false" border_visible="false" reserve_scroll_corner="false" mouse_opaque="false">
+    <panel follows="left|top" layout="topleft" left="0" top="0" width="460" height="646" name="tf_content" background_visible="false" mouse_opaque="false">
     <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="56" label="" left="10" name="tf_tool_level" top="90" width="56" is_toggle="true"
      tool_tip="Level: set the ground in a box to one height (a building pad)" />
     <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="56" label="" left="73" name="tf_tool_ramp" top="90" width="56" is_toggle="true"
@@ -145,11 +155,11 @@
          tool_tip="The rest of the tool's settings (soft edges, banks, typed heights). Most jobs need none of it.">
 <check_box.label_text text_color="0.95 0.92 0.84 1" text_readonly_color="0.7 0.66 0.6 1" />
 </check_box>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_level" top="646" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_level" top="668" visible="false" width="460">
         <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="16" show_text="true" decimal_digits="1" increment="0.5" initial_value="0" label="Soft edge (m)" label_width="84" left="10"
          max_val="10" min_val="0" name="tf_level_edge" top="8" width="300" tool_tip="Ease the ground into the level box over this many metres round it (0: a sharp edge). Round brush: used when Soft rim is 0." />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_ramp" top="646" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_ramp" top="668" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="3" label="Shoulders (m)" label_width="84" left="10"
          max_val="20" min_val="0" name="tf_ramp_shoulder" top="2" width="170" tool_tip="Ease the sides into the ground over this many metres" />
         <check_box follows="left|top" height="16" initial_value="false" label="Heights" layout="topleft" left="190" name="tf_ramp_typed" top="4" width="70"
@@ -161,24 +171,24 @@
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="2" increment="0.5" initial_value="20" label="B" label_width="14" left="358"
          max_val="4000" min_val="-100" name="tf_ramp_b" top="2" width="90" tool_tip="Height at B (the second point), metres" />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_terrace" top="646" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_terrace" top="668" visible="false" width="460">
         <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="16" show_text="true" decimal_digits="1" increment="0.5" initial_value="2" label="Soft edge (m)" label_width="84" left="10"
          max_val="10" min_val="0" name="tf_terrace_edge" top="8" width="300" tool_tip="Ease the terraces into the ground round the box over this many metres. Round brush: used when Soft rim is 0." />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_smooth" top="646" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_smooth" top="668" visible="false" width="460">
         <text text_color="0.82 0.76 0.66 1" follows="left|top" height="32" layout="topleft" left="10" name="tf_smooth_more" top="4" width="440" word_wrap="true">Smooth has no more options: Radius and Strength are all of it.</text>
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_road" top="646" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_road" top="668" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="4" label="Banks (m)" label_width="64" left="10"
          max_val="20" min_val="0" name="tf_road_shoulder" top="2" width="150" tool_tip="Ease the cut and filled banks into the ground over this many metres" />
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="0" increment="1" initial_value="25" label="Most grade (%)" label_width="92" left="170"
          max_val="100" min_val="1" name="tf_road_maxgrade" top="2" width="170" tool_tip="Following the ground, the road is never steeper than this, percent (25: the Tunnel tool's walking limit)" />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_river" top="646" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_river" top="668" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="4" label="Banks (m)" label_width="64" left="10"
          max_val="20" min_val="0" name="tf_river_banks" top="2" width="150" tool_tip="Ease the banks into the ground over this many metres" />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_beach" top="646" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_beach" top="668" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="2" increment="0.25" initial_value="2" label="Up to (m)" label_width="60" left="10"
          max_val="20" min_val="0" name="tf_beach_above" top="2" width="140" tool_tip="The beach reaches this far above the water, metres" />
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="2" increment="0.25" initial_value="2" label="Down to (m)" label_width="72" left="160"
@@ -186,4 +196,6 @@
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="4" label="Ease (m)" label_width="52" left="320"
          max_val="20" min_val="0" name="tf_beach_edge" top="2" width="130" tool_tip="Ease the beach into the ground beyond it over this many metres" />
     </panel>
+    </panel>
+    </scroll_container>
 </floater>

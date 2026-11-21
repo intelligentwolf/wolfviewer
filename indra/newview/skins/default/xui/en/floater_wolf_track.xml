@@ -22,6 +22,12 @@
  single_instance="true"
  title="Lay Railway Track"
  width="500">
+ <!-- [T961 2026-11-21] Shadow: "nothing is ever off screen" on small laptop screens. Every control is in track_content, which
+      scrolls in track_scroll: WolfFloaterTrack::relayout sizes track_content (Your railways closed or open), makes the window
+      that plus its header but never taller than the floaters' area, and the scroll bar shows when it is cut short (the window
+      then widens by the bar so nothing is covered). Coordinates below are track_content's, the same numbers as before. -->
+    <scroll_container follows="all" layout="topleft" left="0" top="0" width="500" height="680" name="track_scroll" opaque="false" border_visible="false" reserve_scroll_corner="false" mouse_opaque="false">
+    <panel follows="left|top" layout="topleft" left="0" top="0" width="500" height="680" name="track_content" background_visible="false" mouse_opaque="false">
     <text follows="left|top" font="SansSerifBold" height="40" layout="topleft" left="16" name="track_hint" top="26" width="468" word_wrap="true" />
     <!-- [TRACK STEPS 2026-11-18] Paul (W106 beta): "there needs to be better instructions its not obvious that you have to lay
          the track first THEN do the tunnels and cuttings". The pens are in two numbered rows, the order the planner needs them
@@ -160,4 +166,6 @@
         <button follows="left|top" height="26" label="Remove" layout="topleft" left="404" name="track_remove" top="104" width="80"
          tool_tip="Take this railway's pieces away from the region you are in (the window asks first)" />
     </panel>
+    </panel>
+    </scroll_container>
 </floater>

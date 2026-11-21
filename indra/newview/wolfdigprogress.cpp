@@ -117,7 +117,7 @@ namespace
 
 WolfDigProgress::WolfDigProgress(const Params& p) : LLView(p) {}
 
-WolfDigProgress* WolfDigProgress::add(LLFloater* owner, const LLRect& rect)
+WolfDigProgress* WolfDigProgress::add(LLView* owner, const LLRect& rect)
 {
     Params p;
     p.name("wolf_dig_progress");

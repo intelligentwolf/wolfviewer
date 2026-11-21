@@ -47,6 +47,7 @@
 #include "llprogressbar.h"
 #include "llradiogroup.h"
 #include "llrender.h"
+#include "llscrollcontainer.h"   // [T961 2026-11-21/] track_scroll
 #include "llscrolllistctrl.h"
 #include "llspinctrl.h"
 #include "llsdjson.h"
@@ -411,8 +412,6 @@ WolfFloaterTrack::~WolfFloaterTrack()
 
 bool WolfFloaterTrack::postBuild()
 {
-    // [T961 2026-11-21] before the first relayout (below): the height as built, header stretch included
-    mBaseH = getRect().getHeight();
     mHint = getChild<LLTextBox>("track_hint");
     mMode = getChild<LLRadioGroup>("track_mode");
     mUndoBtn = getChild<LLButton>("track_undo");
@@ -458,9 +457,15 @@ bool WolfFloaterTrack::postBuild()
     mStatus = getChild<LLTextBox>("track_status");
     mMineCheck = getChild<LLCheckBoxCtrl>("track_mine_check");
     mMinePanel = getChild<LLPanel>("track_mine_panel");
-    // [T961 2026-11-21] open, the window reaches the panel's foot (it follows the top, so this distance never changes) and
-    // 5 px under it: W108 opened to 680 + 140 = 820 with the foot 815 below the top (rig, 21 Nov), so open is as it was.
-    mOpenH = mBaseH - mMinePanel->getRect().mBottom + 5;
+    // [T961 2026-11-21] the scrolled content (floater_wolf_track.xml track_scroll / track_content), measured before the first
+    // relayout (below). Open, the content reaches the Your railways panel's foot (it follows the content's top, so this
+    // distance never changes) and 5 px under it: W108 opened to 820 with the foot 815 below the window's top (rig, 21 Nov).
+    mScroll = getChild<LLScrollContainer>("track_scroll");
+    mContent = getChild<LLPanel>("track_content");
+    mHeaderH = getRect().getHeight() - mScroll->getRect().getHeight();
+    mContentW = mContent->getRect().getWidth();
+    mClosedH = mContent->getRect().getHeight();
+    mOpenH = mClosedH - mMinePanel->getRect().mBottom + 5;
     mMineList = mMinePanel->getChild<LLScrollListCtrl>("track_mine_list");
     mShowBtn = mMinePanel->getChild<LLButton>("track_show");
     mChangeBtn = mMinePanel->getChild<LLButton>("track_change");
@@ -3369,6 +3374,8 @@ void WolfFloaterTrack::sendRemoved(const LLSD& layout, const LLUUID& region, boo
 void WolfFloaterTrack::onMineCheck()
 {
     relayout();
+    // [T961 2026-11-21] opened in a window cut short by a small screen: scroll the panel into view (track_content's coordinates)
+    if (mMineCheck->get() && mScroll && mMinePanel) mScroll->scrollToShowRect(mMinePanel->getRect());
     if (mMineCheck->get()) refreshMine();
 }
 
@@ -4706,6 +4713,8 @@ void WolfFloaterTrack::draw()
         if (rgn->getRegionID() != mMineRegion) refreshMine();
     }
     if (mPlanDirty && !mPlanInFlight && LLFrameTimer::getElapsedSeconds() - mChangedAt >= PLAN_WAIT_S) sendPlan();
+    // [T961 2026-11-21] the floaters' area changed (the viewer window resized, the UI size changed, docked here): fit again
+    if (gFloaterView && getParent() == gFloaterView && !isMinimized() && gFloaterView->getSnapRect().getHeight() != mAreaH) relayout();
     updateControls();
     keepPen();
     LLFloater::draw();
@@ -4719,22 +4728,56 @@ void WolfFloaterTrack::setTextIfChanged(LLTextBox* box, const std::string& text)
 
 void WolfFloaterTrack::relayout()
 {
-    // the window's height as built, and the Your railways panel under it when it is open. Every child sits a header stretch
-    // below its XUI top (LLFloater::initFloaterXML: header_height - legacy_header_height, 25 px in the default skin), and on
-    // 14 Nov a closed height of 624 drew the Your railways check box below the floater, where a click fell through to the world
-    // (live test 14:22Z: the click started a new line). [T961 2026-11-21] That fix was a constant (680, the XML's own height),
-    // which still cut the stretch off the foot: the box fitted by 9 px only, so one more row would have broken it again, as
-    // ticket 961 did the Terraform window. Now the base is the height as built (mBaseH, postBuild), the same in every skin and
-    // whatever rows the XML gains. Source: wolffloaterterraform.cpp relayout (ticket 961).
+    // [T961 2026-11-21] Shadow: "nothing is ever off screen" (residents on small laptop screens). The window is its content
+    // (track_content: closed, or down to the Your railways panel when it is open) plus the title bar, but never taller than the
+    // floaters' area; cut short, track_scroll shows its bar and the window widens by the bar, so no control is covered.
+    // History: 14 Nov a closed height of 624 drew the Your railways box below the floater (its click started a new line in the
+    // world); the fix, a constant 680 (the XML's height), still lost LLFloater::initFloaterXML's header stretch at the foot, and
+    // open (820) the panel ran off any floaters' area under 820 high. Source: wolffloaterterraform.cpp relayout (ticket 961, the
+    // height as built) and wolffloaterhuds.cpp fitToArea (the scroll recomputed after the document changes, kept on screen).
+    if (!mScroll || !mContent) return;
     const bool open = mMineCheck && mMineCheck->get();
     if (mMinePanel) mMinePanel->setVisible(open);
-    const S32 h = open ? llmax(mBaseH, mOpenH) : mBaseH;
+    const S32 content_h = open ? llmax(mClosedH, mOpenH) : mClosedH;
+    // the document grows downwards: its children follow its top (LLView::reshape), the scroll places it (updateScroll)
+    if (mContent->getRect().getHeight() != content_h) mContent->reshape(mContentW, content_h);
+    const bool in_area = gFloaterView && getParent() == gFloaterView;
+    const S32 area_h = in_area ? gFloaterView->getSnapRect().getHeight() : S32_MAX;
+    const S32 full = content_h + mHeaderH;
+    // CHOSEN: never shorter than the title bar and 120 px of content (about four rows), even on a tinier area
+    const S32 h = llmax(llmin(full, area_h), mHeaderH + 120);
+    // Source: llscrollcontainer.cpp:98-99 - the bar's width is UIScrollbarSize
+    static LLUICachedControl<S32> scrollbar_size("UIScrollbarSize", 0);
+    const S32 w = mContentW + (h < full ? (S32)scrollbar_size : 0);
     LLRect r = getRect();
-    if (r.getHeight() != h)
+    if (r.getHeight() != h || r.getWidth() != w)
     {
+        // the top-left stays where it is
         r.mBottom = r.mTop - h;
+        r.mRight = r.mLeft + w;
         setShape(r);
     }
+    // setShape reshapes only when the rect changed; the document may have changed alone (wolffloaterhuds.cpp fitToArea)
+    mScroll->reshape(mScroll->getRect().getWidth(), mScroll->getRect().getHeight());
+    if (in_area)
+    {
+        // lift it when its foot went below the floaters' area, never its title bar above that area's top
+        // Source: wolffloaterterraform.cpp relayout (llfloater.h LLFloaterView::getSnapRect)
+        const LLRect snap = gFloaterView->getSnapRect();
+        const LLRect now = getRect();
+        if (now.mBottom < snap.mBottom)
+        {
+            const S32 up = llmin(snap.mBottom - now.mBottom, llmax(0, snap.mTop - now.mTop));
+            if (up > 0) translate(0, up);
+        }
+        // and, widened by the scroll bar at the right edge, back left, never its left edge past the area's
+        if (now.mRight > snap.mRight)
+        {
+            const S32 left = llmin(now.mRight - snap.mRight, llmax(0, now.mLeft - snap.mLeft));
+            if (left > 0) translate(-left, 0);
+        }
+    }
+    mAreaH = in_area ? area_h : -1;
 }
 
 void WolfFloaterTrack::updateControls()

@@ -18,6 +18,8 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolffloaterterraform.h"
+#include "llscrollcontainer.h"   // [T961 2026-11-21/] tf_scroll
+#include "llpanel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -68,8 +70,11 @@ namespace
     // wolffloatertunnels.cpp)
     constexpr F32 SAME_CLICK_M = 0.5f;
     // What More options adds at the foot (floater_wolf_terraform.xml: the More options panels are 60 high). [T961 2026-11-21] The
-    // base height is no longer a constant here (it was the XML's 646): it is measured as built (mBaseH, see relayout).
-    constexpr S32 MORE_H = 64;
+    // base height is no longer a constant here (it was the XML's 646): tf_content is measured as built (mClosedH, see relayout).
+    // [T961 2026-11-21] 86: the panels start at 668 (floater_wolf_terraform.xml), 22 under the closed content's 646, so the MORE
+    // OPTIONS plate's heading (WolfBurrow::around: pad 2 + heading 16) clears the More options box's own plate (rig shot, 1366 x 650:
+    // at 646 / 64 it lay over the box); 668 + 60 + 4 = 732 = 646 + 86.
+    constexpr S32 MORE_H = 86;
     // [ticket 355] the brush shape row's values (floater_wolf_terraform.xml tf_shape radio_item value=) and its settings
     // (app_settings/settings.xml WolfTerraformBrushShape, WolfTerraformRoundSoft)
     const char* const SHAPE_SQUARE = "square";
@@ -101,8 +106,12 @@ WolfFloaterTerraform::~WolfFloaterTerraform()
 
 bool WolfFloaterTerraform::postBuild()
 {
-    // [T961 2026-11-21] before anything calls relayout (pickTool below does): the height as built, header stretch included
-    mBaseH = getRect().getHeight();
+    // [T961 2026-11-21] before anything calls relayout (pickTool below does): the scrolled content as built
+    mScroll = getChild<LLScrollContainer>("tf_scroll");
+    mContent = getChild<LLPanel>("tf_content");
+    mHeaderH = getRect().getHeight() - mScroll->getRect().getHeight();
+    mContentW = mContent->getRect().getWidth();
+    mClosedH = mContent->getRect().getHeight();
     for (S32 t = 0; t < TOOL_COUNT; ++t)
     {
         mTiles[t] = getChild<LLButton>(std::string("tf_tool_") + TOOL_KEY[t]);
@@ -219,10 +228,11 @@ bool WolfFloaterTerraform::postBuild()
     {
         LLRect area = mSummary->getRect();
         area.unionWith(mStatus->getRect());
-        mDig = WolfDigProgress::add(this, area);
+        mDig = WolfDigProgress::add(mContent, area);   // [T961/] in tf_content: it scrolls with what it covers
     }
     // the painted window behind every control (wolfburrow.cpp)
-    WolfBurrow::Sheet::add(this, [this]() { paintBurrow(); });
+    // [T961 2026-11-21] in tf_content, behind its controls, so the painted plates scroll with them
+    WolfBurrow::Sheet::add(mContent, [this]() { paintBurrow(); });
     if (getDragHandle()) sendChildToBack(getDragHandle());   // empty paper still drags the window
     pickTool(TOOL_LEVEL);
     relayout();
@@ -793,6 +803,8 @@ void WolfFloaterTerraform::keepPen()
 
 void WolfFloaterTerraform::draw()
 {
+    // [T961 2026-11-21] the floaters' area changed (the viewer window resized, the UI size changed): fit again
+    if (gFloaterView && getParent() == gFloaterView && !isMinimized() && gFloaterView->getSnapRect().getHeight() != mAreaH) relayout();
     if (mStartPending && !LLApp::isExiting())
     {
         // Here and not in onOpen: the window may be opened by the Build window's own Terraform... button, and that window's focus
@@ -962,30 +974,55 @@ void WolfFloaterTerraform::fillHistory()
 // click made a start point in the world. The base height was the XML's 646, but the window is built 25 px taller
 // (LLFloater::initFloaterXML's header stretch: setRect, the widgets keep their place under the header), so the first relayout
 // cut 25 px off the foot and the box, at the very bottom, was drawn below the window's edge, where clicks go to the world
-// (rig, W108 at 1280 x 775: window bottom 110, box 91-107). Now the base is the height as built (mBaseH, postBuild), the same
-// in every skin; wolffloatertunnels.cpp (22 Oct, measured) and wolffloatertrack.cpp (14 Nov, CLOSED_H padded) met the same.
+// (rig, W108 at 1280 x 775: window bottom 110, box 91-107). Now the heights are measured as built (postBuild), the same in
+// every skin; wolffloatertunnels.cpp (22 Oct, measured) and wolffloatertrack.cpp (14 Nov, CLOSED_H padded) met the same.
 void WolfFloaterTerraform::relayout()
 {
+    // [T961 2026-11-21] Shadow: nothing ever off screen. The window is its content (tf_content, More options closed, or with the
+    // tool's More panel under it) plus the title bar, never taller than the floaters' area; cut short, tf_scroll shows its bar
+    // and the window widens by the bar. Source: wolffloatertrack.cpp relayout (the same, 21 Nov) and wolffloaterhuds.cpp fitToArea.
+    if (!mScroll || !mContent) return;
     const bool more = mMoreCheck->get();
     for (S32 t = 0; t < TOOL_COUNT; ++t) mMore[t]->setVisible(more && t == mTool);
-    const S32 want = mBaseH + (more ? MORE_H : 0);
-    if (getRect().getHeight() != want)
+    const S32 content_h = mClosedH + (more ? MORE_H : 0);
+    // the document grows downwards: its children follow its top (LLView::reshape), so the More panels (floater_wolf_terraform.xml
+    // top 668, 22 under the closed content) come into the 86 px it gains; the scroll places the document (updateScroll)
+    if (mContent->getRect().getHeight() != content_h) mContent->reshape(mContentW, content_h);
+    const bool in_area = gFloaterView && getParent() == gFloaterView;
+    const S32 area_h = in_area ? gFloaterView->getSnapRect().getHeight() : S32_MAX;
+    const S32 full = content_h + mHeaderH;
+    // CHOSEN: never shorter than the title bar and 120 px of content, even on a tinier area
+    const S32 want = llmax(llmin(full, area_h), mHeaderH + 120);
+    // Source: llscrollcontainer.cpp:98-99 - the bar's width is UIScrollbarSize
+    static LLUICachedControl<S32> scrollbar_size("UIScrollbarSize", 0);
+    const S32 width = mContentW + (want < full ? (S32)scrollbar_size : 0);
+    LLRect r = getRect();
+    if (r.getHeight() != want || r.getWidth() != width)
     {
-        LLRect r = getRect();
+        // the top-left stays where it is
         r.mBottom = r.mTop - want;
+        r.mRight = r.mLeft + width;
         setShape(r);
     }
-    for (S32 t = 0; t < TOOL_COUNT; ++t) mMore[t]->setOrigin(0, want - mBaseH - mMore[t]->getRect().getHeight());
-    if (gFloaterView && getParent() == gFloaterView)
+    // setShape reshapes only when the rect changed; the document may have changed alone (wolffloaterhuds.cpp fitToArea)
+    mScroll->reshape(mScroll->getRect().getWidth(), mScroll->getRect().getHeight());
+    if (in_area)
     {
         const LLRect snap = gFloaterView->getSnapRect();
-        const LLRect r = getRect();
-        if (r.mBottom < snap.mBottom)
+        const LLRect now = getRect();
+        if (now.mBottom < snap.mBottom)
         {
-            const S32 up = llmin(snap.mBottom - r.mBottom, llmax(0, snap.mTop - r.mTop));
+            const S32 up = llmin(snap.mBottom - now.mBottom, llmax(0, snap.mTop - now.mTop));
             if (up > 0) translate(0, up);
         }
+        // widened by the scroll bar at the right edge: back left, never its left edge past the area's
+        if (now.mRight > snap.mRight)
+        {
+            const S32 left = llmin(now.mRight - snap.mRight, llmax(0, now.mLeft - snap.mLeft));
+            if (left > 0) translate(-left, 0);
+        }
     }
+    mAreaH = in_area ? area_h : -1;
 }
 
 // ---- the paint ----------------------------------------------------------------------------------------------------------------
@@ -996,8 +1033,9 @@ void WolfFloaterTerraform::relayout()
 void WolfFloaterTerraform::paintBurrow()
 {
     using namespace WolfBurrow;
-    const LLRect all = getLocalRect();
-    const LLRect client(0, all.mTop - getHeaderHeight(), all.mRight, 0);
+    // [T961 2026-11-21] painted in tf_content (the sheet is its child): its own rect is the client area, no header in it
+    const LLRect all = mContent->getLocalRect();
+    const LLRect client = all;
     drawSheet(client);
     const S32 L = 4, R = all.mRight - 4;
     drawHeader(LLRect(L, client.mTop - 3, R, client.mTop - 45), "TERRAFORM", "Pick a tool, click on the ground, see it, Apply.",
@@ -1006,16 +1044,16 @@ void WolfFloaterTerraform::paintBurrow()
     std::vector<LLView*> first(std::begin(mTiles), std::end(mTiles));
     for (LLView* v : { (LLView*)mHint, (LLView*)mUndoPoint, (LLView*)mStartOver, (LLView*)mDrawInfo, (LLView*)mShape }) first.push_back(v);
     if (mSurface) first.push_back(mSurface);   // [SKY LAND TOOLS 2026-11-10/] the Shape row closes section 1
-    drawSection(wide(around(first, this, 4, 16)), "1  PICK A TOOL, THEN CLICK ON THE GROUND");
-    drawSection(wide(around({ mSimple[mTool] }, this, 2, 16)), "2  SETTINGS");
-    drawSection(wide(around({ mSummary, mApply, mStop, mStatus }, this, 4, 16)), "3  SEE IT, THEN APPLY");
-    drawSection(wide(around({ mHistory, mUndo, mRedo, mHistoryInfo }, this, 4, 16)), "4  HISTORY");
-    drawSection(wide(around({ mMoreCheck }, this, 4, 0)), std::string());
-    if (mMore[mTool]->getVisible()) drawSection(wide(around({ mMore[mTool] }, this, 2, 16)), "MORE OPTIONS");
+    drawSection(wide(around(first, mContent, 4, 16)), "1  PICK A TOOL, THEN CLICK ON THE GROUND");
+    drawSection(wide(around({ mSimple[mTool] }, mContent, 2, 16)), "2  SETTINGS");
+    drawSection(wide(around({ mSummary, mApply, mStop, mStatus }, mContent, 4, 16)), "3  SEE IT, THEN APPLY");
+    drawSection(wide(around({ mHistory, mUndo, mRedo, mHistoryInfo }, mContent, 4, 16)), "4  HISTORY");
+    drawSection(wide(around({ mMoreCheck }, mContent, 4, 0)), std::string());
+    if (mMore[mTool]->getVisible()) drawSection(wide(around({ mMore[mTool] }, mContent, 2, 16)), "MORE OPTIONS");
     for (S32 t = 0; t < TOOL_COUNT; ++t) paintTile(mTiles[t], (ETool)t);
-    drawButtonFace(mApply, this, WEIGHT_PRIMARY);
-    for (LLButton* b : { mStop, mStartOver }) drawButtonFace(b, this, WEIGHT_DANGER);
-    for (LLButton* b : { mUndoPoint, mUndo, mRedo, mLevelPick, mLevelWater }) drawButtonFace(b, this, WEIGHT_SECONDARY);
+    drawButtonFace(mApply, mContent, WEIGHT_PRIMARY);
+    for (LLButton* b : { mStop, mStartOver }) drawButtonFace(b, mContent, WEIGHT_DANGER);
+    for (LLButton* b : { mUndoPoint, mUndo, mRedo, mLevelPick, mLevelWater }) drawButtonFace(b, mContent, WEIGHT_SECONDARY);
 }
 
 // A tile: the stone face (amber rule when it is the tool), a small picture of what the tool does and its word under it (CREAM on
@@ -1023,9 +1061,9 @@ void WolfFloaterTerraform::paintBurrow()
 void WolfFloaterTerraform::paintTile(LLButton* b, ETool tool) const
 {
     using namespace WolfPaint;
-    WolfBurrow::drawButtonFace(b, this, WolfBurrow::WEIGHT_SECONDARY);
+    WolfBurrow::drawButtonFace(b, mContent, WolfBurrow::WEIGHT_SECONDARY);
     if (!b || !b->isInVisibleChain()) return;
-    const LLRect r = rectIn(b, this);
+    const LLRect r = rectIn(b, mContent);
     const bool on = b->isInEnabledChain();
     const LLColor4 ink = on ? WolfBurrow::CREAM : WolfBurrow::DIS;
     const LLColor4 acc = on ? WolfBurrow::AMBER : WolfBurrow::DIS;

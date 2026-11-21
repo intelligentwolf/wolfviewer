@@ -26,6 +26,8 @@
 #include "wolffloatertunnels.h"   // WolfRouteHost, WolfToolTunnel: the Tunnel tool's pen, reused
 #include "wolfterraform.h"
 
+class LLScrollContainer;
+class LLPanel;
 class LLButton;
 class LLComboBox;
 class LLCheckBoxCtrl;
@@ -116,10 +118,13 @@ private:
     std::vector<LLVector2> mClicks;
     WolfTerraform::Plan mPlan;
     bool mPlanDirty = true;
-    // [T961 2026-11-21] the window's height as built, More options closed: floater_wolf_terraform.xml's height plus the header
-    // stretch LLFloater::initFloaterXML adds (llfloater.cpp: header_height 25 - legacy_header_height 0, by setRect, widgets
-    // not moved). Measured at the start of postBuild; relayout sizes the window from it.
-    S32 mBaseH = 0;
+    // [T961 2026-11-21] every control and the painted sheet are in tf_content, scrolled by tf_scroll (floater_wolf_terraform.xml),
+    // so the window never runs past the floaters' area. Measured at the start of postBuild: mHeaderH the window's height above
+    // tf_scroll (the title bar; LLFloater::initFloaterXML's header stretch included), mContentW / mClosedH tf_content as built
+    // (More options closed). mAreaH: the floaters' area height relayout last fitted (draw refits on a change).
+    LLScrollContainer* mScroll = nullptr;
+    LLPanel* mContent = nullptr;
+    S32 mHeaderH = 0, mContentW = 0, mClosedH = 0, mAreaH = -1;
     F64 mPlanAt = 0.0;
     bool mPicking = false;          // the next click gives Level's height
     bool mPenWanted = false;

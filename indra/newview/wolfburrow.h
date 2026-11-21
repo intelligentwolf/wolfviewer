@@ -73,7 +73,8 @@ namespace WolfBurrow
     public:
         /** Behind every control of `owner`. The window must then send its own drag handle behind the sheet
          *  (sendChildToBack(getDragHandle()), protected in LLFloater), as the uploaders do. */
-        static Sheet* add(LLFloater* owner, const std::function<void()>& painter);
+        // [T961 2026-11-21] any view: a window, or the scrolled panel its controls are in (wolffloaterterraform.cpp tf_content)
+        static Sheet* add(LLView* owner, const std::function<void()>& painter);
         void draw() override;
     private:
         struct Params : public LLInitParam::Block<Params, LLView::Params> { Params() {} };

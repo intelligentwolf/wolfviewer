@@ -8,7 +8,9 @@
      Flow: 1. pick a tool tile -> click (or draw) on the ground; the hint line says what -> 2. its two or three settings (the rest
      under More options, closed) -> 3. the preview in the world (red = cut, green = fill), Apply and the summary under it (the mole plate lies over the summary and the status line, never over Apply or Stop) -> the mole plate
      while it works -> 4. the step in History, Undo / Redo.
-     Layout: 646 high with More options closed (620 until the Shape row, 2026-11-10 sky land) (596 until the brush shape row, ticket 355); More options adds 64 at the bottom (WolfFloaterTerraform::relayout). The burrow
+     Layout: 646 high with More options closed (620 until the Shape row, 2026-11-10 sky land) (596 until the brush shape row, ticket 355); More options adds 64 at the bottom (WolfFloaterTerraform::relayout). [T961 2026-11-21] The window is built 25 px taller than this
+     height (LLFloater::initFloaterXML header stretch, the widgets keep their place), and relayout sizes it from that built height,
+     never from this number: sized to 646 the foot (More options) fell outside the window and its clicks went to the world. The burrow
      look (wolfburrow.cpp): fixed colours on fixed paint, so every text pair keeps its contrast in every skin
      (region-terrain-work/cave-lights/check/burrow_contrast.py: CREAM on a plate 13.4:1, MUTED 9.1:1, DIS 6.8:1, CREAM on stone
      8.1:1+, INK on amber 6.7:1+). The tool tiles' pictures and words are painted (paintBurrow). -->

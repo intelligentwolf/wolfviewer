@@ -116,6 +116,10 @@ private:
     std::vector<LLVector2> mClicks;
     WolfTerraform::Plan mPlan;
     bool mPlanDirty = true;
+    // [T961 2026-11-21] the window's height as built, More options closed: floater_wolf_terraform.xml's height plus the header
+    // stretch LLFloater::initFloaterXML adds (llfloater.cpp: header_height 25 - legacy_header_height 0, by setRect, widgets
+    // not moved). Measured at the start of postBuild; relayout sizes the window from it.
+    S32 mBaseH = 0;
     F64 mPlanAt = 0.0;
     bool mPicking = false;          // the next click gives Level's height
     bool mPenWanted = false;

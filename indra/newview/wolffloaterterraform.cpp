@@ -67,9 +67,9 @@ namespace
     // a second click closer than this to the last is the second press of a double-click (the Tunnel tool's SEG_MIN_M,
     // wolffloatertunnels.cpp)
     constexpr F32 SAME_CLICK_M = 0.5f;
-    // Base and More options heights (floater_wolf_terraform.xml: 620 high - 596 until the brush shape row, ticket 355 - the More
-    // options panels 60 high at its foot)
-    constexpr S32 BASE_H = 646, MORE_H = 64;   // [SKY LAND TOOLS 2026-11-10] 620 + the Shape row (floater_wolf_terraform.xml)
+    // What More options adds at the foot (floater_wolf_terraform.xml: the More options panels are 60 high). [T961 2026-11-21] The
+    // base height is no longer a constant here (it was the XML's 646): it is measured as built (mBaseH, see relayout).
+    constexpr S32 MORE_H = 64;
     // [ticket 355] the brush shape row's values (floater_wolf_terraform.xml tf_shape radio_item value=) and its settings
     // (app_settings/settings.xml WolfTerraformBrushShape, WolfTerraformRoundSoft)
     const char* const SHAPE_SQUARE = "square";
@@ -101,6 +101,8 @@ WolfFloaterTerraform::~WolfFloaterTerraform()
 
 bool WolfFloaterTerraform::postBuild()
 {
+    // [T961 2026-11-21] before anything calls relayout (pickTool below does): the height as built, header stretch included
+    mBaseH = getRect().getHeight();
     for (S32 t = 0; t < TOOL_COUNT; ++t)
     {
         mTiles[t] = getChild<LLButton>(std::string("tf_tool_") + TOOL_KEY[t]);
@@ -956,18 +958,24 @@ void WolfFloaterTerraform::fillHistory()
 
 // Base height with More options closed; More options adds MORE_H at the foot (the window grows down, its top stays).
 // Source: wolffloatertunnels.cpp WolfFloaterTunnels::relayout.
+// [T961 2026-11-21] IndigoQueen King: "More options" could not be ticked - the pointer was the pen's cross over it and the
+// click made a start point in the world. The base height was the XML's 646, but the window is built 25 px taller
+// (LLFloater::initFloaterXML's header stretch: setRect, the widgets keep their place under the header), so the first relayout
+// cut 25 px off the foot and the box, at the very bottom, was drawn below the window's edge, where clicks go to the world
+// (rig, W108 at 1280 x 775: window bottom 110, box 91-107). Now the base is the height as built (mBaseH, postBuild), the same
+// in every skin; wolffloatertunnels.cpp (22 Oct, measured) and wolffloatertrack.cpp (14 Nov, CLOSED_H padded) met the same.
 void WolfFloaterTerraform::relayout()
 {
     const bool more = mMoreCheck->get();
     for (S32 t = 0; t < TOOL_COUNT; ++t) mMore[t]->setVisible(more && t == mTool);
-    const S32 want = BASE_H + (more ? MORE_H : 0);
+    const S32 want = mBaseH + (more ? MORE_H : 0);
     if (getRect().getHeight() != want)
     {
         LLRect r = getRect();
         r.mBottom = r.mTop - want;
         setShape(r);
     }
-    for (S32 t = 0; t < TOOL_COUNT; ++t) mMore[t]->setOrigin(0, want - BASE_H - mMore[t]->getRect().getHeight());
+    for (S32 t = 0; t < TOOL_COUNT; ++t) mMore[t]->setOrigin(0, want - mBaseH - mMore[t]->getRect().getHeight());
     if (gFloaterView && getParent() == gFloaterView)
     {
         const LLRect snap = gFloaterView->getSnapRect();

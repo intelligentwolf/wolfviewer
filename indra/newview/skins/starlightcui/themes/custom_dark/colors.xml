@@ -111,7 +111,7 @@
   <!-- Customisable StarLight Colors -->	
 	<color
 	 name="SL-CustomMain"
-	 value="0.38 0.694 0.573 1" />
+	 value="0.2 0.365 0.302 1" />
     <color
 	 name="SL-ButtonNormal"
 	 value="1 1 1 1" />

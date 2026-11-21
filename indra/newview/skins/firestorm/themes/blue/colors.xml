@@ -134,7 +134,7 @@
      reference="Blue4" />
     <color
      name="ButtonLabelColor"
-     reference="LSteel" />
+     reference="White" />
     <color
      name="ButtonLabelDisabledColor"
      reference="White_25" />

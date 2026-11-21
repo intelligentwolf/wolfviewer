@@ -4,6 +4,10 @@
 	image_pressed_selected
   image_flash
    -->
+<!-- WolfViewer 2026-11-21 (button contrast): hover_glow_amount 0.12, was 0.25. The glow (llbutton.cpp draw: the button image
+     again in white, BT_ADD_WITH_ALPHA) lightens the button under the pointer, and on a just-clicked button it lands on top of
+     the keyboard-focus fill (lluiimage.inl drawBorder = drawSolid of the whole image in FocusColor). At 0.25 that put labels at
+     3.2-4.1:1 under the pointer in most skins (WolfGlass 3.5:1, measured on the rig). scripts/check_button_contrast.py. -->
 <button image_unselected="PushButton_Off"
         image_selected="PushButton_Selected"
         image_disabled_selected="PushButton_Selected_Disabled"
@@ -20,7 +24,7 @@
         flash_color="SL-CustomMain"
         flash_alt_color="MentionFlashBgColor"
         font="SansSerifSmall"
-        hover_glow_amount="0.25"
+        hover_glow_amount="0.12"
         halign="center"
         pad_bottom="1" 
         height="23"

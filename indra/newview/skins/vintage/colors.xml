@@ -74,7 +74,13 @@
 	<!-- Color of the push button label -->
 	<color
 		name="ButtonLabelColor"
-		value="0.862 0.862 0.862 1.0" />
+		value="1 1 1 1.0" />
+	<!-- WolfViewer 2026-11-21 (button contrast, scripts/check_button_contrast.py): the push button image tinted to 62%, so its
+	     label reads at 4.5:1 or more in every state (normal, under the pointer, focused, pressed, toggled). Was the default's
+	     SL-White (no tint): the light label on the mid-blue button was 3.2:1, and 2.2:1 under the pointer. -->
+	<color
+		name="ButtonImageColor"
+		value="0.62 0.62 0.62 1.0" />
 	<!-- Color of the push button label when disabled -->
 	<color
 		name="ButtonLabelDisabledColor"

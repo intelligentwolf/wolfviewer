@@ -386,7 +386,7 @@
      reference="SL-White" />
     <color
      name="ButtonLabelColor"
-     reference="LtGray" />
+     reference="White" />
     <color
      name="ButtonLabelDisabledColor"
      reference="White_25" />

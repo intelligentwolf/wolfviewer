@@ -26,6 +26,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llappearancelistener.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] not held by Lock What I'm Wearing
 
 #include "llappearancemgr.h"
 #include "llinventoryfunctions.h"
@@ -93,6 +94,7 @@ void LLAppearanceListener::wearItems(LLSD const &data)
             ids.push_back(id);
         }
     }
+    WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] a LEAP script (the Appearance API), not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
     LLAppearanceMgr::instance().wearItemsOnAvatar(ids, true, data["replace"].asBoolean());
 }
 
@@ -111,6 +113,7 @@ void LLAppearanceListener::detachItems(LLSD const &data)
             ids.push_back(id);
         }
     }
+    WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] a LEAP script (the Appearance API), not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
     LLAppearanceMgr::instance().removeItemsFromAvatar(ids);
 }
 

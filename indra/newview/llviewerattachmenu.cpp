@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llviewerattachmenu.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] Lock What I'm Wearing
 
 // project includes
 #include "llagent.h"
@@ -125,6 +126,9 @@ void LLViewerAttachMenu::attachObjects(const uuid_vec_t& items, const std::strin
     {
         return;
     }
+
+    // [T964 2026-11-21] Lock What I'm Wearing: Attach To / Attach To HUD refused with its note (wolfoutfitlock.h)
+    if (WolfOutfitLock::refuse("attach to a point")) return;
 
     for (uuid_vec_t::const_iterator it = items.begin(); it != items.end(); ++it)
     {

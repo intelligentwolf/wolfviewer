@@ -103,6 +103,11 @@ private:
     LLButton*                   mOpenOutfitBtn;
     LLButton*                   mEditAppearanceBtn;
     LLButton*                   mEditOutfitBtn = nullptr;
+    // [T964 2026-11-21] Lock What I'm Wearing's padlock (sidepanel_appearance.xml wolf_outfit_lock_btn; absent in a skin
+    // without it) and the setting's signal, so the padlock, its words and the status follow the lock however it changes
+    LLButton*                   mWolfLockBtn = nullptr;
+    boost::signals2::scoped_connection mWolfLockConn;
+    void refreshWolfLock();
     LLPanel*                    mCurrOutfitPanel;
 
     LLLoadingIndicator*         mWearableLoadingIndicator = nullptr;

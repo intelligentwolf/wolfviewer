@@ -925,6 +925,7 @@ set(viewer_SOURCE_FILES
     wolfundersea.cpp   # [UNDERSEA 2026-11-09] ticket 652
     wolfleaves.cpp   # [FALLING LEAVES 2026-11-10] ticket 718
     wolfweatherprops.cpp   # [WEATHER PROPS 2026-11-13] ticket 847
+    wolfoutfitlock.cpp     # [T964 2026-11-21] ticket 964 Lock What I'm Wearing
     wolfboatrock.cpp
     wolfflight.cpp
     wolfflightdeck.cpp
@@ -2145,6 +2146,7 @@ set(viewer_HEADER_FILES
     wolffloatertutorials.h   # [TUTORIALS 2026-11-13] ticket 847
     wolffloaterweatherprops.h   # [WEATHER PROPS 2026-11-13] ticket 847
     wolfweatherprops.h   # [WEATHER PROPS 2026-11-13] ticket 847
+    wolfoutfitlock.h     # [T964 2026-11-21] ticket 964 Lock What I'm Wearing
     wolfai.h
     wolfpaint.h  # [LOOK 2026-10-20] the painting kit of the Upload Model and Create with AI windows
     wolfairports.h

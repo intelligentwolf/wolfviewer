@@ -15860,4 +15860,20 @@ You can enable saving transcripts under Preferences &gt; Privacy &gt; Logs &amp;
      yestext="OK"/>
   </notification>
   <!-- </FS:TJ>-->
+  <!-- [T964 2026-11-21] ticket 964: Lock What I'm Wearing refused a wear, add, replace, take-off or detach (wolfoutfitlock.cpp
+       refuse). An alert that stays until it is answered (a refusal must be read and acted on), never one per item. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfOutfitLocked"
+   type="alert">
+Your outfit is locked, so nothing was put on or taken off.
+
+To change what you are wearing, unlock it. You can lock it again from Avatar &gt; Lock What I'm Wearing.
+    <tag>fail</tag>
+    <usetemplate
+     name="okcancelbuttons"
+     notext="Keep it locked"
+     yestext="Unlock"/>
+  </notification>
+
 </notifications>

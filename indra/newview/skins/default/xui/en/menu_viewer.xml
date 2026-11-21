@@ -147,6 +147,15 @@
             <menu_item_call.on_visible
              function="WolfGrid.IsWolfTerritories" />
         </menu_item_call>
+        <!-- [T964 2026-11-21] ticket 964: Lock What I'm Wearing (wolfoutfitlock.cpp). On every grid: it is only the viewer. -->
+        <menu_item_check
+         label="Lock What I'm Wearing"
+         name="WolfOutfitLock">
+            <menu_item_check.on_click
+             function="WolfOutfitLock.Toggle" />
+            <menu_item_check.on_check
+             function="WolfOutfitLock.IsLocked" />
+        </menu_item_check>
 
       <menu
         label="Take off"

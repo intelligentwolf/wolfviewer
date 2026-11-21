@@ -33,6 +33,7 @@
 #include "llagentwearables.h"
 #include "llappearancelistener.h"
 #include "llappearancemgr.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] Lock What I'm Wearing
 #include "llattachmentsmgr.h"
 #include "llcommandhandler.h"
 #include "lleventtimer.h"
@@ -1538,6 +1539,8 @@ void wear_on_avatar_cb(const LLUUID& inv_item, bool do_replace = false)
     LLViewerInventoryItem *item = gInventory.getItem(inv_item);
     if (item)
     {
+        // [T964 2026-11-21] the copy finished for a wear that already passed the lock (wolfoutfitlock.h: decided once)
+        WolfOutfitLock::Bypass passed;
         LLAppearanceMgr::instance().wearItemOnAvatar(inv_item, true, do_replace);
     }
 }
@@ -1568,6 +1571,8 @@ void LLAppearanceMgr::wearItemsOnAvatar(const uuid_vec_t& item_ids_to_wear,
                                         bool replace,
                                         LLPointer<LLInventoryCallback> cb)
 {
+    // [T964 2026-11-21] Lock What I'm Wearing: refused (with its note) when locked, unless a script, RLVa or a viewer feature asked (wolfoutfitlock.h)
+    if (WolfOutfitLock::refuse("wear items")) return;
     LL_DEBUGS("UIUsage") << "wearItemsOnAvatar" << LL_ENDL;
     LLUIUsage::instance().logCommand("Avatar.WearItem");
 
@@ -1815,6 +1820,8 @@ void LLAppearanceMgr::addCategoryToCurrentOutfit(const LLUUID& cat_id)
 
 void LLAppearanceMgr::takeOffOutfit(const LLUUID& cat_id)
 {
+    // [T964 2026-11-21] Lock What I'm Wearing: refused (with its note) when locked, unless a script, RLVa or a viewer feature asked (wolfoutfitlock.h)
+    if (WolfOutfitLock::refuse("take off outfit")) return;
     LLInventoryModel::cat_array_t cats;
     LLInventoryModel::item_array_t items;
     LLFindWearablesEx collector(/*is_worn=*/ true, /*include_body_parts=*/ false);
@@ -3151,6 +3158,8 @@ void LLAppearanceMgr::getUserDescendents(const LLUUID& category,
 
 void LLAppearanceMgr::wearInventoryCategory(LLInventoryCategory* category, bool copy, bool append)
 {
+    // [T964 2026-11-21] Lock What I'm Wearing: refused (with its note) when locked, unless a script, RLVa or a viewer feature asked (wolfoutfitlock.h)
+    if (WolfOutfitLock::refuse("wear folder")) return;
     if(!category) return;
 
     // <FS:Ansariel> FIRE-12004: Attachments getting lost on TP; assume we're not changing outfits
@@ -4691,6 +4700,8 @@ void LLAppearanceMgr::makeNewOutfitLinks(const std::string& new_folder_name, boo
 
 void LLAppearanceMgr::wearBaseOutfit()
 {
+    // [T964 2026-11-21] Lock What I'm Wearing: refused (with its note) when locked, unless a script, RLVa or a viewer feature asked (wolfoutfitlock.h)
+    if (WolfOutfitLock::refuse("wear base outfit")) return;
     const LLUUID& base_outfit_id = getBaseOutfitUUID();
     if (base_outfit_id.isNull()) return;
 
@@ -4702,6 +4713,8 @@ void LLAppearanceMgr::wearBaseOutfit()
 void LLAppearanceMgr::removeItemsFromAvatar(const uuid_vec_t& ids_to_remove, nullary_func_t post_update_func, LLPointer<LLInventoryCallback> cb /*= NULL*/, bool immediate_delete /*= false*/)
 // [/SL:KB]
 {
+    // [T964 2026-11-21] Lock What I'm Wearing: refused (with its note) when locked, unless a script, RLVa or a viewer feature asked (wolfoutfitlock.h)
+    if (WolfOutfitLock::refuse("take off / detach")) return;
     LL_DEBUGS("UIUsage") << "removeItemsFromAvatar" << LL_ENDL;
     LLUIUsage::instance().logCommand("Avatar.RemoveItem");
 

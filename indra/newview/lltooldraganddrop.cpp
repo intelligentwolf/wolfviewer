@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "lltooldraganddrop.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] Lock What I'm Wearing
 
 // library headers
 #include "llnotificationsutil.h"
@@ -2450,6 +2451,12 @@ EAcceptance LLToolDragAndDrop::dad3dRezAttachmentFromInv(
         return ACCEPT_NO_LOCKED;
     }
 // [/RLVa:KB]
+    // [T964 2026-11-21] Lock What I'm Wearing: the locked cursor over the avatar, and on the drop the note (wolfoutfitlock.h)
+    if (WolfOutfitLock::wouldRefuse())
+    {
+        if (drop) WolfOutfitLock::refuse("drag attachment onto avatar");
+        return ACCEPT_NO_LOCKED;
+    }
 
 
     if( drop )
@@ -2901,6 +2908,12 @@ EAcceptance LLToolDragAndDrop::dad3dWearItem(
             return ACCEPT_NO_LOCKED;
         }
 // [/RLVa:KB]
+        // [T964 2026-11-21] Lock What I'm Wearing: the locked cursor over the avatar, and on the drop the note (wolfoutfitlock.h)
+        if (WolfOutfitLock::wouldRefuse())
+        {
+            if (drop) WolfOutfitLock::refuse("drag wearable onto avatar");
+            return ACCEPT_NO_LOCKED;
+        }
 
         if( drop )
         {
@@ -2977,6 +2990,12 @@ EAcceptance LLToolDragAndDrop::dad3dWearCategory(
     LLViewerInventoryCategory* category;
     locateInventory(item, category);
     if(!category) return ACCEPT_NO;
+    // [T964 2026-11-21] Lock What I'm Wearing: the locked cursor over the avatar, and on the drop the note (wolfoutfitlock.h)
+    if (WolfOutfitLock::wouldRefuse())
+    {
+        if (drop) WolfOutfitLock::refuse("drag folder onto avatar");
+        return ACCEPT_NO_LOCKED;
+    }
 
     if (drop)
     {

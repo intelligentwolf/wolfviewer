@@ -15,6 +15,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfweatherprops.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] not held by Lock What I'm Wearing
 
 #include <cctype>
 
@@ -276,6 +277,7 @@ void WolfWeatherProps::takeOff(const LLUUID& item, const char* why)
     LL_INFOS("WolfWeatherProps") << "taking off " << item << ": " << why << LL_ENDL;
     mRemoving = item;
     mLastAction = LLFrameTimer::getTotalSeconds();
+    WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] Weather Props following the weather, not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
     LLAppearanceMgr::instance().removeItemFromAvatar(item);
 }
 
@@ -510,6 +512,7 @@ void WolfWeatherProps::idle()
     if (mGive == GIVE_WAITING) mGive = GIVE_IDLE;
     setStatus(std::string("Putting your ") + what + " in your hand...");
     // add, never replace: anything else worn stays (the right hand was checked empty above)
+    WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] Weather Props following the weather, not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
     LLAppearanceMgr::instance().wearItemOnAvatar(mOurItem, true, false);
 }
 

@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolffishingoverlay.h"
+#include "wolfoutfitlock.h"   // [T964 2026-11-21/] not held by Lock What I'm Wearing
 
 #include <algorithm>
 #include <cmath>
@@ -567,6 +568,7 @@ void WolfFishingSession::putAway()
     if (!active()) return;
     if (LLViewerInventoryItem* rod = findRod())
     {
+        WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] Fishing putting its rod away, not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
         if (get_is_item_worn(rod->getUUID())) LLAppearanceMgr::instance().removeItemFromAvatar(rod->getUUID());
     }
     ++mRodGen;
@@ -896,6 +898,7 @@ void WolfFishingSession::rodCoro(U32 gen)
     if (!get_is_item_worn(rod_id))
     {
         s->setStatus("Putting your fishing rod in your hand...", false, true);
+        WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] Fishing putting its rod in the hand, not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
         LLAppearanceMgr::instance().wearItemOnAvatar(rod_id, true, false);
     }
     else

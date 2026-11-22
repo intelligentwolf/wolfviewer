@@ -226,6 +226,20 @@
    <text_editor follows="left|right|top" layout="topleft" left="30" top="148" width="620" height="112" word_wrap="true" parse_urls="false" max_length="8000" name="ai_prompt" />
    <text follows="left|top" layout="topleft" left="30" top="268" width="300" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_name_lbl">Name in inventory</text>
    <line_editor follows="left|top" layout="topleft" left="30" top="286" width="360" height="24" max_length_chars="63" name="ai_name" />
+   <!-- [PICTURE 2026-11-22] Paul: "Also add a button to the object builder." Building / Settlement only (the small model's
+        "Name in inventory" sits here instead), and only when the proxy says it takes a picture (/ai_available
+        structure_image): the thumbnail, Add a picture..., Remove picture and the check's state. wolfai.cpp syncPicture. -->
+   <panel follows="left|top" layout="topleft" left="30" top="268" width="64" height="48" name="ai_picture_panel" visible="false"
+    tool_tip="Your picture. The builder uses it for the shape, colours and details; it is never shown to anyone else." />
+   <button follows="left|top" layout="topleft" left="102" top="268" width="140" height="24" name="ai_picture_add" label="Add a picture..." visible="false"
+    tool_tip="Choose a photo or drawing of what you want: PNG, JPEG, BMP or TGA, up to 8 MB. It is checked first: nothing sexual, no children, nothing hateful or violent."
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <button follows="left|top" layout="topleft" left="250" top="268" width="140" height="24" name="ai_picture_remove" label="Remove picture" visible="false"
+    tool_tip="Build from your words only"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <text follows="left|top" layout="topleft" left="102" top="296" width="300" height="30" word_wrap="true" parse_urls="false" text_color="0.83 0.76 0.7 1" name="ai_picture_state" visible="false" />
    <!-- the main action: the glowing ingot, bottom right of the plate -->
    <button follows="right|top" layout="topleft" left="420" top="274" width="230" height="44" name="ai_build" label="Build"
     font="SansSerifBold" use_ellipses="true"

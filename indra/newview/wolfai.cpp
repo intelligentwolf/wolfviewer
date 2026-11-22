@@ -51,6 +51,11 @@
 #include "llsdutil.h"
 #include "lluri.h"         // LLURI::escape (lluri.h:144)
 #include "wolfgrid.h"
+#include "wolfcave.h"          // [PICTURE 2026-11-22] WolfCaves::serviceRequest (the picture check)
+#include "wolfpicture.h"
+#include "llfilepicker.h"
+#include "llviewermenufile.h"  // LLFilePickerReplyThread
+#include <boost/json.hpp>
 #include "wolfmeshupload.h"
 #include "wolfpaint.h"
 // [WOLF 3D TEXT 2026-10-26] the 3D Text form's controls and its calls (WolfAdventure::api)
@@ -310,6 +315,7 @@ void WolfAI::availCoro(Session auth)
         a.mBuild = reply["build"].asBoolean();
         a.mStructure = parse_quote(reply["build_quotes"]["structure"]);
         a.mSettlement = parse_quote(reply["build_quotes"]["settlement"]);
+        a.mStructureImage = reply["structure_image"].asBoolean();   // [PICTURE 2026-11-22] absent before the proxy has it
         a.mBalanceKnown = nonnegative(reply["balance"]);
         a.mScriptModel = reply["script_model"].asString();
         a.mMeshModel   = reply["mesh_model"].asString();
@@ -761,7 +767,7 @@ void WolfAI::buildRequest(const std::string& path, LLSD body, const std::string&
         }
     });
 }
-void WolfAI::startBuild(const std::string& prompt, const std::string& size, S32 maximum, build_fn done)
+void WolfAI::startBuild(const std::string& prompt, const std::string& size, S32 maximum, build_fn done, const std::string& image)
 {
     // [AI MODEL PROMPTS 2026-10-31] the box allows a longer small-model description; say so for a building
     if (prompt.size() > size_t(MAX_PROMPT_CHARS))
@@ -772,6 +778,8 @@ void WolfAI::startBuild(const std::string& prompt, const std::string& size, S32 
     if (prompt.empty() || (size != "structure" && size != "settlement"))
     { error("start", "Enter a valid building description and mode."); done(false, "Enter a valid building description and mode."); return; }
     LLSD body; body["prompt"] = prompt; body["size"] = size; body["max_credits"] = maximum;
+    // [PICTURE 2026-11-22] rust_proxy build_http.rs Start.image: base64 PNG or JPEG (reference_png re-encodes it)
+    if (!image.empty()) body["image"] = image;
     buildRequest("/ai_build", body, "start", done);
 }
 void WolfAI::resumeBuild(const BuildJob& j, build_fn done)
@@ -1062,6 +1070,16 @@ bool WolfPanelAI::postBuild()
     LLMediaCtrl::Params mp; mp.name = "ai_grounding_browser"; mp.rect = grounding->getLocalRect(); mp.follows.flags = FOLLOWS_ALL;
     mp.trusted_content = false; mp.hide_loading = false;
     mGrounding = LLUICtrlFactory::create<WolfAIGrounding>(mp); grounding->addChild(mGrounding);
+    // [PICTURE 2026-11-22] the picture row (Building / Settlement only, and only when the proxy takes a picture)
+    {
+        LLPanel* holder = getChild<LLPanel>("ai_picture_panel");
+        WolfPictureView::Params vp; vp.name = "ai_picture_view"; vp.rect = holder->getLocalRect(); vp.follows.flags = FOLLOWS_ALL;
+        vp.mouse_opaque = false;
+        mPictureView = LLUICtrlFactory::create<WolfPictureView>(vp); holder->addChild(mPictureView);
+        getChild<LLButton>("ai_picture_add")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onAddPicture(); });
+        getChild<LLButton>("ai_picture_remove")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+        { forgetPicture(); setStatus("Picture removed. The build will follow your words only.", false); });
+    }
     mBuild->setCommitCallback([this](LLUICtrl*, const LLSD&) { onBuild(); });
     getChild<LLButton>("ai_update")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onUpdateCredits(); });
     getChild<LLButton>("ai_buy")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onBuyCredits(); });
@@ -1249,6 +1267,7 @@ void WolfPanelAI::refresh()
         mStatus->setText(std::string(ai.pending("start") ? "Starting your saved build…" : ""));
     }
     mNote->setText(note); mName->setVisible(mesh); getChildView("ai_name_lbl")->setVisible(mesh);
+    syncPicture(!mesh);
     // Small model: the generator is fixed, so the size choice is hidden; large: Building/Settlement.
     mMode->setVisible(!mesh); getChildView("ai_mode_lbl")->setVisible(!mesh);
     for (const char* name : {"ai_saved_title", "ai_jobs_reload", "ai_jobs"}) getChildView(name)->setVisible(!mesh);
@@ -1261,8 +1280,9 @@ void WolfPanelAI::refresh()
         mConfirmText->setText(llformat(
             "You will be charged up to %d Wolf Credits for this %s — the actual AI cost plus 10%%, taken when it is ready. You have %s.\n\n"
             "It is designed in stages and then reviewed. Revisions use that allowance. When the allowance is used up, the %s is finished with what has been designed and the reviewer's remaining notes are kept with it — it is never abandoned part way.\n\n"
-            "When it is ready it is delivered to your Objects folder and charged automatically. You can close this window while it builds.",
-            quote.maxCredits, kind.c_str(), balance.c_str(), kind.c_str()));
+            "When it is ready it is delivered to your Objects folder and charged automatically. You can close this window while it builds.%s",
+            quote.maxCredits, kind.c_str(), balance.c_str(), kind.c_str(),
+            mPicture.empty() ? "" : "\n\nIt follows the picture you added; where your words and the picture differ, your words win."));
         getChild<LLButton>("ai_confirm_start")->setLabel(quote.valid ? llformat("Start the %s · up to %d credits", kind.c_str(), quote.maxCredits) : "Price unavailable");
         getChild<LLButton>("ai_confirm_start")->setEnabled(auth.current() && a.mBuild && quote.valid && !ai.pending("start"));
     }
@@ -1395,6 +1415,98 @@ void WolfPanelAI::onBuyCredits()
     const std::string url = WolfAI::instance().avail().mBuyUrl;
     if (safe_link(url)) LLWeb::loadURLExternal(url); else setStatus("The credit store link is unavailable. Use Update to retry.", true);
 }
+// ─── [PICTURE 2026-11-22] the resident's own picture (Building / Settlement) ───────────────────────────────────────────
+// Source: wolffloaterbuildinggen.cpp onAddPicture / onPictureFilePicked (the same picker, WolfPicture::load and words).
+namespace
+{
+    // Source: wolffloaterbuildinggen.cpp YARD_URL - the Building Generator's endpoint, whose picture_check action checks a
+    // picture for this window (wolfstorm php/buildinggen_lib.php bg_api_picture_check); 60 s as its other calls.
+    const char* PICTURE_CHECK_URL = "https://wolfstorm.app/php/building_gen.php";
+    const char* PICTURE_PROBLEM[][2] = {
+        {"type", "%s is not a picture the builder can use. Choose a PNG, JPEG, BMP or TGA picture."},
+        {"unreadable", "%s could not be read. Choose another picture."},
+        {"too_big", "%s is too large. Choose a picture of at most 8 MB."},
+        {"too_small", "%s is too small to build from. Choose a picture at least 64 pixels across."},
+        {"too_many_pixels", "%s has too many pixels. Choose a picture of at most 6000 by 6000 pixels."}};
+}
+void WolfPanelAI::syncPicture(bool large)
+{
+    const bool show = large && WolfAI::instance().avail().mStructureImage;
+    for (const char* name : {"ai_picture_panel", "ai_picture_add", "ai_picture_state"}) getChildView(name)->setVisible(show);
+    getChildView("ai_picture_remove")->setVisible(show && (!mPicture.empty() || !mPictureChecking.empty()));
+    getChild<LLButton>("ai_picture_add")->setEnabled(mPictureChecking.empty());
+    getChild<LLTextBox>("ai_picture_state")->setText(std::string(!mPictureChecking.empty() ? "Checking your picture..."
+        : !mPicture.empty() ? "Your picture is ready. The build will follow it with your words."
+        : "A photo or drawing of what you want helps with the shape, colours and details (optional)."));
+    if (mPictureView) mPictureView->setDim(!mPictureChecking.empty());
+}
+void WolfPanelAI::onAddPicture()
+{
+    if (!mPictureChecking.empty() || !WolfAI::instance().avail().mStructureImage) return;
+    // The image picker as File > Upload > Image uses it (llviewermenufile.cpp startPicker(..., FFLOAD_IMAGE, false)); the
+    // callback comes back on the main thread, and the panel may be gone.
+    LLHandle<LLPanel> handle = getHandle();
+    LLFilePickerReplyThread::startPicker(
+        [handle](const std::vector<std::string>& filenames, LLFilePicker::ELoadFilter, LLFilePicker::ESaveFilter)
+        { if (auto* p = dynamic_cast<WolfPanelAI*>(handle.get())) p->onPictureFilePicked(filenames); },
+        LLFilePicker::FFLOAD_IMAGE, false);
+}
+void WolfPanelAI::onPictureFilePicked(const std::vector<std::string>& filenames)
+{
+    if (filenames.empty() || filenames[0].empty() || !mPictureChecking.empty()) return;   // the picker was cancelled
+    WolfPicture::Picture pic; std::string problem;
+    if (!WolfPicture::load(filenames[0], pic, problem))
+    {
+        std::string words = "%s could not be read. Choose another picture.";
+        for (const auto& row : PICTURE_PROBLEM) if (problem == row[0]) words = row[1];
+        setStatus(llformat(words.c_str(), pic.name.c_str()), true);
+        return;
+    }
+    WolfAI::instance().error("action", "");
+    mPicture.clear();
+    mPictureChecking = pic.jpegBase64;
+    mPictureView->setTexture(pic.thumb);
+    syncPicture(true);
+    LLHandle<LLPanel> handle = getHandle();
+    const std::string image = pic.jpegBase64;
+    LLCoros::instance().launch("WolfAI picture check", [handle, image]() { pictureCheckCoro(handle, image); });
+}
+// static
+void WolfPanelAI::pictureCheckCoro(LLHandle<LLPanel> handle, std::string image)
+{
+    // Source: wolffloaterbuildinggen.cpp requestCoro (WolfCaves::serviceRequest, POST JSON with the session headers);
+    // buildinggen_lib.php bg_api_picture_check {image} -> {} or {success: false, error: words for the resident}.
+    LLSD body; body["action"] = "picture_check"; body["image"] = image;
+    const std::string text = boost::json::serialize(LlsdToJson(body));
+    LLSD result = WolfCaves::serviceRequest(PICTURE_CHECK_URL, &text, 60.f);
+    LLSD reply; std::string transport;
+    const S32 status = WolfCaves::serviceReply(result, reply, transport);
+    auto* p = dynamic_cast<WolfPanelAI*>(handle.get());
+    if (!p || p->mPictureChecking != image) return;   // removed or replaced while it was checked
+    p->mPictureChecking.clear();
+    if (status == 200 && reply.isMap() && reply["success"].asBoolean())
+    {
+        p->mPicture = image;
+        p->setStatus(std::string(), false);
+    }
+    else
+    {
+        const std::string why = reply.isMap() && !reply["error"].asString().empty() ? reply["error"].asString()
+            : (transport.empty() ? llformat("Your picture could not be checked (HTTP %d). Try again in a moment.", status)
+                                 : "Your picture could not be checked: " + transport);
+        p->forgetPicture();
+        p->setStatus(why, true);
+    }
+    p->syncPicture(true);
+    p->refresh();
+}
+void WolfPanelAI::forgetPicture()
+{
+    mPicture.clear();
+    mPictureChecking.clear();
+    if (mPictureView) mPictureView->setTexture(nullptr);
+    syncPicture(mMode && mMode->getValue().asString() != "mesh");
+}
 void WolfPanelAI::setStatus(const std::string& message, bool failure)
 {
     if (failure) WolfAI::instance().error("action", message); else mStatus->setText(message);
@@ -1426,6 +1538,8 @@ void WolfPanelAI::onBuild()
         setStep(Step::Working);
         return;
     }
+    // [PICTURE] a picture still being checked: wait for its answer (it is not sent unchecked)
+    if (!mPictureChecking.empty()) { setStatus("Wait a moment: your picture is still being checked.", true); return; }
     // Large project: nothing is started from the form. The confirm screen states the charge and
     // asks; only its Start button spends anything (onConfirmStart).
     const auto& q = mMode->getValue().asString() == "settlement" ? ai.avail().mSettlement : ai.avail().mStructure;
@@ -1444,14 +1558,16 @@ void WolfPanelAI::onConfirmStart()
     const std::string mode = mMode->getValue().asString() == "settlement" ? "settlement" : "structure";
     const auto& q = mode == "settlement" ? ai.avail().mSettlement : ai.avail().mStructure;
     if (!q.valid) { setStatus("Price unavailable. Use Update before building.", true); return; }
+    // [PICTURE] the checked picture goes with it only while the proxy says it takes one
+    const std::string image = ai.avail().mStructureImage && mPictureChecking.empty() ? mPicture : std::string();
     ai.startBuild(prompt, mode, q.maxCredits, [handle, auth, generation](bool ok, const std::string& message)
     {
         auto* p = dynamic_cast<WolfPanelAI*>(handle.get());
         if (!p || !p->accepts(auth, generation)) return;
-        if (ok) { WolfAI::instance().mSelected = WolfAI::instance().mLastStarted; p->setStep(Step::Working); }
+        if (ok) { WolfAI::instance().mSelected = WolfAI::instance().mLastStarted; p->setStep(Step::Working); p->forgetPicture(); }
         else { p->setStep(Step::Form); }
         p->mShownRevision = ~U64(0); p->refresh();
-    });
+    }, image);
     setStep(Step::Working);
 }
 void WolfPanelAI::onResume()
@@ -1890,7 +2006,8 @@ void WolfPanelAI::drawForgeStep(F32 t)
             const LLRect title = at(getChildView("ai_saved_title")), list = at(mJobs);
             forgeIron(LLRect(16, title.mTop + 8, getRect().getWidth() - 16, list.mBottom - 6), 8.f);
         }
-        for (const char* name : { "ai_back", "ai_update", "ai_buy", "ai_jobs_reload" })
+        // [PICTURE 2026-11-22] the picture buttons are quiet plates too (forgeButton skips them while hidden)
+        for (const char* name : { "ai_back", "ai_update", "ai_buy", "ai_jobs_reload", "ai_picture_add", "ai_picture_remove" })
         {
             LLButton* b = getChild<LLButton>(name);
             forgeButton(b, at(b), false, t);

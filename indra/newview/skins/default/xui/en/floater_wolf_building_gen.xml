@@ -4,7 +4,8 @@
      built one. Story: say what you want in your own words, see what designing it costs (the AI cost plus 10%, at least
      1 credit, never more than the quote), press Plan it, look at the turning picture and its land impact, then Build it (no
      charge: no AI runs in it, and nothing is charged for land or size) puts it in your inventory.
-     Flow: on the right, top to bottom, 1. the request (2,500 characters, counter under it) 2. the style (its description scrolls
+     Flow: on the right, top to bottom, 1. the request (2,500 characters, counter under it; then the resident's picture, if
+     they have one: Add a picture... / Remove picture) 2. the style (its description scrolls
      in a fixed box, so a long one never runs into the options) 3. the options and the design cost (Plan it: in the footer, since ticket 529's rule) 4. the price to
      build it (opaque box: the plan's price lines and the yard's price note) against the credits you have. On the left, once planned: the turntable, the
      plan's words, the budget and the sources of a researched style. Build it bottom right (Buy credits... beside it when short;
@@ -27,7 +28,7 @@
     <string name="opening">Opening the yard...</string>
     <string name="closed">The yard is closed</string>
     <string name="reopen">Close this window and open it again to try again.</string>
-    <string name="start_hint">Say what you would like built, then press Plan it. You see the plan and its price before anything is built.</string>
+    <string name="start_hint">Say what you would like built (and add a picture if you have one), then press Plan it. You see the plan and its price before anything is built.</string>
     <string name="plan_not_allowed">Planning is not open to you at the moment.</string>
     <string name="no_plan_yet">Your plan will appear here</string>
     <string name="no_plan_text">Once it is planned, its buildings and its land impact show here.</string>
@@ -38,7 +39,7 @@
     <string name="style_tip">The period and place it is built in</string>
     <string name="credit_one">[N] credit</string>
     <string name="credit_many">[N] credits</string>
-    <string name="quote_empty">Describe the building you want and what designing it costs shows here.</string>
+    <string name="quote_empty">Describe the building you want, or add a picture of it, and what designing it costs shows here.</string>
     <string name="quote_working">Working out what designing it costs...</string>
     <string name="quote_line">Designing it costs about [N] (at most [M]): the AI cost plus 10%.</string>
     <string name="quote_research">This includes researching this style; you are charged what it really costs, usually much less.</string>
@@ -46,7 +47,7 @@
     <string name="quote_moved">Designing it now costs at most [M]. Check it, then press Plan it again.</string>
     <string name="changed_while_checking">Your words or the style changed while the cost was being checked. Wait for the new cost, then press Plan it again.</string>
     <string name="checking_cost">Checking what designing it costs...</string>
-    <string name="request_needed">Describe the building you want first.</string>
+    <string name="request_needed">Describe the building you want, or add a picture of it, first.</string>
     <string name="plan_short">You do not have enough AI credits to plan it.</string>
     <string name="planning_send">Sending your request to the yard...</string>
     <string name="plan_waiting">Your plan is waiting for the yard ([AHEAD] ahead of it)...</string>
@@ -89,6 +90,19 @@
     <string name="build_done_unbilled">Delivered to your inventory: [FOLDER]. [CHARGED] will be taken from your balance shortly.</string>
     <string name="build_cancelled">Cancelled - you have not been charged.</string>
     <string name="build_failed">The yard could not build it. You have not been charged.</string>
+    <!-- [PICTURE 2026-11-22] -->
+    <string name="picture_none">A photo or drawing helps with the shape, colours and details. If your words and the picture differ, your words win.</string>
+    <string name="picture_checking">Checking your picture...</string>
+    <string name="picture_ready">Your picture is ready. The plan will use it with your words.</string>
+    <string name="picture_removed">Picture removed. The plan will use your words only.</string>
+    <string name="picture_type">[NAME] is not a picture the generator can use. Choose a PNG, JPEG, BMP or TGA picture.</string>
+    <string name="picture_unreadable">[NAME] could not be read. Choose another picture.</string>
+    <string name="picture_too_big">[NAME] is too large. Choose a picture of at most 8 MB.</string>
+    <string name="picture_too_small">[NAME] is too small to build from. Choose a picture at least 64 pixels across.</string>
+    <string name="picture_too_many_pixels">[NAME] has too many pixels. Choose a picture of at most 6000 by 6000 pixels.</string>
+    <string name="picture_wait">Wait a moment: your picture is still being checked.</string>
+    <string name="quote_wait_picture">What designing it costs shows once your picture has been checked.</string>
+    <string name="plan_with_picture">Planned from your words and your picture.</string>
 
     <!-- [TICKET 529 PATTERN 2026-11-05] Paul "fix 2": the window never grows past the screen. The plan and the request (1-4)
          sit in a scroll container (body_scroll / body; their tops are the body panel's, the window's top + 20, and the right
@@ -97,7 +111,7 @@
          Build it, so both presses are always on show with the status line; the plan's result scrolls into view. -->
     <scroll_container follows="all" height="580" layout="topleft" left="0" name="body_scroll" top="20" width="720"
      reserve_scroll_corner="false" opaque="false">
-    <panel follows="left|top" height="580" layout="topleft" left="0" name="body" top="0" width="704" background_visible="false">
+    <panel follows="left|top" height="656" layout="topleft" left="0" name="body" top="0" width="704" background_visible="false">
     <!-- left: the plan. The read-only boxes are opaque (DkGray, the dark of every skin, paired there with
          TextFgReadOnlyColor, the read-only text): the default TextBgReadOnlyColor is 5% white and let the world, hover text
          included, show through. -->
@@ -120,27 +134,40 @@
      tool_tip="In your own words, up to 2,500 characters - the more detail the better: for example a huge castle, a row of shops, or a farmhouse in wartime France" />
     <text follows="left|top" halign="right" height="16" layout="topleft" left="356" name="request_counter" top="116" width="336" />
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="style_label" top="136" width="336">2. Style</text>
-    <combo_box follows="left|top" height="23" layout="topleft" left="356" name="style" top="154" width="336"
+    <!-- [PICTURE 2026-11-22] Paul: "allow users to upload their own picture". A photo or drawing of what they want: Add a
+         picture... opens the image picker, the thumbnail shows with the check's state beside it, Remove picture takes it away.
+         The yard checks it (nothing sexual, no children, nothing hateful or violent, a building in it) and keeps it a day;
+         the plan reads it with the words, and the words win. 1-4 below moved down 76 px; the body scrolls. -->
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="picture_label" top="136" width="336">A picture of it (if you have one)</text>
+    <panel follows="left|top" height="56" layout="topleft" left="356" name="picture_panel" top="156" width="80"
+     tool_tip="Your picture. The yard uses it for the shape, colours and details; it is never shown to anyone else." />
+    <button follows="left|top" height="23" layout="topleft" left="444" name="picture_add_btn" top="156" width="120" label="Add a picture..."
+     tool_tip="Choose a photo or drawing of the building you would like: PNG, JPEG, BMP or TGA, up to 8 MB" />
+    <button follows="left|top" height="23" layout="topleft" left="572" name="picture_remove_btn" top="156" width="120" label="Remove picture"
+     tool_tip="Plan from your words only" />
+    <text follows="left|top" height="28" layout="topleft" left="444" name="picture_state" top="182" width="248" wrap="true" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="style_label" top="212" width="336">2. Style</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="356" name="style" top="230" width="336"
      tool_tip="The period and place it is built in" />
     <!-- the style's description: a fixed box that scrolls (a text label grows past its rect and ran into 3. Options) -->
-    <text_editor follows="left|top" height="52" layout="topleft" left="356" name="style_info" top="182" width="336" word_wrap="true"
+    <text_editor follows="left|top" height="52" layout="topleft" left="356" name="style_info" top="258" width="336" word_wrap="true"
      read_only="true" allow_scroll="true" parse_urls="false" max_length="4000" bg_readonly_color="Transparent" h_pad="0" v_pad="0" />
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="options_label" top="240" width="336">3. Options</text>
-    <check_box follows="left|top" height="16" label="Wartime damage" layout="topleft" left="356" name="option_1" top="258" width="336" />
-    <check_box follows="left|top" height="16" label="Interiors with doors and stairs" layout="topleft" left="356" name="option_2" top="278" width="336" />
-    <check_box follows="left|top" height="16" label="Street props" layout="topleft" left="356" name="option_3" top="298" width="336" />
-    <check_box follows="left|top" height="16" label="Lit at night" layout="topleft" left="356" name="option_4" top="318" width="336" />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="options_label" top="316" width="336">3. Options</text>
+    <check_box follows="left|top" height="16" label="Wartime damage" layout="topleft" left="356" name="option_1" top="334" width="336" />
+    <check_box follows="left|top" height="16" label="Interiors with doors and stairs" layout="topleft" left="356" name="option_2" top="354" width="336" />
+    <check_box follows="left|top" height="16" label="Street props" layout="topleft" left="356" name="option_3" top="374" width="336" />
+    <check_box follows="left|top" height="16" label="Lit at night" layout="topleft" left="356" name="option_4" top="394" width="336" />
 
-    <text_editor follows="left|top" height="52" layout="topleft" left="356" name="quote_text" top="340" width="336" word_wrap="true"
+    <text_editor follows="left|top" height="52" layout="topleft" left="356" name="quote_text" top="416" width="336" word_wrap="true"
      read_only="true" allow_scroll="true" parse_urls="false" max_length="4000" bg_readonly_color="Transparent" h_pad="0" v_pad="0"
      tool_tip="What designing it costs in AI credits: what the AI costs us, plus 10%. You are never charged more than the figure shown." />
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="price_label" top="426" width="336">4. Price to build it</text>
-    <text_editor follows="left|top" height="90" layout="topleft" left="356" name="price_text" top="444" width="336" word_wrap="true"
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="price_label" top="502" width="336">4. Price to build it</text>
+    <text_editor follows="left|top" height="90" layout="topleft" left="356" name="price_text" top="520" width="336" word_wrap="true"
      read_only="true" allow_scroll="true" parse_urls="false" max_length="8000" bg_readonly_color="DkGray" />
-    <text follows="left|top" height="34" layout="topleft" left="356" name="balance_text" top="540" width="336" wrap="true" />
+    <text follows="left|top" height="34" layout="topleft" left="356" name="balance_text" top="616" width="336" wrap="true" />
     </panel>
     </scroll_container>
 

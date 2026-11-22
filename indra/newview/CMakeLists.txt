@@ -1060,6 +1060,7 @@ set(viewer_SOURCE_FILES
     wolffloaterseatunnels.cpp # [WOLF SEA TUNNEL 2026-10-28] Sea Tunnels: air-filled glass tubes under the sea
     wolffloateranimator.cpp    # [WOLF ANIMATOR 2026-11-05] Wolf Animator: describe a movement, get an animation in your inventory (ticket 547)
     wolffloaterbuildinggen.cpp # [BUILDING GENERATOR 2026-11-01] Building Generator: describe a building, the yard plans, builds and delivers it
+    wolfpicture.cpp            # [PICTURE 2026-11-22] a resident's own reference picture (Building Generator, Create with AI)
     wolffloaterplanebuilder.cpp # [PLANE BUILDER 2026-11-01] Plane Builder: design a fighter, the yard builds and delivers it
     wolffloatershipbuilder.cpp # [SHIP BUILDER 2026-10-29] Ship Builder: design a ship, the shipyard builds and delivers her
     wolffloaterraildepartures.cpp # [RAIL BRAIN 2026-11-20] Railway Departures: a station's board from its railway's one timetable
@@ -2132,6 +2133,7 @@ set(viewer_HEADER_FILES
     wolffloateranimator.h      # [WOLF ANIMATOR 2026-11-05]
     wolffloaterfit.h           # [WOLF ANIMATOR 2026-11-05] ticket 529 rule: tall Wolf windows stay inside the screen
     wolffloaterbuildinggen.h   # [BUILDING GENERATOR 2026-11-01]
+    wolfpicture.h              # [PICTURE 2026-11-22]
     wolffloaterplanebuilder.h   # [PLANE BUILDER 2026-11-01]
     wolffloatershipbuilder.h   # [SHIP BUILDER 2026-10-29]
     wolffloaterraildepartures.h # [RAIL BRAIN 2026-11-20]

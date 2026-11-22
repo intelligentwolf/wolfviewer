@@ -58,6 +58,9 @@ public:
         S32 mMeshMax = 0;
         F64 mPencePerCredit = 0.;
         BuildQuote mStructure, mSettlement;
+        // [PICTURE 2026-11-22] rust_proxy main.rs /ai_available "structure_image": Building / Settlement take a reference
+        // picture (build_service.rs planner_picture). Absent from an older proxy: the Add a picture row stays hidden.
+        bool mStructureImage = false;
     };
     const Avail& avail() const { return mAvail; }
     bool scriptReady() const { return mAvail.mScript; }
@@ -93,7 +96,8 @@ public:
     typedef std::function<void(bool, const LLSD::Binary&, const std::string&)> bytes_fn;
     void listBuilds(build_fn done, std::function<bool()> valid = {});
     void getBuild(const LLUUID& id, build_fn done, std::function<bool()> valid = {});
-    void startBuild(const std::string& prompt, const std::string& size, S32 maximum, build_fn done);
+    // image: [PICTURE 2026-11-22] base64 JPEG/PNG of the resident's checked reference picture, or "" for none
+    void startBuild(const std::string& prompt, const std::string& size, S32 maximum, build_fn done, const std::string& image = std::string());
     void resumeBuild(const BuildJob& job, build_fn done);
     void collectBuild(const BuildJob& job, build_fn done);
     void getBuildPreview(const LLUUID& id, S32 view, bytes_fn done);
@@ -173,6 +177,17 @@ private:
     void invalidateReads();
     void saveDraft();
     void setStatus(const std::string& message, bool error);
+    // [PICTURE 2026-11-22] Paul: "Also add a button to the object builder." Building / Settlement: Add a picture... (the image
+    // picker), checked by the Building Generator's picture check (wolfstorm php/building_gen.php picture_check) before it is
+    // used, a thumbnail, Remove picture; sent with the start request. Shown only when the proxy says it takes one.
+    void onAddPicture();
+    void onPictureFilePicked(const std::vector<std::string>& filenames);
+    void forgetPicture();
+    void syncPicture(bool large);
+    static void pictureCheckCoro(LLHandle<LLPanel> handle, std::string image);
+    class WolfPictureView* mPictureView = nullptr;
+    std::string mPicture;           // the checked picture, sent with the start request
+    std::string mPictureChecking;   // being checked now (a reply for an older choice is dropped)
     bool accepts(const WolfAI::Session& auth, U64 generation) const;
     /** [FORGE LOOK] the error box shows only while there is an error (its red plate would otherwise sit there empty). */
     void showErrors(const std::string& errors);

@@ -32,6 +32,7 @@ class LLComboBox;
 class LLScrollContainer;
 class LLTextBox;
 class LLTextEditor;
+class WolfPictureView;
 
 /**
  * [BUILDING GENERATOR 2026-11-01] The plan's turntable. Copied from WolfPlanePreview (wolffloaterplanebuilder.cpp), with the
@@ -131,6 +132,14 @@ private:
     std::string quoteKey() const;
     LLSD options() const;
 
+    // [PICTURE 2026-11-22] the resident's own picture: Add a picture... (the image picker), the yard's check, Remove picture
+    void onAddPicture();
+    void onPictureFilePicked(const std::vector<std::string>& filenames);
+    void onRemovePicture();
+    void forgetPicture();
+    void showPictureState();
+    bool hasInput() const { return !requestText().empty() || !mPictureId.empty(); }
+
     void request(const std::string& what, const LLSD& body);
     static void requestCoro(LLHandle<LLFloater> h, std::string what, LLSD body);
     void onReply(const std::string& what, const LLSD& body, bool ok, const LLSD& reply, const std::string& error);
@@ -175,6 +184,14 @@ private:
     std::string mJob, mJobKind, mJobState;
     LLFrameTimer mPoll;
     bool mPolling = false;
+
+    // [PICTURE 2026-11-22] the picture: its kept id once the yard has checked it (sent with quote and plan), the base64 being
+    // checked now (the reply for an older choice is dropped by comparing it), the thumbnail and its controls
+    WolfPictureView* mPictureView = nullptr;
+    LLButton *mPictureAddBtn = nullptr, *mPictureRemoveBtn = nullptr;
+    LLTextBox* mPictureState = nullptr;
+    std::string mPictureId, mPictureChecking;
+    bool mPictureShown = false;
 
     // the finished plan on show (the plan JOB's uuid is what build sends)
     std::string mPlanId;

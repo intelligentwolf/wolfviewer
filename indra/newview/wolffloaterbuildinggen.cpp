@@ -28,6 +28,7 @@
 #include "llcheckboxctrl.h"
 #include "llcombobox.h"
 #include "llcoros.h"
+#include "llfilepicker.h"
 #include "llfocusmgr.h"
 #include "lllocalcliprect.h"
 #include "llrender.h"
@@ -38,11 +39,13 @@
 #include "lltexteditor.h"
 #include "lluicolortable.h"
 #include "lluictrlfactory.h"
+#include "llviewermenufile.h"   // LLFilePickerReplyThread
 #include "llweb.h"
 #include "wolfai.h"
 #include "wolfcave.h"
 #include "wolffloaterfit.h"     // [TICKET 529 PATTERN 2026-11-05/]
 #include "wolfgrid.h"
+#include "wolfpicture.h"      // [PICTURE 2026-11-22/]
 
 namespace
 {
@@ -343,6 +346,22 @@ bool WolfFloaterBuildingGen::postBuild()
     holder->addChild(mPreview);
     mPreview->setMessage(getString("no_plan_yet"));
 
+    // [PICTURE 2026-11-22] the picture row: a thumbnail (WolfPictureView in picture_panel), Add a picture..., Remove picture
+    mPictureAddBtn = getChild<LLButton>("picture_add_btn");
+    mPictureRemoveBtn = getChild<LLButton>("picture_remove_btn");
+    mPictureState = getChild<LLTextBox>("picture_state");
+    LLPanel* picHolder = getChild<LLPanel>("picture_panel");
+    WolfPictureView::Params vp;
+    vp.name = "picture_view";
+    vp.rect = picHolder->getLocalRect();
+    vp.follows.flags = FOLLOWS_ALL;
+    vp.mouse_opaque = false;
+    mPictureView = LLUICtrlFactory::create<WolfPictureView>(vp);
+    picHolder->addChild(mPictureView);
+    mPictureAddBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onAddPicture(); });
+    mPictureRemoveBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRemovePicture(); });
+    showPictureState();
+
     mStyle->add(getString("style_auto"), LLSD(STYLE_AUTO));
     mStyle->selectFirstItem();
 
@@ -399,10 +418,10 @@ void WolfFloaterBuildingGen::draw()
     if (mReady && mAccessPlan && mQuoteDue && !mQuoting && mQuoteTimer.getElapsedTimeF32() > QUOTE_SETTLE_S)
     {
         mQuoteDue = false;
-        if (!requestText().empty() && WolfGrid::isOnWolfTerritoriesConfirmed())
+        if (hasInput() && mPictureChecking.empty() && WolfGrid::isOnWolfTerritoriesConfirmed())
         {
             mQuoting = true;
-            request("quote", LLSD().with("request", requestText()).with("style", styleId()));
+            request("quote", LLSD().with("request", requestText()).with("style", styleId()).with("picture", mPictureId));
         }
     }
     if (!mJob.empty() && !mPolling && mPoll.getElapsedTimeF32() > POLL_S && (mJobState == "queued" || mJobState == "running"))
@@ -429,7 +448,8 @@ std::string WolfFloaterBuildingGen::styleId() const
 
 std::string WolfFloaterBuildingGen::quoteKey() const
 {
-    return styleId() + "\n" + requestText();
+    // [PICTURE] the picture is part of what is quoted and planned (a picture plan is priced with the picture's tokens)
+    return styleId() + "\n" + mPictureId + "\n" + requestText();
 }
 
 LLSD WolfFloaterBuildingGen::options() const
@@ -580,7 +600,12 @@ void WolfFloaterBuildingGen::showQuote()
         mQuote->setText(std::string());     // no quote is asked for: access.reason says why (access_text)
         return;
     }
-    if (requestText().empty())
+    if (!mPictureChecking.empty())
+    {
+        mQuote->setText(getString("quote_wait_picture"));
+        return;
+    }
+    if (!hasInput())
     {
         mQuote->setText(getString("quote_empty"));
         return;
@@ -658,6 +683,8 @@ void WolfFloaterBuildingGen::showPlan(const LLSD& o, bool fromLastTime)
         any = true;
     }
     std::string text = plan["summary"].asString();
+    // Source: wolfstorm/php/buildinggen_lib.php bg_job_out "picture" (the plan was made from the words and the picture)
+    if (o["picture"].asBoolean()) text += (text.empty() ? "" : "\n") + getString("plan_with_picture");
     const LLSD& style = plan["style"];
     if (!style["title"].asString().empty())
     {
@@ -769,8 +796,12 @@ void WolfFloaterBuildingGen::updateControls()
         c->setEnabled(canPlan);
     }
     const bool quoted = mQuoteFor == quoteKey() && mQuoteAtMost >= 0;
-    mPlanBtn->setEnabled(canPlan && !mBusy && !mQuoting && quoted && !requestText().empty() && mAvailable >= 0
+    mPlanBtn->setEnabled(canPlan && !mBusy && !mQuoting && quoted && hasInput() && mPictureChecking.empty() && mAvailable >= 0
                          && mAvailable >= mQuoteAtMost);
+    // [PICTURE] greyed, never hidden, while planning is not open; while a picture is checked only Remove picture works
+    mPictureAddBtn->setEnabled(canPlan && mPictureChecking.empty());
+    mPictureRemoveBtn->setVisible(mPictureShown);
+    mPictureRemoveBtn->setEnabled(canPlan || !mPictureChecking.empty());
     mBuildBtn->setEnabled(open && mAccessBuild && !working && !mBusy && !mPlanId.empty() && mPlanPrice >= 0 && mAvailable >= 0
                           && mAvailable >= mPlanPrice);
     const S32 need = !mPlanId.empty() ? mPlanPrice : (quoted ? mQuoteAtMost : -1);
@@ -792,7 +823,12 @@ void WolfFloaterBuildingGen::onPlan()
         setStatus(getString("not_confirmed"), true);
         return;
     }
-    if (requestText().empty())
+    if (!mPictureChecking.empty())
+    {
+        setStatus(getString("picture_wait"), true);
+        return;
+    }
+    if (!hasInput())
     {
         setStatus(getString("request_needed"), true);
         return;
@@ -803,7 +839,7 @@ void WolfFloaterBuildingGen::onPlan()
     mQuoteDue = false;
     setStatus(getString("checking_cost"), false);
     updateControls();
-    request("quote", LLSD().with("request", requestText()).with("style", styleId()));
+    request("quote", LLSD().with("request", requestText()).with("style", styleId()).with("picture", mPictureId));
 }
 
 void WolfFloaterBuildingGen::onBuild()
@@ -903,12 +939,89 @@ void WolfFloaterBuildingGen::showJob(const LLSD& o)
         }
         else
         {
+            // Source: buildinggen_lib.php bg_worker_plan: a plan whose kept picture had gone fails with code picture_gone
+            if (o["code"].asString() == "picture_gone") forgetPicture();
             const std::string err = o["error"].asString();
             setStatus(err.empty() ? getString(kind == "build" ? "build_failed" : "plan_failed") : err, true);
         }
     }
     updateCredits();
     updateControls();
+}
+
+// ─── [PICTURE 2026-11-22] the resident's own picture ─────────────────────────────────────────────────────────────────
+
+void WolfFloaterBuildingGen::onAddPicture()
+{
+    if (!mPictureChecking.empty() || !mJob.empty() || !mAccessPlan || !mReady) return;
+    // The image picker as File > Upload > Image uses it (llviewermenufile.cpp startPicker(..., FFLOAD_IMAGE, false); as
+    // wolffloatertrainbuilder.cpp onChooseLogo). The callback comes back on the main thread; the floater may have closed.
+    const LLHandle<LLFloater> handle = getHandle();
+    LLFilePickerReplyThread::startPicker(
+        [handle](const std::vector<std::string>& filenames, LLFilePicker::ELoadFilter, LLFilePicker::ESaveFilter)
+        {
+            if (WolfFloaterBuildingGen* self = dynamic_cast<WolfFloaterBuildingGen*>(handle.get()))
+            {
+                self->onPictureFilePicked(filenames);
+            }
+        },
+        LLFilePicker::FFLOAD_IMAGE, false);
+}
+
+void WolfFloaterBuildingGen::onPictureFilePicked(const std::vector<std::string>& filenames)
+{
+    if (filenames.empty() || filenames[0].empty() || !mPictureChecking.empty()) return;   // the picker was cancelled
+    WolfPicture::Picture pic;
+    std::string problem;
+    if (!WolfPicture::load(filenames[0], pic, problem))
+    {
+        LLStringUtil::format_map_t a;
+        a["[NAME]"] = pic.name;
+        setStatus(getString("picture_" + problem, a), true);
+        return;
+    }
+    // a new picture replaces the one on show (the old kept one is deleted by the yard)
+    if (!mPictureId.empty()) request("picture_remove", LLSD().with("picture", mPictureId));
+    mPictureId.clear();
+    mPictureChecking = pic.jpegBase64;
+    mPictureShown = true;
+    mPictureView->setTexture(pic.thumb);
+    mPictureView->setDim(true);
+    setStatus(std::string(), false);
+    showPictureState();
+    showQuote();
+    updateControls();
+    // Source: buildinggen_lib.php bg_api_picture {image: base64 PNG/JPEG/WebP}: checked and kept a day
+    request("picture", LLSD().with("image", pic.jpegBase64));
+}
+
+void WolfFloaterBuildingGen::onRemovePicture()
+{
+    if (!mPictureShown) return;
+    if (!mPictureId.empty()) request("picture_remove", LLSD().with("picture", mPictureId));
+    forgetPicture();
+    setStatus(getString("picture_removed"), false);
+}
+
+void WolfFloaterBuildingGen::forgetPicture()
+{
+    mPictureId.clear();
+    mPictureChecking.clear();   // a check still running is dropped when it answers
+    mPictureShown = false;
+    mPictureView->setTexture(nullptr);
+    mPictureView->setDim(false);
+    mQuoteDue = true;
+    mQuoteTimer.reset();
+    showPictureState();
+    showQuote();
+    updateCredits();
+    updateControls();
+}
+
+void WolfFloaterBuildingGen::showPictureState()
+{
+    mPictureState->setText(getString(!mPictureChecking.empty() ? "picture_checking" : (!mPictureId.empty() ? "picture_ready" : "picture_none")));
+    mPictureState->setColor(LLUIColorTable::instance().getColor("LabelTextColor"));
 }
 
 void WolfFloaterBuildingGen::request(const std::string& what, const LLSD& body)
@@ -973,7 +1086,7 @@ void WolfFloaterBuildingGen::onReply(const std::string& what, const LLSD& body, 
         mQuoting = false;
         const bool planNow = mPlanAfterQuote;
         mPlanAfterQuote = false;
-        const std::string key = body["style"].asString() + "\n" + body["request"].asString();
+        const std::string key = body["style"].asString() + "\n" + body["picture"].asString() + "\n" + body["request"].asString();
         if (key != quoteKey())
         {
             // the words or the style changed while it was asked: a new quote is due, this one is not shown
@@ -1031,6 +1144,7 @@ void WolfFloaterBuildingGen::onReply(const std::string& what, const LLSD& body, 
                     p["style"] = body["style"];
                     p["options"] = options();
                     p["at_most"] = mQuoteAtMost;
+                    if (!body["picture"].asString().empty()) p["picture"] = body["picture"];   // [PICTURE]
                     request("plan", p);
                 }
             }
@@ -1058,9 +1172,45 @@ void WolfFloaterBuildingGen::onReply(const std::string& what, const LLSD& body, 
                 showQuote();
             }
             if (code == "plan_expired") clearPlan();
+            if (code == "picture_gone") forgetPicture();   // [PICTURE] kept a day only: the member adds it again
             setStatus(error, true);
             updateCredits();
         }
+    }
+    else if (what == "picture")
+    {
+        // [PICTURE] a reply about a picture that is no longer the one on show (removed or replaced) is dropped
+        if (body["image"].asString() == mPictureChecking && !mPictureChecking.empty())
+        {
+            mPictureChecking.clear();
+            if (ok && !reply["picture"].asString().empty())
+            {
+                // Source: buildinggen_lib.php bg_api_picture -> {picture: id, thumb, w, h}
+                mPictureId = reply["picture"].asString();
+                mPictureView->setDim(false);
+                mQuoteDue = true;
+                mQuoteTimer.reset();
+                setStatus(std::string(), false);
+                request("credits", LLSD::emptyMap());   // the check is a small AI cost on the member's account
+            }
+            else
+            {
+                forgetPicture();
+                setStatus(error, true);    // the yard's own words: why the picture cannot be used
+            }
+            showPictureState();
+            showQuote();
+            updateCredits();
+        }
+        else if (ok && !reply["picture"].asString().empty())
+        {
+            // removed or replaced while it was checked: the picture the yard kept anyway is deleted at once (review 2026-11-22)
+            request("picture_remove", LLSD().with("picture", reply["picture"].asString()));
+        }
+    }
+    else if (what == "picture_remove")
+    {
+        // nothing to show: the picture is already gone from the window, and the yard deletes a kept one after a day anyway
     }
     else if (what == "status" || what == "cancel")
     {

@@ -74,7 +74,7 @@ namespace
         if (copy.isNull() || !copy->getData()) return nullptr;
         const S32 w = copy->getWidth(), h = copy->getHeight();
         const F32 k = llmin(1.f, (F32)side / (F32)llmax(w, h));
-        if (k < 1.f && !copy->scale(llmax(1, ll_round(w * k)), llmax(1, ll_round(h * k)))) return nullptr;
+        if (k < 1.f && !copy->scale(llmax(1, ll_round((F32)w * k)), llmax(1, ll_round((F32)h * k)))) return nullptr;
         return copy;
     }
 }
@@ -172,8 +172,8 @@ void WolfPictureView::draw()
     if (mTexture.notNull() && mTexture->getWidth() > 0 && mTexture->getHeight() > 0)
     {
         LLGLSUIDefault ui;
-        const F32 scale = llmin(F32(W - 2) / mTexture->getWidth(), F32(H - 2) / mTexture->getHeight());
-        const S32 width = ll_round(mTexture->getWidth() * scale), height = ll_round(mTexture->getHeight() * scale);
+        const F32 scale = llmin(F32(W - 2) / (F32)mTexture->getWidth(), F32(H - 2) / (F32)mTexture->getHeight());
+        const S32 width = ll_round((F32)mTexture->getWidth() * scale), height = ll_round((F32)mTexture->getHeight() * scale);
         gGL.color4f(1.f, 1.f, 1.f, 1.f);
         gl_draw_scaled_image((W - width) / 2, (H - height) / 2, width, height, mTexture, LLColor4(1.f, 1.f, 1.f, mDim ? 0.45f : 1.f));
     }

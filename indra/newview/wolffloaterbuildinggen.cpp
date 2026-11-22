@@ -40,6 +40,7 @@
 #include "lluicolortable.h"
 #include "lluictrlfactory.h"
 #include "llviewermenufile.h"   // LLFilePickerReplyThread
+#include "llviewertexture.h"    // [PICTURE 2026-11-22] WolfPicture::Picture holds an LLPointer<LLViewerTexture> (complete type for its ref/unref)
 #include "llweb.h"
 #include "wolfai.h"
 #include "wolfcave.h"

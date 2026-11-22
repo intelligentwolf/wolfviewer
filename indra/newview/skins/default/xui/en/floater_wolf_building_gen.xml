@@ -4,7 +4,7 @@
      built one. Story: say what you want in your own words, see what designing it costs (the AI cost plus 10%, at least
      1 credit, never more than the quote), press Plan it, look at the turning picture and its land impact, then Build it (no
      charge: no AI runs in it, and nothing is charged for land or size) puts it in your inventory.
-     Flow: on the right, top to bottom, 1. the request (600 characters, counter under it) 2. the style (its description scrolls
+     Flow: on the right, top to bottom, 1. the request (2,500 characters, counter under it) 2. the style (its description scrolls
      in a fixed box, so a long one never runs into the options) 3. the options and the design cost (Plan it: in the footer, since ticket 529's rule) 4. the price to
      build it (opaque box: the plan's price lines and the yard's price note) against the credits you have. On the left, once planned: the turntable, the
      plan's words, the budget and the sources of a researched style. Build it bottom right (Buy credits... beside it when short;
@@ -116,8 +116,8 @@
     <!-- right: the request, top to bottom -->
     <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="request_label" top="6" width="336">1. What would you like built?</text>
     <text_editor follows="left|top" height="90" layout="topleft" left="356" name="request_text" top="24" width="336" word_wrap="true"
-     parse_urls="false" max_length="2400" commit_on_focus_lost="false"
-     tool_tip="In your own words, up to 600 characters: for example a huge castle, a row of shops, or a farmhouse in wartime France" />
+     parse_urls="false" max_length="10000" commit_on_focus_lost="false"
+     tool_tip="In your own words, up to 2,500 characters - the more detail the better: for example a huge castle, a row of shops, or a farmhouse in wartime France" />
     <text follows="left|top" halign="right" height="16" layout="topleft" left="356" name="request_counter" top="116" width="336" />
 
     <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="style_label" top="136" width="336">2. Style</text>

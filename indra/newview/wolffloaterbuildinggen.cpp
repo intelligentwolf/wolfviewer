@@ -55,8 +55,9 @@ namespace
     constexpr F32 POLL_S = 5.f;
     // The quote is asked for once the request and style have been still this long (the brief: "debounced ~1 s").
     constexpr F32 QUOTE_SETTLE_S = 1.f;
-    // Source: building-generator-2026-11-01/README.md "a text box for the request (600 characters)".
-    constexpr S32 REQUEST_MAX_CHARS = 600;
+    // Source: wolfstorm/php/buildinggen_lib.php BG_REQUEST_MAX = 2500 (ticket 985, 2026-11-22: a resident's 2,400-character
+    // description was cut to 600 and the builder lost every detail after it).
+    constexpr S32 REQUEST_MAX_CHARS = 2500;
     // Source: building-generator-2026-11-01/README.md preview "At most 30,000 triangles".
     constexpr S32 PREVIEW_MAX_TRIS = 30000;
     // A mesh of 30,000 triangles needs at most 90,000 corners; more than that is not a preview of the contract.
@@ -524,7 +525,7 @@ void WolfFloaterBuildingGen::onOpenReply(const LLSD& reply)
 
 void WolfFloaterBuildingGen::onRequestEdited()
 {
-    // 600 characters at most (the contract's): typing or pasting past it is cut back to the first 600
+    // REQUEST_MAX_CHARS at most (the contract's): typing or pasting past it is cut back, and the counter turns amber
     LLWString w = mRequest->getWText();
     if ((S32)w.size() > REQUEST_MAX_CHARS)
     {

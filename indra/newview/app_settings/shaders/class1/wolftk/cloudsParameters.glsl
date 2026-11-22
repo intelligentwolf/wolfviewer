@@ -86,7 +86,7 @@ uniform vec4 wolfFlowState;             // x = time / 6 h wrapped 0..1 (the eddi
 uniform vec4 wolfLayerFibre;            // per layer 0..1: the fibrous ice detail (wolfcloudgenus.cpp rows)
 uniform vec3 wolfFibreScale;            // the fibre noise per texture unit of the cirrus lookup (x along, y across: whole numbers) and per metre of height (z)
 // [CLOUDS CLEAR OF BUILDS 2026-10-26] the build clearance field (wolfcloudclearance.h; cloudsCommon.glsl wolfBuildClear)
-uniform sampler2D wolfBuildField;       // RGBA16F, 3 levels x 256 rows: R distance to a build, G ground tops, B sky tops, A sky bottoms (agent z)
+uniform sampler2D wolfBuildField;       // RGBA16F, 3 levels x 256 rows, 4 pages x 256 columns: page 0 R distance to a build, G ground tops, B/A sky band 0 top/bottom; pages 1-3 two sky bands each (agent z; wolfcloudclearance.h)
 uniform vec4 wolfBuildLevel[3];         // per level: the texel grid's corner (agent x, y), the texel (m), unused
 uniform vec4 wolfBuildParams;           // x 1 = on, y the camera region's sea (agent z of height 0), z the highest cleared agent z, w unused
 uniform vec4 wolfLayerBuildFade;        // per layer: 1 = fades round builds, 0 = not (ground fog, wolfcloudgenus.cpp)

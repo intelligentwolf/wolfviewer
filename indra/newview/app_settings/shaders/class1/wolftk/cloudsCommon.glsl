@@ -202,31 +202,48 @@ vec4 shapeAlteringFunction(const vec4 heightFraction, const vec4 bias) {
 // the last tenth of its half-window, the outermost faded out over its own last tenth.
 // [2026-10-26] M0 and W come from the cloud table as the uniform wolfBuildFade (cloudsParameters.glsl): WolfCloudClearance::M0 / W
 const float WOLF_BUILD_N = 256.0;   // WolfCloudClearance::N (texels per level edge; 3 levels = 768 rows)
-float wolfBuildClearOf(const vec4 s, const float z) {
-  float dvg = max(z - s.g, 0.0);
-  float dvs = max(max(z - s.b, s.a - z), 0.0);
-  float d = min(length(vec2(s.r, dvg)), length(vec2(s.r, dvs)));
+// [t1003 2026-11-22] the sky bands (wolfcloudclearance.h THE SKY BANDS): WolfCloudClearance::PAGES pages of N columns; page 0
+// = D, Tg, Ts0, Bs0, page p = bands 2p - 1 (r Ts, g Bs) and 2p (b Ts, a Bs). With one sky pair a low sky prim and a high one
+// in the same window made one slab between them (ticket 1003); each band's slab is now taken on its own.
+const float WOLF_BUILD_PAGES = 4.0;
+float wolfBuildSlab(const float D, const vec2 tb, const float z) {
+  float dvs = max(max(z - tb.x, tb.y - z), 0.0);
+  return length(vec2(D, dvs));
+}
+float wolfBuildClearOf(const vec4 s0, const vec4 s1, const vec4 s2, const vec4 s3, const float z) {
+  float dvg = max(z - s0.g, 0.0);
+  float d = length(vec2(s0.r, dvg));
+  d = min(d, wolfBuildSlab(s0.r, s0.ba, z));
+  d = min(d, min(wolfBuildSlab(s0.r, s1.rg, z), wolfBuildSlab(s0.r, s1.ba, z)));
+  d = min(d, min(wolfBuildSlab(s0.r, s2.rg, z), wolfBuildSlab(s0.r, s2.ba, z)));
+  d = min(d, min(wolfBuildSlab(s0.r, s3.rg, z), wolfBuildSlab(s0.r, s3.ba, z)));
   return 1.0 - smoothstep(wolfBuildFade.x, wolfBuildFade.x + wolfBuildFade.y, d);
 }
-bool wolfBuildLevelRead(const int k, const vec2 a, out vec4 s, out float edge) {
+bool wolfBuildLevelRead(const int k, const vec2 a, out vec4 s0, out vec4 s1, out vec4 s2, out vec4 s3, out float edge) {
   vec2 tx = (a - wolfBuildLevel[k].xy) / wolfBuildLevel[k].z;
   edge = min(min(tx.x - 2.0, (WOLF_BUILD_N - 2.0) - tx.x), min(tx.y - 2.0, (WOLF_BUILD_N - 2.0) - tx.y));
   if (edge < 0.0) return false;
-  // texel centres at (i + 0.5) t: u = tx / N; the level's rows k N .. (k + 1) N of 3 N
-  s = textureLod(wolfBuildField, vec2(tx.x / WOLF_BUILD_N, (float(k) * WOLF_BUILD_N + tx.y) / (3.0 * WOLF_BUILD_N)), 0.0);
+  // texel centres at (i + 0.5) t: u = (page N + tx) / (PAGES N) (two texels in from each page's edges, so a bilinear read never
+  // reaches the next page); the level's rows k N .. (k + 1) N of 3 N
+  float v = (float(k) * WOLF_BUILD_N + tx.y) / (3.0 * WOLF_BUILD_N);
+  float w = WOLF_BUILD_PAGES * WOLF_BUILD_N;
+  s0 = textureLod(wolfBuildField, vec2(tx.x / w, v), 0.0);
+  s1 = textureLod(wolfBuildField, vec2((WOLF_BUILD_N + tx.x) / w, v), 0.0);
+  s2 = textureLod(wolfBuildField, vec2((2.0 * WOLF_BUILD_N + tx.x) / w, v), 0.0);
+  s3 = textureLod(wolfBuildField, vec2((3.0 * WOLF_BUILD_N + tx.x) / w, v), 0.0);
   return true;
 }
 float wolfBuildClear(const vec2 a, const float z) {
   for (int k = 0; k < 3; ++k) {
-    vec4 s;
+    vec4 s0, s1, s2, s3;
     float edge;
-    if (!wolfBuildLevelRead(k, a, s, edge)) continue;
-    float c = wolfBuildClearOf(s, z);
+    if (!wolfBuildLevelRead(k, a, s0, s1, s2, s3, edge)) continue;
+    float c = wolfBuildClearOf(s0, s1, s2, s3, z);
     float blend = 1.0 - smoothstep(0.0, WOLF_BUILD_N * 0.1, edge);
     if (blend > 0.0) {
-      vec4 s2;
+      vec4 t0, t1, t2, t3;
       float edge2;
-      float next = (k + 1 < 3 && wolfBuildLevelRead(k + 1, a, s2, edge2)) ? wolfBuildClearOf(s2, z) : 0.0;
+      float next = (k + 1 < 3 && wolfBuildLevelRead(k + 1, a, t0, t1, t2, t3, edge2)) ? wolfBuildClearOf(t0, t1, t2, t3, z) : 0.0;
       c = mix(c, next, blend);
     }
     return c;

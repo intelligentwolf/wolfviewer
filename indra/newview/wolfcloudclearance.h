@@ -38,14 +38,15 @@
  *   ground  its bottom within GROUND_ATTACH_M of the terrain under it: the cloud is cleared from the ground up to its top;
  *   sky     anything higher (skyboxes, platforms): cleared only between its bottom and top, so the cloud deck under and
  *           over a skybox stays (a cushion of clear air round it, not a shaft down to the ground).
- * Channels (RGBA16F, ROWS = LEVELS x N rows):
- *   R  D   distance to the nearest marked texel (two-pass chamfer, weights / CHAMFER so it never exceeds the Euclidean
- *          distance), minus sqrt(2) x the texel (the most a bilinear read inside a marked texel can see), floored at 0
- *   G  Tg  the highest ground-group top within the window radius WIN(k) of the texel (agent z, metres), + PAD_M
- *   B  Ts  the highest sky-group top within the window, + PAD_M
- *   A  Bs  the lowest sky-group bottom within the window, - PAD_M
+ * Channels (RGBA16F, ROWS = LEVELS x N rows, PAGES x N columns; page 0 = R D, G Tg, B Ts0, A Bs0, page p >= 1 = the sky
+ * bands 2p - 1 (R Ts, G Bs) and 2p (B Ts, A Bs)):
+ *   D   distance to the nearest marked texel (two-pass chamfer, weights / CHAMFER so it never exceeds the Euclidean
+ *       distance), minus sqrt(2) x the texel (the most a bilinear read inside a marked texel can see), floored at 0
+ *   Tg  the highest ground-group top within the window radius WIN(k) of the texel (agent z, metres), + PAD_M
+ *   Ts  per sky band (SKY_BAND_TOP): the highest top of the sky-group boxes' parts in that band within the window, + PAD_M
+ *   Bs  per sky band: the lowest bottom of those parts within the window, - PAD_M
  * (missing: Tg = Ts = -SENTINEL, Bs = +SENTINEL). The shader (cloudsCommon.glsl wolfBuildClear) and the CPU twin clearAt():
- *   dg = |(D, max(z - Tg, 0))|, ds = |(D, max(z - Ts, Bs - z, 0))|, clear = 1 - smoothstep(M0, M0 + W, min(dg, ds)),
+ *   dg = |(D, max(z - Tg, 0))|, ds_b = |(D, max(z - Ts_b, Bs_b - z, 0))|, clear = 1 - smoothstep(M0, M0 + W, min(dg, ds_b)),
  * and every cloud layer that fades multiplies its density by 1 - clear: a rounded cushion round each build's box, fully clear
  * within M0 of it and back to the weather's own cloud W further out - thinning, never a box-shaped hole.
  * THE INVARIANT: inside any build's box clear = 1, so the cloud density there is 0 - in the shader and the shadow pass alike.
@@ -54,6 +55,18 @@
  * subtraction; the window radius is at least one texel, so all four hold Tg (or Ts / Bs) at least as wide as the build's
  * own top / bottom; PAD_M covers the half-float rounding (|z| < 16,384 m: half an ulp is at most 8 m). selfCheck() tests
  * it numerically every rebuild (the corners and centre of every source box through clearAt()) and logs any miss.
+ * [t1003 2026-11-22] THE SKY BANDS. With one sky pair, the window's highest top and lowest bottom could come from DIFFERENT
+ * builds, and the slab between them read "inside a build": two sky-group prims far apart in height (a low one - a ski-lift
+ * cable, a deck or a rock standing on another rock, its bottom more than GROUND_ATTACH_M above the terrain - and a high one)
+ * within one window made one slab from the lowest bottom to the highest top, every cloud between them cleared: the shaft this
+ * design says it never makes. Jimmy Olsen's TROMSO (ticket 1003: "Region tells me clouds are 87% but it shows me very clean
+ * sky with a bright moon") has a 1024 x 1024 m "sim surround landscape" at 3,942 - 4,198 m over the middle of the region and
+ * such low sky prims below it (its OAR of 19 Oct); the rig there (22 Nov 20:58Z, MET low cloud 89 %, St 150 - 500 m) drew no
+ * low cloud over the town while the region's corners showed the overcast. Now a sky box is cut at the band edges SKY_BAND_TOP
+ * (125, 250, 500, 1,000, 2,000, 4,000 m and above) and each part is windowed in its own band: two builds only share a slab
+ * within one band, a factor of two in height at most (a deck at 60 m joins nothing above 125 m), and the union of a box's
+ * parts is the box, so THE INVARIANT below holds as before (each part's band reads it as inside). traceColumn (the
+ * WolfEnvironmentTrace log) shows which term clears the column over the camera.
  * M0 = 20 m: the cloud's finest structure - takram's shape-detail noise (Worley, 2 to 16 cells per 1 / 0.006 m = 167 m,
  * cloudShapeDetailF.glsl, wolftkclouds.cpp shapeDetailRepeat) - is ~10-20 m, so a gap narrower than that would still let a
  * detail wisp touch a wall; 20 m is the smallest gap the cloud itself can show. W = 50 m: the cloud march's minimum step
@@ -100,6 +113,13 @@ public:
     // then the passes take over again. What a resident can still see: a build that rezzes or moves into a region already
     // walked is cleared up to one pass + LEVELS + 2 frames later than the old 1 s (see above).
     static constexpr F64 INTERVAL_SECS = 1.0;         // the builds are re-rastered this often
+    // [t1003 2026-11-22] the sky bands (see THE SKY BANDS above): band b holds the parts of sky boxes between SKY_BAND_TOP[b - 1]
+    // and SKY_BAND_TOP[b] (agent z; band 0 from below, the last band upwards); 1 + 2 x (PAGES - 1) bands fill the pages exactly
+    static constexpr S32 SKY_BANDS = 7;
+    static constexpr S32 PAGES = 4;                   // texture pages of N columns (cloudsCommon.glsl WOLF_BUILD_PAGES)
+    static const F32 SKY_BAND_TOP[SKY_BANDS - 1];     // 125, 250, 500, 1000, 2000, 4000
+    static constexpr S32 CHANNELS = 2 + 2 * SKY_BANDS;   // D, Tg, then Ts / Bs for each band (sampleLevel's order)
+    static_assert(1 + 2 * (PAGES - 1) == SKY_BANDS, "the sky bands fill the texture pages (cloudsCommon.glsl wolfBuildLevelRead)");
 
     /** Once a frame from the clouds' frame (wolfenvironmentrender.cpp cloudsFrame); rebuilds once a second. */
     void idle();
@@ -112,6 +132,10 @@ public:
     F32 topAgentZ() const { return mTopZ; }
     /** CPU twin of cloudsCommon.glsl wolfBuildClear at agent (x, y, z): 1 = no cloud. */
     F32 clearAt(F32 ax, F32 ay, F32 az) const;
+    /** [t1003 2026-11-22] WolfEnvironmentTrace: the field over the camera (clear at heights up the column, which term clears it)
+     *  and the builds within reach that rise highest, every 10 s - the reading that tells a cloud cleared by a build from one
+     *  the weather did not make. */
+    void traceColumn() const;
 
     // [FAR DRAW PERF 2026-11-14] the builds are read in the shared object pass (wolfobjectsweep.h)
     void beginPass() override;
@@ -143,11 +167,11 @@ private:
     void finishLevel(S32 k);
     void upload();
     void selfCheck(const LLVector3d& agent_origin);
-    bool sampleLevel(S32 k, F32 ax, F32 ay, F32 out[4]) const;
+    bool sampleLevel(S32 k, F32 ax, F32 ay, F32 out[CHANNELS]) const;
 
     LLVector3d mOrigin[LEVELS];
     bool mHaveOrigin[LEVELS] = { false, false, false };
-    std::vector<F32> mTg[LEVELS], mTs[LEVELS], mBs[LEVELS];   // raw per texel, then windowed
+    std::vector<F32> mTg[LEVELS], mTs[LEVELS][SKY_BANDS], mBs[LEVELS][SKY_BANDS];   // raw per texel, then windowed
     std::vector<U8> mMark[LEVELS];
     std::vector<F32> mD[LEVELS];
     std::vector<F32> mTmp, mUpload;
@@ -162,7 +186,7 @@ private:
     U64 mPassRegion = 0;      // [review 2] the agent's region when the pass under way began
     U64 mPrimsRegion = 0;     // [review 2] ... and when the one in mPrims began
     S32 mStage = -1;
-    std::vector<F32> mTgP[LEVELS], mTsP[LEVELS], mBsP[LEVELS], mDP[LEVELS];
+    std::vector<F32> mTgP[LEVELS], mTsP[LEVELS][SKY_BANDS], mBsP[LEVELS][SKY_BANDS], mDP[LEVELS];
     std::vector<U8> mMarkP[LEVELS];
     std::vector<Box> mBoxesP;
     F32 mTopZP = -SENTINEL;

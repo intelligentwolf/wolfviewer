@@ -25,13 +25,19 @@
 #include "llviewerobject.h"
 #include "llviewerobjectlist.h"
 #include "llviewerregion.h"
+#include "llviewercontrol.h"   // [t1003 2026-11-22] gSavedSettings (WolfEnvironmentTrace)
 
 #include <cmath>
 #include <utility>   // [FAR DRAW PERF 2026-11-14/] std::swap (swapPendingAll)
+#include <algorithm>   // [t1003 2026-11-22] std::sort (traceColumn)
+#include <sstream>     // [t1003 2026-11-22] traceColumn
 
 const F32 WolfCloudClearance::TEXEL_M[WolfCloudClearance::LEVELS] = { 4.f, 16.f, 64.f };
 F32 WolfCloudClearance::M0 = 20.f;   // [2026-10-26] the cloud table's build_clear_m0_m (setFade)
 F32 WolfCloudClearance::W = 50.f;    // [2026-10-26] the cloud table's build_clear_w_m
+// [t1003 2026-11-22] the sky bands' edges (wolfcloudclearance.h THE SKY BANDS): doubling heights, so two sky builds windowed into
+// one band are at most a factor of two apart in height; 4,000 m is the top of the highest cloud base the genus table uses (Ns)
+const F32 WolfCloudClearance::SKY_BAND_TOP[WolfCloudClearance::SKY_BANDS - 1] = { 125.f, 250.f, 500.f, 1000.f, 2000.f, 4000.f };
 
 namespace
 {
@@ -143,6 +149,14 @@ void WolfCloudClearance::idle()
         swapPendingAll();
         mStage = 0;
     }
+    // [t1003 2026-11-22] the column over the camera, for a trace log (wolfcloudclearance.h traceColumn)
+    static LLCachedControl<bool> trace(gSavedSettings, "WolfEnvironmentTrace", false);
+    static F64 s_nextColumn = 0.0;
+    if (trace && mReady && now >= s_nextColumn)
+    {
+        s_nextColumn = now + 10.0;
+        traceColumn();
+    }
     if (now >= mNext && !WolfObjectSweep::instance().busy(this))
     {
         mNext = now + INTERVAL_SECS;
@@ -166,8 +180,11 @@ void WolfCloudClearance::rebuildNow()
 void WolfCloudClearance::swapPendingLevel(S32 k)
 {
     mTg[k].swap(mTgP[k]);
-    mTs[k].swap(mTsP[k]);
-    mBs[k].swap(mBsP[k]);
+    for (S32 b = 0; b < SKY_BANDS; ++b)
+    {
+        mTs[k][b].swap(mTsP[k][b]);
+        mBs[k][b].swap(mBsP[k][b]);
+    }
     mMark[k].swap(mMarkP[k]);
     mD[k].swap(mDP[k]);
 }
@@ -274,8 +291,11 @@ void WolfCloudClearance::raster()
     for (S32 k = 0; k < LEVELS; ++k)
     {
         mTg[k].assign(NN, -SENTINEL);
-        mTs[k].assign(NN, -SENTINEL);
-        mBs[k].assign(NN, SENTINEL);
+        for (S32 b = 0; b < SKY_BANDS; ++b)
+        {
+            mTs[k][b].assign(NN, -SENTINEL);
+            mBs[k][b].assign(NN, SENTINEL);
+        }
         mMark[k].assign(NN, 0);
     }
     mBoxes.clear();
@@ -312,8 +332,15 @@ void WolfCloudClearance::raster()
                     }
                     else
                     {
-                        mTs[k][idx] = llmax(mTs[k][idx], hi.mV[VZ]);
-                        mBs[k][idx] = llmin(mBs[k][idx], lo.mV[VZ]);
+                        // [t1003 2026-11-22] the box's part in each sky band it reaches (the parts' union is the box)
+                        for (S32 b = 0; b < SKY_BANDS; ++b)
+                        {
+                            const F32 bandLo = b > 0 ? SKY_BAND_TOP[b - 1] : -SENTINEL;
+                            const F32 bandHi = b < SKY_BANDS - 1 ? SKY_BAND_TOP[b] : SENTINEL;
+                            if (hi.mV[VZ] < bandLo || lo.mV[VZ] > bandHi) continue;
+                            mTs[k][b][idx] = llmax(mTs[k][b][idx], llmin(hi.mV[VZ], bandHi));
+                            mBs[k][b][idx] = llmin(mBs[k][b][idx], llmax(lo.mV[VZ], bandLo));
+                        }
                     }
                 }
             }
@@ -363,8 +390,11 @@ void WolfCloudClearance::finishLevel(S32 k)
         }
     };
     windowed(mTg[k], true);
-    windowed(mTs[k], true);
-    windowed(mBs[k], false);
+    for (S32 b = 0; b < SKY_BANDS; ++b)
+    {
+        windowed(mTs[k][b], true);
+        windowed(mBs[k][b], false);
+    }
     // chamfer distance of the marked texels: WolfWaterClearance::solve's D (wolfwaterfield.cpp), the same weights
     std::vector<F32>& D = mD[k];
     D.resize(NN);
@@ -404,24 +434,42 @@ void WolfCloudClearance::finishLevel(S32 k)
     {
         D[i] = D[i] < SENTINEL * 0.5f ? llmax(D[i] - F_SQRT2 * t, 0.f) : SENTINEL;
         if (mTg[k][i] > -SENTINEL * 0.5f) mTg[k][i] += PAD_M;
-        if (mTs[k][i] > -SENTINEL * 0.5f) mTs[k][i] += PAD_M;
-        if (mBs[k][i] < SENTINEL * 0.5f) mBs[k][i] -= PAD_M;
+        for (S32 b = 0; b < SKY_BANDS; ++b)
+        {
+            if (mTs[k][b][i] > -SENTINEL * 0.5f) mTs[k][b][i] += PAD_M;
+            if (mBs[k][b][i] < SENTINEL * 0.5f) mBs[k][b][i] -= PAD_M;
+        }
     }
 }
 
-// ROWS x N RGBA16F (R D, G Tg, B Ts, A Bs; level k in rows k N ..), allocated once, then replaced whole each rebuild.
+// ROWS x (PAGES x N) RGBA16F (level k in rows k N ..; page 0 R D, G Tg, B Ts0, A Bs0, page p the bands 2p - 1 and 2p: R Ts,
+// G Bs, B Ts, A Bs - wolfcloudclearance.h), allocated once, then replaced whole each rebuild.
 void WolfCloudClearance::upload()
 {
-    mUpload.resize((size_t)N * ROWS * 4);
+    const size_t W_TEX = (size_t)PAGES * N;
+    mUpload.resize(W_TEX * ROWS * 4);
     for (S32 k = 0; k < LEVELS; ++k)
     {
-        F32* dst = &mUpload[(size_t)k * N * N * 4];
-        for (size_t i = 0; i < (size_t)N * N; ++i)
+        for (S32 y = 0; y < N; ++y)
         {
-            dst[i * 4] = mD[k][i];
-            dst[i * 4 + 1] = mTg[k][i];
-            dst[i * 4 + 2] = mTs[k][i];
-            dst[i * 4 + 3] = mBs[k][i];
+            F32* row = &mUpload[((size_t)k * N + y) * W_TEX * 4];
+            for (S32 x = 0; x < N; ++x)
+            {
+                const size_t i = (size_t)y * N + x;
+                F32 ch[CHANNELS];
+                ch[0] = mD[k][i];
+                ch[1] = mTg[k][i];
+                for (S32 b = 0; b < SKY_BANDS; ++b)
+                {
+                    ch[2 + 2 * b] = mTs[k][b][i];
+                    ch[3 + 2 * b] = mBs[k][b][i];
+                }
+                for (S32 p = 0; p < PAGES; ++p)
+                {
+                    F32* dst = &row[((size_t)p * N + x) * 4];
+                    for (S32 c = 0; c < 4; ++c) dst[c] = ch[p * 4 + c];
+                }
+            }
         }
     }
     if (!mTex)
@@ -433,21 +481,21 @@ void WolfCloudClearance::upload()
     if (!mTexAllocated)
     {
         LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGBA16F,
-                                  N, ROWS, GL_RGBA, GL_FLOAT, mUpload.data(), false);
+                                  PAGES * N, ROWS, GL_RGBA, GL_FLOAT, mUpload.data(), false);
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
         gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
         mTexAllocated = true;
     }
     else
     {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, N, ROWS, GL_RGBA, GL_FLOAT, mUpload.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PAGES * N, ROWS, GL_RGBA, GL_FLOAT, mUpload.data());
     }
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
 }
 
 // GL's bilinear read of level k at agent (ax, ay) (texel centres at (i + 0.5) t, clamped), or false outside the usable part
 // (two texels in from each edge, so a read never reaches the next level's rows).
-bool WolfCloudClearance::sampleLevel(S32 k, F32 ax, F32 ay, F32 out[4]) const
+bool WolfCloudClearance::sampleLevel(S32 k, F32 ax, F32 ay, F32 out[CHANNELS]) const
 {
     const LLVector2 o = levelOriginAgent(k);
     const F32 t = TEXEL_M[k];
@@ -457,8 +505,15 @@ bool WolfCloudClearance::sampleLevel(S32 k, F32 ax, F32 ay, F32 out[4]) const
     const S32 i0 = llclamp((S32)floorf(sx), 0, N - 1), j0 = llclamp((S32)floorf(sy), 0, N - 1);
     const S32 i1 = llmin(i0 + 1, N - 1), j1 = llmin(j0 + 1, N - 1);
     const F32 fx = sx - floorf(sx), fy = sy - floorf(sy);
-    const std::vector<F32>* ch[4] = { &mD[k], &mTg[k], &mTs[k], &mBs[k] };
-    for (S32 c = 0; c < 4; ++c)
+    const std::vector<F32>* ch[CHANNELS];
+    ch[0] = &mD[k];
+    ch[1] = &mTg[k];
+    for (S32 b = 0; b < SKY_BANDS; ++b)
+    {
+        ch[2 + 2 * b] = &mTs[k][b];
+        ch[3 + 2 * b] = &mBs[k][b];
+    }
+    for (S32 c = 0; c < CHANNELS; ++c)
     {
         const std::vector<F32>& v = *ch[c];
         const F32 a = v[(size_t)j0 * N + i0] * (1.f - fx) + v[(size_t)j0 * N + i1] * fx;
@@ -473,16 +528,20 @@ bool WolfCloudClearance::sampleLevel(S32 k, F32 ax, F32 ay, F32 out[4]) const
 F32 WolfCloudClearance::clearAt(F32 ax, F32 ay, F32 az) const
 {
     if (!mReady) return 0.f;
-    auto clearOf = [&](const F32 s[4])
+    auto clearOf = [&](const F32 s[CHANNELS])
     {
         const F32 dvg = llmax(az - s[1], 0.f);
-        const F32 dvs = llmax(llmax(az - s[2], s[3] - az), 0.f);
-        const F32 d = llmin(sqrtf(s[0] * s[0] + dvg * dvg), sqrtf(s[0] * s[0] + dvs * dvs));
+        F32 d = sqrtf(s[0] * s[0] + dvg * dvg);
+        for (S32 b = 0; b < SKY_BANDS; ++b)   // [t1003 2026-11-22] each sky band's slab on its own
+        {
+            const F32 dvs = llmax(llmax(az - s[2 + 2 * b], s[3 + 2 * b] - az), 0.f);
+            d = llmin(d, sqrtf(s[0] * s[0] + dvs * dvs));
+        }
         return 1.f - smooth01(M0, M0 + W, d);
     };
     for (S32 k = 0; k < LEVELS; ++k)
     {
-        F32 s[4];
+        F32 s[CHANNELS];
         if (!sampleLevel(k, ax, ay, s)) continue;
         const LLVector2 o = levelOriginAgent(k);
         const F32 t = TEXEL_M[k];
@@ -492,7 +551,7 @@ F32 WolfCloudClearance::clearAt(F32 ax, F32 ay, F32 az) const
         F32 c = clearOf(s);
         if (blend > 0.f)
         {
-            F32 s2[4];
+            F32 s2[CHANNELS];
             const F32 next = (k + 1 < LEVELS && sampleLevel(k + 1, ax, ay, s2)) ? clearOf(s2) : 0.f;
             c = c + (next - c) * blend;
         }
@@ -543,4 +602,63 @@ void WolfCloudClearance::selfCheck(const LLVector3d& agent_origin)
         LL_INFOS("WolfEnv") << "cloud build clearance: first check " << points << " points of " << mBoxes.size()
                             << " prims, " << misses << " not clear" << LL_ENDL;
     }
+}
+
+// [t1003 2026-11-22] WolfEnvironmentTrace: the field over the camera. For heights up the column, clearAt and, from the finest level
+// holding the point, which term is nearest (ground, or sky band b) with its slab; then the builds within 150 m of the column whose
+// boxes rise highest (agent z), with their group. Ticket 1003 (TROMSO): the whole low deck was gone over the town, and the log
+// had no way to say whether a build's cushion took it.
+void WolfCloudClearance::traceColumn() const
+{
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    std::ostringstream o;
+    o << "cloud build clearance over the camera (" << cam.mV[VX] << ", " << cam.mV[VY] << "), top " << mTopZ << ":";
+    static const F32 HEIGHTS[] = { 100.f, 150.f, 200.f, 300.f, 400.f, 500.f, 700.f, 1000.f, 1500.f, 2000.f, 3000.f, 4000.f };
+    for (F32 z : HEIGHTS)
+    {
+        o << " z" << z << " " << clearAt(cam.mV[VX], cam.mV[VY], z);
+        F32 s[CHANNELS];
+        for (S32 k = 0; k < LEVELS; ++k)
+        {
+            if (!sampleLevel(k, cam.mV[VX], cam.mV[VY], s)) continue;
+            F32 best = sqrtf(s[0] * s[0] + llmax(z - s[1], 0.f) * llmax(z - s[1], 0.f));
+            S32 which = -1;
+            for (S32 b = 0; b < SKY_BANDS; ++b)
+            {
+                const F32 dv = llmax(llmax(z - s[2 + 2 * b], s[3 + 2 * b] - z), 0.f);
+                const F32 d = sqrtf(s[0] * s[0] + dv * dv);
+                if (d < best) { best = d; which = b; }
+            }
+            o << " (L" << k << " D " << s[0] << " d " << best << " by ";
+            if (which < 0) o << "ground Tg " << s[1] << ")";
+            else o << "sky band " << which << " " << s[3 + 2 * which] << ".." << s[2 + 2 * which] << ")";
+            break;
+        }
+    }
+    LL_INFOS("WolfEnvTrace") << o.str() << LL_ENDL;
+    // the highest builds near the column (the last finished pass), at most 8
+    const LLVector3d agent_origin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
+    std::vector<std::pair<F32, size_t>> near;
+    for (size_t i = 0; i < mPrims.size(); ++i)
+    {
+        const PrimBox& pb = mPrims[i];
+        const LLVector3d& po = mPrimOrigins[pb.mOrigin];
+        const F32 dx = (F32)(po.mdV[VX] - agent_origin.mdV[VX]), dy = (F32)(po.mdV[VY] - agent_origin.mdV[VY]);
+        const F32 lx = pb.mLo.mV[VX] + dx, hx = pb.mHi.mV[VX] + dx, ly = pb.mLo.mV[VY] + dy, hy = pb.mHi.mV[VY] + dy;
+        const F32 ex = llmax(llmax(lx - cam.mV[VX], cam.mV[VX] - hx), 0.f), ey = llmax(llmax(ly - cam.mV[VY], cam.mV[VY] - hy), 0.f);
+        if (ex * ex + ey * ey > 150.f * 150.f) continue;
+        near.emplace_back(pb.mHi.mV[VZ], i);
+    }
+    std::sort(near.begin(), near.end(), [](const std::pair<F32, size_t>& a, const std::pair<F32, size_t>& b) { return a.first > b.first; });
+    std::ostringstream p;
+    p << "cloud build clearance: " << near.size() << " builds within 150 m of the column; highest:";
+    for (size_t j = 0; j < near.size() && j < 8; ++j)
+    {
+        const PrimBox& pb = mPrims[near[j].second];
+        const LLVector3d& po = mPrimOrigins[pb.mOrigin];
+        const F32 dx = (F32)(po.mdV[VX] - agent_origin.mdV[VX]), dy = (F32)(po.mdV[VY] - agent_origin.mdV[VY]);
+        p << " [" << (pb.mGround ? "ground" : "sky") << " x " << pb.mLo.mV[VX] + dx << ".." << pb.mHi.mV[VX] + dx
+          << " y " << pb.mLo.mV[VY] + dy << ".." << pb.mHi.mV[VY] + dy << " z " << pb.mLo.mV[VZ] << ".." << pb.mHi.mV[VZ] << "]";
+    }
+    LL_INFOS("WolfEnvTrace") << p.str() << LL_ENDL;
 }

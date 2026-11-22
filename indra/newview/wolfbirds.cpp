@@ -179,10 +179,12 @@ namespace
     //    the resident's avatar instead of anywhere within 40 m of where it is: outside the 10 m flush distance with each
     //    bird's PATCH_R_M spread (15 - 5 = 10 m), so they settle where they can be watched and flush as before when the
     //    avatar comes within 10 m.
-    // [rig trace 22 Nov] at 17..25 m and 4..8 m up the birds crossed high on the screen, in the tree tops, 3..6 px: now
-    // 8..16 m out and FLYBY_ALT_MIN_M..MAX_M up, the low dash across a garden or a field small birds make (CHOSEN): a
-    // 0.23 m sparrow at 8..16 m is about 21..11 px wide on a 1280 x 800 frame
-    constexpr F32 FLYBY_NEAR_M = 8.f, FLYBY_FAR_M = 16.f, FLYBY_IN_M = 70.f, FLYBY_OUT_M = 400.f;
+    // [rig trace 22 Nov] at 17..25 m and 4..8 m up the birds crossed high on the screen, in the tree tops, 3..6 px. A
+    // crossing bird is seen side on (its span along the line of sight), so it shows its 0.15 m body and its wing beat,
+    // not its 0.23 m span: the burst frames of 22 Nov showed a flock 8..16 m out (spread +-6 m) as 7..10 px birds. Now
+    // FLYBY_NEAR_M..FAR_M out (the camera stands 4..5 m behind the avatar: 1..7 m past it), FLYBY_SPREAD_M either way, and
+    // FLYBY_ALT_MIN_M..MAX_M up, the low dash past a person small birds make (CHOSEN): about 12..20 px side on.
+    constexpr F32 FLYBY_NEAR_M = 6.f, FLYBY_FAR_M = 12.f, FLYBY_IN_M = 70.f, FLYBY_OUT_M = 400.f, FLYBY_SPREAD_M = 3.f;
     constexpr F32 FLYBY_ALT_MIN_M = 1.5f, FLYBY_ALT_MAX_M = 4.f;
     constexpr F32 FLYBY_CLEAR_M = 24.f;   // the line this far either side of its crossing point is over open land (CHOSEN)
     constexpr F64 FLYBY_MIN_S = 60.0, FLYBY_MAX_S = 180.0, FLYBY_FIRST_MIN_S = 20.0, FLYBY_FIRST_MAX_S = 60.0;
@@ -337,18 +339,20 @@ namespace
     //
     // THE BODY ON THE SURFACE. Standing, the body's underside is the bare leg (the tarsus) above the feet: herring gull
     // 58.9 mm (male) / 54.7 mm (female) (Threlfall & Jewer 1978, Auk 95:749), so 57 mm; house sparrow 19.8 mm (Griggio &
-    // Hoi 2010, BMC Evol. Biol. 10:261). The body's underside is 0.081 of its length below its axis (buildMesh: h x 0.9,
-    // h = 0.09 len). Floating, the waterline is at the body's axis less a third of its half-depth (chosen: a gull rides
-    // high, most of its body over the water).
+    // Hoi 2010, BMC Evol. Biol. 10:261). The body's underside is BODY_HALF_DEPTH x 0.9 of its length below its axis
+    // (buildMesh: the ring's lowest point is h x 0.9). Floating, the waterline is at the body's axis less a third of its
+    // half-depth (chosen: a gull rides high, most of its body over the water).
+    // [WILDLIFE SHOWS 2026-11-21] the half-depth and half-width (were 0.09 and 0.08) - see buildMesh
+    constexpr F32 BODY_HALF_DEPTH = 0.14f, BODY_HALF_WIDTH = 0.12f;   // x length
     constexpr F32 TARSUS_GULL_M = 0.057f, TARSUS_SMALL_M = 0.0198f;
-    constexpr F32 BODY_UNDER = 0.081f;      // x length
+    constexpr F32 BODY_UNDER = BODY_HALF_DEPTH * 0.9f;   // x length (was 0.081 = 0.09 x 0.9)
     // The drawn water under a floating bird is sampled (WolfBoatRock::drawnWaveHeight, the whole wave model) at most every
     // WAVE_SAMPLE_S and carried on at the rate between the last two samples in between. Measured in world on 2 Nov: the
     // per-frame sample was most of the landing's cost (move() 29-58 us for 4-7 gulls on the water). The error of a linear
     // carry over 0.05 s is under a millimetre on the swell and about 1.5 cm on the fastest shore breaker (amplitude x
     // omega^2 x 0.05^2); under 20 frames a second every frame is a fresh sample.
     constexpr F64 WAVE_SAMPLE_S = 0.05;
-    constexpr F32 FLOAT_ABOVE = 0.03f;      // x length: the axis over the waterline
+    constexpr F32 FLOAT_ABOVE = BODY_HALF_DEPTH / 3.f;   // x length: the axis over the waterline (was 0.03 = 0.09 / 3)
     // Herring gull: "Their legs are pink with webbed feet" (RSPB herring gull). No wording was found for the sparrow's: its
     // legs are drawn in its own darker back colour (SPECIES mTip).
     const F32 LEG_GULL[3] = { 0.86f, 0.62f, 0.60f };
@@ -934,7 +938,7 @@ bool WolfBirds::flyBy(LLViewerRegion* region, S32 count, F64 now)
             Bird b;
             b.mFlock = index;
             b.mAlt = frand_range(FLYBY_ALT_MIN_M, FLYBY_ALT_MAX_M);
-            b.mPos = entry + LLVector3(frand_range(-6.f, 6.f), frand_range(-6.f, 6.f), 0.f);
+            b.mPos = entry + LLVector3(frand_range(-FLYBY_SPREAD_M, FLYBY_SPREAD_M), frand_range(-FLYBY_SPREAD_M, FLYBY_SPREAD_M), 0.f);
             b.mPos.mV[VZ] = surfaceZ(b.mPos) + b.mAlt;
             b.mSpeed = sp.mSpeed * frand_range(0.9f, 1.1f);
             b.mSize = frand_range(0.9f, 1.1f);
@@ -2064,7 +2068,7 @@ void WolfBirds::move(F32 dt, F64 now)
     {
         Flock& f = mFlocks[(size_t)fi];
         if (!f.mFlyBy || now < f.mFlyByLog) continue;
-        f.mFlyByLog = now + 1.0;
+        f.mFlyByLog = now + 0.25;
         LLVector3 c;
         S32 n = 0, seen = 0;
         F32 nearest = 1e9f;
@@ -2077,8 +2081,11 @@ void WolfBirds::move(F32 dt, F64 now)
         }
         if (n > 0)
         {
+            LLCoordGL px;
+            const bool on = camera->projectPosAgentToScreen(c / (F32)n, px, false);
             LL_DEBUGS("WolfBirds") << "fly-by flock: " << n << " birds round " << (c / (F32)n - (region ? region->getOriginAgent() : LLVector3()))
-                                   << " (region metres), nearest " << nearest << " m, " << seen << " in view" << LL_ENDL;
+                                   << " (region metres), nearest " << nearest << " m, " << seen << " in view, screen "
+                                   << px.mX << "," << px.mY << (on ? "" : " (off)") << LL_ENDL;
         }
     }
 
@@ -2415,7 +2422,7 @@ void WolfBirds::buildMesh(S32& verts)
             a2 = preen ? -10.f * DEG_TO_RAD : 0.f;
             reach = preen ? 0.8f : 0.55f;
             sweep = (preen ? 35.f : 80.f) * DEG_TO_RAD;
-            lift = len * 0.045f;
+            lift = len * BODY_HALF_DEPTH * 0.5f;   // [WILDLIFE SHOWS 2026-11-21] half the body's half-depth, as before (0.045 = 0.09 / 2)
         }
         else if (gliding)
         {
@@ -2426,7 +2433,11 @@ void WolfBirds::buildMesh(S32& verts)
         const F32 ssw = sinf(sweep), csw = cosf(sweep);
 
         // body: nose, a ring of four at the shoulders, the tail root
-        const F32 h = len * 0.09f, wb = len * 0.08f;
+        // [WILDLIFE SHOWS 2026-11-21] the body was 0.18 x 0.16 of the length deep and wide (a 15 cm sparrow 2.7 cm deep), so
+        // a bird crossing the view side on - its span along the line of sight - showed as a 1..3 px dash a few metres away
+        // (burst frames, rig 22 Nov: a fly-by 7 m out drawn as 8 px dashes). Now 0.28 x 0.24 of the length (a sparrow about
+        // 4 cm deep and 3.5 cm wide, a herring gull about 17 cm deep: CHOSEN from field-guide proportions, not a measurement).
+        const F32 h = len * BODY_HALF_DEPTH, wb = len * BODY_HALF_WIDTH;
         const LLVector3 nose = P(len * 0.5f, 0.f, 0.f);
         const LLVector3 tailr = P(-len * 0.3f, 0.f, 0.f);
         const LLVector3 rt = P(len * 0.08f, 0.f, h), rb = P(len * 0.08f, 0.f, -h * 0.9f);

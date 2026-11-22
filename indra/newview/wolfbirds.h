@@ -168,6 +168,8 @@ private:
         LLVector3 mPatch;        // agent metres: where it feeds
         LLVector3 mFlushedFrom;  // agent metres: what flushed it last (it settles away from there)
         bool mFlushed = false;
+        bool mFlyBy = false;     // [WILDLIFE SHOWS 2026-11-21/] a small flock crossing the view (flyBy)
+        F64 mFlyByLog = 0.0;     // [WILDLIFE SHOWS 2026-11-21/] a fly-by's next debug line
     };
 
     void reset();
@@ -175,6 +177,8 @@ private:
     bool wanted(LLViewerRegion*& region) const;
     void direct(LLViewerRegion* region, F64 now);
     bool spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now);
+    /** [WILDLIFE SHOWS 2026-11-21] a small flock crossing the view 8..25 m in front of the camera, then flying on */
+    bool flyBy(LLViewerRegion* region, S32 count, F64 now);
     void rebase(const LLVector3& delta);   // the agent frame moved: shift every stored position with it
     bool pickPlace(LLViewerRegion* region, Kind kind, F32 min_m, F32 max_m, LLVector3& out) const;
     void move(F32 dt, F64 now);
@@ -182,7 +186,7 @@ private:
     void moveTern(Bird& b, Flock& f, F32 dt);
     void moveFlocking(Bird& b, Flock& f, S32 index, F32 dt);
     void steer(Bird& b, const LLVector3& desired_vel, F32 max_accel, F32 dt);
-    void keepClear(Bird& b, F32 dt);
+    void keepClear(Bird& b, F32 dt, bool divert = true);   // [WILDLIFE SHOWS 2026-11-21/] divert false: a fly-by climbs over builds
     void calls(F64 now);
     // [BIRDS LANDING 2026-11-02]
     bool takeRay();
@@ -226,6 +230,7 @@ private:
     LLVector3 mLastCamera;
     LLVector3d mLastOrigin;        // gAgent.getAgentOriginGlobal() the positions are relative to
     F64 mNextDirect = 0.0;
+    F64 mNextFlyBy = 0.0;   // [WILDLIFE SHOWS 2026-11-21/] when the next small flock may cross the view (0: not yet timed)
     F64 mLastIdle = 0.0;
     F64 mLastLog = 0.0;
 

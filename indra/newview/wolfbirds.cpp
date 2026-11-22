@@ -27,6 +27,7 @@
 #include "llrand.h"
 #include "llrender.h"
 #include "llvertexbuffer.h"
+#include "llvoavatarself.h"   // [WILDLIFE SHOWS 2026-11-21/] gAgentAvatarp: feeding flocks settle near the avatar
 #include "llviewercamera.h"
 #include "llviewercontrol.h"
 #include "llviewerobject.h"
@@ -167,6 +168,25 @@ namespace
     constexpr F32 SMALL_NEAR_M = 25.f, SMALL_FAR_M = 90.f;
     constexpr F32 LEFT_BEHIND_M = 60.f;
     constexpr F32 LAND_FLOCK_FRAC = 0.05f, LAND_TWO_FLOCKS_FRAC = 0.3f;
+    // [WILDLIFE SHOWS 2026-11-21] Shadow's rig test 21 Nov: 26..40 small birds counted round the camera at Tranquility
+    // Isle by day, none to be made out on the screenshots - a 0.23 m sparrow is 0.23 / d x 800 / 1.047 rad = about 9 px at
+    // 20 m and 3 px at 60 m on a 1280 x 800 frame, its true size (buildMesh draws it so: no shrinking, no cull nearer than
+    // 900 spans). So they now also come where a resident sees them, as small birds do:
+    //  - now and then a small flock flies past, crossing the view FLYBY_NEAR_M..FLYBY_FAR_M in front of the camera, low
+    //    (FLYBY_ALT_MIN_M..MAX_M), coming in from FLYBY_IN_M to the side (out of view) and flying on (a leaving flock, so it is
+    //    never counted in direct()'s wanted flocks); every FLYBY_MIN_S..FLYBY_MAX_S (CHOSEN), the first sooner;
+    //  - a feeding flock settles, NEAR_SETTLE_CHANCE of the times (CHOSEN), on open grass NEAR_SETTLE_MIN_M..MAX_M from
+    //    the resident's avatar instead of anywhere within 40 m of where it is: outside the 10 m flush distance with each
+    //    bird's PATCH_R_M spread (15 - 5 = 10 m), so they settle where they can be watched and flush as before when the
+    //    avatar comes within 10 m.
+    // [rig trace 22 Nov] at 17..25 m and 4..8 m up the birds crossed high on the screen, in the tree tops, 3..6 px: now
+    // 8..16 m out and FLYBY_ALT_MIN_M..MAX_M up, the low dash across a garden or a field small birds make (CHOSEN): a
+    // 0.23 m sparrow at 8..16 m is about 21..11 px wide on a 1280 x 800 frame
+    constexpr F32 FLYBY_NEAR_M = 8.f, FLYBY_FAR_M = 16.f, FLYBY_IN_M = 70.f, FLYBY_OUT_M = 400.f;
+    constexpr F32 FLYBY_ALT_MIN_M = 1.5f, FLYBY_ALT_MAX_M = 4.f;
+    constexpr F32 FLYBY_CLEAR_M = 24.f;   // the line this far either side of its crossing point is over open land (CHOSEN)
+    constexpr F64 FLYBY_MIN_S = 60.0, FLYBY_MAX_S = 180.0, FLYBY_FIRST_MIN_S = 20.0, FLYBY_FIRST_MAX_S = 60.0;
+    constexpr F32 NEAR_SETTLE_CHANCE = 0.5f, NEAR_SETTLE_MIN_M = 15.f, NEAR_SETTLE_MAX_M = 30.f;
     // [BIRDS MID 2026-11-02] ticket 463: the draw distance (RenderFarClip, the camera's far clip) also bounds the flocks.
     // Nothing past the far clip is drawn, and the Mid graphics level sets 128 m (featuretable_linux.txt "list Mid"
     // RenderFarClip 128; measured in a test viewer: far clip 133 m at Mid), so with 60..220 m most birds were out of
@@ -508,6 +528,7 @@ void WolfBirds::reset()
     mPerches.clear();   // [BIRDS LANDING/]
     mThreats.clear();
     mNextDirect = 0.0;
+    mNextFlyBy = 0.0;   // [WILDLIFE SHOWS 2026-11-21/] the first fly-by comes soon after a teleport
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -750,6 +771,37 @@ void WolfBirds::direct(LLViewerRegion* region, F64 now)
         ++flocks;
         break;   // one new flock per decision: they arrive one after another, not all at once
     }
+    // [WILDLIFE SHOWS 2026-11-21] now and then a small flock crosses the view (FLYBY_*): only where small birds would come
+    if (mNextFlyBy <= 0.0) mNextFlyBy = now + FLYBY_FIRST_MIN_S + ll_frand() * (FLYBY_FIRST_MAX_S - FLYBY_FIRST_MIN_S);
+    if (now >= mNextFlyBy && want[SMALL] > 0 && flocks < MAX_FLOCKS)
+    {
+        S32 n = (S32)llround((F32)rand_range(SMALL_MIN, SMALL_MAX) * scale);
+        n = llmin(n, cap - flying);
+        if (n >= 4 && flyBy(region, n, now))
+        {
+            flying += n;
+            ++flocks;
+            mNextFlyBy = now + FLYBY_MIN_S + ll_frand() * (FLYBY_MAX_S - FLYBY_MIN_S);
+        }
+        else
+        {
+            mNextFlyBy = now + DIRECT_SECS * 3.0;   // no room or no place this moment: try again soon
+            // no room under the cap (a slow frame lowers it, WolfFrameGovernor): the farthest flock flies off to make it,
+            // so the cap never keeps every bird far away
+            if (n < 4)
+            {
+                Flock* far_f = nullptr;
+                F32 far_d = 0.f;
+                for (Flock& f : mFlocks)
+                {
+                    if (f.mLeaving || f.mRoosting || f.mKind == STARLING) continue;
+                    const F32 d = flat(f.mCentre - cam).length();
+                    if (d > far_d) { far_d = d; far_f = &f; }
+                }
+                if (far_f) leave(*far_f, cam);
+            }
+        }
+    }
 
     if (now - mLastLog > 60.0 && (!mBirds.empty() || flocks > 0))
     {
@@ -822,6 +874,82 @@ bool WolfBirds::spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now
     }
     LL_DEBUGS("WolfBirds") << "flock " << (S32)kind << " of " << count << " coming in" << LL_ENDL;
     return true;
+}
+
+/** [WILDLIFE SHOWS 2026-11-21] A small flock crossing the view: its line FLYBY_NEAR_M..FLYBY_FAR_M ahead of the camera,
+ *  across the way it looks, over open land of the region (not water, not a built cell); the birds start FLYBY_IN_M to
+ *  one side, low over the ground, and fly to FLYBY_OUT_M on the other. It is a leaving flock from the start (move() steers
+ *  it to mExit and drops it far off, out of view), so direct() never counts it and nothing else changes. */
+bool WolfBirds::flyBy(LLViewerRegion* region, S32 count, F64 now)
+{
+    LLViewerCamera* camera = LLViewerCamera::getInstance();
+    const LLVector3 cam = camera->getOrigin();
+    LLVector3 fwd = flat(camera->getAtAxis());
+    if (fwd.isExactlyZero()) fwd.setVec(1.f, 0.f, 0.f);
+    fwd.normVec();
+    const LLVector3 left(-fwd.mV[VY], fwd.mV[VX], 0.f);
+    const U8 zone = (U8)WolfRegionWeather::instance().birdsZone();
+    const Species& sp = species(zone, SMALL);
+    if (sp.mSpan <= 0.f) return false;
+    for (S32 attempt = 0; attempt < 8; ++attempt)
+    {
+        LLVector3 c = flat(cam) + fwd * frand_range(FLYBY_NEAR_M, FLYBY_FAR_M);
+        if (!inRegion(region, c, -8.f) || overWater(c) || built(c)) continue;
+        // the part of the line in view (FLYBY_CLEAR_M either side) over open land, so they cross it low (rig trace 22 Nov: a
+        // line over the trees by the avatar made them climb out of the top of the frame); one built sample is allowed - a
+        // lone tree they hop over - as a park or a garden seldom has a clear 48 m (rig run 11: none found under the trees)
+        S32 blocked = 0;
+        for (F32 s = -FLYBY_CLEAR_M; s <= FLYBY_CLEAR_M; s += CELL_M * 0.5f)
+        {
+            const LLVector3 p = c + left * s;
+            if (overWater(p)) blocked += 2;
+            else if (built(p)) ++blocked;
+        }
+        if (blocked > 1) continue;
+        const F32 sg = (ll_frand() < 0.5f) ? -1.f : 1.f;
+        LLVector3 entry = c - left * (sg * FLYBY_IN_M);
+        if (overWater(entry)) continue;   // they come over the land, not in from the sea
+        const F32 ground = surfaceZ(c);
+        Flock f;
+        f.mKind = SMALL;
+        f.mZone = zone;
+        f.mCentre = c;
+        f.mCentre.mV[VZ] = ground;
+        f.mLeaving = true;
+        f.mExit = c + left * (sg * FLYBY_OUT_M);
+        f.mExit.mV[VZ] = ground + FLYBY_ALT_MAX_M;
+        f.mTarget = f.mExit;
+        f.mRetarget = now + 1e6;
+        f.mNextCall = now + frand_range(1.f, 4.f);
+        f.mSettleIn = 1e6f;
+        f.mFlyBy = true;
+        f.mFlyByLog = now;
+        const S32 index = (S32)mFlocks.size();
+        mFlocks.push_back(f);
+        LLVector3 to = f.mExit - entry;
+        to.mV[VZ] = 0.f;
+        to.normVec();
+        for (S32 i = 0; i < count; ++i)
+        {
+            Bird b;
+            b.mFlock = index;
+            b.mAlt = frand_range(FLYBY_ALT_MIN_M, FLYBY_ALT_MAX_M);
+            b.mPos = entry + LLVector3(frand_range(-6.f, 6.f), frand_range(-6.f, 6.f), 0.f);
+            b.mPos.mV[VZ] = surfaceZ(b.mPos) + b.mAlt;
+            b.mSpeed = sp.mSpeed * frand_range(0.9f, 1.1f);
+            b.mSize = frand_range(0.9f, 1.1f);
+            b.mVel = to * b.mSpeed;
+            b.mPhase = ll_frand(F_TWO_PI);
+            b.mWaypoint = f.mExit;
+            b.mFlapFor = frand_range(0.3f, 0.6f);
+            mBirds.push_back(b);
+        }
+        LL_DEBUGS("WolfBirds") << "fly-by camera at " << (cam - region->getOriginAgent()) << " looking " << fwd << LL_ENDL;
+        LL_DEBUGS("WolfBirds") << "fly-by of " << count << " small birds " << (c - flat(cam)).length() << " m ahead, crossing at "
+                               << (c - region->getOriginAgent()) << " (region metres) at " << ground << " m ground" << LL_ENDL;
+        return true;
+    }
+    return false;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -1157,13 +1285,19 @@ void WolfBirds::settleFlock(Flock& f, S32 flock_index)
     if (n == 0) return;
     c /= (F32)n;
     const F32 keep_off = FLUSH_PERSON_SMALL_M * RESETTLE_FID_MULT;
-    for (S32 k = 0; k < 10; ++k)
+    // [WILDLIFE SHOWS 2026-11-21] NEAR_SETTLE_CHANCE of the times the patch is looked for NEAR_SETTLE_MIN_M..MAX_M from
+    // the resident's avatar (10 tries), where it can be watched; else, or when none is found, near the flock as before
+    const bool near_avatar = isAgentAvatarValid() && ll_frand() < NEAR_SETTLE_CHANCE;
+    const LLVector3 me = isAgentAvatarValid() ? flat(gAgentAvatarp->getPositionAgent()) : flat(c);
+    for (S32 k = 0; k < (near_avatar ? 20 : 10); ++k)
     {
+        const bool by_me = near_avatar && k < 10;
         // chosen: within 40 m of where the flock is, "nearby"
-        const F32 a = ll_frand(F_TWO_PI), d = frand_range(0.f, 40.f);
-        LLVector3 p = flat(c) + LLVector3(cosf(a) * d, sinf(a) * d, 0.f);
+        const F32 a = ll_frand(F_TWO_PI), d = by_me ? frand_range(NEAR_SETTLE_MIN_M, NEAR_SETTLE_MAX_M) : frand_range(0.f, 40.f);
+        LLVector3 p = (by_me ? me : flat(c)) + LLVector3(cosf(a) * d, sinf(a) * d, 0.f);
         if (f.mFlushed && flat(p - f.mFlushedFrom).length() < keep_off) continue;
-        if (!grassAt(p) || threatNear(p, SMALL, RESETTLE_FID_MULT)) continue;
+        // by the avatar: outside its flush distance with the patch's spread (NEAR_SETTLE_MIN_M - PATCH_R_M = 10 m)
+        if (!grassAt(p) || threatNear(p, SMALL, by_me ? NEAR_SETTLE_MIN_M / FLUSH_PERSON_SMALL_M : RESETTLE_FID_MULT)) continue;
         p.mV[VZ] = LLWorld::getInstance()->resolveLandHeightAgent(p);
         const S32 clear = spotClear(p);
         if (clear < 0) { f.mSettleIn = 0.3f; return; }
@@ -1568,7 +1702,7 @@ void WolfBirds::steer(Bird& b, const LLVector3& desired_vel, F32 max_accel, F32 
 
 /** Every bird: keep above the surface below, and out of built cells: pushed away from every built cell of the 5 x 5 round
  *  the point 15 m ahead of it, and climbing while over one, unless it is already 50 m above it. */
-void WolfBirds::keepClear(Bird& b, F32 dt)
+void WolfBirds::keepClear(Bird& b, F32 dt, bool divert)
 {
     const F32 ground = surfaceZ(b.mPos);
     if (!b.mRising)
@@ -1599,6 +1733,15 @@ void WolfBirds::keepClear(Bird& b, F32 dt)
     LLVector3 dir = flat(b.mVel);
     if (dir.isExactlyZero()) dir.setVec(1.f, 0.f, 0.f);
     dir.normVec();
+    // [WILDLIFE SHOWS 2026-11-21] Shadow's rig test (debug trace of a fly-by at Tranquility Isle 600,900): the push away
+    // from built cells 15 m ahead (a big tree by the avatar counts as built) bent every fly-by 30 m off its line, so none
+    // came nearer than 46 m. A fly-by keeps its line (flyBy picks one over open land where it is in view) and climbs only
+    // over what is under it.
+    if (!divert)
+    {
+        if (built(b.mPos)) b.mVel.mV[VZ] += 6.f * dt;   // only what is under it: off the builds it comes down again
+        return;
+    }
     const LLVector3 o = r->getOriginAgent();
     const LLVector3 ahead = b.mPos + dir * 15.f;
     const S32 cx0 = (S32)floorf((ahead.mV[VX] - o.mV[VX]) / CELL_M), cy0 = (S32)floorf((ahead.mV[VY] - o.mV[VY]) / CELL_M);
@@ -1759,6 +1902,9 @@ void WolfBirds::moveFlocking(Bird& b, Flock& f, S32 index, F32 dt)
     // the flock's target, with its height over the ground
     LLVector3 aim = f.mTarget;
     if (!f.mRoosting) aim.mV[VZ] = surfaceZ(aim) + b.mAlt;
+    // [WILDLIFE SHOWS 2026-11-21] a fly-by's target is 400 m away: it keeps its height over the ground under it, not over
+    // the ground at its exit (rig trace: a fly-by aimed at a hill's height crossed 15 m up, out of view)
+    if (f.mFlyBy) aim.mV[VZ] = surfaceZ(b.mPos) + b.mAlt;
     LLVector3 to = aim - b.mPos;
     const F32 dist = to.length();
     const F32 pull = starling ? llclamp((dist - 25.f) / 40.f, 0.05f, 1.f) : 0.6f;
@@ -1905,12 +2051,35 @@ void WolfBirds::move(F32 dt, F64 now)
                 if (b.mAlarmFor <= 0.f) b.mAlarm = false;
             }
             b.mPos += b.mVel * dt;
-            if (!(f.mRoosting)) keepClear(b, dt);
+            if (!(f.mRoosting)) keepClear(b, dt, !f.mFlyBy);   // [WILDLIFE SHOWS 2026-11-21/] a fly-by keeps its line
         }
         const Species& sp = species(f.mZone, f.mKind);
         const F32 beat = (b.mFlapFor > 0.f) ? sp.mBeatHz : 0.f;
         b.mPhase += F_TWO_PI * beat * dt;   // a glide holds the phase; buildMesh sets the gliding wings itself
         if (b.mPhase > F_TWO_PI * 64.f) b.mPhase -= F_TWO_PI * 64.f;
+    }
+
+    // [WILDLIFE SHOWS 2026-11-21] debug only: where a fly-by flock is, once a second
+    for (S32 fi = 0; fi < (S32)mFlocks.size(); ++fi)
+    {
+        Flock& f = mFlocks[(size_t)fi];
+        if (!f.mFlyBy || now < f.mFlyByLog) continue;
+        f.mFlyByLog = now + 1.0;
+        LLVector3 c;
+        S32 n = 0, seen = 0;
+        F32 nearest = 1e9f;
+        for (const Bird& b : mBirds)
+        {
+            if (b.mFlock != fi) continue;
+            c += b.mPos; ++n;
+            nearest = llmin(nearest, (b.mPos - cam).length());
+            if (camera->sphereInFrustum(b.mPos, 0.3f)) ++seen;
+        }
+        if (n > 0)
+        {
+            LL_DEBUGS("WolfBirds") << "fly-by flock: " << n << " birds round " << (c / (F32)n - (region ? region->getOriginAgent() : LLVector3()))
+                                   << " (region metres), nearest " << nearest << " m, " << seen << " in view" << LL_ENDL;
+        }
     }
 
     // drop: leaving birds far off, roosting starlings that reached the ground, flocks with no birds

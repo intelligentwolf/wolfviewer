@@ -25,8 +25,6 @@ class LLCheckBoxCtrl;
 class LLComboBox;
 class LLIconCtrl;
 class LLLineEditor;
-class LLPanel;
-class LLScrollContainer;
 class LLScrollListCtrl;
 class LLSpinCtrl;
 class LLTextBox;
@@ -72,8 +70,8 @@ public:
 
     // [WolfViewer 2026-10-14] What's on (EVENTS_V1.md): the events feed was fetched (or failed).
     static void eventsChanged();
-    // Called from WolfExperiences::idle every frame: while What's on is on screen, rewrites each card's
-    // "LIVE NOW" / "Starts in ..." line every 30 s.
+    // Called from WolfExperiences::idle every frame: while What's on is on screen, every 30 s brings the cards' badges
+    // and countdowns up to date (an ended event leaves), and asks for the feed again once it is older than its max-age.
     static void tick();
 
 private:
@@ -85,29 +83,31 @@ private:
 
     // [WolfViewer 2026-10-14] What's on: the toggle at the top switches the window between the two.
     void showWhatsOn(bool whats_on);
-    void clearCards();
-    void buildEventCards();
-    void updateEventTimes();
+    // [2026-11-22] What's on as the carousel (Paul: "make it like the experiences rather than a long list"): its pills
+    // and event cards from the feed, soonest first (replaces the scrolled list of event cards).
+    void fillEventsCarousel();
     void onEventGo(const std::string& id);
+    // [2026-11-22] The pill to choose when filling the carousel: the one showing when it already holds this section's
+    // list, else the one this section had last (each section keeps its own).
+    std::string keepCategory(const std::string& saved) const;
 
     bool mWhatsOn = false;              // the What's on section is showing
     LLButton* mModeExperiences = nullptr;
     LLButton* mModeWhatsOn = nullptr;
     LLTextBox* mSubtitle = nullptr;
     std::string mSubtitleExperiences;   // the layout's subtitle, for the Experiences section
-    struct EventTime { LLTextBox* mWhen; S64 mStarts; S64 mEnds; };
-    std::vector<EventTime> mEventTimes; // the shown event cards' time lines (children of mCards)
     F64 mLastTick = 0.0;
+    std::string mExpCategory;           // [2026-11-22] each section's chosen pill while the other shows
+    std::string mEventsCategory;
 
     LLButton* mAddBtn = nullptr;        // [WolfViewer 2026-10-14] "Add your experience" (builder tools)
-    LLScrollContainer* mScroll = nullptr;
-    LLPanel* mCards = nullptr;          // made in code: the scrolled view that holds the cards
     LLTextBox* mStatus = nullptr;
     LLButton* mRetry = nullptr;
+    LLButton* mShowExperiences = nullptr;   // [2026-11-22] "See Experiences" when nothing is on
     LLCheckBoxCtrl* mDontShow = nullptr;
     // [2026-11-21] Paul: "far more exciting, with a 3D scrolling carousel ... a space background like the map":
-    // the pills, the ring and the details, drawn over the whole window (wolfexperiencecarousel.h); in What's on only
-    // its sky shows, behind the event list. (Was: the category chips cat_0..cat_6 and a scrolled card list.)
+    // the pills, the ring and the details, drawn over the whole window (wolfexperiencecarousel.h). [2026-11-22] What's
+    // on fills it too. (Was: the category chips cat_0..cat_6 and a scrolled card list; the event list.)
     WolfExperienceCarousel* mCarousel = nullptr;
     // [2026-11-21] Paul: "the Experiences floater should ALWAYS appear in the middle of the screen, not just random
     // places": every open of a closed window centres it (onClose sets this, onOpen centres and clears it).

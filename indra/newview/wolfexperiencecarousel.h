@@ -41,7 +41,7 @@ class LLViewerTexture;
  * the flight deck family (WolfGameDraw, the wolves palette): behind everything the map's sky (wolfspacesky.h,
  * painted ONCE per size into one texture: a frame costs one quad for it), then the pills, the ring and the caption.
  * The window's own widgets (the Experiences / What's on buttons, the status line, the footer) sit on top of it.
- * In What's on only the sky is drawn (setSkyOnly), behind the event list.
+ * [2026-11-22] What's on fills it too (see below); with no list (loading, failed, nothing on) only the sky shows.
  *
  * The ring: `mPos` is its turn in cards (never wrapped, so the spin and the sky's drift stay continuous), `mTarget`
  * the whole card it eases to. Only cards within VISIBLE_SLOTS of the front are drawn, and a card's picture is asked
@@ -53,6 +53,13 @@ class LLViewerTexture;
  * out of the control; on the pills Left / Right choose which, Enter picks it. In the details Tab / Left / Right move
  * between Back and Visit, Escape goes back. Reduce motion (WolfAdventureReduceMotion, the viewer's Wolf
  * reduce-motion setting): every move jumps straight to the card, no deal-in, the sky does not drift.
+ *
+ * [2026-11-22] Paul: "The events part of the Experiences floater: make it like the experiences rather than a long list,
+ * it's disappointing." What's on fills this same control (WolfFloaterExperiences::fillEventsCarousel): an entry with
+ * mEvent set is an event's card - a shorter picture (or a calendar page for its day), a LIVE NOW / Starting soon badge,
+ * its time line under the title; the caption says when and where; the details show the time in full and the
+ * description. Events keep the window's order (soonest first). An entry can stand under more than one pill (mTags:
+ * an event is in "Today" and in "Music"). The same as WolfStorm's What's on (floater_wolf_experiences.js, 2026-11-22).
  */
 class WolfExperienceCarousel : public LLUICtrl
 {
@@ -72,20 +79,38 @@ public:
     struct Entry
     {
         std::string mId, mTitle, mRegion, mBy, mBlurb, mArrive, mCategory, mIcon;
-        LLUUID mImage;          // null = draw mIcon
+        LLUUID mImage;          // null = draw mIcon (an event: its calendar page)
         bool mFeatured = false;
         LLPointer<LLUIImage> mPicture;   // asked for the first time the card is in view
+        // [2026-11-22] More pills it stands under besides mCategory (What's on: "now", "today", "cat:music", ...).
+        std::vector<std::string> mTags;
+        // [2026-11-22] An event's card (What's on). The words are made by the window and refreshed every 30 s.
+        bool mEvent = false;
+        std::string mBadge;             // "LIVE NOW" / "Starting soon" / "" (none)
+        bool mBadgeLive = false;        // the LIVE NOW red, else amber
+        std::string mWhen;              // the card's time line: "Starts in 1 h 20 min" / "On now, until 22:00" / "Sat 28 Nov 20:00"
+        std::string mWhenLong;          // the caption's: "Today 20:00 your time (12:00 SLT)"
+        std::string mWhenMore;          // the details' second line: "Starts in 1 h 20 min  ·  Lasts about 2 hours"
+        std::string mKicker;            // the details' amber line: "LIVE NOW  ·  Music"
+        std::string mDateTop, mDateDay, mDateMonth;   // the calendar page: "SAT", "28", "Nov"
+        std::string mVisitLabel = "Visit";   // the button's word ("Go", "Open page"); empty = no button
+        std::string mVisitTip;          // its tooltip ("" = "Teleport to <region>")
     };
 
     WolfExperienceCarousel(const Params& p);
     ~WolfExperienceCarousel() override;
 
-    /** The pills (All first) and every entry (featured first); the ring shows `category`'s. */
-    void setData(const std::vector<Category>& categories, const std::vector<Entry>& entries);
-    /** No list (loading, failed, another grid): sky only, the window's status line says why. */
+    /** The pills (All first) and every entry, in the order the ring shows them. The pill with id `keep_category` is
+     *  chosen (else All); when that is the pill already showing, the ring stays at the card it was at (a refresh). */
+    void setData(const std::vector<Category>& categories, const std::vector<Entry>& entries, const std::string& keep_category);
+    /** [2026-11-22] The chosen pill's id ("" = All), for the window to keep per section. */
+    std::string category() const;
+    /** [2026-11-22] The pills' count word: "place" / "places" (Experiences), "event" / "events" (What's on). */
+    void setCountWords(const std::string& one, const std::string& many) { mCountOne = one; mCountMany = many; }
+    /** No list (loading, failed, nothing on, another grid): sky only, the window's status line says why. */
     void clearData();
-    /** What's on: only the sky. */
-    void setSkyOnly(bool sky_only);
+    /** [2026-11-22] It holds a list (setData since the last clearData). */
+    bool hasData() const { return mHaveData; }
 
     std::function<void(const std::string& id)> mOnVisit;
 
@@ -128,6 +153,8 @@ private:
     void drawRing();
     void drawCaption();
     void drawDetail();
+    void drawCalendarPage(const Entry& e, F32 cx, F32 cy, F32 size, F32 fade);   // [2026-11-22] an event without a picture
+    std::string countText(S32 n) const;
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, S32 index = -1, const std::string& tip = std::string());
     const Hit* hitAt(S32 x, S32 y) const;
 
@@ -136,7 +163,7 @@ private:
     std::vector<S32> mShown;            // indexes into mEntries on the ring
     S32 mPill = 0;                      // the chosen category pill
     bool mHaveData = false;
-    bool mSkyOnly = false;
+    std::string mCountOne = "place", mCountMany = "places";
 
     F32 mPos = 0.f, mTarget = 0.f;
     F64 mLast = 0.0;

@@ -40,8 +40,6 @@
 #include "llframetimer.h"
 #include "lliconctrl.h"
 #include "llnotificationsutil.h"
-#include "llpanel.h"
-#include "llscrollcontainer.h"
 #include "llsdjson.h"
 #include "llstartup.h"
 #include "lltextbox.h"
@@ -52,7 +50,6 @@
 #include "llslurl.h"
 #include "llworldmapmessage.h"
 #include "lldate.h"             // [WolfViewer 2026-10-14] What's on: LLDate::now (the feed sent no "now")
-#include "lluicolortable.h"     // [WolfViewer 2026-10-14] What's on: AccentColor for LIVE NOW
 #include "llurlaction.h"        // [WolfViewer 2026-10-14] What's on: follow an off-grid event's link
 #include "wolfgrid.h"
 #include "wolfexperiencecarousel.h"   // [2026-11-21] the 3D carousel
@@ -78,14 +75,6 @@ namespace
     const char* const SETTING_NO_SHOW = "WolfExperiencesNoShowOnArrive";
     const char* const FLOATER_NAME = "wolf_experiences";
     const char* const SUBMIT_FLOATER_NAME = "wolf_experience_submit";   // [WolfViewer 2026-10-14] builder tools
-
-    // What's on's card geometry (panel_wolf_experience_card.xml holds the looks, these the places).
-    // [2026-11-21] The experience cards are the carousel's now (wolfexperiencecarousel.cpp); an event card is as wide
-    // as the list (the window is bigger and resizable): buildEventCards.
-    const S32 CARD_GAP = 8;
-    const S32 PAD = 6;
-    const S32 GO_W = 70;
-    const S32 GO_H = 28;
 
     // ---- the shared list (main thread only: coroutines run on it) ----
     LLSD sReply;                  // the last good reply, cleaned (see clean())
@@ -246,13 +235,18 @@ namespace
     const F64 EVENTS_FRESH_SECONDS = 120.0;
     // Source: EVENTS_V1.md "Feed" - "at most 30".
     const S32 MAX_EVENTS = 30;
-    const F64 COUNTDOWN_SECONDS = 30.0;     // the "Starts in ..." lines are rewritten this often
-    const S32 EVENT_CARD_H = 120;           // title, time line, two lines of description, place + Go
-    const S32 EVENT_ICON = 32;              // icon_event.tga is 16 x 16: drawn at twice that, no bigger
-    const char* const EVENT_ICON_NAME = "icon_event.tga";   // skins/default/textures/textures.xml:1097
-    const char* const EVENTS_SUBTITLE = "What's on across Wolf Territories. Times are your own local time, not SLT.";
+    const F64 COUNTDOWN_SECONDS = 30.0;     // the cards' badges and "Starts in ..." lines are brought up to date this often
+    // [2026-11-22] "Starting soon": starts within an hour; the countdown is shown for events starting within 12 hours
+    // (after that the day and time). The same as WolfStorm's What's on (floater_wolf_experiences.js SOON_SECS /
+    // COUNTDOWN_SECS).
+    const S64 SOON_SECONDS = 3600;
+    const S64 COUNTDOWN_WINDOW_SECONDS = 12 * 3600;
+    // [2026-11-22] EVENTS_V1.md v1.3 sltOffset: a real UTC offset is at most 14 hours either way.
+    const S64 MAX_UTC_OFFSET = 14 * 3600;
+    const char* const EVENTS_SUBTITLE = "What's on across Wolf Territories, soonest first. Times are your own, with SLT.";
 
     LLSD sEvents = LLSD::emptyArray();  // the last good feed's events, cleaned (cleanEvents)
+    LLSD sEventCategories = LLSD::emptyArray();   // [2026-11-22] v1.3: the feed's categories [{id, title}], in order
     F64 sEventsAt = -1.0;               // when it arrived (LLFrameTimer total seconds); < 0 = never
     S64 sEventsServerNow = 0;           // the feed's "now" (unix seconds UTC) at sEventsAt
     bool sEventsFetching = false;
@@ -313,6 +307,14 @@ namespace
             sEventsServerNow = feed_now > 0 ? feed_now : (S64)LLDate::now().secondsSinceEpoch();
             sEventsAt = LLFrameTimer::getTotalSeconds();
             sEvents = cleanEvents(reply, sEventsServerNow);
+            // [2026-11-22] EVENTS_V1.md v1.3 - the categories (a short id and a title each), in the feed's order.
+            sEventCategories = LLSD::emptyArray();
+            for (const LLSD& c : llsd::inArray(reply["categories"]))
+            {
+                const std::string id = c["id"].asString(), title = c["title"].asString();
+                if (id.empty() || id.size() > 40 || title.empty() || title.size() > 40) continue;
+                sEventCategories.append(c);
+            }
             sEventsError.clear();
         }
         else
@@ -340,98 +342,107 @@ namespace
         LLCoros::instance().launch("WolfEventsFetch", [session]() { eventsFetchCoro(session); });
     }
 
-    // A time as this computer's clock shows it: "Today 20:00", "Tomorrow 9:30 PM", "Thu 20:00".
-    // Source: llexperiencelog.cpp:87-88 - strftime over localtime(), the viewer's way to show local time.
-    // localtime() per event, not LLStringOps::getLocalTimeOffset (fixed when it is set up,
-    // llstring.cpp:1110-1123), so an event after a daylight-saving change shows its real local hour.
+    // A clock time as the viewer shows them: "20:00", or "9:30 PM" with Use24HourClock off.
     // Source: fsfloaternearbychat.cpp:285 / llconversationlog.cpp:126 - the Use24HourClock setting;
-    // llstring.h:161-168 LLStringOps::sWeekDayShortList / sAM / sPM, the viewer's own words for them.
-    std::string localWhen(S64 when, S64 now)
+    // llstring.h:161-168 LLStringOps::sAM / sPM, the viewer's own words for them.
+    std::string clockText(const struct tm& at)
     {
-        time_t t = (time_t)when;
-        time_t n = (time_t)now;
-        const struct tm* p = localtime(&n);
-        if (!p) return std::string();
-        struct tm tomorrow = *p;
-        const struct tm today = *p;
-        p = localtime(&t);
-        if (!p) return std::string();
-        const struct tm at = *p;
+        static LLCachedControl<bool> use_24h(gSavedSettings, "Use24HourClock", true);
+        if (use_24h)
+        {
+            return llformat("%02d:%02d", at.tm_hour, at.tm_min);
+        }
+        const S32 h12 = at.tm_hour % 12 == 0 ? 12 : at.tm_hour % 12;
+        const std::string ampm = at.tm_hour < 12 ? (LLStringOps::sAM.empty() ? std::string("AM") : LLStringOps::sAM)
+                                                 : (LLStringOps::sPM.empty() ? std::string("PM") : LLStringOps::sPM);
+        return llformat("%d:%02d ", h12, at.tm_min) + ampm;
+    }
+
+    // A moment on this computer's clock. Source: llexperiencelog.cpp:87-88 - localtime(), the viewer's way to show
+    // local time; per moment, not LLStringOps::getLocalTimeOffset (fixed when it is set up, llstring.cpp:1110-1123), so
+    // an event after a daylight-saving change shows its real local hour. localtime() shares one buffer: copied at once.
+    bool localTm(S64 when, struct tm& out)
+    {
+        const time_t t = (time_t)when;
+        const struct tm* p = localtime(&t);
+        if (!p) return false;
+        out = *p;
+        return true;
+    }
+
+    // Which local day `when` falls on, from `now`'s: 0 today, 1 tomorrow, -1 any other day.
+    S32 localDayOffset(S64 when, S64 now)
+    {
+        struct tm at, today;
+        if (!localTm(when, at) || !localTm(now, today)) return -1;
+        if (at.tm_year == today.tm_year && at.tm_yday == today.tm_yday) return 0;
         // Tomorrow's date: midday of the next day, normalised by mktime (tm_isdst -1 = let it decide).
+        struct tm tomorrow = today;
         tomorrow.tm_mday += 1;
         tomorrow.tm_hour = 12;
         tomorrow.tm_min = tomorrow.tm_sec = 0;
         tomorrow.tm_isdst = -1;
         mktime(&tomorrow);
-
-        std::string day;
-        if (at.tm_year == today.tm_year && at.tm_yday == today.tm_yday)
-        {
-            day = "Today";
-        }
-        else if (at.tm_year == tomorrow.tm_year && at.tm_yday == tomorrow.tm_yday)
-        {
-            day = "Tomorrow";
-        }
-        else if (LLStringOps::sWeekDayShortList.size() == 7)
-        {
-            day = LLStringOps::sWeekDayShortList[at.tm_wday];
-        }
-        else
-        {
-            char buf[32];
-            strftime(buf, sizeof(buf), "%a", &at);
-            day = buf;
-        }
-
-        static LLCachedControl<bool> use_24h(gSavedSettings, "Use24HourClock", true);
-        if (use_24h)
-        {
-            return day + llformat(" %02d:%02d", at.tm_hour, at.tm_min);
-        }
-        const S32 h12 = at.tm_hour % 12 == 0 ? 12 : at.tm_hour % 12;
-        const std::string ampm = at.tm_hour < 12 ? (LLStringOps::sAM.empty() ? std::string("AM") : LLStringOps::sAM)
-                                                 : (LLStringOps::sPM.empty() ? std::string("PM") : LLStringOps::sPM);
-        return day + llformat(" %d:%02d ", h12, at.tm_min) + ampm;
+        if (at.tm_year == tomorrow.tm_year && at.tm_yday == tomorrow.tm_yday) return 1;
+        return -1;
     }
 
-    // The card's time line. Source: EVENTS_V1.md "Clients show times in the viewer's local time with
-    // 'LIVE NOW' / 'starts in 2 h 10 min' / weekday+time"; live = starts <= now < ends.
-    std::string eventWhen(S64 starts, S64 ends, S64 now, bool& live)
+    // "Today" | "Tomorrow" | "Sat 28 Nov" (with the date: an event 7 days out shares today's weekday).
+    // Source: llstring.h:161-164 LLStringOps::sWeekDayShortList / sMonthShortList, the viewer's own words for them.
+    std::string localDay(S64 when, S64 now)
     {
-        live = false;
-        if (now >= ends)
-        {
-            return "Ended";
-        }
-        if (now >= starts)
-        {
-            live = true;
-            return "LIVE NOW  \xC2\xB7  started " + localWhen(starts, now) + " your time";
-        }
-        const S64 mins = (starts - now + 59) / 60;    // whole minutes, rounded up
-        if (mins >= 12 * 60)
-        {
-            return localWhen(starts, now) + " your time";
-        }
-        std::string in;
-        if (starts - now < 60)
-        {
-            in = "Starts in under a minute";
-        }
-        else if (mins < 60)
-        {
-            in = llformat("Starts in %d min", (S32)mins);
-        }
-        else if (mins % 60 == 0)
-        {
-            in = llformat("Starts in %d h", (S32)(mins / 60));
-        }
-        else
-        {
-            in = llformat("Starts in %d h %d min", (S32)(mins / 60), (S32)(mins % 60));
-        }
-        return in + "  \xC2\xB7  " + localWhen(starts, now) + " your time";
+        const S32 off = localDayOffset(when, now);
+        if (off == 0) return "Today";
+        if (off == 1) return "Tomorrow";
+        struct tm at;
+        if (!localTm(when, at)) return std::string();
+        char buf[32];
+        const std::string wd = LLStringOps::sWeekDayShortList.size() == 7 ? LLStringOps::sWeekDayShortList[at.tm_wday]
+                                                                         : (strftime(buf, sizeof(buf), "%a", &at), std::string(buf));
+        const std::string mon = LLStringOps::sMonthShortList.size() == 12 ? LLStringOps::sMonthShortList[at.tm_mon]
+                                                                         : (strftime(buf, sizeof(buf), "%b", &at), std::string(buf));
+        return llformat("%s %d ", wd.c_str(), at.tm_mday) + mon;
+    }
+
+    // "Today 20:00", "Tomorrow 9:30 PM", "Sat 28 Nov 20:00" - this computer's own time.
+    std::string localWhen(S64 when, S64 now)
+    {
+        struct tm at;
+        if (!localTm(when, at)) return std::string();
+        return localDay(when, now) + " " + clockText(at);
+    }
+
+    // [2026-11-22] The start in grid time, "12:00 SLT", from EVENTS_V1.md v1.3 sltOffset (seconds from UTC at the
+    // event's start, worked out by the site for America/Los_Angeles, so no daylight-saving rule here). gmtime of the
+    // shifted moment reads it as that zone's wall clock. No offset (an older feed): no SLT shown rather than a guess.
+    std::string sltText(S64 starts, const LLSD& offset)
+    {
+        if (!offset.isReal() && !offset.isInteger()) return std::string();
+        const S64 off = (S64)offset.asReal();
+        if (off > MAX_UTC_OFFSET || off < -MAX_UTC_OFFSET) return std::string();
+        const time_t t = (time_t)(starts + off);
+        const struct tm* p = gmtime(&t);
+        if (!p) return std::string();
+        const struct tm at = *p;
+        return clockText(at) + " SLT";
+    }
+
+    // "Starts in 2 h 10 min" | "Starts in under a minute" (secs > 0).
+    std::string countdownText(S64 secs)
+    {
+        if (secs < 60) return "Starts in under a minute";
+        const S64 mins = secs / 60;
+        if (mins < 60) return llformat("Starts in %d min", (S32)mins);
+        if (mins % 60 == 0) return llformat("Starts in %d h", (S32)(mins / 60));
+        return llformat("Starts in %d h %d min", (S32)(mins / 60), (S32)(mins % 60));
+    }
+
+    // "about 2 hours" | "about 1 h 30 min" - EVENTS_V1.md: ends = starts + 2 h unless the event has an end of its own.
+    std::string durationText(S64 starts, S64 ends)
+    {
+        const S64 mins = (ends - starts + 30) / 60, h = mins / 60, m = mins % 60;
+        if (!m) return llformat("about %d %s", (S32)h, h == 1 ? "hour" : "hours");
+        return h ? llformat("about %d h %d min", (S32)h, (S32)m) : llformat("about %d min", (S32)m);
     }
 
     // What an event without a region on this grid can still do with its "link" (the original address,
@@ -463,27 +474,6 @@ namespace
         if (has("explore") || has("tour") || has("sight")) return "Command_Map_Icon";
         if (has("social") || has("meet") || has("people") || has("event") || has("music")) return "Command_People_Icon";
         return "Command_Places_Icon";
-    }
-
-    // Lets Escape through to the floater. LLPanel::handleKeyHere answers Escape by dropping focus
-    // and calling it handled (llpanel.cpp:278-282), and keys travel up the parents
-    // (llview.cpp:1061-1065 LLView::handleKey), so a plain panel between a Go button and the floater
-    // would swallow it. Used for the scrolled holder and each card.
-    class PassEscapePanel : public LLPanel
-    {
-    public:
-        PassEscapePanel() : LLPanel() {}
-        bool handleKeyHere(KEY key, MASK mask) override
-        {
-            if (key == KEY_ESCAPE) return false;
-            return LLPanel::handleKeyHere(key, mask);
-        }
-    };
-
-    // Rect from the top-left of a parent of the given height (LLRect is bottom-up).
-    LLRect topLeft(S32 parent_h, S32 left, S32 top, S32 w, S32 h)
-    {
-        return LLRect(left, parent_h - top, left + w, parent_h - top - h);
     }
 
     // ---- [WolfViewer 2026-10-14] builder tools: requests to php/experiences.php with identity ----
@@ -753,20 +743,16 @@ WolfFloaterExperiences::WolfFloaterExperiences(const LLSD& key) : LLFloater(key)
 
 bool WolfFloaterExperiences::postBuild()
 {
-    mScroll = getChild<LLScrollContainer>("cards_scroll");
     mStatus = getChild<LLTextBox>("status");
     mRetry = getChild<LLButton>("retry");
     mDontShow = getChild<LLCheckBoxCtrl>("dont_show");
 
-    // The scrolled view (What's on's event cards), made here so Escape passes through it (PassEscapePanel).
-    mCards = new PassEscapePanel();
-    mCards->setRect(LLRect(0, 0, mScroll->getRect().getWidth(), 0));
-    mCards->setFollows(FOLLOWS_LEFT | FOLLOWS_TOP);
-    mScroll->addChild(mCards);
-
-    // [2026-11-21] The carousel: Visit goes to the same Go as the cards did.
+    // [2026-11-21] The carousel: Visit goes to the same Go as the cards did. [2026-11-22] In What's on, an event's Go.
     mCarousel = getChild<WolfExperienceCarousel>("carousel");
-    mCarousel->mOnVisit = [this](const std::string& id) { onGo(id); };
+    mCarousel->mOnVisit = [this](const std::string& id) { if (mWhatsOn) onEventGo(id); else onGo(id); };
+    // [2026-11-22] "See Experiences" under "Nothing on right now".
+    mShowExperiences = getChild<LLButton>("show_experiences");
+    mShowExperiences->setCommitCallback([this](LLUICtrl*, const LLSD&) { showWhatsOn(false); });
 
     mDontShow->set(gSavedSettings.getBOOL(SETTING_NO_SHOW));
     mDontShow->setCommitCallback([](LLUICtrl* c, const LLSD&)
@@ -782,7 +768,7 @@ bool WolfFloaterExperiences::postBuild()
 
     // [WolfViewer 2026-10-14] What's on (EVENTS_V1.md "Where it shows" 3): "Experiences" | "What's on" at the
     // top, the active one pressed. Plain buttons straight on the floater, so Tab reaches them and
-    // Space / Enter press them, and Escape still closes (see PassEscapePanel).
+    // Space / Enter press them, and Escape still closes (no panel between them and the floater: llpanel.cpp:278-282).
     mSubtitle = getChild<LLTextBox>("subtitle");
     mSubtitleExperiences = mSubtitle->getText();
     mModeExperiences = getChild<LLButton>("mode_experiences");
@@ -824,8 +810,8 @@ void WolfFloaterExperiences::onOpen(const LLSD& key)
     // (refreshView) and the carousel keeps its place when the answer is the same list (WolfExperienceCarousel::setData).
     // The server reads the database on every request and answers an identified caller private, no-cache.
     load(true);
-    // The keyboard starts on the carousel (Left / Right spin, Enter opens the front card).
-    if (!mWhatsOn) mCarousel->setFocus(true);
+    // The keyboard starts on the carousel (Left / Right spin, Enter opens the front card). [2026-11-22] What's on too.
+    mCarousel->setFocus(true);
 }
 
 void WolfFloaterExperiences::onClose(bool app_quitting)
@@ -867,17 +853,13 @@ void WolfFloaterExperiences::load(bool force)
     }
     if (mWhatsOn)
     {
-        // [WolfViewer 2026-10-14] What's on: asked again when what is held is older than the feed's
-        // max-age=120 (EVENTS_V1.md), each time the section opens; "Try again" always asks.
-        const bool events_fresh = haveEvents() && LLFrameTimer::getTotalSeconds() - sEventsAt < EVENTS_FRESH_SECONDS;
-        if (force || !events_fresh)
+        // [WolfViewer 2026-10-14] What's on. [2026-11-22] Asked for again every time the section opens or the window
+        // opens on it (no stale list: an event added a minute ago shows); the list held stays on show meanwhile.
+        if (force)
         {
-            if (force)
-            {
-                sEventsError.clear();   // show "Finding what's on..." while it asks
-            }
-            startEventsFetch();
+            sEventsError.clear();   // "Try again": show "Finding what's on..." while it asks (when nothing is held)
         }
+        startEventsFetch();
         refreshView();
         return;
     }
@@ -904,20 +886,19 @@ void WolfFloaterExperiences::setStatus(const std::string& text, bool error, bool
 void WolfFloaterExperiences::refreshView()
 {
     mAddBtn->setVisible(WolfGrid::isOnWolfTerritories() && !mWhatsOn);   // [WolfViewer 2026-10-14] builder tools
-    // [2026-11-21] Experiences = the carousel; What's on = its sky behind the event list.
-    mCarousel->setSkyOnly(mWhatsOn);
-    mScroll->setVisible(mWhatsOn);
+    mShowExperiences->setVisible(false);   // [2026-11-22] only with "Nothing on right now" (fillEventsCarousel)
+    // [2026-11-21] Experiences = the carousel. [2026-11-22] What's on = the carousel too, with the events.
     if (mWhatsOn)
     {
         if (!WolfGrid::isOnWolfTerritories())
         {
-            clearCards();
+            mCarousel->clearData();
             setStatus("What's on is for Wolf Territories only.", true, false);
             return;
         }
         if (!haveEvents())
         {
-            clearCards();
+            mCarousel->clearData();
             if (sEventsFetching || sEventsError.empty())
             {
                 setStatus("Finding what's on\xE2\x80\xA6", false, false);
@@ -929,10 +910,9 @@ void WolfFloaterExperiences::refreshView()
             return;
         }
         // An older feed stays on show while a newer one is fetched; a failed refresh keeps it too.
-        buildEventCards();
+        fillEventsCarousel();
         return;
     }
-    clearCards();
     if (!WolfGrid::isOnWolfTerritories())
     {
         mCarousel->clearData();
@@ -1012,15 +992,14 @@ void WolfFloaterExperiences::fillCarousel()
         }
         if (x.mCount > 0) cats.push_back(x);
     }
-    mCarousel->setData(cats, entries);
+    mCarousel->setCountWords("place", "places");
+    mCarousel->setData(cats, entries, keepCategory(mExpCategory));
     setStatus(entries.empty() ? std::string("There are no experiences to choose from yet.") : std::string(), false, false);
 }
 
-// [WolfViewer 2026-10-14] Every card goes, and with it What's on's pointers to their time lines.
-void WolfFloaterExperiences::clearCards()
+std::string WolfFloaterExperiences::keepCategory(const std::string& saved) const
 {
-    mEventTimes.clear();
-    mCards->deleteAllChildren();
+    return mCarousel->hasData() ? mCarousel->category() : saved;
 }
 
 // Go: look the region up by name and teleport to the card's position at once (see onGo for why there is
@@ -1052,6 +1031,10 @@ void WolfFloaterExperiences::onGo(const std::string& id)
 // now or soon - a DJ set, a live singer, a talk - and to be there in one click when it starts.
 // Flow: Wolf Experiences -> "What's on" -> cards soonest first (LIVE NOW / Starts in ... / day + time in
 // their own time zone) -> Go -> teleport straight there (the same Go as an experience).
+// [2026-11-22] Paul: "The events part of the Experiences floater: make it like the experiences rather than a long list,
+// it's disappointing." Now the same carousel: Jean, 64, opens What's on on a Saturday evening, presses "Music", spins to
+// the singer whose card says "Starting soon", reads the time in her own time and SLT, and presses Go. Pills: All this
+// week, On now, Today, Tomorrow, then the feed's categories (EVENTS_V1.md v1.3); events soonest first, never shuffled.
 // ---------------------------------------------------------------------------------------------------
 
 // static
@@ -1069,155 +1052,189 @@ void WolfFloaterExperiences::tick()
 {
     WolfFloaterExperiences* self = LLFloaterReg::findTypedInstance<WolfFloaterExperiences>(FLOATER_NAME);
     // Source: llfloater.h:282-284 isShown - visible and not minimised.
-    if (!self || !self->mWhatsOn || !self->isShown() || self->mEventTimes.empty())
+    if (!self || !self->mWhatsOn || !self->isShown() || !haveEvents())
     {
         return;
     }
-    if (LLFrameTimer::getTotalSeconds() - self->mLastTick >= COUNTDOWN_SECONDS)
+    const F64 now = LLFrameTimer::getTotalSeconds();
+    if (now - self->mLastTick < COUNTDOWN_SECONDS)
     {
-        self->updateEventTimes();
+        return;
     }
+    self->mLastTick = now;
+    // The feed again once it is older than its max-age (quietly: the cards stay; eventsChanged redraws them).
+    if (now - sEventsAt >= EVENTS_FRESH_SECONDS)
+    {
+        startEventsFetch();
+    }
+    self->fillEventsCarousel();   // the badges and countdowns; an ended event leaves (the ring keeps its card)
 }
 
 void WolfFloaterExperiences::showWhatsOn(bool whats_on)
 {
+    // [2026-11-22] One carousel for both sections: the section left keeps its chosen pill for when it comes back, and
+    // the ring is emptied so the other section's list deals itself in afresh.
+    if (whats_on != mWhatsOn)
+    {
+        if (mCarousel->hasData()) (mWhatsOn ? mEventsCategory : mExpCategory) = mCarousel->category();
+        mCarousel->clearData();
+    }
     mWhatsOn = whats_on;
     // Both are toggle buttons: a press flips the pressed one too, so both are set here.
     mModeExperiences->setToggleState(!whats_on);
     mModeWhatsOn->setToggleState(whats_on);
     mSubtitle->setText(whats_on ? std::string(EVENTS_SUBTITLE) : mSubtitleExperiences);
+    mLastTick = LLFrameTimer::getTotalSeconds();
     load(false);
+    mCarousel->setFocus(true);   // the keyboard spins the section just chosen
 }
 
-void WolfFloaterExperiences::buildEventCards()
+// [2026-11-22] What's on's pills and cards from the feed (sEvents, soonest first - the feed's order, kept). The words
+// are this computer's own time; brought up to date every COUNTDOWN_SECONDS by tick, the ring staying at its card
+// (WolfExperienceCarousel::setData).
+void WolfFloaterExperiences::fillEventsCarousel()
 {
-    clearCards();
-    const S32 count = (S32)sEvents.size();
-    const S32 total_h = count * (EVENT_CARD_H + CARD_GAP);
-    // [2026-11-21] As wide as the list, less room for its scroll bar (the window is bigger and resizable now).
-    const S32 CARD_W = llmax(320, mScroll->getRect().getWidth() - 24);
-    mCards->setRect(LLRect(0, total_h, CARD_W, 0));
+    const S64 now = eventsNow();
+    // The feed's categories (EVENTS_V1.md v1.3), and a display icon for each - our own choice, by id.
+    // Source: skins/default/textures/textures.xml - Music_Off :769, Command_WolfGameMode_Icon, Command_HowTo_Icon :192,
+    // Command_Snapshot_Icon :217, Command_People_Icon :205, Command_Places_Icon :208.
+    auto catIcon = [](const std::string& id) -> std::string
+    {
+        if (id == "music") return "Music_Off";
+        if (id == "games") return "Command_WolfGameMode_Icon";
+        if (id == "talks") return "Command_HowTo_Icon";
+        if (id == "arts") return "Command_Snapshot_Icon";
+        if (id == "social") return "Command_People_Icon";
+        return "Command_Places_Icon";
+    };
+    auto catTitle = [](const std::string& id) -> std::string
+    {
+        for (const LLSD& c : llsd::inArray(sEventCategories)) if (c["id"].asString() == id) return c["title"].asString();
+        return std::string();
+    };
 
-    S32 top = 0;
+    std::vector<WolfExperienceCarousel::Entry> entries;
+    S32 n_now = 0, n_today = 0, n_tomorrow = 0;
     for (const LLSD& e : llsd::inArray(sEvents))
     {
-        const S32 h = EVENT_CARD_H;
-        const S32 pic_h = h - 2 * PAD;
-        const S32 pic_w = pic_h * 4 / 3;    // the event picture's place, as an experience card's
-        const S32 text_left = PAD + pic_w + 10;
-        const S32 text_w = CARD_W - text_left - PAD;
-        const S32 where_w = text_w - GO_W - 8;
+        const S64 starts = secondsOf(e["starts"]), ends = secondsOf(e["ends"]);
+        if (ends <= now) continue;   // ended since the feed came
+        WolfExperienceCarousel::Entry x;
+        x.mEvent = true;
+        x.mId = e["id"].asString();
+        x.mTitle = e["title"].asString();
+        // Source: EVENTS_V1.md - region null = no region on this grid; "where" a short place line.
+        const std::string region = e["region"].isString() ? e["region"].asString() : std::string();
+        std::string where = e["where"].asString();
+        if (where.empty()) where = region;
+        x.mRegion = where.empty() ? std::string("Elsewhere") : where;
+        x.mBlurb = e["description"].asString();
+        x.mImage = e["image"].asUUID();   // the poster as a texture, else the region's map tile (EVENTS_V1.md v1.2); null = the calendar page
 
-        PassEscapePanel* card = new PassEscapePanel();
-        card->buildFromFile("panel_wolf_experience_card.xml");
-        card->setRect(topLeft(total_h, 0, top, CARD_W, h));
-        mCards->addChild(card);   // in order: Tab reaches the Go buttons top to bottom
-
-        // Picture: the event's texture as the experience cards showed one (lliconctrl.cpp:122-146 LLIconCtrl::setValue
-        // with a uuid); the null uuid (contract "<uuid or null-uuid>"): the viewer's events icon.
-        LLIconCtrl* pic = card->getChild<LLIconCtrl>("picture");
-        const LLUUID image = e["image"].asUUID();
-        if (image.notNull())
+        const bool live = starts <= now;
+        x.mBadgeLive = live;
+        x.mBadge = live ? "LIVE NOW" : (starts - now <= SOON_SECONDS ? "Starting soon" : "");
+        struct tm end_tm;
+        if (live)
         {
-            pic->setRect(topLeft(h, PAD, PAD, pic_w, pic_h));
-            pic->setValue(image);
+            x.mWhen = localTm(ends, end_tm) ? "On now, until " + clockText(end_tm) : std::string("On now");
+        }
+        else if (starts - now < COUNTDOWN_WINDOW_SECONDS)
+        {
+            x.mWhen = countdownText(starts - now);
         }
         else
         {
-            pic->setRect(topLeft(h, PAD + (pic_w - EVENT_ICON) / 2, (h - EVENT_ICON) / 2, EVENT_ICON, EVENT_ICON));
-            pic->setValue(std::string(EVENT_ICON_NAME));
+            x.mWhen = localWhen(starts, now);
         }
+        const std::string slt = sltText(starts, e["sltOffset"]);
+        x.mWhenLong = (live ? "Started " : "") + localWhen(starts, now) + " your time" + (slt.empty() ? std::string() : " (" + slt + ")");
+        x.mWhenMore = (!live && starts - now < COUNTDOWN_WINDOW_SECONDS ? countdownText(starts - now) + "  \xC2\xB7  " : std::string())
+                    + "Lasts " + durationText(starts, ends);
 
-        const std::string title = e["title"].asString();
-        LLTextBox* title_text = card->getChild<LLTextBox>("title");
-        title_text->setRect(topLeft(h, text_left, PAD, text_w, 18));
-        title_text->setText(title);
+        std::string cat = e["category"].asString();
+        if (catTitle(cat).empty()) cat = "other";   // not among the feed's categories (or an older feed)
+        const std::string cat_title = catTitle(cat);
+        x.mKicker = x.mBadge + (!x.mBadge.empty() && !cat_title.empty() ? "  \xC2\xB7  " : "") + cat_title;
+        x.mTags.push_back("cat:" + cat);
+        const S32 day = localDayOffset(starts, now);
+        if (live) { x.mTags.push_back("now"); ++n_now; }
+        if (live || day == 0) { x.mTags.push_back("today"); ++n_today; }
+        if (!live && day == 1) { x.mTags.push_back("tomorrow"); ++n_tomorrow; }
 
-        // The time line; its words and colour are set by updateEventTimes (now and every 30 s).
-        LLTextBox* when = card->getChild<LLTextBox>("when");
-        when->setRect(topLeft(h, text_left, PAD + 20, text_w, 16));
-        when->setVisible(true);
-        mEventTimes.push_back({ when, secondsOf(e["starts"]), secondsOf(e["ends"]) });
-
-        LLTextBox* blurb = card->getChild<LLTextBox>("blurb");
-        blurb->setRect(topLeft(h, text_left, PAD + 38, text_w, h - 2 * PAD - 38 - GO_H - 4));
-        blurb->setText(e["description"].asString());
-
-        // Source: EVENTS_V1.md - region null = no region on this grid; then only "link".
-        const std::string region = e["region"].isString() ? e["region"].asString() : std::string();
-        const std::string link = e["link"].asString();
-        const EEventLink kind = region.empty() ? eventLinkKind(link) : LINK_NONE;
-        std::string place = e["where"].asString();
-        if (place.empty()) place = region;
-        std::string where_text = place.empty() ? std::string() : "At " + place;
-        if (region.empty() && kind == LINK_NONE)
+        struct tm at;
+        if (localTm(starts, at))
         {
-            where_text += (where_text.empty() ? "" : "  \xC2\xB7  ") + std::string("This event is on another grid");
+            x.mDateTop = LLStringOps::sWeekDayShortList.size() == 7 ? LLStringOps::sWeekDayShortList[at.tm_wday] : std::string();
+            x.mDateDay = llformat("%d", at.tm_mday);
+            x.mDateMonth = LLStringOps::sMonthShortList.size() == 12 ? LLStringOps::sMonthShortList[at.tm_mon] : std::string();
         }
-        LLTextBox* where = card->getChild<LLTextBox>("where");
-        where->setRect(topLeft(h, text_left, h - PAD - (GO_H + 16) / 2, where_w, 16));
-        where->setText(where_text);
 
-        LLButton* go = card->getChild<LLButton>("go");
-        go->setRect(topLeft(h, CARD_W - PAD - GO_W, h - PAD - GO_H, GO_W, GO_H));
+        // Go: the teleport (a region here); off this grid, its address (onEventGo / eventLinkKind); else no button.
+        std::string link = e["link"].asString();
+        LLStringUtil::trim(link);
+        const EEventLink kind = region.empty() ? eventLinkKind(link) : LINK_NONE;
         if (!region.empty())
         {
-            go->setToolTip("Go to " + title + ": teleport to " + region);
+            x.mVisitLabel = "Go";
+            x.mVisitTip = "Go to " + x.mTitle + ": teleport to " + region;
         }
         else if (kind == LINK_SLURL)
         {
-            go->setToolTip("This event is not in a Wolf Territories region. Go follows its address: " + link);
+            x.mVisitLabel = "Go";
+            x.mVisitTip = "This event is not in a Wolf Territories region. Go follows its address: " + link;
         }
         else if (kind == LINK_WEB)
         {
-            go->setLabel(std::string("Open"));
-            go->setToolTip("This event is not in a Wolf Territories region. Open its page: " + link);
+            x.mVisitLabel = "Open page";
+            x.mVisitTip = "This event is not in a Wolf Territories region. Open its page: " + link;
         }
         else
         {
-            go->setEnabled(false);
-            go->setToolTip(std::string("This event is on another grid: there is no address here to go to."));
+            x.mVisitLabel.clear();
+            x.mRegion += "  \xC2\xB7  on another grid";
         }
-        const std::string id = e["id"].asString();
-        go->setCommitCallback([this, id](LLUICtrl*, const LLSD&) { onEventGo(id); });
-        LLHandle<LLFloater> fh = getHandle();
-        go->setFocusReceivedCallback([fh, card](LLFocusableElement*)
+        entries.push_back(x);
+    }
+
+    if (entries.empty())
+    {
+        // Paul's brief: an empty state that says so, with the way to Experiences.
+        mCarousel->clearData();
+        setStatus("Nothing on right now. There are no events in the next 7 days: find something to do in Experiences, "
+                  "or add an event at wolf-grid.com/whats-on.", false, false);
+        mShowExperiences->setVisible(true);
+        return;
+    }
+
+    std::vector<WolfExperienceCarousel::Category> cats;
+    auto pill = [&cats](const std::string& id, const std::string& title, const std::string& icon, S32 n)
+    {
+        if (!id.empty() && n <= 0) return;   // only pills holding something (All always)
+        WolfExperienceCarousel::Category c;
+        c.mId = id;
+        c.mTitle = title;
+        c.mIcon = icon;
+        c.mCount = n;
+        cats.push_back(c);
+    };
+    pill("", "All this week", "Command_Destinations_Icon", (S32)entries.size());   // textures.xml:188
+    pill("now", "On now", "Command_Speak_Icon", n_now);                             // textures.xml:218, a microphone
+    pill("today", "Today", "icon_event.tga", n_today);                               // textures.xml:1138
+    pill("tomorrow", "Tomorrow", "icon_event.tga", n_tomorrow);
+    for (const LLSD& c : llsd::inArray(sEventCategories))
+    {
+        const std::string tag = "cat:" + c["id"].asString();
+        S32 n = 0;
+        for (const WolfExperienceCarousel::Entry& x : entries)
         {
-            if (WolfFloaterExperiences* self = static_cast<WolfFloaterExperiences*>(fh.get()))
-            {
-                self->mScroll->scrollToShowRect(card->getRect());
-            }
-        });
-
-        top += h + CARD_GAP;
+            if (std::find(x.mTags.begin(), x.mTags.end(), tag) != x.mTags.end()) ++n;
+        }
+        pill(tag, c["title"].asString(), catIcon(c["id"].asString()), n);
     }
-    mScroll->goToTop();
-    updateEventTimes();
-
-    if (count == 0)
-    {
-        setStatus("Nothing on in the next 7 days \xE2\x80\x94 add an event at wolf-grid.com/whats-on", false, false);
-    }
-    else
-    {
-        setStatus(std::string(), false, false);
-    }
-}
-
-void WolfFloaterExperiences::updateEventTimes()
-{
-    mLastTick = LLFrameTimer::getTotalSeconds();
-    if (!haveEvents()) return;
-    const S64 now = eventsNow();
-    // Source: skins/default/colors.xml:33 AccentColor (LIVE NOW); :82 LtGray (the other lines).
-    static LLUIColor accent = LLUIColorTable::instance().getColor("AccentColor");
-    static LLUIColor normal = LLUIColorTable::instance().getColor("LtGray");
-    for (const EventTime& t : mEventTimes)
-    {
-        bool live = false;
-        t.mWhen->setText(eventWhen(t.mStarts, t.mEnds, now, live));
-        t.mWhen->setColor(live ? accent : normal);
-    }
+    mCarousel->setCountWords("event", "events");
+    mCarousel->setData(cats, entries, keepCategory(mEventsCategory));
+    setStatus(std::string(), false, false);
 }
 
 void WolfFloaterExperiences::onEventGo(const std::string& id)

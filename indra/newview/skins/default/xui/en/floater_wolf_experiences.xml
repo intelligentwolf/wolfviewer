@@ -12,7 +12,11 @@
      footer under the caption. What's on's list (cards_scroll) shows over its sky. Bigger (900 x 680) and resizable;
      always opened in the middle of the screen (Paul: "should ALWAYS appear in the middle of the screen"): no saved
      place (save_rect off), centred by the code on every open. The category chips cat_0..cat_6 are gone (the
-     carousel draws its own pills). -->
+     carousel draws its own pills).
+     [2026-11-22] Paul: "The events part of the Experiences floater: make it like the experiences rather than a long
+     list". What's on fills the same carousel (wolffloaterexperiences.cpp fillEventsCarousel); the event list
+     (cards_scroll, panel_wolf_experience_card.xml) is gone. show_experiences ("See Experiences") shows under the status
+     line's "Nothing on right now", where "Try again" shows after a failure (never both). -->
 <floater
  can_close="true"
  can_minimize="true"
@@ -42,20 +46,11 @@
     <button follows="left|top" height="30" is_toggle="true" label="What's on" layout="topleft" left="148" name="mode_whats_on" top="30" width="130"
      tool_tip="Events happening now and in the next 7 days, in your own time zone." />
     <text follows="left|top|right" font="SansSerifLarge" height="22" layout="topleft" left="294" name="subtitle" text_color="0.79 0.83 0.90 1" top="36" use_ellipses="true" width="590">Pick something to do — we'll take you there.</text>
-    <scroll_container
-     follows="all"
-     height="510"
-     layout="topleft"
-     left="10"
-     name="cards_scroll"
-     opaque="false"
-     reserve_scroll_corner="false"
-     top="80"
-     visible="false"
-     width="880" />
     <text follows="left|top|right" font="SansSerifLarge" height="44" layout="topleft" left="24" mouse_opaque="false" name="status" text_color="0.79 0.83 0.90 1" top="150" width="852" wrap="true">Finding experiences…</text>
     <button follows="left|top" height="28" label="Try again" layout="topleft" left="24" name="retry" top="198" visible="false" width="110"
      tool_tip="Ask for the list again." />
+    <button follows="left|top" height="28" label="See Experiences" layout="topleft" left="24" name="show_experiences" top="198" visible="false" width="170"
+     tool_tip="Places to go and things to do on Wolf Territories, any time." />
     <check_box follows="left|bottom" height="18" label="Don't show this when I arrive" layout="topleft" left="16" name="dont_show" top="646" width="220"
      tool_tip="Ticked, this window no longer opens by itself after you log in. You can always open it from Wolf World &gt; Experiences..." />
     <!-- [WolfViewer 2026-10-14] Builder tools (EXPERIENCES_V1.md v1.1): opens floater_wolf_experience_submit.xml. -->

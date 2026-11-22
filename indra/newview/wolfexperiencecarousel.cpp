@@ -79,6 +79,11 @@ namespace
     const LLColor4 SPACE(0.010f, 0.015f, 0.040f, 1.f);                           // wolfspacesky.cpp SKY_SPACE_RGB
     const LLColor4 FLOOR_WARM(245.f / 255.f, 165.f / 255.f, 36.f / 255.f, 0.42f);
     const LLColor4 FLOOR_COOL(120.f / 255.f, 150.f / 255.f, 1.f, 0.20f);
+    // [2026-11-22] What's on (WolfStorm's floater_wolf_experiences.js 2026-11-22 the same values): LIVE NOW white on
+    // #c0392b (5.4:1), the time line #ffd27a (12:1 on the band #0f1830), the calendar page's sheet #e6ebf5 with #111 on it.
+    const LLColor4 LIVE_RED(192.f / 255.f, 57.f / 255.f, 43.f / 255.f, 1.f);
+    const LLColor4 WHEN_GOLD(1.f, 210.f / 255.f, 122.f / 255.f, 1.f);
+    const LLColor4 SHEET(230.f / 255.f, 235.f / 255.f, 245.f / 255.f, 1.f);
 
     LLColor4 alpha(const LLColor4& c, F32 a) { return LLColor4(c.mV[VRED], c.mV[VGREEN], c.mV[VBLUE], c.mV[VALPHA] * a); }
 
@@ -198,10 +203,16 @@ WolfExperienceCarousel::~WolfExperienceCarousel()
     if (hasMouseCapture()) gFocusMgr.setMouseCapture(nullptr);
 }
 
-void WolfExperienceCarousel::setData(const std::vector<Category>& categories, const std::vector<Entry>& entries)
+void WolfExperienceCarousel::setData(const std::vector<Category>& categories, const std::vector<Entry>& entries,
+                                     const std::string& keep_category)
 {
-    // Keep the chosen category (by id) and the pictures already asked for, when the same list comes again.
-    const std::string chosen = (mPill >= 0 && mPill < (S32)mCategories.size()) ? mCategories[mPill].mId : std::string();
+    // Keep the pictures already asked for, when the same entries come again. [2026-11-22] The pill to show is the
+    // window's (each section keeps its own); a refresh of the pill already showing keeps the front card (What's on's
+    // 30 s refresh, a reload with the same list), even when the cards around it changed (an event ended).
+    const std::string showing = (mHaveData && mPill >= 0 && mPill < (S32)mCategories.size()) ? mCategories[mPill].mId : std::string();
+    const bool was_showing = mHaveData && mPill >= 0 && mPill < (S32)mCategories.size();
+    const S32 front = frontIndex();
+    const std::string front_id = front >= 0 ? mEntries[mShown[front]].mId : std::string();
     std::vector<Entry> fresh = entries;
     for (Entry& e : fresh)
     {
@@ -211,18 +222,43 @@ void WolfExperienceCarousel::setData(const std::vector<Category>& categories, co
         }
     }
     const bool same = mHaveData && fresh.size() == mEntries.size() && categories.size() == mCategories.size()
-        && std::equal(fresh.begin(), fresh.end(), mEntries.begin(), [](const Entry& a, const Entry& b) { return a.mId == b.mId; });
+        && std::equal(fresh.begin(), fresh.end(), mEntries.begin(), [](const Entry& a, const Entry& b) { return a.mId == b.mId && a.mTags == b.mTags; })
+        && std::equal(categories.begin(), categories.end(), mCategories.begin(), [](const Category& a, const Category& b) { return a.mId == b.mId && a.mCount == b.mCount; });
     mCategories = categories;
     mEntries = fresh;
     mHaveData = true;
     S32 pill = 0;
     for (S32 i = 0; i < (S32)mCategories.size(); ++i)
     {
-        if (mCategories[i].mId == chosen) { pill = i; break; }
+        if (mCategories[i].mId == keep_category) { pill = i; break; }
     }
-    if (same && pill == mPill) return;   // the same list again (a refresh): the ring stays where it is
+    const bool same_pill = was_showing && mCategories[pill].mId == showing;
+    if (same && same_pill) { mPill = pill; mPillFocus = llmin(mPillFocus, (S32)mCategories.size() - 1); return; }   // the ring stays where it is
+    const S32 detail = mDetail;
     mPill = -1;
     choose(pill);
+    if (same_pill && !front_id.empty())
+    {
+        // A refresh: stand at the card that was at the front, if it is still here (no deal-in), and keep its details.
+        for (S32 i = 0; i < count(); ++i)
+        {
+            if (mEntries[mShown[i]].mId != front_id) continue;
+            mPos = mTarget = (F32)i;
+            mMoving = false;
+            if (detail >= 0) mDetail = i;
+            break;
+        }
+    }
+}
+
+std::string WolfExperienceCarousel::category() const
+{
+    return (mPill >= 0 && mPill < (S32)mCategories.size()) ? mCategories[mPill].mId : std::string();
+}
+
+std::string WolfExperienceCarousel::countText(S32 n) const
+{
+    return llformat("%d ", n) + (n == 1 ? mCountOne : mCountMany);
 }
 
 void WolfExperienceCarousel::clearData()
@@ -235,12 +271,6 @@ void WolfExperienceCarousel::clearData()
     mPill = 0;
 }
 
-void WolfExperienceCarousel::setSkyOnly(bool sky_only)
-{
-    mSkyOnly = sky_only;
-    if (sky_only) mDetail = -1;
-}
-
 void WolfExperienceCarousel::choose(S32 pill)
 {
     if (pill < 0 || pill >= (S32)mCategories.size() || pill == mPill) return;
@@ -251,7 +281,9 @@ void WolfExperienceCarousel::choose(S32 pill)
     const std::string& id = mCategories[pill].mId;
     for (S32 i = 0; i < (S32)mEntries.size(); ++i)
     {
-        if (id.empty() || mEntries[i].mCategory == id) mShown.push_back(i);
+        const Entry& e = mEntries[i];
+        // [2026-11-22] an entry may stand under more than one pill (mTags)
+        if (id.empty() || e.mCategory == id || std::find(e.mTags.begin(), e.mTags.end(), id) != e.mTags.end()) mShown.push_back(i);
     }
     mTarget = 0.f;
     // Dealt in with a short spin (not with reduce motion).
@@ -264,7 +296,6 @@ LLSD WolfExperienceCarousel::getValue() const
 {
     LLSD v = LLSD::emptyMap();
     v["data"] = mHaveData;
-    v["sky_only"] = mSkyOnly;
     if (mPill >= 0 && mPill < (S32)mCategories.size())
     {
         v["category"] = mCategories[mPill].mId;
@@ -274,7 +305,21 @@ LLSD WolfExperienceCarousel::getValue() const
     v["count"] = count();
     const S32 f = frontIndex();
     v["front"] = f;
-    if (f >= 0) v["title"] = mEntries[mShown[f]].mTitle;
+    if (f >= 0)
+    {
+        const Entry& e = mEntries[mShown[f]];
+        v["title"] = e.mTitle;
+        // [2026-11-22] What's on: what the front card says
+        v["event"] = e.mEvent;
+        if (e.mEvent)
+        {
+            v["badge"] = e.mBadge;
+            v["when"] = e.mWhen;
+            v["when_long"] = e.mWhenLong;
+            v["visit"] = e.mVisitLabel;
+            v["picture"] = e.mImage.notNull();
+        }
+    }
     v["detail"] = mDetail >= 0;
     v["moving"] = mMoving;
     return v;
@@ -309,7 +354,7 @@ void WolfExperienceCarousel::openDetail(S32 index)
 {
     if (index < 0 || index >= count()) return;
     mDetail = index;
-    mDetailVisitFocus = true;
+    mDetailVisitFocus = !mEntries[mShown[index]].mVisitLabel.empty();   // [2026-11-22] Back when there is no Go
 }
 
 void WolfExperienceCarousel::closeDetail()
@@ -321,6 +366,7 @@ void WolfExperienceCarousel::closeDetail()
 void WolfExperienceCarousel::visit(S32 index)
 {
     if (index < 0 || index >= count() || !mOnVisit) return;
+    if (mEntries[mShown[index]].mVisitLabel.empty()) return;   // [2026-11-22] an event with nowhere to go
     mOnVisit(mEntries[mShown[index]].mId);   // the window teleports and closes (it may delete this control)
 }
 
@@ -374,7 +420,7 @@ void WolfExperienceCarousel::draw()
     animate();
     layout();
     drawSky();
-    if (!mSkyOnly && mHaveData && !mCategories.empty())
+    if (mHaveData && !mCategories.empty())
     {
         drawPills();
         drawRing();
@@ -452,7 +498,7 @@ void WolfExperienceCarousel::drawPills()
     F32 total = 0.f;
     for (const Category& c : mCategories)
     {
-        const std::string n = c.mCount == 1 ? std::string("1 place") : llformat("%d places", c.mCount);
+        const std::string n = countText(c.mCount);
         const F32 w = 14.f + icon + 10.f + llmax(name_font->getWidthF32(c.mTitle), count_font->getWidthF32(n)) + 22.f;
         widths.push_back(w);
         total += w + GAP;
@@ -501,14 +547,13 @@ void WolfExperienceCarousel::drawPills()
             }
             const F32 tx = l + 14.f + icon + 10.f;
             textL(name_font, c.mTitle, tx, mPillT - 6.f, ink, LLFontGL::LEFT, LLFontGL::TOP);
-            textL(count_font, c.mCount == 1 ? std::string("1 place") : llformat("%d places", c.mCount), tx, mPillB + 7.f,
+            textL(count_font, countText(c.mCount), tx, mPillB + 7.f,
                   on ? INK_ON_AMBER : TEXT_DIM, LLFontGL::LEFT, LLFontGL::BOTTOM);
             if (hasFocus() && mZone == Z_PILLS && mPillFocus == i)
             {
                 pill(l - 3.f, mPillB - 3.f, r + 3.f, mPillT + 3.f, LLColor4(0.f, 0.f, 0.f, 0.f), LLColor4(1.f, 0.70f, 0.28f, 1.f), 2.f);
             }
-            addHit(llmax(l, l_edge), mPillB, llmin(r, r_edge), mPillT, H_PILL, i,
-                   llformat("%s: %d %s", c.mTitle.c_str(), c.mCount, c.mCount == 1 ? "place" : "places"));
+            addHit(llmax(l, l_edge), mPillB, llmin(r, r_edge), mPillT, H_PILL, i, c.mTitle + ": " + countText(c.mCount));
         }
     }
     if (overflow)
@@ -598,10 +643,12 @@ void WolfExperienceCarousel::drawRing()
     LLLocalClipRect clip(LLRect(0, ll_round(mStageT), getRect().getWidth(), ll_round(mStageB)));
     const LLFontGL* title_big = fontBig();
     const LLFontGL* small = fontSmall();
-    const F32 pic_frac = (cw * 0.75f) / ch;   // the picture's share of the card's height
     for (const Card& cd : cards)
     {
         Entry& e = mEntries[mShown[cd.i]];
+        // The picture's share of the card's height: 4:3; [2026-11-22] an event's is shorter (0.58 of the width, as
+        // WolfStorm's .wx-face-ev) for its time line under the title.
+        const F32 pic_frac = (cw * (e.mEvent ? 0.58f : 0.75f)) / ch;
         const F32 a = fabsf(cd.k);
         const F32 fade = llclamp((vis + 0.5f - a) / 0.8f, 0.f, 1.f);
         if (fade <= 0.01f) continue;
@@ -660,10 +707,14 @@ void WolfExperienceCarousel::drawRing()
             const LLColor4 bot = alpha(LLColor4(11.f / 255.f, 18.f / 255.f, 38.f / 255.f, 1.f), fade);   // #0b1226
             const LLColor4 c4c[4] = { top, top, bot, bot };
             quad(c4, c4c);
-            LLPointer<LLUIImage> img = LLUI::getUIImage(e.mIcon);
-            if (img.notNull())
+            const LLVector2 mid = at(0.5f, pic_frac * 0.5f);
+            if (e.mEvent)
             {
-                const LLVector2 mid = at(0.5f, pic_frac * 0.5f);
+                // [2026-11-22] an event without a picture: a calendar page for its day
+                if (a < 1.6f) drawCalendarPage(e, mid.mV[0], mid.mV[1], pic_frac * ch * 0.8f * (P / (P - Zc)), fade);
+            }
+            else if (LLPointer<LLUIImage> img = LLUI::getUIImage(e.mIcon); img.notNull())
+            {
                 const F32 sz = cw * 0.28f * (P / (P - Zc));
                 img->draw(ll_round(mid.mV[0] - sz * 0.5f), ll_round(mid.mV[1] - sz * 0.5f), ll_round(sz), ll_round(sz), alpha(AMBER, 0.85f * fade));
             }
@@ -690,19 +741,26 @@ void WolfExperienceCarousel::drawRing()
                     textL(tf, line, tx, ty, alpha(TEXT_MAIN, fade), LLFontGL::LEFT, LLFontGL::TOP, band_w);
                     ty -= (F32)tf->getLineHeight();
                 }
+                if (e.mEvent)
+                {
+                    // [2026-11-22] the time line (#ffd27a on the band, 12:1), then the place
+                    textL(LLFontGL::getFontSansSerifBold(), e.mWhen, tx, ty - 2.f, alpha(WHEN_GOLD, fade), LLFontGL::LEFT, LLFontGL::TOP, band_w);
+                    ty -= (F32)LLFontGL::getFontSansSerifBold()->getLineHeight();
+                }
                 textL(small, e.mRegion, tx, ty - 2.f, alpha(TEXT_DIM, fade), LLFontGL::LEFT, LLFontGL::TOP, band_w);
             }
         }
-        // Featured: the amber badge, top left (flat).
-        if (e.mFeatured && a < 1.6f)
+        // Featured: the amber badge, top left (flat). [2026-11-22] An event's LIVE NOW (white on red) / Starting soon.
+        const std::string badge = e.mEvent ? e.mBadge : (e.mFeatured ? std::string("\xE2\x98\x85 Featured") : std::string());   // U+2605
+        if (!badge.empty() && a < 1.6f)
         {
             const LLVector2 tl = at(0.f, 0.f);
             const LLFontGL* bf = LLFontGL::getFontSansSerifSmallBold();
-            const std::string label = "\xE2\x98\x85 Featured";   // U+2605
-            const F32 bw = bf->getWidthF32(label) + 16.f, bh = 20.f;
+            const F32 bw = bf->getWidthF32(badge) + 16.f, bh = 20.f;
             const F32 bl = tl.mV[0] + 10.f, bt = tl.mV[1] - 10.f;
-            pill(bl, bt - bh, bl + bw, bt, alpha(AMBER, fade), alpha(AMBER, fade), 0.f);
-            textL(bf, label, bl + 8.f, bt - bh * 0.5f, INK_ON_AMBER, LLFontGL::LEFT, LLFontGL::VCENTER);
+            const LLColor4 fill = e.mBadgeLive ? LIVE_RED : AMBER;
+            pill(bl, bt - bh, bl + bw, bt, alpha(fill, fade), alpha(fill, fade), 0.f);
+            textL(bf, badge, bl + 8.f, bt - bh * 0.5f, e.mBadgeLive ? TEXT_MAIN : INK_ON_AMBER, LLFontGL::LEFT, LLFontGL::VCENTER);
         }
         // Dim with distance, then the edge (amber and glowing at the front).
         const LLVector2 q[4] = { at(0.f, 0.f), at(1.f, 0.f), at(1.f, 1.f), at(0.f, 1.f) };
@@ -748,10 +806,11 @@ void WolfExperienceCarousel::drawRing()
     if (n > 1)
     {
         const F32 cy = oy;
+        const std::string item = mEntries[mShown[0]].mEvent ? "event" : "experience";   // [2026-11-22]
         spinButton(MARGIN + SPIN_R, cy, true, mHoverHit == H_PREV);
-        addHit(MARGIN, cy - SPIN_R, MARGIN + 2.f * SPIN_R, cy + SPIN_R, H_PREV, -1, "Previous experience (Left arrow)");
+        addHit(MARGIN, cy - SPIN_R, MARGIN + 2.f * SPIN_R, cy + SPIN_R, H_PREV, -1, "Previous " + item + " (Left arrow)");
         spinButton(W - MARGIN - SPIN_R, cy, false, mHoverHit == H_NEXT);
-        addHit(W - MARGIN - 2.f * SPIN_R, cy - SPIN_R, W - MARGIN, cy + SPIN_R, H_NEXT, -1, "Next experience (Right arrow)");
+        addHit(W - MARGIN - 2.f * SPIN_R, cy - SPIN_R, W - MARGIN, cy + SPIN_R, H_NEXT, -1, "Next " + item + " (Right arrow)");
     }
 }
 
@@ -772,15 +831,20 @@ void WolfExperienceCarousel::drawCaption()
     textL(fontHuge(), e.mTitle, l + 14.f, mCapT - 8.f, TEXT_MAIN, LLFontGL::LEFT, LLFontGL::TOP, text_w);
     std::string where = e.mRegion;
     if (!e.mBy.empty()) where += "  \xC2\xB7  by " + e.mBy;
+    if (e.mEvent) where = e.mWhenLong + "  \xC2\xB7  " + e.mRegion;   // [2026-11-22] when (local time and SLT), then where
     textL(fontBody(), where, l + 14.f, mCapB + 26.f, TEXT_DIM, LLFontGL::LEFT, LLFontGL::BOTTOM, text_w);
-    textL(fontSmall(), llformat("%d of %d", i + 1, n), l + 14.f, mCapB + 8.f, TEXT_DIM, LLFontGL::LEFT, LLFontGL::BOTTOM);
+    std::string nth = llformat("%d of %d", i + 1, n);
+    if (e.mEvent && !e.mBadge.empty()) nth += "  \xC2\xB7  " + e.mBadge;
+    textL(fontSmall(), nth, l + 14.f, mCapB + 8.f, TEXT_DIM, LLFontGL::LEFT, LLFontGL::BOTTOM);
     if (mDetail >= 0) return;   // the details panel covers the buttons
     U32 fd = (mHoverHit == H_DETAILS ? BTN_HOVER : 0) | (hasFocus() && mZone == Z_DETAILS ? BTN_FOCUS : 0);
     button(details_l, by, details_l + bw, by + bh, "Details", pal, fd, fontBig());
-    addHit(details_l, by, details_l + bw, by + bh, H_DETAILS, i, "What it is and what to do when you arrive");
+    addHit(details_l, by, details_l + bw, by + bh, H_DETAILS, i,
+           e.mEvent ? std::string("When it is, how long, and what it is") : std::string("What it is and what to do when you arrive"));
+    if (e.mVisitLabel.empty()) return;   // [2026-11-22] an event with nowhere this viewer can go
     U32 fv = BTN_PRIMARY | (mHoverHit == H_VISIT ? BTN_HOVER : 0) | (hasFocus() && mZone == Z_VISIT ? BTN_FOCUS : 0);
-    button(visit_l, by, visit_l + bw, by + bh, "Visit", pal, fv, fontBig());
-    addHit(visit_l, by, visit_l + bw, by + bh, H_VISIT, i, "Teleport to " + e.mRegion);
+    button(visit_l, by, visit_l + bw, by + bh, e.mVisitLabel, pal, fv, fontBig());
+    addHit(visit_l, by, visit_l + bw, by + bh, H_VISIT, i, e.mVisitTip.empty() ? "Teleport to " + e.mRegion : e.mVisitTip);
 }
 
 void WolfExperienceCarousel::drawDetail()
@@ -812,8 +876,11 @@ void WolfExperienceCarousel::drawDetail()
     else
     {
         rectG(pl, pb, pl + pic_w, pt, LLColor4(29.f / 255.f, 42.f / 255.f, 82.f / 255.f, 1.f), LLColor4(11.f / 255.f, 18.f / 255.f, 38.f / 255.f, 1.f));
-        LLPointer<LLUIImage> img = LLUI::getUIImage(e.mIcon);
-        if (img.notNull())
+        if (e.mEvent)
+        {
+            drawCalendarPage(e, pl + pic_w * 0.5f, pb + pic_h * 0.5f, pic_h * 0.7f, 1.f);   // [2026-11-22]
+        }
+        else if (LLPointer<LLUIImage> img = LLUI::getUIImage(e.mIcon); img.notNull())
         {
             img->draw(ll_round(pl + pic_w * 0.5f - 48.f), ll_round(pb + pic_h * 0.5f - 48.f), 96, 96, alpha(AMBER, 0.85f));
         }
@@ -823,8 +890,9 @@ void WolfExperienceCarousel::drawDetail()
     F32 y = t - pad;
     std::string cat;
     for (const Category& c : mCategories) if (!c.mId.empty() && c.mId == e.mCategory) cat = c.mTitle;
-    textL(LLFontGL::getFontSansSerifBold(), caps((e.mFeatured ? std::string("\xE2\x98\x85 Featured  \xC2\xB7  ") : std::string()) + cat), tl, y, AMBER,
-          LLFontGL::LEFT, LLFontGL::TOP, tw);
+    const std::string kicker = e.mEvent ? e.mKicker   // [2026-11-22] an event: "LIVE NOW  ·  Music"
+                                        : (e.mFeatured ? std::string("\xE2\x98\x85 Featured  \xC2\xB7  ") : std::string()) + cat;
+    textL(LLFontGL::getFontSansSerifBold(), caps(kicker), tl, y, AMBER, LLFontGL::LEFT, LLFontGL::TOP, tw);
     y -= 22.f;
     for (const std::string& line : wrapLines(fontHuge(), e.mTitle, tw, 2))
     {
@@ -844,9 +912,15 @@ void WolfExperienceCarousel::drawDetail()
         y -= (F32)body->getLineHeight();
     }
     y -= 8.f;
-    if (!e.mArrive.empty())
+    // [2026-11-22] an event: its time in the amber box where an experience has "When you arrive"
+    const std::string boxed = e.mEvent ? e.mWhenLong + "\n" + e.mWhenMore : (e.mArrive.empty() ? std::string() : "When you arrive: " + e.mArrive);
+    if (!boxed.empty())
     {
-        const std::vector<std::string> lines = wrapLines(body, "When you arrive: " + e.mArrive, tw - 22.f, 3);
+        std::vector<std::string> lines;
+        for (const std::string& part : LLStringUtil::getTokens(boxed, "\n"))
+        {
+            for (const std::string& line : wrapLines(body, part, tw - 22.f, 3)) lines.push_back(line);
+        }
         const F32 box_h = (F32)lines.size() * (F32)body->getLineHeight() + 14.f;
         rect(tl, y - box_h, tl + tw, y, alpha(AMBER, 0.12f));
         rect(tl, y - box_h, tl + 4.f, y, AMBER);
@@ -858,16 +932,39 @@ void WolfExperienceCarousel::drawDetail()
         }
         y -= box_h + 8.f;
     }
-    textL(body, "In " + e.mRegion, tl, y, TEXT_DIM, LLFontGL::LEFT, LLFontGL::TOP, tw);
+    textL(body, (e.mEvent ? "At " : "In ") + e.mRegion, tl, y, TEXT_DIM, LLFontGL::LEFT, LLFontGL::TOP, tw);
     // Back and Visit, bottom right.
     const Palette& pal = wolvesPalette();
     const F32 bh = 48.f, vw = 160.f, bkw = 120.f;
     const F32 vl = r - pad - vw, bl = vl - 12.f - bkw, bb = b + pad;
     button(bl, bb, bl + bkw, bb + bh, "Back", pal, (mHoverHit == H_D_BACK ? BTN_HOVER : 0) | (hasFocus() && !mDetailVisitFocus ? BTN_FOCUS : 0), fontBig());
     addHit(bl, bb, bl + bkw, bb + bh, H_D_BACK, mDetail, "Back to the carousel (Escape)");
-    button(vl, bb, vl + vw, bb + bh, "Visit", pal, BTN_PRIMARY | (mHoverHit == H_D_VISIT ? BTN_HOVER : 0) | (hasFocus() && mDetailVisitFocus ? BTN_FOCUS : 0),
+    if (e.mVisitLabel.empty()) return;   // [2026-11-22] an event with nowhere this viewer can go: Back only
+    button(vl, bb, vl + vw, bb + bh, e.mVisitLabel, pal, BTN_PRIMARY | (mHoverHit == H_D_VISIT ? BTN_HOVER : 0) | (hasFocus() && mDetailVisitFocus ? BTN_FOCUS : 0),
            fontHuge());
-    addHit(vl, bb, vl + vw, bb + bh, H_D_VISIT, mDetail, "Teleport to " + e.mRegion);
+    addHit(vl, bb, vl + vw, bb + bh, H_D_VISIT, mDetail, e.mVisitTip.empty() ? "Teleport to " + e.mRegion : e.mVisitTip);
+}
+
+// [2026-11-22] An event without a picture: a calendar page for its day - an amber band with the weekday, the day of
+// the month large on a light sheet, the month under it. Flat (face on), `size` tall, centred on (cx, cy). Our own design,
+// as WolfStorm's .wx-datecard; the window's words (Entry mDateTop / mDateDay / mDateMonth, this computer's dates).
+void WolfExperienceCarousel::drawCalendarPage(const Entry& e, F32 cx, F32 cy, F32 size, F32 fade)
+{
+    if (size < 24.f || e.mDateDay.empty()) return;
+    const F32 w = size * 0.86f, h = size;
+    const F32 l = cx - w * 0.5f, r = cx + w * 0.5f, b = cy - h * 0.5f, t = cy + h * 0.5f;
+    const F32 band = h * 0.28f;
+    chamfer(l, b, r, t, 6.f, alpha(SHEET, fade), alpha(SHEET, fade));
+    chamfer(l, t - band, r, t, 6.f, alpha(AMBER, fade), alpha(AMBER, fade));
+    rect(l, t - band, r, t - band * 0.5f, alpha(AMBER, fade));   // square the band's lower corners
+    const LLFontGL* top = size >= 90.f ? fontBig() : LLFontGL::getFontSansSerifSmallBold();
+    textL(top, caps(e.mDateTop), cx, t - band * 0.5f, alpha(INK_ON_AMBER, fade), LLFontGL::HCENTER, LLFontGL::VCENTER);
+    const F32 body_mid = b + (h - band) * 0.56f;
+    textL(fontHuge(), e.mDateDay, cx, body_mid, alpha(INK_ON_AMBER, fade), LLFontGL::HCENTER, LLFontGL::VCENTER);
+    if (size >= 70.f)
+    {
+        textL(fontSmall(), e.mDateMonth, cx, b + h * 0.06f, alpha(LLColor4(0.2f, 0.22f, 0.27f, 1.f), fade), LLFontGL::HCENTER, LLFontGL::BOTTOM);
+    }
 }
 
 // ── hits and input ────────────────────────────────────────────────────────────────────────────────────
@@ -985,7 +1082,7 @@ void WolfExperienceCarousel::onMouseCaptureLost()
 
 bool WolfExperienceCarousel::handleScrollWheel(S32 x, S32 y, S32 clicks)
 {
-    if (mSkyOnly || !mHaveData || mDetail >= 0 || clicks == 0) return mDetail >= 0;
+    if (!mHaveData || mDetail >= 0 || clicks == 0) return mDetail >= 0;
     if ((F32)y >= mPillB && (F32)y <= mPillT)
     {
         mPillScroll += (F32)clicks * 60.f;   // over the pills: scroll them sideways
@@ -1015,12 +1112,16 @@ void WolfExperienceCarousel::onFocusReceived()
 
 bool WolfExperienceCarousel::handleKeyHere(KEY key, MASK mask)
 {
-    if (mSkyOnly || !mHaveData) return false;
+    if (!mHaveData) return false;
     // The details panel: Back / Visit, Escape goes back.
     if (mDetail >= 0)
     {
         if (key == KEY_ESCAPE && mask == MASK_NONE) { closeDetail(); return true; }
-        if (key == KEY_TAB || key == KEY_LEFT || key == KEY_RIGHT) { mDetailVisitFocus = !mDetailVisitFocus; return true; }
+        if (key == KEY_TAB || key == KEY_LEFT || key == KEY_RIGHT)
+        {
+            mDetailVisitFocus = !mDetailVisitFocus && !mEntries[mShown[mDetail]].mVisitLabel.empty();   // [2026-11-22]
+            return true;
+        }
         if ((key == KEY_RETURN || key == ' ') && mask == MASK_NONE)
         {
             if (mDetailVisitFocus) visit(mDetail); else closeDetail();
@@ -1034,6 +1135,8 @@ bool WolfExperienceCarousel::handleKeyHere(KEY key, MASK mask)
         const bool fwd = mask == MASK_NONE;
         const S32 z = (S32)mZone + (fwd ? 1 : -1);
         if (z < (S32)Z_PILLS || z > (S32)Z_VISIT || (z >= (S32)Z_DETAILS && !count())) return false;
+        // [2026-11-22] no Go on the front card (an event with nowhere to go): Tab leaves the control after Details
+        if (z == (S32)Z_VISIT && mEntries[mShown[frontIndex()]].mVisitLabel.empty()) return false;
         mZone = (EZone)z;
         if (mZone == Z_PILLS) { mPillFocus = mPill; mPillFollow = true; }
         return true;
@@ -1060,7 +1163,12 @@ bool WolfExperienceCarousel::handleKeyHere(KEY key, MASK mask)
         return false;
     case Z_DETAILS:
     case Z_VISIT:
-        if (key == KEY_LEFT || key == KEY_RIGHT) { mZone = mZone == Z_DETAILS ? Z_VISIT : Z_DETAILS; return true; }
+        if (key == KEY_LEFT || key == KEY_RIGHT)
+        {
+            const bool can_visit = !mEntries[mShown[frontIndex()]].mVisitLabel.empty();   // [2026-11-22]
+            mZone = (mZone == Z_DETAILS && can_visit) ? Z_VISIT : Z_DETAILS;
+            return true;
+        }
         if (key == KEY_RETURN || key == ' ')
         {
             if (mZone == Z_DETAILS) openDetail(frontIndex()); else visit(frontIndex());

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <!-- [TUTORIALS 2026-11-13] One Tutorial Videos card (wolffloatertutorials.cpp buildCards): a picture, the "How to ..." title,
      one line about the video, and Watch. The code sets the card's rect; this file holds the looks (as
-     panel_wolf_experience_card.xml). Picture: our own play badge, textures/icons/wolf_huds_tutorials.png (make_art.py). -->
+     What's on's old event card did, removed 2026-11-22). Picture: our own play badge, textures/icons/wolf_huds_tutorials.png (make_art.py). -->
 <panel
  background_opaque="false"
  background_visible="true"

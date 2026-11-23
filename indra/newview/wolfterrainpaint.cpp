@@ -56,6 +56,7 @@
 #include "llvlcomposition.h"
 #include "llworld.h"
 #include "llviewerobjectlist.h"
+#include "roles_constants.h"
 #include "llvowater.h"
 #include "m3math.h"
 #include "pipeline.h"
@@ -1242,12 +1243,28 @@ bool WolfTerrainPaint::canEditAll() const
 // Source: php/terrain_paint.php paint_brush_on_own_land — every land tile the square of half-side w/2
 // around the point touches must be the agent's own. [2026-10-12] was nine sample points (centre, axis
 // points, corners): a brush is up to 64 m across, so those stepped over whole 4 m tiles inside it.
+// [ticket 1021] Group land counts too when the agent's role in one of its groups has "Edit terrain"
+// (GP_LAND_ALLOW_EDIT_LAND) - the simulator's own terraform rule (OpenSim PermissionsModule.cs:2062-2064
+// CanTerraformLand) and Firestorm's (lltoolbrush.cpp:687 isParcelOwnedByAgent(parcel, GP_LAND_ALLOW_EDIT_LAND)),
+// as php/grid_rights.php wt_owned_tiles now applies it. The overlay marks a tile PARCEL_GROUP for any group the
+// agent is in (LandManagementModule.cs:1497) without saying which, so "any of my groups" is the courtesy test
+// here and the service decides exactly.
+static bool wolf_paint_group_power_any()
+{
+    for (const LLGroupData& g : gAgent.mGroups)
+    {
+        if ((g.mPowers & GP_LAND_ALLOW_EDIT_LAND) != 0) return true;   // llagent.cpp hasPowerInGroup's test
+    }
+    return false;
+}
+
 bool WolfTerrainPaint::canPaintAt(F32 x, F32 y, F32 w) const
 {
     if (canEditAll()) return true;
     LLViewerRegion* rgn = gAgent.getRegion();
     LLViewerParcelOverlay* overlay = rgn ? rgn->getParcelOverlay() : nullptr;
     if (!overlay) return false;
+    const bool group_ok = wolf_paint_group_power_any();
     const F32 h = clampWidth(w) * 0.5f;
     const F32 U = 4.f;   // php/grid_rights.php WT_LAND_UNIT_M (OpenSim Constants.LandUnit)
     const S32 tx0 = (S32)floorf((x - h) / U), tx1 = (S32)floorf((x + h) / U);
@@ -1258,7 +1275,8 @@ bool WolfTerrainPaint::canPaintAt(F32 x, F32 y, F32 w) const
         {
             const F32 cx = ((F32)tx + 0.5f) * U, cy = ((F32)ty + 0.5f) * U;   // the tile's centre
             if (cx < 0.f || cy < 0.f || cx >= rgn->getWidth() || cy >= rgn->getWidth()) return false;
-            if (!overlay->isOwnedSelf(LLVector3(cx, cy, 0.f))) return false;
+            const LLVector3 tile(cx, cy, 0.f);
+            if (!overlay->isOwnedSelf(tile) && !(group_ok && overlay->isOwnedGroup(tile))) return false;
         }
     }
     return true;
@@ -1719,7 +1737,7 @@ bool WolfToolTerrainPaint::handleMouseDown(S32 x, S32 y, MASK mask)
     const F32 w = brushWidth();
     if (!tp.canPaintAt(rx, ry, w))
     {
-        mMessage = "You can only paint on land you own.";
+        mMessage = "You can only paint on land you own, or group land where your group role has \"Always allow Edit Terrain\".";
         return true;
     }
     const S32 slot = mErase ? -1 : mSlot;

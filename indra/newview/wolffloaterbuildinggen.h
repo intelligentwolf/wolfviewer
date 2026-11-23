@@ -122,6 +122,7 @@ private:
     void showJob(const LLSD& job);
     void showPlan(const LLSD& job, bool fromLastTime);
     void clearPlan();
+    void markPlanEarlier();     // [t1006] the plan on show is the earlier one: the last request failed
     void showQuote();
     void showPriceIdle();
     std::string credits(S32 n) const;

@@ -652,6 +652,23 @@ void WolfFloaterBuildingGen::clearPlan()
     showPriceIdle();
 }
 
+void WolfFloaterBuildingGen::markPlanEarlier()
+{
+    // [t1006 2026-11-23] the plan on show is not what the last request asked for (that one failed): said in its title and,
+    // in bold first, in its words (the words already there follow as plain text)
+    LLStringUtil::format_map_t a;
+    a["[TITLE]"] = mPlanTitle->getText();
+    if (a["[TITLE]"].rfind(getString("plan_earlier_prefix"), 0) == 0) return;      // already marked (a second failure)
+    mPlanTitle->setText(getString("plan_earlier_title", a));
+    const std::string was = mPlanText->getText();
+    LLStyle::Params noteStyle;
+    noteStyle.font = LLFontGL::getFontSansSerifBold();
+    mPlanText->setText(std::string());
+    mPlanText->appendText(getString("plan_earlier_note"), false, noteStyle);
+    if (!was.empty()) mPlanText->appendText(was, true);
+    if (mScroll) mScroll->goToTop();
+}
+
 void WolfFloaterBuildingGen::showPlan(const LLSD& o, bool fromLastTime)
 {
     // Source: building-generator-2026-11-01/README.md PLAN JOB when done: plan {title, summary, style {id, title, researched,
@@ -942,6 +959,11 @@ void WolfFloaterBuildingGen::showJob(const LLSD& o)
         {
             // Source: buildinggen_lib.php bg_worker_plan: a plan whose kept picture had gone fails with code picture_gone
             if (o["code"].asString() == "picture_gone") forgetPicture();
+            // [t1006 2026-11-23] a failed plan marks the design still on show as the EARLIER one: Xenon Darrow's second
+            // request (the same house "with two towers") failed, the window went on showing the first house unmarked with
+            // Build it still on, and she took it for the generator giving her the same building again. The earlier plan
+            // stays buildable (it is still a good plan); its title and words now say it is the earlier design.
+            if (kind == "plan" && !mPlanId.empty()) markPlanEarlier();
             const std::string err = o["error"].asString();
             setStatus(err.empty() ? getString(kind == "build" ? "build_failed" : "plan_failed") : err, true);
         }

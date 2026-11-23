@@ -59,6 +59,9 @@
     <string name="plan_last_time_free">Your last plan, "[TITLE]", has not been built yet. Press Build it to have it built at no charge, or plan something new.</string>
     <string name="plan_cancelled">Planning cancelled - you have not been charged.</string>
     <string name="plan_failed">The yard could not plan it. Try different words.</string>
+    <string name="plan_earlier_prefix">Earlier design:</string>
+    <string name="plan_earlier_title">Earlier design: [TITLE]</string>
+    <string name="plan_earlier_note">Your last request could not be planned, so this is still your EARLIER design, not a new one. You can still build it, or change the words and press Plan it again.</string>
     <string name="plan_style">Style: [STYLE]</string>
     <string name="plan_style_researched">Style: [STYLE] (researched on the web)</string>
     <string name="building_line">- [NAME]: [TYPE], [STOREYS] storeys, [SIZE]</string>

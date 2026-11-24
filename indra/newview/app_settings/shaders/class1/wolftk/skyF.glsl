@@ -64,7 +64,8 @@ uniform sampler3D higher_order_scattering_texture;
 #wolf_include "wolftk/brunetonCommon.glsl"
 #wolf_include "wolftk/brunetonRuntime.glsl"
 #wolf_include "wolftk/coreRaySphereIntersection.glsl"
-#wolf_include "wolftk/seaGlint.glsl"   // [WolfViewer round 11] the sun's glint on the open sea (Cox-Munk)
+#wolf_include "wolftk/seaGlint.glsl"
+#wolf_include "wolftk/starfoldPlanet.glsl"   // [STARFOLD 2026-11-24] the planet surface below the line   // [WolfViewer round 11] the sun's glint on the open sea (Cox-Munk)
 #wolf_include "wolftk/nightLight.glsl"   // [WolfViewer 2026-10-25] the night's light as the eye sees it (Jimmy Olsen, #226)
 #wolf_include "wolftk/nightFloor.glsl"   // [WolfViewer 2026-11-02 W92] the night sky never below the stock Midnight sky
 
@@ -597,30 +598,12 @@ vec3 wolfStarfoldSpace(vec3 dirWorld, vec3 rayDirectionECEF)
     return c * clamp(sf_space_on, 0.0, 1.0);
 }
 
-// [STARFOLD 2026-11-24, polish] the world far below, above the line: the rig's shots read it DARK (the sea mirrored the black
-// sky over it). README "client look rules": WolfStorm "draws a far blue planet surface with cloud swirls" (wolf_starfold_draw.js,
-// render_manager.js createSky wolfSurface); here the same look natively: the far sea as a lit planet surface, its albedo the
-// Glass Arc mock-up's sea (#1d3b66 linear, WolfStorm's wolfGround at the limb) under domain-warped cloud swirls, lit by the same
-// sun and sky irradiance as the sea (so it follows day and night and the real sun), the glint between the clouds. Only where
-// sf_space_on > 0 (above the line's 300 m edge, never in a probe face), so the world's water and the sea below the line are as
-// they were. GAME TUNING:
-//   SF_SEA_ALBEDO    the mock-up's sea, linear
-//   SF_CLOUD_ALBEDO  a cloud deck's (a little grey: thin cloud lets the sea through)
-//   SF_CLOUD_KM      the swirls' size on the planet; SF_CLOUD_COVER the share of the sea under cloud
-const vec3 SF_SEA_ALBEDO = vec3(0.012, 0.043, 0.133);
-const vec3 SF_CLOUD_ALBEDO = vec3(0.62, 0.64, 0.68);
-const float SF_CLOUD_KM = 40.0;
-const float SF_CLOUD_COVER = 0.85;
-// groundKm: the sea point (km from the planet's centre, ECEF); out cloud: 0..1 for the glint between the clouds
+// [STARFOLD 2026-11-24, polish] above the line the far sea is a lit planet surface (wolftk/starfoldPlanet.glsl, shared with the
+// world's water); groundKm: the sea point (km from the planet's centre, ECEF); out cloud: for the glint between the clouds
 vec3 wolfStarfoldPlanet(vec3 groundKm, vec3 sunIrr, vec3 skyIrr, out float cloud)
 {
-    vec3 p = groundKm / SF_CLOUD_KM;
-    vec3 warp = vec3(wolfNoise3(p * 0.5 + vec3(3.1)), wolfNoise3(p * 0.5 + vec3(7.7)), wolfNoise3(p * 0.5 + vec3(11.3))) - vec3(0.5);
-    p += warp * 2.5;
-    float f = 0.5 * wolfNoise3(p) + 0.25 * wolfNoise3(p * 2.03) + 0.125 * wolfNoise3(p * 4.07) + 0.0625 * wolfNoise3(p * 8.11);
-    cloud = smoothstep(0.50, 0.72, f) * SF_CLOUD_COVER;
-    vec3 albedo = mix(SF_SEA_ALBEDO, SF_CLOUD_ALBEDO, cloud);
-    return albedo * RECIPROCAL_PI * (sunIrr + skyIrr);
+    cloud = wolfStarfoldCloud(groundKm);
+    return wolfStarfoldSurface(cloud, RECIPROCAL_PI * (sunIrr + skyIrr));
 }
 
 uniform float uBodyDepth;

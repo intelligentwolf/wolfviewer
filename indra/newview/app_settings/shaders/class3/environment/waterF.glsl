@@ -179,6 +179,11 @@ uniform vec3  waterFogColorLinear;
 uniform float wolf_phys;
 uniform float wolfSeaMss;   // [WolfViewer round 11] Cox-Munk mean square slope from the wind (wolftk/seaGlint.glsl; bindSceneUniforms)
 #wolf_include "wolftk/seaGlint.glsl"
+// [STARFOLD 2026-11-24, polish] above a Starfold space line the water far below is the lit planet surface (wolftk/starfoldPlanet.glsl):
+// it mirrored the black sky over it and read DARK. sf_space_on: WolfStarfold::spaceFade (0 below the line's 300 m edge, in a probe
+// face and off Starfold: lldrawpoolwater.cpp), so the water anywhere else is exactly as it was.
+#wolf_include "wolftk/starfoldPlanet.glsl"
+uniform float sf_space_on;
 uniform vec3  wolf_light_h;    // [WOLF ENV 2026-10-12 physical] the light on the water / pi, pre-exposed
 vec3 wolfWaterBody() { return waterFogColorLinear * (wolf_phys > 0.5 ? wolf_light_h : vec3(1.0)); }
 // [T424 2026-11-01] Ticket 424 (Jimmy Olsen, TROMSO at night, Transparent Water off - the Low..MidHigh presets): a white
@@ -1426,6 +1431,17 @@ void main()
         color = mix(color, wolf_phys > 0.5 ? wolfSeaBehind : fb.rgb, smoothstep(wolf_far_clip * 0.6, wolf_far_clip * 0.95, length(pos.xyz)));
     }
 #endif
+    // [STARFOLD 2026-11-24, polish] above the line: the open sea becomes the dome's own planet surface behind it (wolfSeaBehind:
+    // skyF.glsl's sea branch, so the two meet with no seam); any other water (Transparent Water off, water over something)
+    // shades the same surface itself, its clouds on its own place in km, lit by the light on the water / pi (wolfWaterBody's)
+    if (sf_space_on > 0.0)
+    {
+        vec3 sfPlanet = wolfStarfoldSurface(wolfStarfoldCloud(vary_world_pos * 0.001), wolf_phys > 0.5 ? wolf_light_h : vec3(1.0));
+#ifdef TRANSPARENT_WATER
+        if (wolf_behind_sky && wolf_sea_height >= 0.0) sfPlanet = wolfSeaBehind;
+#endif
+        color = mix(color, sfPlanet, clamp(sf_space_on, 0.0, 1.0));
+    }
 #ifdef WOLF_TK_LIB
     // [WolfViewer 2026-10-29 ticket 349] the clouds' overlay - fog, haze, cloud - for the water's own distance, as the composite lays it
     // over the opaque frame: the water is drawn after the composite, whose overlay at these pixels was for the bed (or the sky) behind.

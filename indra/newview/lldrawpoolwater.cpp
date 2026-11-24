@@ -49,6 +49,7 @@
 #include "llworld.h"
 #include "pipeline.h"
 #include "llviewershadermgr.h"
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/] the planet surface above the line
 #include "llenvironment.h"
 #include "llsettingssky.h"
 #include "llsettingswater.h"
@@ -351,6 +352,10 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         static LLStaticHashedString s_wolf_far_clip("wolf_far_clip");
         shader->uniform1f(s_wolf_sea_height, WolfAltitudeSky::horizonSeaHeight());
         shader->uniform1f(s_wolf_far_clip, LLViewerCamera::getInstance()->getFar());
+        // [STARFOLD 2026-11-24, polish] above a space line the water far below is the planet surface (waterF.glsl sf_space_on):
+        // the sky's own fade (WolfStarfold::bindSpaceSky), 0 in a reflection-probe face
+        static LLStaticHashedString s_sf_space_on("sf_space_on");
+        shader->uniform1f(s_sf_space_on, gCubeSnapshot ? 0.f : WolfStarfold::instance().spaceFade());
     }
     shader->uniform1f(LLShaderMgr::WATER_TIME, phase_time);
     shader->uniform3fv(LLShaderMgr::WATER_EYEVEC, 1, LLViewerCamera::getInstance()->getOrigin().mV);

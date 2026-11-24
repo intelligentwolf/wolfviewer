@@ -1289,8 +1289,11 @@ bool start(std::string& error)
     }
     const std::string path = newFileName(dir);
     {
-        // a quick test that the folder can be written to, so the resident hears about it now, not after Stop
-        std::ofstream probe(fsyspath(path), std::ios::binary);
+        // a quick test that the folder can be written to, so the resident hears about it now, not after Stop.
+        // As a std::filesystem::path: MSVC's ofstream(const path&) is a template for that exact type only, so an
+        // fsyspath converts to std::string and std::wstring equally and the call is ambiguous (C2668, W111 CI).
+        const fsyspath probe_path(path);
+        std::ofstream probe(static_cast<const std::filesystem::path&>(probe_path), std::ios::binary);
         if (!probe)
         {
             error = "WolfViewer is not allowed to save files in " + dir + ". Choose another folder.";

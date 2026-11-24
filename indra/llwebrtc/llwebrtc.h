@@ -346,6 +346,24 @@ class LLWebRTCPeerConnectionInterface
     virtual void AnswerAvailable(const std::string &sdp) = 0;
 };
 
+// [W111 VIDEO 2026-11-24] THE VIDEO RECORDER'S OPUS ENCODER (newview wolfrec_audioenc.cpp). libopus is inside
+// libwebrtc (the voice engine's codec), which only this library links, so a plain Opus encoder is handed out from
+// here: the recorder's sound track on Linux, and its fallback on Windows/macOS when the system AAC encoder fails.
+// Plain C types only across the library boundary (llwebrtc.dll is built with its own static C runtime on Windows):
+// no std::string, and the object is freed by freeOpusEncoder, never deleted by the caller. One thread at a time.
+class LLWebRTCOpusEncoder
+{
+  public:
+    // Encodes one Opus frame from `frames` interleaved float samples per channel (-1..1). `frames` must be an Opus
+    // frame size at the encoder's rate (opus.h opus_encode_float: 120, 240, 480, 960, 1920 or 2880 at 48 kHz).
+    // Returns the packet's length in bytes, or a negative Opus error code (opus_defines.h opus_errorcodes).
+    virtual int encode(const float* interleaved, int frames, unsigned char* out, int max_bytes) = 0;
+    // OPUS_GET_LOOKAHEAD (opus_defines.h): the samples of delay the codec adds at the start - the Ogg/MP4 pre-skip.
+    virtual int lookahead() const = 0;
+  protected:
+    virtual ~LLWebRTCOpusEncoder() = default;
+};
+
 // The following define the dynamic linked library
 // exports.
 
@@ -361,6 +379,14 @@ LLSYMEXPORT LLWebRTCDeviceInterface* getDeviceInterface();
 // Allocate and free peer connections.
 LLSYMEXPORT LLWebRTCPeerConnectionInterface* newPeerConnection();
 LLSYMEXPORT void freePeerConnection(LLWebRTCPeerConnectionInterface *connection);
+
+// [W111 VIDEO 2026-11-24] Opus encoder for the video recorder (see LLWebRTCOpusEncoder). sample_rate and channels as
+// opus_encoder_create (8000/12000/16000/24000/48000 Hz, 1 or 2 channels); OPUS_APPLICATION_AUDIO; bitrate in bits/s.
+// Null with *error_code set (an Opus error code) when libopus refuses. Usable without init().
+LLSYMEXPORT LLWebRTCOpusEncoder* newOpusEncoder(int sample_rate, int channels, int bitrate_bps, int* error_code);
+LLSYMEXPORT void freeOpusEncoder(LLWebRTCOpusEncoder* encoder);
+// opus_strerror: a static English string for an Opus error code.
+LLSYMEXPORT const char* opusErrorText(int error_code);
 }
 
 #endif // LLWEBRTC_H

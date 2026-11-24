@@ -14,6 +14,7 @@
  */
 
 #include "wolfvr_openh264.h"
+#include "wolfvr_yuv.h"
 
 // Cisco OpenH264 v2.6.0 API headers, vendored unmodified (openh264/SOURCES.md, BSD-2-Clause).
 #include "openh264/codec_api.h"
@@ -241,60 +242,10 @@ std::string openh264LoadedDescription()
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// RGBA -> I420 (ITU-R BT.709, limited range), as the encoder input and as signalled in the SPS VUI below
+// RGBA -> I420 (ITU-R BT.709, limited range): wolfvr_yuv.h, as signalled in the SPS VUI below
 // ---------------------------------------------------------------------------------------------------------------
 namespace
 {
-    // ITU-R BT.709-6 item 3.2/3.3: Kr = 0.2126, Kb = 0.0722 (Kg = 1 - Kr - Kb); E'Cb = (E'B - E'Y) / 1.8556,
-    // E'Cr = (E'R - E'Y) / 1.5748. Item 4.6 (8-bit): Y = 219 E'Y + 16, Cb/Cr = 224 E'C + 128. The 8-bit RGB input is
-    // E' * 255. Coefficients in 16.16 fixed point.
-    constexpr double kKr = 0.2126, kKb = 0.0722, kKg = 1.0 - kKr - kKb;
-    constexpr int fix16(double v) { return (int)(v >= 0 ? v * 65536.0 + 0.5 : v * 65536.0 - 0.5); }
-    constexpr double kYs = 219.0 / 255.0, kCs = 224.0 / 255.0;
-    constexpr int kYR = fix16(kYs * kKr), kYG = fix16(kYs * kKg), kYB = fix16(kYs * kKb);
-    constexpr int kUR = fix16(-kCs * kKr / 1.8556), kUG = fix16(-kCs * kKg / 1.8556), kUB = fix16(kCs * (1 - kKb) / 1.8556);
-    constexpr int kVR = fix16(kCs * (1 - kKr) / 1.5748), kVG = fix16(-kCs * kKg / 1.5748), kVB = fix16(-kCs * kKb / 1.5748);
-
-    inline uint8_t lumaOf(const uint8_t* p)
-    {
-        return (uint8_t)((kYR * p[0] + kYG * p[1] + kYB * p[2] + (16 << 16) + (1 << 15)) >> 16);
-    }
-
-    // Rows [cy0, cy1) of chroma (= luma rows 2*cy0 .. 2*cy1-1). Odd widths/heights repeat the last column/row.
-    void convertBand(const uint8_t* rgba, uint32_t w, uint32_t h, uint8_t* Y, uint8_t* U, uint8_t* V, uint32_t cw,
-                     uint32_t cy0, uint32_t cy1)
-    {
-        const size_t stride = (size_t)w * 4;
-        for (uint32_t cy = cy0; cy < cy1; ++cy)
-        {
-            const uint32_t y0 = cy * 2, y1 = std::min(y0 + 1, h - 1);
-            const uint8_t* r0 = rgba + y0 * stride;
-            const uint8_t* r1 = rgba + y1 * stride;
-            uint8_t* Y0 = Y + (size_t)y0 * w;
-            uint8_t* Y1 = Y + (size_t)y1 * w;   // == Y0 for the last row of an odd height: same values written
-            uint8_t* Ur = U + (size_t)cy * cw;
-            uint8_t* Vr = V + (size_t)cy * cw;
-            for (uint32_t cx = 0; cx < cw; ++cx)
-            {
-                const uint32_t x0 = cx * 2, x1 = std::min(x0 + 1, w - 1);
-                const uint8_t* a = r0 + (size_t)x0 * 4;
-                const uint8_t* b = r0 + (size_t)x1 * 4;
-                const uint8_t* c = r1 + (size_t)x0 * 4;
-                const uint8_t* d = r1 + (size_t)x1 * 4;
-                Y0[x0] = lumaOf(a);
-                Y0[x1] = lumaOf(b);
-                Y1[x0] = lumaOf(c);
-                Y1[x1] = lumaOf(d);
-                // chroma of the 2x2 average: sums are 0..1020, so the shift is 16 + 2
-                const int sr = a[0] + b[0] + c[0] + d[0];
-                const int sg = a[1] + b[1] + c[1] + d[1];
-                const int sb = a[2] + b[2] + c[2] + d[2];
-                Ur[cx] = (uint8_t)std::clamp((kUR * sr + kUG * sg + kUB * sb + (128 << 18) + (1 << 17)) >> 18, 0, 255);
-                Vr[cx] = (uint8_t)std::clamp((kVR * sr + kVG * sg + kVB * sb + (128 << 18) + (1 << 17)) >> 18, 0, 255);
-            }
-        }
-    }
-
     // H.264 Table A-1 MaxMBPS / MaxFS per level, as OpenH264 holds them (codec/common/src/common_tables.cpp
     // g_ksLevelLimits, v2.6.0). OpenH264 picks the level from fMaxFrameRate, which it clamps to 60 (wels_const.h
     // MAX_FRAME_RATE); for 72 fps the level is computed here from the real rate and handed in (the encoder only ever
@@ -451,24 +402,8 @@ namespace
             uint8_t* Y = mYuv.data();
             uint8_t* U = Y + (size_t)mW * mH;
             uint8_t* V = U + (size_t)mCw * mCh;
-            const uint32_t bands = std::min<uint32_t>((uint32_t)mConvertThreads, mCh);
-            if (bands <= 1)
-            {
-                convertBand(rgba, mW, mH, Y, U, V, mCw, 0, mCh);
-            }
-            else
-            {
-                std::vector<std::thread> workers;
-                workers.reserve(bands - 1);
-                const uint32_t per = (mCh + bands - 1) / bands;
-                for (uint32_t i = 1; i < bands; ++i)
-                {
-                    const uint32_t a = std::min(mCh, i * per), b = std::min(mCh, (i + 1) * per);
-                    workers.emplace_back(convertBand, rgba, mW, mH, Y, U, V, mCw, a, b);
-                }
-                convertBand(rgba, mW, mH, Y, U, V, mCw, 0, std::min(mCh, per));
-                for (std::thread& t : workers) t.join();
-            }
+            // [W111 VIDEO 2026-11-24] the shared converter (wolfvr_yuv.cpp), unchanged from the one that was here
+            rgbaToYuv420(rgba, mW, mH, Y, mW, U, V, mCw, false, (uint32_t)mConvertThreads);
 
             SSourcePicture pic;
             std::memset(&pic, 0, sizeof pic);

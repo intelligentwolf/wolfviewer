@@ -62,10 +62,14 @@ namespace wolfvr
         virtual bool setBitrate(uint32_t kbps) { (void)kbps; return false; }
     };
 
-    /** Opens the first encoder that works - or only `which` (nvenc | va | x264 | openh264 | jpeg) when it is not
-     *  "auto". Linux: NVENC, VA-API, x264 (GStreamer, loaded with dlopen), then OpenH264 direct, then JPEG.
-     *  Windows/macOS: OpenH264 direct (Cisco's library, downloaded on first use: wolfvrcodecfetch.h and
-     *  setOpenH264Path in wolfvr_openh264.h), then JPEG. `tried` lists every attempt and why it failed. */
+    /** Opens the first encoder that works - or only `which` (nvenc | va | x264 | mf | vt | openh264 | jpeg) when it is
+     *  not "auto". Linux: NVENC, VA-API, x264 (GStreamer, loaded with dlopen), then OpenH264 direct, then JPEG.
+     *  Windows: Media Foundation H.264 (hardware MFT, then Microsoft's software MFT), then OpenH264 direct (Cisco's
+     *  library, downloaded on first use: wolfvrcodecfetch.h and setOpenH264Path in wolfvr_openh264.h), then JPEG.
+     *  macOS: VideoToolbox H.264 (hardware, then software), then OpenH264, then JPEG.
+     *  [W111 VIDEO 2026-11-24] "h264": the same order without JPEG (the video recorder): null when no H.264 encoder
+     *  works. Every encoder takes RGBA, top row first, and signals BT.709 limited range. `tried` lists every
+     *  attempt and why it failed. Windows: call on the thread that encodes (Media Foundation initialises COM there). */
     std::unique_ptr<Encoder> openEncoder(const std::string& which, uint32_t width, uint32_t height, uint32_t fps,
                                          uint32_t bitrate_kbps, std::string& tried);
 

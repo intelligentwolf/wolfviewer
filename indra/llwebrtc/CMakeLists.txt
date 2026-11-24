@@ -12,6 +12,7 @@ project(llwebrtc)
 
 set(llwebrtc_SOURCE_FILES
     llwebrtc.cpp
+    llwebrtc_opus.cpp   # [W111 VIDEO 2026-11-24] the video recorder's Opus encoder
     )
 
 set(llwebrtc_HEADER_FILES

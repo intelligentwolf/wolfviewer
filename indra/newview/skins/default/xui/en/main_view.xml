@@ -123,6 +123,17 @@
                       mouse_opaque="false"
                       tab_stop="false"
                       name="wolf_train_cab"/>
+      <!-- [STARFOLD 2026-11-24] wolfstarfolddeck.cpp: Starfold's cockpit, the Station window, the guide and the owner's setup helper,
+           in the dashboard family. Draws nothing and takes no clicks unless one of them is up (a ship flown, Wolf World > Starfold,
+           docked, or the helper); Wolf Territories only. -->
+      <wolf_starfold_deck follows="all"
+                          left="0"
+                          top="0"
+                          height="500"
+                          width="1024"
+                          mouse_opaque="false"
+                          tab_stop="false"
+                          name="wolf_starfold_deck"/>
       <!-- [SKIS 2026-11-06] wolfskihud.cpp: the Ski HUD (speed, steepness, the run's clock, air time, style score), in the
            dashboard family. Draws nothing and takes no clicks unless riding Wolf skis or a snowboard; Wolf Territories only. -->
       <wolf_ski_hud follows="all"

@@ -23,6 +23,7 @@
 #include "llviewercamera.h"
 #include "llviewercontrol.h"
 #include "wolfgrid.h"
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/] skyAltitude
 #include "wolfweather.h"
 
 namespace
@@ -56,6 +57,14 @@ namespace
         return llmax(0.f, z - LLEnvironment::instance().getWaterHeight());
     }
 
+    // [STARFOLD 2026-11-24] the height the sky reads: the camera's own, except above a Starfold region whose space is on, where
+    // the air reaches vacuum at the owner's line (WolfStarfold::skyAltitude; design.html "The air thins away": "In a space
+    // region the same model is driven by a remapped height"). Below the line's 300 m edge it is the camera's own height.
+    F32 skyAltitude()
+    {
+        return WolfStarfold::instance().skyAltitude(altitude());
+    }
+
     F32 smoothstep(F32 edge0, F32 edge1, F32 x)
     {
         const F32 t = llclamp((x - edge0) / (edge1 - edge0), 0.f, 1.f);
@@ -69,7 +78,7 @@ F32 WolfAltitudeSky::airFraction()
     {
         return 1.f;
     }
-    return expf(-altitude() / AIR_SCALE_HEIGHT_M);
+    return expf(-skyAltitude() / AIR_SCALE_HEIGHT_M);
 }
 
 F32 WolfAltitudeSky::cloudFraction()
@@ -78,7 +87,7 @@ F32 WolfAltitudeSky::cloudFraction()
     {
         return 1.f;
     }
-    return 1.f - smoothstep(CLOUDS_THIN_FROM_M, CLOUDS_GONE_AT_M, altitude());
+    return 1.f - smoothstep(CLOUDS_THIN_FROM_M, CLOUDS_GONE_AT_M, skyAltitude());
 }
 
 F32 WolfAltitudeSky::spaceStarAlpha()

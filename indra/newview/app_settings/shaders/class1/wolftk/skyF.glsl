@@ -122,6 +122,11 @@ uniform float uNight;               // [2026-10-25] WolfEnvironmentRender::night
 uniform float uNightSky;            // the natural night-sky background, cd/m2 x pre-exposure (0 = none)
 uniform float wolf_aurora;
 vec3 wolfAuroraRadiance(vec3 dir);  // wolfAuroraF.glsl: linear sRGB cd/m2 (east, north, up)
+// [STARFOLD 2026-11-24] deferred/wolfStarfoldSkyF.glsl (attached to this program): the space system's planet, and the vacuum
+// above the owner's space line (README "client look rules": 0 = the air as it is, 1 = none above the camera; unset reads 0)
+vec4 wolfStarfoldPlanet(vec3 dir);
+bool wolfStarfoldCovers(vec3 dir);
+uniform float uWolfVacuum;
 uniform float wolf_sea_height;      // camera metres above the sea; < 0 = no sea to the horizon
 uniform vec3  waterFogColorLinear;  // the sea's body colour (reflectance-like)
 uniform float fresnelScale;         // the EEP water's fresnel (LLSettingsWater fresnel_scale / fresnel_offset, as
@@ -262,6 +267,17 @@ vec3 wolfTkSkyRadiance(
     transmittance
   );
 
+  // [STARFOLD 2026-11-24] above a space region's line the air thins to nothing (WolfStarfold::skyVacuum, from the remapped
+  // height: README "The air"). The air above the camera is what scatters light into an upward ray and dims the sun, so for
+  // rays above the horizon the in-scatter is scaled by what is left (1 - v) and the transmittance raised to that power (its
+  // optical depth scaled the same way: T = exp(-tau)); rays below the horizon keep the real air's look of the ground.
+  if (uWolfVacuum > 0.0) {
+    float upness = dot(rayDirection, normalize(cameraPositionKm));
+    float k = mix(1.0, 1.0 - clamp(uWolfVacuum, 0.0, 1.0), smoothstep(0.0, 0.06, upness));
+    radiance *= k;
+    transmittance = pow(max(transmittance, vec3(1e-6)), vec3(k));
+  }
+
   // Source: sky.glsl:48-59 (SUN)
   // [WolfViewer 2026-10-13] the disc at the EEP's sun_scale (LL draws its sun billboard sun_scale times larger,
   // llvosky.cpp setSunScale; 0.25..20, llsettingssky.cpp:788-789), its radiance the sun's: what the scene is lit by is
@@ -336,6 +352,13 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
     }
     float cover = 0.0;
     color += wolfBodies(dirWorld, transmittance, cover);
+    // [STARFOLD 2026-11-24] the space system's planet: above the air, so seen through the same transmittance as the bodies
+    vec4 sfPlanet = wolfStarfoldPlanet(dirWorld);
+    if (sfPlanet.a > 0.0)
+    {
+        color = color * (1.0 - sfPlanet.a) + sfPlanet.rgb * transmittance;
+        cover = max(cover, sfPlanet.a);
+    }
     if (uNebula > 0.0) color += wolfNebula(dirWorld) * (1.0 - cover) * transmittance;
     // Decision D13: the natural night-sky background, NPS Night Skies "22.0 mag/arcsec2 or 172 ucd/m2 ...
     // the darkest part of pristine skies" (zenith luminance), as measured from the ground - so NOT dimmed by
@@ -545,6 +568,8 @@ bool wolfBodyCovers(vec3 dirWorld, vec3 rayDirectionECEF)
             }
         }
     }
+    // [STARFOLD 2026-11-24] the space system's planet (wolfStarfoldSkyF.glsl)
+    if (wolfStarfoldCovers(dirWorld)) return true;
     // the sun's disc (wolfTkSkyRadiance: the disc at the EEP's sun_scale)
     if (uDrawSunDisc > 0.5 && dot(rayDirectionECEF, sunDirection) > cos(ATMOSPHERE.sun_angular_radius * (1.0 + uSunScaleD))) return true;
     return false;

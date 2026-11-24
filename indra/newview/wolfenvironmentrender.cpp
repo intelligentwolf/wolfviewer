@@ -58,6 +58,7 @@
 #include "llvosky.h"
 #include "pipeline.h"
 #include "wolfaltitudesky.h"
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolfaurora.h"
 #include "wolfcloudgenus.h"
 #include "wolfcloudclearance.h"   // [CLOUDS CLEAR OF BUILDS 2026-10-26]
@@ -1479,6 +1480,23 @@ namespace
             {
                 l.densityScale *= dens;
                 l.shapeDetailAmount *= detail;
+            }
+        }
+        // [STARFOLD 2026-11-24] above a Starfold region the clouds never reach the space: every layer's top is held 200 m under
+        // the owner's line (design.html "clouds kept 200 m below the line"; README "client look rules"). A layer reaching above
+        // it is moved down whole; one thicker than the room left keeps only that room. Heights are above the sea, as the
+        // layers' own (cameraHeight: the camera over the sea, frameGeometry). Idempotent, so a held layer set is safe.
+        if (sClouds)
+        {
+            const F32 cap = WolfStarfold::instance().cloudCapAboveSea();
+            if (cap > 0.f)
+            {
+                for (WolfTk::CloudLayer& l : sClouds->layers().layer)
+                {
+                    if (l.height <= 0.f || l.altitude + l.height <= cap) continue;
+                    l.height = llmin(l.height, cap);
+                    l.altitude = llmax(0.f, cap - l.height);
+                }
             }
         }
         // [WolfViewer round 9] the haze from the EEP sky the server bakes (Paul: the EEP is the basis). The document's haze
@@ -4398,10 +4416,21 @@ bool WolfEnvironmentRender::renderSkyDome()
     sh.uniform1fv(s_bt, 12, types);
     sh.uniform3fv(s_br, 12, rings);
     sh.uniform3fv(s_lit, 1, sFrame.sunWorld.mV);
+    // [STARFOLD 2026-11-24] above a Starfold region's line: the air thinned away (skyF.glsl uWolfVacuum) and the system's planet
+    // (wolfStarfoldSkyF.glsl), lit as the bodies above are: a white surface under the sun reads E / pi in the frame's units
+    {
+        static LLStaticHashedString s_vac("uWolfVacuum");
+        sh.uniform1f(s_vac, WolfStarfold::instance().skyVacuum());
+        WolfStarfold::instance().bindSkyUniforms(sh, (sunIrrTOA.mV[0] + sunIrrTOA.mV[1] + sunIrrTOA.mV[2]) / 3.f, sFrame.sunWorld);
+    }
     // a nebula: an emission nebula's surface brightness, 3e-4 cd/m2 (21-22 mag/arcsec2, NPS's scale) at the
     // document's full strength
-    sh.uniform1f(s_neb, d.mNebula * 3.0e-4f * e);
-    const LLColor3 nc = lin(d.mNebulaColor);
+    // [STARFOLD 2026-11-24] a Starfold system's own nebula (its colour from the system's seed) when it is the stronger
+    LLColor3 sfNebula;
+    const F32 sfNebulaOn = WolfStarfold::instance().nebula(sfNebula);
+    const bool sfNebulaWins = sfNebulaOn > d.mNebula;
+    sh.uniform1f(s_neb, (sfNebulaWins ? sfNebulaOn : d.mNebula) * 3.0e-4f * e);
+    const LLColor3 nc = sfNebulaWins ? sfNebula : lin(d.mNebulaColor);
     sh.uniform3fv(s_nebc, 1, nc.mV);
     sh.uniform1f(s_night, NIGHT_SKY_ZENITH_CD * e);
     // a probe face draws no sun disc (LL lights with the sun itself; in a probe it would be ambient a second time);

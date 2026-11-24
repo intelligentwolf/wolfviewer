@@ -29,6 +29,7 @@ in float vary_LightNormPosDot;
 in vec3 vary_wolf_sky_dir;         // <WolfViewer 2026-09-18/> skyV.glsl
 uniform float wolf_aurora;         // <WolfViewer 2026-10-12/> [WOLF AURORA] wolfAuroraF.glsl's gate (WolfAurora::bindUniforms)
 vec3 wolfAuroraDisplay(vec3 dir);  // wolfAuroraF.glsl, attached to this program (llviewershadermgr.cpp)
+vec4 wolfStarfoldPlanet(vec3 dir);  // [STARFOLD 2026-11-24/] wolfStarfoldSkyF.glsl, attached to this program (world: east, north, up)
 // <WolfViewer 2026-10-07> the ocean to the true horizon (wolfHorizonSea below)
 uniform float wolf_sea_height;     // camera metres above the sea; < 0 = off (WolfAltitudeSky::horizonSeaHeight)
 uniform vec3  waterFogColorLinear; // the region's EEP water colour (LLSettingsVOWater, every shader group)
@@ -233,6 +234,13 @@ void main()
         {
             vec3 wd = normalize(vary_wolf_sky_dir);
             color.rgb += srgb_to_linear(wolfAuroraDisplay(vec3(wd.z, wd.x, wd.y)));   // <WolfViewer 2026-10-12/> [WOLF AURORA]
+        }
+        // [STARFOLD 2026-11-24] the space system's planet (wolfStarfoldSkyF.glsl), in front of the sky behind it; the dome
+        // frame is (north, up, east) as for the aurora above
+        {
+            vec3 wd = normalize(vary_wolf_sky_dir);
+            vec4 sfPlanet = wolfStarfoldPlanet(vec3(wd.z, wd.x, wd.y));
+            if (sfPlanet.a > 0.0) color.rgb = color.rgb * (1.0 - sfPlanet.a) + sfPlanet.rgb;
         }
         // </WolfViewer>
         color.rgb = clamp(color.rgb, vec3(0), vec3(5));

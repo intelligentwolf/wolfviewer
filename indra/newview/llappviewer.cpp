@@ -131,7 +131,8 @@
 #include "wolfweather.h" // <WolfViewer> rain and snow // <WolfViewer> share focus/zoom follow-up
 #include "wolffx.h"   // <WolfViewer 2026-10-10/>
 #include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/>
-#include "wolfaurora.h"   // <WolfViewer 2026-10-15/> WolfForceAurora: WolfAurora::idle
+#include "wolfaurora.h"
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/] WolfStarfold::idle   // <WolfViewer 2026-10-15/> WolfForceAurora: WolfAurora::idle
 #include "wolfswim.h"    // [WOLF SWIM 2026-10-20/] WolfSwim::beforeAgentUpdate
 #include "wolfadaptivedrawdistance.h"   // [ADAPTIVE DRAW DISTANCE 2026-11-18/] idle, userDrawDistance
 #include "llviewerdisplay.h"
@@ -6499,6 +6500,7 @@ void LLAppViewer::idle()
     // <WolfViewer 2026-11-01> Wolf Air: a warplane's hello, the dogfight band's orders and fire key, the kill feed
     // (wolfair.cpp); after WolfFlight so the deck it may switch on is there next frame. </WolfViewer>
     { WolfVRScreen::SubPart wsp_("WolfAir"); WolfAir::instance().idle(); }
+    { WolfVRScreen::SubPart wsp_("WolfStarfold"); WolfStarfold::instance().idle(); }   // [STARFOLD 2026-11-24/] the space game (wolfstarfold.h)
     { WolfVRScreen::SubPart wsp_("WolfFarTerrain"); WolfFarTerrain::instance().idle(); }  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
     { WolfVRScreen::SubPart wsp_("WolfFarGround"); WolfFarGround::instance().idle(); }   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     { WolfVRScreen::SubPart wsp_("WolfBirds"); WolfBirds::instance().idle(); }       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)

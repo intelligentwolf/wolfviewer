@@ -28,6 +28,7 @@
 
 #include "lldrawpoolwlsky.h"
 #include "wolfweather.h"   // <WolfViewer 2026-09-18/> auroraAmount()
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolfaurora.h"    // <WolfViewer 2026-10-12/> [WOLF AURORA]
 
 #include "llerror.h"
@@ -211,6 +212,9 @@ void LLDrawPoolWLSky::renderSkyHazeDeferred(const LLVector3& camPosLocal, F32 ca
         // render_manager.js _applyWeatherAurora.
         WolfAurora::bindUniforms(sky_shader);
         // </WolfViewer>
+        // [STARFOLD 2026-11-24] the space system's planet (wolfStarfoldSkyF.glsl, attached to this program); this buffer's white
+        // surface in full sun reads about 1 (the EEP's linear colour)
+        WolfStarfold::instance().bindSkyUniforms(*sky_shader, 1.f, LLEnvironment::instance().getSunDirection());
         // <WolfViewer 2026-10-07> the ocean out to the true horizon (skyF.glsl wolfHorizonSea)
         static LLStaticHashedString s_wolf_sea_height("wolf_sea_height");
         sky_shader->uniform1f(s_wolf_sea_height, WolfAltitudeSky::horizonSeaHeight());

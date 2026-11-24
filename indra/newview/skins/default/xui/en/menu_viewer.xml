@@ -2221,6 +2221,19 @@
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_train_builder" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
+            <!-- [STARFOLD 2026-11-24] wolfstarfold.cpp: Starfold, our space game - the cockpit (flying) or the Launch panel. Only on
+             the Wolf grid AND only on a region whose space is on (WolfStarfold.Available); the owner's setup helper only for its
+             estate owner or managers on a region with the space plugin (WolfStarfold.CanSetUp). -->
+            <menu_item_check label="Starfold (Space)" name="WolfStarfold">
+                <menu_item_check.on_check function="WolfStarfold.IsShown" />
+                <menu_item_check.on_click function="WolfStarfold.Toggle" />
+                <menu_item_check.on_visible function="WolfStarfold.Available" />
+            </menu_item_check>
+            <menu_item_check label="Starfold Setup Helper (Region Owner)" name="WolfStarfoldSetup">
+                <menu_item_check.on_check function="WolfStarfold.SetupShown" />
+                <menu_item_check.on_click function="WolfStarfold.ToggleSetup" />
+                <menu_item_check.on_visible function="WolfStarfold.CanSetUp" />
+            </menu_item_check>
             <!-- [SPACESHIP HUD 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, "spaceships are basically
              aircraft" - the dashboard in its spaceship / rocket design, beside Flight Mode. Wolf Territories
              only, gone (not greyed) elsewhere, like the Car Dashboard. -->

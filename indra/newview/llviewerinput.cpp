@@ -55,6 +55,7 @@
 #include "fsfloatersearch.h"
 #include "llvoiceclient.h"
 #include "wolfdrive.h"   // <WolfViewer 2026-10-09> driving: the dashboard follows the keys
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolfflight.h"            // <WolfViewer 2026-10-06> Flight Mode
 
 //
@@ -1737,6 +1738,13 @@ bool LLViewerInput::scanKey(KEY key, bool key_down, bool key_up, bool key_level)
     // autopilot disconnects when the pilot takes the controls). Watches only.
     WolfFlight::instance().noteScanKey(key, mask, key_down, key_up, key_level, repeat);
     // </WolfViewer>
+    // [STARFOLD 2026-11-24] piloting a Starfold ship: the cockpit's keys are its own and stop here, so the arrows and W / S do
+    // not also swing the camera round the seat (key_bindings.xml "sitting": spin_around_*_sitting, move_*_sitting). After the
+    // mKeyHandledByUI bail, so typing in chat never reaches them; off Wolf or not piloting, noteScanKey returns false at once.
+    if (WolfStarfold::instance().noteScanKey(key, mask, key_down, key_up, key_level, repeat))
+    {
+        return true;
+    }
 
     bool res = scanKey(mKeyBindings[mode], static_cast<S32>(mKeyBindings[mode].size()), key, mask, key_down, key_up, key_level, repeat);
 

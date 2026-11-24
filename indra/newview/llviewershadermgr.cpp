@@ -389,6 +389,7 @@ LLGLSLShader            gPostScreenSpaceReflectionProgram;
 LLGLSLShader            gPostVignetteProgram;   // <FS:CR> Import Vignette from Exodus
 LLGLSLShader            gPostSnapshotFrameProgram;   // <FS:Beq/> Add Snapshot frame guide
 LLGLSLShader            gWolfPhotoFilterProgram;     // <WolfViewer 2026-09-18/> World > Photo Effects
+LLGLSLShader            gWolfStarfoldLensProgram;    // [STARFOLD 2026-11-24/] the wormhole and the jump (pipeline.cpp wolfStarfoldLens)
 
 // Deferred rendering shaders
 LLGLSLShader            gDeferredImpostorProgram;
@@ -1452,6 +1453,7 @@ bool LLViewerShaderMgr::loadShadersEffects()
         gPostVignetteProgram.unload();  // <FS:Ansariel> Import Vignette from Exodus
         gPostSnapshotFrameProgram.unload();  // <FS:Beq/> Add Snapshot framing shader
         gWolfPhotoFilterProgram.unload();    // <WolfViewer 2026-09-18/> World > Photo Effects
+        gWolfStarfoldLensProgram.unload();   // [STARFOLD 2026-11-24/]
         return true;
     }
 
@@ -1532,6 +1534,20 @@ bool LLViewerShaderMgr::loadShadersEffects()
         }
     }
     // </WolfViewer>
+    // [STARFOLD 2026-11-24] the wormhole's lensing and the jump's tunnel, the photo filter's pattern: not folded into `success`
+    // (a driver that cannot compile it loses the effect, never the post chain); the pass checks isComplete() and steps aside.
+    if (success)
+    {
+        gWolfStarfoldLensProgram.mName = "Wolf Starfold Lens Post";
+        gWolfStarfoldLensProgram.mShaderFiles.clear();
+        gWolfStarfoldLensProgram.mShaderFiles.push_back(make_pair("post/exoPostBaseV.glsl", GL_VERTEX_SHADER));
+        gWolfStarfoldLensProgram.mShaderFiles.push_back(make_pair("post/wolfStarfoldLensF.glsl", GL_FRAGMENT_SHADER));
+        gWolfStarfoldLensProgram.mShaderLevel = mShaderLevel[SHADER_EFFECT];
+        if (!gWolfStarfoldLensProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf Starfold lens shader failed to load; the wormhole will show only its marker" << LL_ENDL;
+        }
+    }
 
     return success;
 
@@ -3059,6 +3075,7 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         gWolfEnvSkyProgram.mShaderFiles.push_back(make_pair("deferred/wolfEnvSkyV.glsl", GL_VERTEX_SHADER));
         gWolfEnvSkyProgram.mShaderFiles.push_back(make_pair("wolftk/skyF.glsl", GL_FRAGMENT_SHADER));
         gWolfEnvSkyProgram.mShaderFiles.push_back(make_pair("deferred/wolfAuroraF.glsl", GL_FRAGMENT_SHADER));   // [WOLF AURORA] wolfAuroraRadiance
+        gWolfEnvSkyProgram.mShaderFiles.push_back(make_pair("deferred/wolfStarfoldSkyF.glsl", GL_FRAGMENT_SHADER));   // [STARFOLD 2026-11-24/] the planet
         gWolfEnvSkyProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
         gWolfEnvSkyProgram.mShaderGroup = LLGLSLShader::SG_SKY;
         WolfEnvironmentRender::addAtmosphereDefines(gWolfEnvSkyProgram);
@@ -3535,6 +3552,7 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         gEnvironmentMapProgram.mShaderFiles.push_back(make_pair("deferred/skyV.glsl", GL_VERTEX_SHADER));
         gEnvironmentMapProgram.mShaderFiles.push_back(make_pair("deferred/skyF.glsl", GL_FRAGMENT_SHADER));
         gEnvironmentMapProgram.mShaderFiles.push_back(make_pair("deferred/wolfAuroraF.glsl", GL_FRAGMENT_SHADER));   // [WOLF AURORA 2026-10-12/]
+        gEnvironmentMapProgram.mShaderFiles.push_back(make_pair("deferred/wolfStarfoldSkyF.glsl", GL_FRAGMENT_SHADER));   // [STARFOLD 2026-11-24/] the planet
         gEnvironmentMapProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
         gEnvironmentMapProgram.mShaderGroup = LLGLSLShader::SG_SKY;
 
@@ -3554,6 +3572,7 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         gDeferredWLSkyProgram.mShaderFiles.push_back(make_pair("deferred/skyV.glsl", GL_VERTEX_SHADER));
         gDeferredWLSkyProgram.mShaderFiles.push_back(make_pair("deferred/skyF.glsl", GL_FRAGMENT_SHADER));
         gDeferredWLSkyProgram.mShaderFiles.push_back(make_pair("deferred/wolfAuroraF.glsl", GL_FRAGMENT_SHADER));   // [WOLF AURORA 2026-10-12/]
+        gDeferredWLSkyProgram.mShaderFiles.push_back(make_pair("deferred/wolfStarfoldSkyF.glsl", GL_FRAGMENT_SHADER));   // [STARFOLD 2026-11-24/] the planet
         gDeferredWLSkyProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
         gDeferredWLSkyProgram.mShaderGroup = LLGLSLShader::SG_SKY;
 

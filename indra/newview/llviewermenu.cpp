@@ -37,6 +37,7 @@
 #include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/] Wolf World > Fishing on the screen
 #include "wolfdrive.h"   // [WOLF DRIVE 2026-10-09/] the Car Dashboard toolbar button
 #include "wolfhelm.h"   // <WolfViewer 2026-10-28/> Captain's Helm
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolftraincab.h"   // [TRAIN CAB 2026-11-13] the Train Cab (Wolf Rail)
 #include "wolffloatertunnels.h"   // [T934 2026-11-19/] a taken or returned tunnel rock takes its holes with it
 #include "wolftunnelgone.h"
@@ -13137,6 +13138,17 @@ void initialize_menus()
     // [TRAIN CAB 2026-11-13] Wolf World > Vehicles & Travel > Train Cab: show / hide it (driving), or open its guide
     commit.add("WolfTrain.Toggle", [](LLUICtrl*, const LLSD&) { WolfTrain::instance().toggleShown(); });
     enable.add("WolfTrain.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfTrain::instance().shown(); });
+    // [STARFOLD 2026-11-24] Wolf World > Vehicles & Travel > Starfold (Space) and its setup helper (wolfstarfold.h): shown only on
+    // the Wolf grid where the region's space is on (the helper: its estate managers, on a region with the space plugin)
+    commit.add("WolfStarfold.Toggle", [](LLUICtrl*, const LLSD&) { WolfStarfold::instance().togglePanel(); });
+    enable.add("WolfStarfold.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfStarfold::instance().panelShown(); });
+    enable.add("WolfStarfold.Available", [](LLUICtrl*, const LLSD&) -> bool
+    {
+        return WolfGrid::isOnWolfTerritories() && WolfStarfold::instance().spaceHere();
+    });
+    commit.add("WolfStarfold.ToggleSetup", [](LLUICtrl*, const LLSD&) { WolfStarfold::instance().toggleSetup(); });
+    enable.add("WolfStarfold.SetupShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfStarfold::instance().setupShown(); });
+    enable.add("WolfStarfold.CanSetUp", [](LLUICtrl*, const LLSD&) -> bool { return WolfStarfold::instance().canSetUp(); });
     // <WolfViewer 2026-10-11> Wolf World > Show Wolf Icons (bottom right): checked while the icons show, i.e. the
     // inverse of WolfHideToolbarIcons (lltoolbarview.cpp draw hides them and keeps the toolbar showing). Every grid.
     commit.add("Wolf.ToggleToolbarIcons", [](LLUICtrl*, const LLSD&)

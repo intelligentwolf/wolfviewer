@@ -574,6 +574,10 @@ class Enumerator:
                          group="effects", src=":1473"))
         self.add(Program("Wolf Photo Filter Post", [("post/exoPostBaseV.glsl", VERT), ("post/wolfPhotoFilterF.glsl", FRAG)], lvl,
                          group="effects", tolerated=True, src=":1488"))
+        # [STARFOLD 2026-11-24] llviewershadermgr.cpp loadShadersEffects: the wormhole's lens and the jump's tunnel (tolerated:
+        # it is kept out of `success`, the pass steps aside without it)
+        self.add(Program("Wolf Starfold Lens Post", [("post/exoPostBaseV.glsl", VERT), ("post/wolfStarfoldLensF.glsl", FRAG)], lvl,
+                         group="effects", tolerated=True, src=":1541"))
 
     # -- loadShadersInterface ----------------------------------------------------
     def interface(self):
@@ -1178,7 +1182,8 @@ class Enumerator:
         if st.native_sky:   # :2957-3048 (+ WolfEnvironmentRender::loadShaders -> WolfTk)
             self.wolftk_programs()
             p = Program("Wolf Env Sky Dome", [(D + "wolfEnvSkyV.glsl", VERT), ("wolftk/skyF.glsl", FRAG),
-                                              (D + "wolfAuroraF.glsl", FRAG)], lvl, group="wolfenv", tolerated=True, src=":2964")
+                                              (D + "wolfAuroraF.glsl", FRAG), (D + "wolfStarfoldSkyF.glsl", FRAG)],   # [STARFOLD 2026-11-24/]
+                        lvl, group="wolfenv", tolerated=True, src=":2964")
             p.features.hasSrgb = True
             p.defines.update(wolftk_atmosphere_defines())
             p.defines["GROUND"] = "1"
@@ -1265,8 +1270,8 @@ class Enumerator:
         self.add(post("Deferred Post NoDoF Noise Shader", "postDeferredNoDoFF.glsl", ":3418", srgb=False, defines={"HAS_NOISE": "1"}))
 
         for name, src, hdri in [("Environment Map Program", ":3434", True), ("Deferred Windlight Sky Shader", ":3456", False)]:
-            p = Program(name, [(D + "skyV.glsl", VERT), (D + "skyF.glsl", FRAG), (D + "wolfAuroraF.glsl", FRAG)], lvl,
-                        group="deferred", src=src)
+            p = Program(name, [(D + "skyV.glsl", VERT), (D + "skyF.glsl", FRAG), (D + "wolfAuroraF.glsl", FRAG),
+                               (D + "wolfStarfoldSkyF.glsl", FRAG)], lvl, group="deferred", src=src)   # [STARFOLD 2026-11-24/] the planet
             p.features.calculatesAtmospherics = True
             p.features.hasAtmospherics = True
             p.features.hasGamma = True

@@ -149,6 +149,7 @@
 #define A_CPU 1
 #include "app_settings/shaders/class1/deferred/CASF.glsl" // This is also C++
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
 #include "wolfkraken.h"      // [KRAKEN 2026-11-17/] ticket 823
@@ -4448,6 +4449,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
             WolfUnderSea::instance().renderDeferred(); // [UNDERSEA 2026-11-09/] ticket 652: sea plants, fish and sharks
             WolfSwimBubbles::instance().renderDeferred();   // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles under the water
             WolfLeaves::instance().renderDeferred();   // [FALLING LEAVES 2026-11-10/] ticket 718: leaves from wolftree trees
+            WolfStarfold::instance().renderDeferred();   // [STARFOLD 2026-11-24/] the belt's rocks, lit as the scene (wolfstarfold.h)
         }
         // </WolfViewer>
 
@@ -9737,6 +9739,12 @@ void LLPipeline::renderFinalize()
 
     combineGlow(sourceBuffer, targetBuffer);
     std::swap(sourceBuffer, targetBuffer);
+
+    // [STARFOLD 2026-11-24] the wormhole's bent light and the jump's tunnel, over the glowing frame (wolfstarfold.h renderLens)
+    if (WolfStarfold::instance().renderLens(sourceBuffer, targetBuffer, mScreenTriangleVB))
+    {
+        std::swap(sourceBuffer, targetBuffer);
+    }
 
     gGLViewport[0] = gViewerWindow->getWorldViewRectRaw().mLeft;
     gGLViewport[1] = gViewerWindow->getWorldViewRectRaw().mBottom;

@@ -261,6 +261,7 @@ extern LLGLSLShader         gPostScreenSpaceReflectionProgram;
 extern LLGLSLShader         gPostVignetteProgram;   // <FS:CR> Import Vignette from Exodus
 extern LLGLSLShader         gPostSnapshotFrameProgram;   // <FS:Beq/> Snapshot Frame overlay
 extern LLGLSLShader         gWolfPhotoFilterProgram;     // <WolfViewer 2026-09-18/> World > Photo Effects (pipeline.cpp wolfPhotoFilter)
+extern LLGLSLShader         gWolfStarfoldLensProgram;    // [STARFOLD 2026-11-24/] pipeline.cpp wolfStarfoldLens
 
 // Deferred rendering shaders
 extern LLGLSLShader         gDeferredImpostorProgram;

@@ -13149,6 +13149,29 @@ void initialize_menus()
     commit.add("WolfStarfold.ToggleSetup", [](LLUICtrl*, const LLSD&) { WolfStarfold::instance().toggleSetup(); });
     enable.add("WolfStarfold.SetupShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfStarfold::instance().setupShown(); });
     enable.add("WolfStarfold.CanSetUp", [](LLUICtrl*, const LLSD&) -> bool { return WolfStarfold::instance().canSetUp(); });
+    // [STARFOLD 2026-11-24] every cockpit action by name, for LEAP (UI "call") and anything else that can call a commit
+    // function (a gesture, a toolbar button): the same checks as the cockpit's buttons (wolfstarfold.cpp), so nothing here can
+    // do what the pilot could not. "throttle:<0..1>", "fly:<station|belt|wormhole|stop>", "setup:<station|belt|wormhole|pad>".
+    commit.add("WolfStarfold.Do", [](LLUICtrl*, const LLSD& param)
+    {
+        WolfStarfold& sf = WolfStarfold::instance();
+        const std::string a = param.asString();
+        const size_t colon = a.find(':');
+        const std::string verb = a.substr(0, colon), arg = colon == std::string::npos ? std::string() : a.substr(colon + 1);
+        if (verb == "launch") sf.launch();
+        else if (verb == "fire") sf.fire(arg.empty() ? !sf.firing() : arg == "1");
+        else if (verb == "mine") sf.mine(arg.empty() ? !sf.mining() : arg == "1");
+        else if (verb == "target") sf.nextTarget();
+        else if (verb == "dock") sf.dock();
+        else if (verb == "sell") sf.sell();
+        else if (verb == "leave") sf.leave();
+        else if (verb == "drift") sf.setDrift(arg.empty() ? !sf.drift() : arg == "1");
+        else if (verb == "throttle") sf.setThrottle((F32)atof(arg.c_str()));
+        else if (verb == "fly") sf.flyTo(arg);
+        else if (verb == "setup") sf.setupRez(arg);
+        else if (verb == "guide") sf.showGuide(arg != "0");
+        else if (verb == "station") { if (arg == "0") sf.closeStation(); else sf.showStation(); }
+    });
     // <WolfViewer 2026-10-11> Wolf World > Show Wolf Icons (bottom right): checked while the icons show, i.e. the
     // inverse of WolfHideToolbarIcons (lltoolbarview.cpp draw hides them and keeps the toolbar showing). Every grid.
     commit.add("Wolf.ToggleToolbarIcons", [](LLUICtrl*, const LLSD&)

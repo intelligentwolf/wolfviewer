@@ -1255,7 +1255,12 @@ void WolfStarfoldDeck::drawGhosts(F32 u)
             const std::vector<std::vector<S32>> cells = WolfStarbase::footprint(size, gs[i].mCell, gs[i].mRot);
             for (const std::vector<S32>& c : cells)
             {
-                box((F32)c[0] * C, (F32)c[1] * C, (F32)c[2] * C, (F32)(c[0] + 1) * C, (F32)(c[1] + 1) * C, (F32)(c[2] + 1) * C, edge, fill);
+                // a cell round the camera would fill the whole view (rig 24 Nov 23:07Z, the ship inside the frame): its fill fades
+                // as the eye comes within 40 m of its centre; the edges stay
+                const F32 near_m = (agentOf(((F32)c[0] + 0.5f) * C, ((F32)c[1] + 0.5f) * C, ((F32)c[2] + 0.5f) * C) - LLViewerCamera::getInstance()->getOrigin()).length();
+                LLColor4 cellFill = fill;
+                cellFill.mV[VALPHA] *= llclamp((near_m - 8.f) / 32.f, 0.1f, 1.f);
+                box((F32)c[0] * C, (F32)c[1] * C, (F32)c[2] * C, (F32)(c[0] + 1) * C, (F32)(c[1] + 1) * C, (F32)(c[2] + 1) * C, edge, cellFill);
                 mid += LLVector3(((F32)c[0] + 0.5f) * C, ((F32)c[1] + 0.5f) * C, ((F32)c[2] + 0.5f) * C);
             }
             if (cells.empty()) continue;
@@ -1517,8 +1522,9 @@ void WolfStarfoldDeck::drawBaseHome(F32 l, F32 b, F32 r, F32 t, F32 u)
         para(l, y - 6.f * u, "Packed your base up before? Bring my base back puts it here, with everything in it.", 16.f * u, w, C_DIM);
         return;
     }
-    // the picture on the left, the facts and who may dock on the right
-    const F32 pic = llmin(240.f * u, (t - b) * 0.55f);
+    // the picture on the left, the facts and who may dock on the right (the picture no taller than that column, so the parts
+    // keep their room on a short window: rig 24 Nov 23:05Z, 1080 lines, the answer lay over the first part)
+    const F32 pic = llmin(llmin(180.f * u, (t - b) * 0.5f), 96.f * u + targetH(u));
     drawBasePicture(l + pic * 0.5f, t - pic * 0.55f, pic, u);
     const F32 x0 = l + pic + 20.f * u, cw = r - x0;
     F32 y = t - 14.f * u;
@@ -1526,18 +1532,15 @@ void WolfStarfoldDeck::drawBaseHome(F32 l, F32 b, F32 r, F32 t, F32 u)
     if (sb.baseState() == "packing") state += " is being packed away";
     T(x0, y, state, 21.f * u, C_TEXT, true, LLFontGL::LEFT);
     y -= 30.f * u;
-    if (LLViewerRegion* region = gAgent.getRegion())
     {
-        const LLVector3 me = region->getPosRegionFromAgent(gAgent.getPositionAgent());
-        T(x0, y, distance((me - sb.basePos()).length()) + " from you", 17.f * u, C_TEXT, false, LLFontGL::LEFT);
-        y -= 26.f * u;
-    }
-    T(x0, y, llformat("Prims: %d of %d", sb.primsUsed(), sb.primsMax()), 17.f * u, C_TEXT, false, LLFontGL::LEFT);
-    y -= 26.f * u;
-    if (sb.haveStarmarks())
-    {
-        T(x0, y, std::string("Your ") + WolfStarfold::currency() + ": " + thousands(sb.starmarks()), 17.f * u, C_GREEN, true, LLFontGL::LEFT);
-        y -= 26.f * u;
+        // one line of facts: how far, the prims, the Starmarks
+        std::string facts;
+        if (LLViewerRegion* region = gAgent.getRegion())
+            facts = distance((region->getPosRegionFromAgent(gAgent.getPositionAgent()) - sb.basePos()).length()) + " from you.  ";
+        facts += llformat("Prims %d of %d.", sb.primsUsed(), sb.primsMax());
+        if (sb.haveStarmarks()) facts += "  " + thousands(sb.starmarks()) + " " + WolfStarfold::currency() + ".";
+        T(x0, y, fit(facts, 16.f * u, false, cw), 16.f * u, C_TEXT, false, LLFontGL::LEFT);
+        y -= 28.f * u;
     }
     T(x0, y, "Who may dock at your docking ring:", 16.f * u, C_DIM, true, LLFontGL::LEFT);
     y -= 12.f * u;
@@ -1555,7 +1558,17 @@ void WolfStarfoldDeck::drawBaseHome(F32 l, F32 b, F32 r, F32 t, F32 u)
     for (const WolfStarbase::Part& p : sb.parts()) if (p.mState != "stored") rows.push_back(&p);
     F32 ly = llmin(y, t - pic - 8.f * u);
     const F32 rowH = targetH(u) + 12.f * u;
-    const S32 per = llmax(1, (S32)((ly - b) / rowH));
+    // rows that fit; when they do not all fit, the page line (a button's height) comes off the room first
+    S32 per = (S32)((ly - b) / rowH);
+    if (per < (S32)rows.size()) per = (S32)((ly - b - targetH(u) - 6.f * u) / rowH);
+    if (per < 1)
+    {
+        // no room for a row (a very short window): the parts in one line of words instead, never drawn over the answer
+        std::string sum;
+        for (const WolfStarbase::Part* p : rows) sum += (sum.empty() ? "" : ", ") + kindTitle(p->mKind) + (p->building() ? " (being built)" : "");
+        if (!sum.empty() && ly - b > 16.f * u) T(l, ly - 10.f * u, fit("Parts: " + sum, 14.f * u, false, r - l), 14.f * u, C_DIM, false, LLFontGL::LEFT);
+        return;
+    }
     const S32 pages = llmax(1, ((S32)rows.size() + per - 1) / per);
     mBasePage = llclamp(mBasePage, 0, pages - 1);
     if (pages > 1)
@@ -1716,7 +1729,9 @@ void WolfStarfoldDeck::drawBaseStore(F32 l, F32 b, F32 r, F32 t, F32 u)
                  "place it again.", 16.f * u, w, C_DIM) - 6.f * u;
     if (rows.empty()) { para(l, y, "Your storeroom is empty.", 18.f * u, w, C_TEXT, true); return; }
     const F32 rowH = targetH(u) + 12.f * u, bh = targetH(u), bw = 190.f * u;
-    const S32 per = llmax(1, (S32)((y - b) / rowH));
+    S32 per = (S32)((y - b) / rowH);
+    if (per < (S32)rows.size()) per = (S32)((y - b - bh - 6.f * u) / rowH);   // the page line's room first
+    per = llmax(1, per);
     const S32 pages = llmax(1, ((S32)rows.size() + per - 1) / per);
     mBasePage = llclamp(mBasePage, 0, pages - 1);
     if (pages > 1)
@@ -1772,7 +1787,9 @@ void WolfStarfoldDeck::drawBaseOwn(F32 l, F32 b, F32 r, F32 t, F32 u)
     if (!sb.ownHere())
         y = para(l, y, "Your starbase is not in this region, so use Send to my base: it waits in your storeroom.", 15.f * u, w, C_AMBER) - 4.f * u;
     const F32 rowH = targetH(u) + 12.f * u, bh = targetH(u), bw = 200.f * u;
-    const S32 per = llmax(1, (S32)((y - b) / rowH));
+    S32 per = (S32)((y - b) / rowH);
+    if (per < (S32)sb.own().size()) per = (S32)((y - b - bh - 6.f * u) / rowH);   // the page line's room first
+    per = llmax(1, per);
     const S32 pages = llmax(1, ((S32)sb.own().size() + per - 1) / per);
     mBasePage = llclamp(mBasePage, 0, pages - 1);
     if (pages > 1)

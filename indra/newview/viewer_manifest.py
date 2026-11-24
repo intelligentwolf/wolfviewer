@@ -2005,6 +2005,30 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                                         args += ['--keychain', viewer_keychain]
                                     args += ['--sign', identity, signee]
                                     self.run_command(args)
+                                # [W111 VIDEO 2026-11-24] The CEF framework and the DullahanHelper apps inside
+                                # SLPlugin.app, signed inside-out before the bundles that hold them (Apple TN2206
+                                # "Signing Code Manually": nested code first; --deep is not a substitute). Our own
+                                # dullahan 1.50.1 package (audio to host, built by intelligentwolf/dullahan's CI) has
+                                # no Linden signing, so its helpers arrive unsigned; arm64 will not run unsigned code.
+                                # The helpers get the same entitlements and hardened runtime as SLPlugin (CEF's
+                                # renderer needs allow-jit / allow-unsigned-executable-memory).
+                                frameworks = resources + "SLPlugin.app/Contents/Frameworks/"
+                                nested = glob.glob(frameworks + "Chromium Embedded Framework.framework")
+                                nested_apps = sorted(glob.glob(frameworks + "DullahanHelper*.app"))
+                                for signee in nested:
+                                    args = ['codesign', '--force', '--timestamp']
+                                    if not ad_hoc_sign:
+                                        args += ['--keychain', viewer_keychain]
+                                    args += ['--sign', identity, signee]
+                                    self.run_command(args)
+                                for signee in nested_apps:
+                                    args = ['codesign', '--verbose', '--force', '--timestamp',
+                                            '--entitlements', self.src_path_of("slplugin.entitlements"),
+                                            '--options', 'runtime']
+                                    if not ad_hoc_sign:
+                                        args += ['--keychain', viewer_keychain]
+                                    args += ['--sign', identity, signee]
+                                    self.run_command(args)
                                 for signee in deep_sign:
                                     args = [
                                         'codesign',
@@ -2025,6 +2049,10 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                         else:
                             print("Maximum codesign attempts exceeded; giving up", file=sys.stderr)
                             raise sign_failed
+
+                        # [W111 VIDEO 2026-11-24] fail the build here, not on a resident's Mac or at notarisation,
+                        # when any nested code (helpers, framework, plugins) is left unsigned or broken
+                        self.run_command(['codesign', '--verify', '--deep', '--strict', '--verbose=2', tmp_app_path])
 
                         # Signing succeeded, now delete the original app in the mounted sparse image and notarize if needed
                         shutil.rmtree(app_in_dmg)

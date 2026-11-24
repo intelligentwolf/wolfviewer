@@ -54,7 +54,7 @@ private:
     LLComboBox* mFps = nullptr;
     LLComboBox* mLimit = nullptr;
     LLCheckBoxCtrl* mWorld = nullptr;
-    F32 mNextStatic = 0.f;
+    F64 mNextStatic = 0.0;   // LLFrameTimer::getElapsedSeconds() time (F64: a float loses the seconds after a long session)
     std::string mStartError;   // a start refused by WolfRecorder::start, shown until the next press
 };
 

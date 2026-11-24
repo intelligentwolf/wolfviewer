@@ -173,7 +173,7 @@ void WolfFloaterRecorder::refreshStatic()
     {
         mSpaceNote->setText(LLStringUtil::null);
     }
-    mNextStatic = LLFrameTimer::getElapsedSeconds() + 2.f;
+    mNextStatic = LLFrameTimer::getElapsedSeconds() + 2.0;
 }
 
 void WolfFloaterRecorder::refresh()

@@ -89,6 +89,11 @@ in vec2 texcoord0;
 // Terrain-LOD lift (LLVOWater::ConformingMesh::mLodLift): metres the terrain as drawn at
 // render stride 4 (x) and 16 (y) rises above this vertex. Read only when wolfTerrainLod > 0.
 in vec2 texcoord1;
+// [W112 WATERFALLS 2026-11-24] How a stream mesh's falling water looks at this vertex (LLVOWater::ConformingMesh::mCascade,
+// normalised): r THIN (0 = the full water, 1 = none), g WHITE (a pool's brink, the plunge foam and spray), b AERATION (the
+// share of the falling film turned to white threads). Read only when wolfStream > 0; other water never fills it (as
+// texcoord1 above).
+in vec4 diffuse_color;
 // </WolfViewer>
 // </FS:WolfViewer>
 
@@ -249,6 +254,8 @@ out vec3 vary_world_pos;
 // surface's own slope, so one ribbon runs level, tips over a ledge into a fall and
 // levels out again, all in one draw; the fragment stage blends the waterfall look by it.
 out float vary_fall;
+// [W112 WATERFALLS 2026-11-24/] diffuse_color.rgb above for a stream mesh, 0 (clear water) for everything else
+out vec3 vary_wolf_cascade;
 // </WolfViewer>
 // <WolfViewer 2026-09-06> vShore = (shore wave phase, shoal factor) — the single source of
 // truth the fragment's swash and breaker foam follow; vWake = the wake field's foam here;
@@ -1468,6 +1475,7 @@ void main()
         fall = max(fall, smoothstep(0.3, 0.8, rise_run));
     }
     vary_fall = fall;
+    vary_wolf_cascade = wolfStream > 0.0 ? diffuse_color.rgb : vec3(0.0);   // [W112 WATERFALLS 2026-11-24/]
     // </WolfViewer>
 
     //transform vertex

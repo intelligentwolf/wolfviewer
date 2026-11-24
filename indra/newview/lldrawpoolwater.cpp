@@ -906,7 +906,25 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
         }
         // </FS:WolfViewer>
 
-        face->renderIndexed();
+        // [W112 WATERFALLS 2026-11-24] Ticket 1039: with Transparent Water off (Graphics presets Low to Mid-High,
+        // featuretable.txt "RenderTransparentWater 1 0") there is no refraction copy, and the water shader puts 2 km of
+        // water fog behind every surface - right for the sea, an opaque sheet for a stream a few centimetres deep, and with
+        // a fall's white on it, a white wall. A STREAM mesh (conforming, wolfnaturalwater.cpp) is drawn BLENDED over the
+        // ground already in the frame instead: waterF.glsl writes its colour and, as alpha, what it covers (the same
+        // composite the Transparent Water path makes with the refraction copy). The target's alpha moves toward the 0 the
+        // water writes, by the coverage. Everything else stays unblended (renderPostDeferred's LLGLDisable blend).
+        if (water->hasConformingMesh() && water->getStreamFlow() > 0.f && !LLPipeline::sRenderTransparentWater)
+        {
+            LLGLEnable blend_stream(GL_BLEND);
+            gGL.blendFunc(LLRender::BF_SOURCE_ALPHA, LLRender::BF_ONE_MINUS_SOURCE_ALPHA,
+                          LLRender::BF_ZERO, LLRender::BF_ONE_MINUS_SOURCE_ALPHA);
+            face->renderIndexed();
+            gGL.setSceneBlendType(LLRender::BT_ALPHA);
+        }
+        else
+        {
+            face->renderIndexed();
+        }
 
         // Note non-void water being drawn, updates required
         // Previously we had some logic to determine if this pass was also our water edge pass.

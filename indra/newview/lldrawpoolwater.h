@@ -55,7 +55,8 @@ public:
         VERTEX_DATA_MASK =  LLVertexBuffer::MAP_VERTEX |
                             LLVertexBuffer::MAP_NORMAL |
                             LLVertexBuffer::MAP_TEXCOORD0 |
-                            LLVertexBuffer::MAP_TEXCOORD1   // <WolfViewer> terrain-LOD lift, conforming meshes only
+                            LLVertexBuffer::MAP_TEXCOORD1 |   // <WolfViewer> terrain-LOD lift, conforming meshes only
+                            LLVertexBuffer::MAP_COLOR         // [W112 WATERFALLS 2026-11-24/] the falls' look (LLVOWater::ConformingMesh::mCascade), conforming meshes only
     };
 
     virtual U32 getVertexDataMask() override { return VERTEX_DATA_MASK; }

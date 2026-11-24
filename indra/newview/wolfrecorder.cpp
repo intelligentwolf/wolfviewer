@@ -51,7 +51,6 @@
 #include "llview.h"
 #include "llwebrtc.h"
 #include "llwindow.h"
-#include "pipeline.h"           // [W111 RECORDER UI 2026-11-24/] LLPipeline::RenderUIBuffer (holdBackFromVideo)
 #include "wolfrec_audioenc.h"
 #include "wolfrec_mp4.h"
 #include "wolfvkbridge.h"
@@ -1066,10 +1065,32 @@ namespace
         }
     }
 
-    // [W111 RECORDER UI 2026-11-24] Views kept out of a whole-window video (holdBackFromVideo): collected while the UI
-    // draws, drawn after the picture copy. Handles, not pointers: a window can close between the two.
+    // [W111 RECORDER UI 2026-11-24] Views kept out of a whole-window video (holdBackFromVideo). Paul: "the recording
+    // window should never be recorded". A view registers itself from its draw() and stays registered for the whole
+    // recording, drawn after the picture copy every frame - also on frames where the UI itself is not redrawn (the
+    // RenderUIBuffer debug setting: llviewerdisplay.cpp render_ui_2d redraws the UI into mUIScreen only when a view
+    // is dirty, and lays that buffer down every frame). Handles, not pointers: a window can close meanwhile.
     std::vector<LLHandle<LLView>> gHeldViews;
     bool gDrawingHeld = false;
+
+    // The whole UI is drawn again this frame (LLView::sIsRectDirty / sDirtyRect, screen coordinates = the root view's):
+    // with RenderUIBuffer the cached UI must drop a held view when a whole-window recording starts (it was drawn into
+    // the buffer before), and take it back when the recording ends. Without RenderUIBuffer the UI is drawn every frame
+    // anyway and this changes nothing.
+    void dirtyWholeUI()
+    {
+        if (LLView* root = LLUI::getInstance()->getRootView())
+        {
+            LLView::sDirtyRect = root->getLocalRect();
+            LLView::sIsRectDirty = true;
+        }
+    }
+    void releaseHeldViews()
+    {
+        if (gHeldViews.empty()) return;
+        gHeldViews.clear();
+        dirtyWholeUI();
+    }
 
     // Each held view at its place on screen, as LLView::drawChildren would have drawn it (llview.cpp: LLUI::pushMatrix,
     // LLUI::translate to the view's rect) under the root view's UI scale (llviewerwindow.cpp LLViewerWindow::draw:
@@ -1089,7 +1110,7 @@ namespace
         for (const LLHandle<LLView>& h : views)
         {
             LLView* v = h.get();
-            if (!v || !v->isInVisibleChain()) continue;
+            if (!v || !v->isInVisibleChain()) continue;   // closed, or hidden: nothing to draw
             const LLRect r = v->calcScreenRect();
             LLUI::pushMatrix();
             LLUI::translate((F32)r.mLeft, (F32)r.mBottom);
@@ -1309,6 +1330,9 @@ bool start(std::string& error)
     gSess.captured_frame = 0;
     gSess.last_disk_check = LLFrameTimer::getElapsedSeconds();
     gSess.state = State::STARTING;
+    // [W111 RECORDER UI 2026-11-24/] the UI is drawn afresh this frame, before the first copy: a held view drops out of
+    // the cached UI buffer (RenderUIBuffer) right away (dirtyWholeUI)
+    if (gSess.ui) dirtyWholeUI();
     gSoundOn = gSess.world || gSess.voice || gSess.mic;
     setTaps(true);
     WorkerConfig cfg{ path, gSess.width, gSess.height, gSess.fps, gSess.kbps, gSess.world, gSess.voice, gSess.mic };
@@ -1324,6 +1348,7 @@ void stop()
     gSess.state = State::FINISHING;
     setTaps(false);
     setClockPaused(false);   // [W111 RECORDER UI 2026-11-24/] the clock runs again: the worker waits on it for the end
+    releaseHeldViews();      // [W111 RECORDER UI 2026-11-24/] held views are drawn as usual again (and the UI buffer redrawn)
     // the pictures still in their pixel buffers: collect whatever has finished (the rest is a frame or two)
     collect();
     {
@@ -1367,14 +1392,18 @@ void captureWorld()
 
 void captureWholeWindowAndDrawIndicator()
 {
-    std::vector<LLHandle<LLView>> held;
-    held.swap(gHeldViews);   // this pass's held views; none carry over to another pass
     if (!isRecording() || gSnapshot || gCubeSnapshot || !gViewerWindow) return;
     if (gSess.ui && pictureDue())
     {
-        capture(WolfVRScreen::wholeWindowFramebuffer());   // 0 = the back buffer; Vulkan mode: the composite
+        // OpenGL: the back buffer as it is now. Vulkan: wolfvrscreen.cpp composeVkBigScreen builds the composite from
+        // the back buffer as it is now (and Big Screen reuses that one in this frame). Either way, before the held views.
+        capture(WolfVRScreen::wholeWindowFramebuffer());
     }
-    drawHeldViews(held);   // [W111 RECORDER UI 2026-11-24/] the recorder's own window, after the copy: never in the video
+    // [W111 RECORDER UI 2026-11-24/] the recorder's own window, after the copy: never in the video
+    gHeldViews.erase(std::remove_if(gHeldViews.begin(), gHeldViews.end(),
+                                    [](const LLHandle<LLView>& h) { return h.get() == nullptr; }),
+                     gHeldViews.end());
+    drawHeldViews(gHeldViews);
     drawIndicator();
 }
 
@@ -1419,15 +1448,14 @@ bool previewPicture(U32& serial, std::vector<U8>& rgb)
 
 bool holdBackFromVideo(LLView* view)
 {
-    // the same test captureWholeWindowAndDrawIndicator makes before it draws the held views; and not with the cached UI
-    // buffer (the debug setting RenderUIBuffer, llviewerdisplay.cpp render_ui_2d: the UI is redrawn only when it
-    // changes, so a view held back would be missing from every other frame)
-    if (gDrawingHeld || !view || !isRecording() || !gSess.ui || gSnapshot || gCubeSnapshot || !gViewerWindow ||
-        LLPipeline::RenderUIBuffer)
+    // the same test captureWholeWindowAndDrawIndicator makes before it draws the held views (a snapshot pass draws the
+    // window as usual: it is not a video picture)
+    if (gDrawingHeld || !view || !isRecording() || !gSess.ui || gSnapshot || gCubeSnapshot || !gViewerWindow)
     {
         return false;
     }
-    gHeldViews.push_back(view->getHandle());
+    const LLHandle<LLView> h = view->getHandle();
+    if (std::find(gHeldViews.begin(), gHeldViews.end(), h) == gHeldViews.end()) gHeldViews.push_back(h);
     return true;
 }
 
@@ -1448,6 +1476,7 @@ void shutdown()
     joinWorker();
     gSoundOn = false;
     resetClock();
+    gHeldViews.clear();
     gSess.state = State::IDLE;
 }
 }

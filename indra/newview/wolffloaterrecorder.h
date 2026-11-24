@@ -23,6 +23,7 @@
 class LLButton;
 class LLCheckBoxCtrl;
 class LLComboBox;
+class LLScrollContainer;
 class LLSliderCtrl;
 class LLTextBox;
 class LLViewerTexture;
@@ -57,6 +58,7 @@ private:
     void updateMeters();
     void drawMonitor();
     void drawMeter(int source, const LLRect& rect);
+    void followKeyboardFocus();
 
     LLButton* mRecordBtn = nullptr;
     LLButton* mPauseBtn = nullptr;
@@ -74,6 +76,9 @@ private:
     LLComboBox* mFps = nullptr;
     LLComboBox* mLimitCombo = nullptr;
     LLView* mMonitor = nullptr;
+    LLScrollContainer* mScroll = nullptr;   // [W111 RECORDER UI 2026-11-24] everything below the transport buttons
+    LLView* mSettingsPanel = nullptr;       // (Paul: "make sure it scrolls")
+    const void* mLastFocus = nullptr;       // the keyboard focus last seen (compared only, never used)
     LLView* mMeterViews[3] = {};
     F64 mNextStatic = 0.0;   // LLFrameTimer::getElapsedSeconds() time (F64: a float loses the seconds after a long session)
     F64 mNextSpace = 0.0;

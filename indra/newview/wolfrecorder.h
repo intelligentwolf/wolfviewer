@@ -93,8 +93,9 @@ namespace WolfRecorder
     bool previewPicture(U32& serial, std::vector<U8>& rgb);
 
     /** Main thread, from a view's draw(): true when a whole-window recording runs and this view must be kept out of
-     *  the video - the view then returns without drawing, and the recorder draws it right after the picture copy
-     *  (as it does the recording indicator). For the recorder's own window. */
+     *  the video - the view then returns without drawing. From then until the recording ends the recorder draws it
+     *  itself, right after the picture copy, every frame (as it does the recording indicator) - also when the UI is
+     *  cached (RenderUIBuffer). For the recorder's own window (Paul: "the recording window should never be recorded"). */
     bool holdBackFromVideo(LLView* view);
 
     /** True when the world sound can be recorded this session (the sound engine's mirror route is running). */

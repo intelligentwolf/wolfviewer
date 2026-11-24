@@ -29,9 +29,13 @@
 #include "lldirpicker.h"
 #include "llfloaterreg.h"
 #include "llfontgl.h"
+#include "llfocusmgr.h"
 #include "llimage.h"
+#include "lllocalcliprect.h"
 #include "llrender2dutils.h"
+#include "llscrollcontainer.h"
 #include "llsliderctrl.h"
+#include "lltooltip.h"
 #include "lltextbox.h"
 #include "lluicolortable.h"
 #include "lluictrlfactory.h"
@@ -239,6 +243,8 @@ bool WolfFloaterRecorder::postBuild()
     mFps = getChild<LLComboBox>("fps_combo");
     mLimitCombo = getChild<LLComboBox>("limit_combo");
     mMonitor = getChild<LLView>("monitor");
+    mScroll = getChild<LLScrollContainer>("settings_scroll");
+    mSettingsPanel = getChild<LLView>("settings_panel");
     mMeterViews[WolfRecorder::SOURCE_WORLD] = getChild<LLView>("world_meter");
     mMeterViews[WolfRecorder::SOURCE_VOICE] = getChild<LLView>("voice_meter");
     mMeterViews[WolfRecorder::SOURCE_MIC] = getChild<LLView>("mic_meter");
@@ -306,6 +312,7 @@ void WolfFloaterRecorder::onRecord()
     {
         std::string error;
         if (!WolfRecorder::start(error)) mStartError = error;
+        else if (WolfRecorder::wantsWholeWindow()) LLToolTipMgr::instance().hideToolTips();   // e.g. Record's own tooltip
     }
     mNextSpace = 0.0;
     refresh();
@@ -322,16 +329,54 @@ void WolfFloaterRecorder::draw()
 {
     // a whole-window recording: this window is drawn after the picture copy instead (never in the video)
     if (WolfRecorder::holdBackFromVideo(this)) return;
+    if (WolfRecorder::wantsWholeWindow())
+    {
+        // no tooltip of this window in the video: one already showing when the recording started (the mouse resting
+        // on a button) goes; new ones are not made (handleToolTip). The tooltip view is part of the recorded UI.
+        LLToolTipMgr& tips = LLToolTipMgr::instance();
+        S32 mx = 0, my = 0;
+        LLUI::getInstance()->getMousePositionLocal(this, &mx, &my);
+        if (tips.toolTipVisible() && (pointInView(mx, my) || tips.getMouseNearRect().overlaps(calcScreenRect())))
+        {
+            tips.hideToolTips();
+        }
+    }
     refresh();
+    followKeyboardFocus();
     updatePreview();
     updateMeters();
     LLFloater::draw();
     if (isMinimized()) return;
     drawMonitor();
+    // the meters scroll with the settings: drawn clipped to the scroll container's visible part, so one scrolled out
+    // of sight never paints over the buttons (LLLocalClipRect: in this window's coordinates, the current UI origin)
+    LLRect visible;
+    if (!mScroll->localRectToOtherView(mScroll->getContentWindowRect(), &visible, this)) return;
+    LLLocalClipRect clip(visible);
     for (int i = 0; i < WolfRecorder::SOURCE_COUNT; ++i)
     {
         LLRect r;
-        if (mMeterViews[i]->localRectToOtherView(mMeterViews[i]->getLocalRect(), &r, this)) drawMeter(i, r);
+        if (mMeterViews[i]->localRectToOtherView(mMeterViews[i]->getLocalRect(), &r, this) && r.overlaps(visible))
+        {
+            drawMeter(i, r);
+        }
+    }
+}
+
+void WolfFloaterRecorder::followKeyboardFocus()
+{
+    // a control reached with the keyboard (Tab) is scrolled into view: LLScrollContainer does not follow the focus
+    // itself; scrollToShowRect takes the rect in the scrolled panel's coordinates (llscrollcontainer.cpp)
+    LLFocusableElement* focus = gFocusMgr.getKeyboardFocus();
+    if (focus == mLastFocus) return;
+    mLastFocus = focus;
+    LLView* v = dynamic_cast<LLView*>(focus);
+    if (!v || !v->hasAncestor(mSettingsPanel)) return;
+    LLRect r;
+    if (v->localRectToOtherView(v->getLocalRect(), &r, mSettingsPanel))
+    {
+        mScroll->scrollToShowRect(r);
+        LL_DEBUGS("WolfRecorder") << "keyboard focus on " << v->getName() << ": scrolled to show it" << LL_ENDL;
     }
 }
 
@@ -718,11 +763,16 @@ void WolfFloaterRecorder::refresh()
     mPlayBtn->setVisible(mSaved && !offer_codec);
     mSavedFolderBtn->setVisible(mSaved && !offer_codec);
 
-    // settings are fixed for a recording (the levels stay live)
+    // settings are fixed for a recording (the levels stay live); a list left open when Record was pressed closes, so
+    // no list of this window is ever in the video (combo lists are popups of the whole UI, not of this window)
     for (const char* name : { "size_combo", "fps_combo", "show_ui_check", "world_check", "voice_check", "mic_check",
                               "change_folder_btn", "limit_combo" })
     {
         getChild<LLUICtrl>(name)->setEnabled(!busy);
+    }
+    if (busy)
+    {
+        for (LLComboBox* combo : { mSize, mFps, mLimitCombo }) combo->hideList();
     }
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!busy && now >= mNextStatic) refreshStatic();

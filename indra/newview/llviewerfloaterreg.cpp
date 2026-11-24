@@ -107,6 +107,7 @@
 #include "llfloatermodelpreview.h"
 #include "wolffloatersoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
 #include "wolffloatervulkan.h"   // [VULKAN BACKEND 2026-11-08/]
+#include "wolffloaterrecorder.h"   // [W111 VIDEO 2026-11-24/]
 #include "wolffloaterskis.h"   // [SKIS 2026-11-06/]
 #include "wolffloaterhuds.h"   // [HUDS BUTTON 2026-11-10/]
 #include "wolffloatertutorials.h"   // [TUTORIALS 2026-11-13/] ticket 847
@@ -707,6 +708,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
     LLFloaterReg::add("wolf_bug_report", "floater_wolf_bug_report.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBugReport>);   // [WOLF BUG REPORT 2026-10-24/] Report a Problem: ticket + viewer logs
     LLFloaterReg::add("wolf_sound_effects", "floater_wolf_sound_effects.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSoundEffects>);   // [SOUND EFFECTS 2026-11-06]
+    LLFloaterReg::add("wolf_recorder", "floater_wolf_recorder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterRecorder>);   // [W111 VIDEO 2026-11-24] Video Recorder (ticket 1033)
     LLFloaterReg::add("wolf_vulkan", "floater_wolf_vulkan.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterVulkan>);   // [VULKAN BACKEND 2026-11-08] Wolf World > Vulkan Renderer...
     LLFloaterReg::add("wolf_skis", "floater_wolf_skis.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSkis>);   // [SKIS 2026-11-06] ticket 556
     LLFloaterReg::add("wolf_huds", "floater_wolf_huds.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterHuds>);   // [HUDS BUTTON 2026-11-10] the HUDs button

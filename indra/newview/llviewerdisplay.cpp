@@ -28,6 +28,7 @@
 
 #include "llviewerdisplay.h"
 #include "wolfvrscreen.h"   // [VR BIG SCREEN 2026-11-03/] WolfVRScreen::captureFrame
+#include "wolfrecorder.h"   // [W111 VIDEO 2026-11-24/] WolfRecorder::captureWorld, captureWholeWindowAndDrawIndicator
 #include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/] WolfVkBridge::present in place of swapBuffers in Vulkan mode
 #include "wolfmemorylog.h"   // [W106 MEMLOG 2026-11-13/] WolfMemoryLog::idle
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> far clip grows with height
@@ -1806,6 +1807,7 @@ void render_ui(F32 zoom_factor, int subfield)
     // [VR NAME TAGS 2026-11-13] a headset view: the name tags, hover text and voice dots into this eye's picture first
     const bool vr_hud_objects_drawn = WolfVRScreen::drawHudObjectsInEye();
     WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
+    WolfRecorder::captureWorld();   // [W111 VIDEO 2026-11-24/] Video Recorder, world only: the same finished world
     // [VULKAN HUD 2026-11-09] In Vulkan mode the world layer is taken AFTER the HUD attachments (below), so a worn HUD is
     // drawn by OpenGL straight over the world in the default framebuffer, exactly as in OpenGL mode, and only the 2D/3D UI
     // goes onto the cleared UI layer. Taken before them, the HUD landed on that cleared (0,0,0,0) layer with alpha writes
@@ -1913,6 +1915,9 @@ void render_ui(F32 zoom_factor, int subfield)
         gViewerWindow->updateDebugText();
         { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui debugtext R" : "ui debugtext L");   // [VR FRAME PARTS 2026-11-05]
           gViewerWindow->drawDebugText(); }
+        // [W111 VIDEO 2026-11-24] Video Recorder: the whole window as the resident sees it (with the interface), then the
+        // recording indicator over it - after the copy, so it is never in the video
+        WolfRecorder::captureWholeWindowAndDrawIndicator();
     }
     wolf_set_ui_coverage(false);   // [VULKAN UI COVERAGE 2026-11-09/] (see above)
     WolfVRScreen::captureLayer();   // [VR HUD LAYER 2026-11-04/] the HUDs and floaters again, on their own, for the headset

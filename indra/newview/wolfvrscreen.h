@@ -40,6 +40,11 @@ namespace WolfVRScreen
      *  clears it for the UI, so captureFrame can hand the headset the same composite the Vulkan window shows
      *  (llviewerdisplay.cpp render_ui, between captureWorld and WolfVkBridge::captureWorld). */
     void keepWorldForBigScreen();
+    /** [W111 VIDEO 2026-11-24] For the video recorder at swap (wolfrecorder.cpp): the GL framebuffer that holds the whole
+     *  window as the resident sees it - 0 for the back buffer (OpenGL mode, or Vulkan mode without a kept world this
+     *  frame), else the Vulkan-mode composite (the kept world under the UI layer), made once a frame and shared with
+     *  Big Screen. GL state (read/draw framebuffers, sRGB, scissor) is left as it was found. */
+    U32 wholeWindowFramebuffer();
     void pumpInput();
     /** [VR STEREO 2026-11-04] The main loop's display(): one pass, or one per eye when the headset is in VR 3D Mode
      *  with stereo on (llappviewer.cpp, in place of display()). */

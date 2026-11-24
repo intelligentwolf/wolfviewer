@@ -148,6 +148,14 @@ void LLAudioEngine_OpenAL::setMixTap(MixTapFn fn, void* user)
     mMixTap.store(fn);
 }
 
+// [W111 VIDEO 2026-11-24] as setMixTap. A tap being removed may still be running on the mixer thread for one block, so
+// the recorder's tap and its user data live for the whole session (static storage in wolfrecorder.cpp).
+void LLAudioEngine_OpenAL::setRecorderMixTap(MixTapFn fn, void* user)
+{
+    if (fn) mRecMixTapUser.store(user);
+    mRecMixTap.store(fn);
+}
+
 bool LLAudioEngine_OpenAL::initMirrorMix()
 {
     ALCcontext* out_ctx = alcGetCurrentContext();   // alutInit's context on the speakers
@@ -238,6 +246,7 @@ void LLAudioEngine_OpenAL::shutdownMirrorMix()
 {
     if (!mLoopDevice) return;
     mMixTap.store(nullptr);
+    mRecMixTap.store(nullptr);   // [W111 VIDEO 2026-11-24/]
     // Back to alutInit's own context, so alutExit closes what alutInit opened, exactly as without the mirror.
     alcMakeContextCurrent(mOutContext);
     alSourceStop(mOutSource);
@@ -267,6 +276,10 @@ ALsizei AL_APIENTRY LLAudioEngine_OpenAL::onOutputPull(ALvoid* user, ALvoid* dat
     if (MixTapFn tap = self->mMixTap.load())
     {
         tap(static_cast<const F32*>(data), (U32)frames, MIRROR_RATE, self->mMixTapUser.load());
+    }
+    if (MixTapFn rec = self->mRecMixTap.load())   // [W111 VIDEO 2026-11-24/] the video recorder's copy (setRecorderMixTap)
+    {
+        rec(static_cast<const F32*>(data), (U32)frames, MIRROR_RATE, self->mRecMixTapUser.load());
     }
     if (self->mSpeakersMuted.load())
     {

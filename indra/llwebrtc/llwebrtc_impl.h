@@ -178,6 +178,7 @@ public:
     void  SetSpeechSource(LLWebRTCSpeechSource* src) { mSpeechSource.store(src, std::memory_order_release); }
     void  SetCaptureTap(LLWebRTCPlayoutTap* tap) { mCaptureTap.store(tap, std::memory_order_release); }
     void  SetListenTap(LLWebRTCPlayoutTap* tap) { mListenTap.store(tap, std::memory_order_release); }
+    void  SetRecorderTap(LLWebRTCPlayoutTap* tap) { mRecorderTap.store(tap, std::memory_order_release); }   // [W111 VIDEO 2026-11-24/]
     // One 10 ms buffer from the headset microphone into the engine, as RecordedDataIsAvailable would deliver it.
     int32_t DeliverCapture(const void* audio_data, size_t number_of_frames, size_t bytes_per_frame,
                            size_t number_of_channels, uint32_t samples_per_sec, uint32_t total_delay_ms,
@@ -196,6 +197,7 @@ private:
     std::atomic<LLWebRTCSpeechSource*>   mSpeechSource{ nullptr };   // [AI MODE 2026-11-05]
     std::atomic<LLWebRTCPlayoutTap*>     mCaptureTap{ nullptr };
     std::atomic<LLWebRTCPlayoutTap*>     mListenTap{ nullptr };
+    std::atomic<LLWebRTCPlayoutTap*>     mRecorderTap{ nullptr };   // [W111 VIDEO 2026-11-24] the video recorder's copy
     std::vector<int16_t>                 mSpeechBuf;                 // capture thread only
 
 };
@@ -360,6 +362,7 @@ public:
     void SetSpeechSource(LLWebRTCSpeechSource* src) { audio_transport_.SetSpeechSource(src); }
     void SetCaptureTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetCaptureTap(tap); }
     void SetListenTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetListenTap(tap); }
+    void SetRecorderTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetRecorderTap(tap); }   // [W111 VIDEO 2026-11-24/]
     void  SetTuning(bool tuning, bool mute)
     {
         tuning_ = tuning;
@@ -514,6 +517,7 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     void setSpeechSource(LLWebRTCSpeechSource* source) override;
     void setCaptureTap(LLWebRTCPlayoutTap* tap) override;
     void setListenTap(LLWebRTCPlayoutTap* tap) override;
+    void setRecorderPlayoutTap(LLWebRTCPlayoutTap* tap) override;   // [W111 VIDEO 2026-11-24/]
     void setSpeechGain(bool open) override;
 
     void intSetMute(bool mute, int delay_ms = 20);

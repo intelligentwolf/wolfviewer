@@ -393,6 +393,11 @@ int32_t LLWebRTCAudioTransport::NeedMorePlayData(size_t   number_of_frames,
         {
             tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
         }
+        // [W111 VIDEO 2026-11-24] the voices as heard, for the video recorder (before any silencing for the headset)
+        if (LLWebRTCPlayoutTap* tap = mRecorderTap.load(std::memory_order_acquire))
+        {
+            tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
+        }
         if (mSilenced.load(std::memory_order_relaxed))
         {
             memset(audio_data, 0, number_of_frames * number_of_channels * sizeof(int16_t));
@@ -1241,6 +1246,15 @@ void LLWebRTCImpl::setListenTap(LLWebRTCPlayoutTap* tap)
     if (mDeviceModule)
     {
         mDeviceModule->SetListenTap(tap);
+    }
+}
+
+// [W111 VIDEO 2026-11-24] see setRecorderPlayoutTap (llwebrtc.h)
+void LLWebRTCImpl::setRecorderPlayoutTap(LLWebRTCPlayoutTap* tap)
+{
+    if (mDeviceModule)
+    {
+        mDeviceModule->SetRecorderTap(tap);
     }
 }
 

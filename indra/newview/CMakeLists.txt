@@ -1077,6 +1077,8 @@ set(viewer_SOURCE_FILES
     wolfsoundeffects.cpp   # [SOUND EFFECTS 2026-11-06]
     wolffloatersoundeffects.cpp   # [SOUND EFFECTS 2026-11-06]
     wolffloatervulkan.cpp   # [VULKAN BACKEND 2026-11-08] Wolf World > Vulkan Renderer
+    wolffloaterrecorder.cpp   # [W111 VIDEO 2026-11-24] Video Recorder window
+    wolfrecorder.cpp   # [W111 VIDEO 2026-11-24] Video Recorder: capture, sound mix, encoding thread
     wolfskis.cpp   # [SKIS 2026-11-06]
     wolfskihud.cpp   # [SKIS 2026-11-06]
     wolffloaterskis.cpp   # [SKIS 2026-11-06]
@@ -2147,6 +2149,8 @@ set(viewer_HEADER_FILES
     wolfsoundeffects.h   # [SOUND EFFECTS 2026-11-06]
     wolffloatersoundeffects.h   # [SOUND EFFECTS 2026-11-06]
     wolffloatervulkan.h   # [VULKAN BACKEND 2026-11-08]
+    wolffloaterrecorder.h   # [W111 VIDEO 2026-11-24]
+    wolfrecorder.h   # [W111 VIDEO 2026-11-24]
     wolfskis.h   # [SKIS 2026-11-06]
     wolfskihud.h   # [SKIS 2026-11-06]
     wolffloaterskis.h   # [SKIS 2026-11-06]

@@ -229,6 +229,11 @@ class LLWebRTCDeviceInterface
     virtual void setCaptureTap(LLWebRTCPlayoutTap* tap) = 0;
     virtual void setListenTap(LLWebRTCPlayoutTap* tap) = 0;
     virtual void setSpeechGain(bool open) = 0;
+
+    // [W111 VIDEO 2026-11-24] the video recorder's own copy of the voices as heard (newview wolfrecorder.cpp), a slot of
+    // its own beside the DJ, VR and AI taps; called on the playout thread like them, before setPlayoutSilenced silences
+    // the speakers. nullptr removes it; the tap object must outlive the voice engine (the recorder's is static).
+    virtual void setRecorderPlayoutTap(LLWebRTCPlayoutTap* tap) = 0;
 };
 
 // LLWebRTCAudioInterface provides the viewer with a way

@@ -21031,6 +21031,127 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>0</integer>
 		</map>
+		<key>WolfRecorderSize</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): picture height of the video: 720 (1280x720) or 1080 (1920x1080). The window is fitted inside, with black bars when its shape is not 16:9.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>720</integer>
+		</map>
+		<key>WolfRecorderFps</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): frames a second the recorder aims for: 30 or 60. When the viewer draws fewer, the video has fewer (each frame keeps its real time).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>30</integer>
+		</map>
+		<key>WolfRecorderShowInterface</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): record the whole window (menus, windows, name tags, HUDs) instead of the world only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfRecorderSoundWorld</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): record the world sound (sounds, music, media). Needs the sound engine's mixing route, which starts with the viewer: a change takes effect after restarting WolfViewer (llstartup.cpp setMirrorMix).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfRecorderSoundVoice</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): record voice chat (other people's voices as heard).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfRecorderSoundMic</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): record your own microphone. The microphone is opened only while a recording runs.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfRecorderLevelWorld</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): level of the world sound in the video (0 to 2, 1 = as heard).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>1.0</real>
+		</map>
+		<key>WolfRecorderLevelVoice</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): level of voice chat in the video (0 to 2).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>1.0</real>
+		</map>
+		<key>WolfRecorderLevelMic</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): level of your microphone in the video (0 to 2).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>1.0</real>
+		</map>
+		<key>WolfRecorderMaxMinutes</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): a recording stops by itself after this many minutes (short videos; a warning shows 30 seconds before).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>5</integer>
+		</map>
+		<key>WolfRecorderFolder</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): the folder videos are saved in; empty = the computer's Videos folder (Movies on macOS), in a WolfViewer folder.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string></string>
+		</map>
 		<key>WolfVRSoundReady</key>
 		<map>
 			<key>Comment</key>

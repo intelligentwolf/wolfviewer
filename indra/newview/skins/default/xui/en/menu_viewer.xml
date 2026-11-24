@@ -620,6 +620,14 @@
              function="Floater.Show"
              parameter="360capture" />
         </menu_item_call>
+        <!-- [W111 VIDEO 2026-11-24] Video Recorder (ticket 1033), next to the snapshots; also Wolf World > Tools -->
+        <menu_item_call
+         label="Video Recorder..."
+         name="WolfVideoRecorder">
+            <menu_item_call.on_click
+             function="Floater.ToggleOrBringToFront"
+             parameter="wolf_recorder" />
+        </menu_item_call>
 
       <menu_item_call
         label="Money Tracker"
@@ -2602,6 +2610,10 @@
             <!-- WolfViewer 2026-09-18 / PAINTERS 2026-09-20: World > Photo Effects… opens the floater
            (floater_wolf_photo_effects.xml: a tile per style, strength slider). The WolfPhoto.*
            listeners in llviewermenu.cpp stay for keybindings; the submenu they served is gone. -->
+            <!-- [W111 VIDEO 2026-11-24] Video Recorder (ticket 1033); every grid. Also Avatar > Video Recorder... -->
+            <menu_item_call label="Video Recorder..." name="WolfToolsVideoRecorder">
+                <menu_item_call.on_click function="Floater.ToggleOrBringToFront" parameter="wolf_recorder" />
+            </menu_item_call>
             <menu_item_check label="Photo Effects..." name="WolfPhotoEffects">
                 <menu_item_check.on_check function="Floater.Visible" parameter="wolf_photo_effects" />
                 <menu_item_check.on_click function="Floater.Toggle" parameter="wolf_photo_effects" />

@@ -1129,7 +1129,10 @@ bool idle_startup()
                 // (llaudioengine_openal.h setMirrorMix); off, the engine plays exactly as before. [VR OFF AT START
                 // 2026-11-04] VR itself is never on at start now, so this is decided by WolfVRSoundReady (a headset
                 // has been in VR on this PC before): only the internal route, nothing sent or muted until VR is on.
-                LLAudioEngine_OpenAL::setMirrorMix(gSavedSettings.getBOOL("WolfVRSoundReady"));
+                // [W111 VIDEO 2026-11-24] ...or the Video Recorder records the world sound (WolfRecorderSoundWorld, on by
+                // default, Paul 24 Nov: "run the mirror whenever Record sound is ticked"): its tap is the same mix.
+                LLAudioEngine_OpenAL::setMirrorMix(gSavedSettings.getBOOL("WolfVRSoundReady")
+                                                   || gSavedSettings.getBOOL("WolfRecorderSoundWorld"));
                 gAudiop = (LLAudioEngine *) new LLAudioEngine_OpenAL();
             }
 #endif

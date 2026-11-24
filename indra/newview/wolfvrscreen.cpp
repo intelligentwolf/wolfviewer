@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfvrscreen.h"
+#include "wolfrecorder.h"   // [W111 VIDEO 2026-11-24/] WolfRecorder::wantsWholeWindow (the Vulkan composite)
 
 #include "llagent.h"
 #include "llagentcamera.h"
@@ -133,6 +134,8 @@ namespace
         S32 w = 0, h = 0;
         U32 kept_frame = 0;
         bool kept = false;
+        U32 composed_frame = 0;    // [W111 VIDEO 2026-11-24] out_fbo already holds this frame's composite (recorder + Big Screen)
+        bool composed = false;
         bool failed = false;       // the program would not build: Big Screen in Vulkan mode stays UI-only, said once
     };
     VkBigScreen gVkBig;
@@ -783,8 +786,15 @@ namespace
     // GL_FRAMEBUFFER_SRGB and the scissor test off (captureInto).
     GLuint composeVkBigScreen(S32 ww, S32 wh)
     {
+        // [W111 VIDEO 2026-11-24] the video recorder (wolfrecorder.cpp) and Big Screen can both want the composite in the
+        // same frame: made once, the second asker gets the same framebuffer
+        if (gVkBig.composed && gVkBig.composed_frame == LLFrameTimer::getFrameCount() && ww == gVkBig.w && wh == gVkBig.h)
+        {
+            return gVkBig.out_fbo;
+        }
         const bool kept = gVkBig.kept && gVkBig.kept_frame == LLFrameTimer::getFrameCount();
         gVkBig.kept = false;
+        gVkBig.composed = false;
         if (!kept || ww != gVkBig.w || wh != gVkBig.h || !makeVkBigProgram()) return 0;
         // the UI: the back buffer as it is at swap (GL 4.6 core 18.3.1 glBlitFramebuffer, same size, so 1:1)
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -823,6 +833,8 @@ namespace
         if (blend) glEnable(GL_BLEND);
         if (depth) glEnable(GL_DEPTH_TEST);
         if (cull) glEnable(GL_CULL_FACE);
+        gVkBig.composed = true;                                     // [W111 VIDEO 2026-11-24/]
+        gVkBig.composed_frame = LLFrameTimer::getFrameCount();
         return gVkBig.out_fbo;
     }
 
@@ -2191,11 +2203,36 @@ void displayFrame()
 
 void captureFrame() { captureInto(false); }
 
+// [W111 VIDEO 2026-11-24] see wolfvrscreen.h
+U32 wholeWindowFramebuffer()
+{
+    if (!gViewerWindow) return 0;
+    if (!WolfVkBridge::isActive()) return 0;   // OpenGL mode: the back buffer is the whole window
+    const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
+    if (ww <= 0 || wh <= 0) return 0;
+    GLint read_fb = 0, draw_fb = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
+    const GLboolean srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (srgb) glDisable(GL_FRAMEBUFFER_SRGB);   // composeVkBigScreen's precondition (captureInto does the same)
+    if (scissor) glDisable(GL_SCISSOR_TEST);
+    const U32 fbo = composeVkBigScreen(ww, wh);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fb);
+    if (read_fb == 0) glReadBuffer(GL_BACK);
+    if (srgb) glEnable(GL_FRAMEBUFFER_SRGB);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    return fbo;
+}
+
 void keepWorldForBigScreen()
 {
     // [VR BIG SCREEN VULKAN 2026-11-09] see VkBigScreen. Only what captureInto(false) would use this frame: Vulkan mode,
     // Big Screen streaming, a real frame (not a snapshot or reflection-probe pass)
-    if (!WolfVkBridge::isActive() || gSnapshot || gCubeSnapshot || !gViewerWindow || !WolfVRStream::bigScreenWanted()) return;
+    // [W111 VIDEO 2026-11-24] ...or the video recorder recording with the interface shown (WolfRecorder::wantsWholeWindow)
+    if (!WolfVkBridge::isActive() || gSnapshot || gCubeSnapshot || !gViewerWindow
+        || !(WolfVRStream::bigScreenWanted() || WolfRecorder::wantsWholeWindow())) return;
     const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
     if (!ensureVkBigTextures(ww, wh)) return;
     GLint read_fb = 0, draw_fb = 0;

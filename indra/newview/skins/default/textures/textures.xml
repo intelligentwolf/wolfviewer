@@ -215,6 +215,7 @@ with the same filename but different name
   <texture name="Command_FaceNearest_Icon"  file_name="toolbar_icons/facenearest.png"  preload="true" />     <!-- FS:Chanayane Compass floater -->
   <texture name="Command_Search_Icon"       file_name="toolbar_icons/search.png"       preload="true" />
   <texture name="Command_Snapshot_Icon"     file_name="toolbar_icons/snapshot.png"     preload="true" />
+  <texture name="Command_WolfRecorder_Icon" file_name="toolbar_icons/wolf_recorder.png" preload="true" />   <!-- [W111 VIDEO 2026-11-24] video camera with a red record dot -->
   <texture name="Command_Speak_Icon"        file_name="toolbar_icons/speak.png"        preload="true" />
   <!-- WolfViewer 2026-09-06: Wolf Territories-only commands -->
   <!-- [PAINTERS 2026-09-20] Photo Effects floater tiles (floater_wolf_photo_effects.xml) -->

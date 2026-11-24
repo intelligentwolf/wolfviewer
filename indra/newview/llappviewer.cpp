@@ -92,6 +92,7 @@
 #include "wolfvkbridge.h"       // [VULKAN BACKEND 2026-11-08/] WolfRenderBackend decision, About lines, report fields
 #include "wolfaimode.h"         // [AI MODE 2026-11-05/]
 #include "wolfvraudio.h"        // [VR AUDIO 2026-11-04/] WolfVRAudio::shutdown
+#include "wolfrecorder.h"       // [W111 VIDEO 2026-11-24/] WolfRecorder::shutdown
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
 #include "wolffloaterdj.h"      // [WOLF DJ 2026-10-04/] wolfdj_on_app_quit
 #include "wolfdjplayer.h"       // [WOLF DJ 2026-10-04/] WolfDJPlayer::shutdown
@@ -1893,6 +1894,7 @@ bool LLAppViewer::doFrame()
                 pauseMainloopTimeout();
                 saveFinalSnapshot();
 
+                WolfRecorder::shutdown();  // [W111 VIDEO 2026-11-24/] a recording finishes and its taps go, before voice goes
                 WolfVRAudio::shutdown();   // [VR AUDIO 2026-11-04/] before voice goes
                 if (WolfAIMode::instanceExists()) WolfAIMode::instance().shutdown();   // [AI MODE 2026-11-05/] its taps too
                 if (LLVoiceClient::instanceExists())
@@ -2084,6 +2086,7 @@ bool LLAppViewer::doFrame()
         }
 
         pingMainloopTimeout("Main:TerminateVoice");
+        WolfRecorder::shutdown();  // [W111 VIDEO 2026-11-24/] a recording finishes and its taps go first
         WolfVRAudio::shutdown();   // [VR AUDIO 2026-11-04/] the headset's taps off the sound engine and voice first
         if (WolfAIMode::instanceExists()) WolfAIMode::instance().shutdown();   // [AI MODE 2026-11-05/] its taps too
         if (LLVoiceClient::instanceExists())

@@ -92,6 +92,11 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         bool isMixMirrored() const { return mLoopDevice != nullptr; }
         /** fn(stereo float, frames, rate, user) on the OpenAL mixer thread; it must copy and return. NULL = off. */
         void setMixTap(MixTapFn fn, void* user);
+        /** [W111 VIDEO 2026-11-24] A second tap of the same mix for the video recorder (newview wolfrecorder.cpp), so the
+         *  recorder and the VR headset can both have it at once. Same contract as setMixTap: called on the OpenAL mixer
+         *  thread with the block the speakers are about to play (before setSpeakersMuted silences it); it must copy
+         *  and return. NULL = off. Only does anything while isMixMirrored(). */
+        void setRecorderMixTap(MixTapFn fn, void* user);
         void setSpeakersMuted(bool muted) { mSpeakersMuted.store(muted); }
 
     private:
@@ -111,6 +116,8 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         PFNALCSETTHREADCONTEXTPROC mSetThreadContext = nullptr;
         std::atomic<MixTapFn>     mMixTap{nullptr};
         std::atomic<void*>        mMixTapUser{nullptr};
+        std::atomic<MixTapFn>     mRecMixTap{nullptr};      // [W111 VIDEO 2026-11-24] see setRecorderMixTap
+        std::atomic<void*>        mRecMixTapUser{nullptr};
         std::atomic<bool>         mSpeakersMuted{false};
         static constexpr U32      MIRROR_RATE = 48000;      // the headset stream's rate (wolfvrpipe.h)
 

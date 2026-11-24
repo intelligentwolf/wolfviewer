@@ -87,6 +87,7 @@ public:
         H_BASE_ROWA_0, H_BASE_ROWA_LAST = H_BASE_ROWA_0 + 11,   // a row's first button (Put it back, Place it, Attach)
         H_BASE_ROWB_0, H_BASE_ROWB_LAST = H_BASE_ROWB_0 + 11,   // its second (Take down, Send to my base)
         H_BASE_GHOST_0, H_BASE_GHOST_LAST = H_BASE_GHOST_0 + 11, // a ghost in the world: click to choose it
+        H_RADAR_BASE_0, H_RADAR_BASE_LAST = H_RADAR_BASE_0 + 23,  // a starbase on the radar (BaseRules.CAP_MAX 24)
     };
 
 private:
@@ -95,7 +96,8 @@ private:
     F32 mPanelB = 0.f, mPanelT = 0.f;     // the band, view-local, this frame
     bool mBandDrawn = false;
     S32 mPressed = H_NONE;
-    std::string mPicked;                  // a place picked on the radar: "station", "belt", "wormhole"
+    std::string mPicked;                  // a place picked on the radar: "station", "belt", "wormhole", "base:<id>"
+    std::string mDockBase;                // [STARBASES] the base last picked on the radar: DOCK docks there when it is nearer
     WolfHudResize mResize{ "WolfStarfoldDeckScale" };
     F32 mWorldCx = 0.f, mWorldCy = 0.f, mWorldHalfW = 1.f, mWorldHalfH = 1.f;   // the view above the band, for point and fly
 

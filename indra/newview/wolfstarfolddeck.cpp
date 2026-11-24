@@ -724,6 +724,25 @@ void WolfStarfoldDeck::drawRadar(F32 cx, F32 cy, F32 rx, F32 ry, F32 u)
         labels.push_back({ m.x, m.head + 16.f * u, "WORMHOLE" + height(m.dz), c, mPicked == "wormhole" ? 0 : 2 });
         addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_WORMHOLE, "The wormhole to " + sys.mWormholeTo + ": click, then FLY THERE");
     }
+    // [STARBASES 2026-11-24] the starbases here (k=bases, SpaceBases.cs SendBasesList: "so the radar and Fly there know them"): a
+    // small diamond each, yours labelled once the Starbase window has learned which it is; click one, then FLY THERE or DOCK
+    {
+        const WolfStarbase& sb = WolfStarbase::instance();
+        for (size_t i = 0; i < sb.bases().size() && i < 24; ++i)
+        {
+            const WolfStarbase::Known& kb = sb.bases()[i];
+            const Mark m = place(region->getPosAgentFromRegion(kb.mPos));
+            const bool picked = mPicked == "base:" + kb.mId, mineBase = !sb.baseId().empty() && kb.mId == sb.baseId();
+            const LLColor4 c = picked ? C_AMBER : (mineBase ? C_GREEN : C_DIM);
+            stalk(m, c);
+            const F32 d = 6.f * u;
+            quadF(m.x, m.head + d, m.x + d, m.head, m.x, m.head - d, m.x - d, m.head, c);
+            if (picked || mineBase)
+                labels.push_back({ m.x, m.head + 14.f * u, (mineBase ? std::string("YOUR BASE") : upper(kb.mOwner.empty() ? std::string("STARBASE") : kb.mOwner)) + height(m.dz), c, picked ? 0 : 2 });
+            const std::string who = mineBase ? std::string("Your starbase") : (kb.mOwner.empty() ? std::string("A starbase") : kb.mOwner + "'s starbase");
+            addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, (EHit)(H_RADAR_BASE_0 + (S32)i), who + ": click, then FLY THERE or DOCK");
+        }
+    }
     for (size_t i = 0; i < s.mAliens.size() && i < 6; ++i)
     {
         LLVector3 at;   // its object, or the region's position for it (ap=) when it is beyond what this viewer was sent
@@ -861,6 +880,9 @@ void WolfStarfoldDeck::drawHud(F32 u)
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (mClosingFor != s.mTarget)
     {
+        // which position the box stands on (a test reads this: the far clip decides whether the object is here at all)
+        LL_INFOS("WolfStarfold") << "target box: " << (gObjectList.findObject(s.mTarget) ? "the object" : "the region's position (tgp/ap)")
+                                 << ", " << (S32)llround((tp - me).length()) << " m" << LL_ENDL;
         mClosingFor = s.mTarget;
         mClosing = 0.f;
         mLastRange = range;
@@ -1873,7 +1895,28 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
         case H_FIRE: sf.fire(!sf.firing()); break;
         case H_MINE: sf.mine(!sf.mining()); break;
         case H_NEXT: sf.nextTarget(); break;
-        case H_DOCK: sf.dock(); break;
+        case H_DOCK:
+        {
+            // [STARBASES 2026-11-24] a base picked on the radar and nearer than the station: dock there (SpaceBases.cs TryDockBase:
+            // the owner at the core, others at a ready docking ring they are let into; the region says why not), else the station
+            LLVector3 shipAt;
+            bool base = false;
+            if (!mDockBase.empty() && sf.beamEnd(sf.ship().mRoot, -1, shipAt))
+            {
+                for (const WolfStarbase::Known& kb : WolfStarbase::instance().bases())
+                {
+                    if (kb.mId != mDockBase) continue;
+                    LLViewerRegion* region = gAgent.getRegion();
+                    if (!region) break;
+                    const F32 toBase = (region->getPosAgentFromRegion(kb.mPos) - shipAt).length();
+                    const F32 toStation = sf.system().mHaveStation ? (region->getPosAgentFromRegion(sf.system().mStation) - shipAt).length() : 1e9f;
+                    base = toBase < toStation;
+                }
+            }
+            if (base) sf.intent("dock|at=" + mDockBase);
+            else sf.dock();
+            break;
+        }
         case H_MODE: sf.setDrift(!sf.drift()); break;
         case H_THROTTLE: dragThrottle(x); break;
         case H_FLY_STATION: sf.flyTo("station"); break;
@@ -1914,6 +1957,16 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
         case H_SETUP_CLOSE: sf.closeSetup(); break;
         case H_BASE_OPEN: WolfStarbase::instance().toggle(); break;
         default:
+            if (id >= H_RADAR_BASE_0 && id <= H_RADAR_BASE_LAST)
+            {
+                const size_t i = (size_t)(id - H_RADAR_BASE_0);
+                if (i < WolfStarbase::instance().bases().size())
+                {
+                    mDockBase = WolfStarbase::instance().bases()[i].mId;
+                    mPicked = "base:" + mDockBase;
+                }
+                break;
+            }
             if (id >= H_BASE_CLOSE && id <= H_BASE_GHOST_LAST) { pressBase(id); break; }
             if (id >= H_ALIEN_0 && id <= H_ALIEN_LAST)
             {
@@ -2014,7 +2067,9 @@ bool WolfStarfoldDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
     if (const Hit* hit = hitAt(x, y))
     {
         // a quick second click counts as another press (FIRE / MINE toggle back, a second NEXT TARGET), as a single would
-        if (hit->mId != H_NONE && hit->mId != H_THROTTLE) press(hit->mId, x, y);
+        // [STARBASES] never for the Starbase window or the radar's bases: Pack up, Scrap and Take down wait for a deliberate
+        // second press, and a double click must not be taken as one
+        if (hit->mId != H_NONE && hit->mId != H_THROTTLE && !(hit->mId >= H_BASE_OPEN && hit->mId <= H_RADAR_BASE_LAST)) press(hit->mId, x, y);
         return true;
     }
     return onPanel(x, y);

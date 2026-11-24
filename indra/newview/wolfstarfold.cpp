@@ -19,6 +19,7 @@
 #include "wolfstarfold.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
@@ -1030,8 +1031,11 @@ void WolfStarfold::mine(bool on)
 void WolfStarfold::flyTo(const std::string& where)
 {
     if (!piloting()) return;
-    // "base": the pilot's own starbase here (SpaceEngine.cs "fly" -> SpaceBases.cs FlyToBase, wolf-space 1.0.7)
-    if (where != "station" && where != "belt" && where != "wormhole" && where != "stop" && where != "base") return;
+    // "base": the pilot's own starbase here; "base:<id>": any base here, by the first 8+ hex digits of its id (SpaceEngine.cs "fly"
+    // -> SpaceBases.cs FlyToBase, wolf-space 1.0.7)
+    bool baseId = where.size() >= 13 && where.size() <= 37 && where.compare(0, 5, "base:") == 0;
+    for (size_t i = 5; baseId && i < where.size(); ++i) baseId = isxdigit((unsigned char)where[i]) != 0;
+    if (where != "station" && where != "belt" && where != "wormhole" && where != "stop" && where != "base" && !baseId) return;
     mFlyTo = where == "stop" ? std::string() : where;
     say("fly|to=" + where);
     mSentAt = now();

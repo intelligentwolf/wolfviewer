@@ -188,7 +188,12 @@ bool WolfStarbase::receive(const std::string& kind, const std::vector<std::pair<
 {
     if (kind != "bases" && kind != "base" && kind != "bpart" && kind != "bghost" && kind != "bown") return false;
     // one line a message, so a test (the rig reads the log) can see what the region said; never anyone's private words
-    LL_INFOS("WolfStarbase") << "region says k=" << kind << " (" << kv.size() << " fields)" << LL_ENDL;
+    // (k=bpart's part field and k=base's has/state; never k=bases, which carries owners' names)
+    std::string what;
+    for (const auto& p : kv)
+        if ((kind == "bpart" && p.first == "p") || (kind == "base" && (p.first == "has" || p.first == "state")) || (kind == "bghost" && p.first == "kind"))
+            what += " " + p.first + "=" + clean(p.second, 80);
+    LL_INFOS("WolfStarbase") << "region says k=" << kind << " (" << kv.size() << " fields)" << what << LL_ENDL;
     LLViewerRegion* r = gAgent.getRegion();
     if (r && r->getRegionID() != mRegion)
     {

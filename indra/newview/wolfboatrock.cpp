@@ -1184,6 +1184,9 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         {
             surf_zone = auto_gate;   // [TICKET 271 2026-10-27/] was open_w
         }
+        // [T1042 BORDER SEAM 2026-11-24/] waterV.glsl surfKeep: the surf this region's own plane keeps (its field read as the
+        // agent region's when it is the agent's, as a neighbour's otherwise - lldrawpoolwater.cpp wolfZoneAgent)
+        surf_zone *= WolfWaterField::surfKeepAt(*field, rx, ry, regionp == gAgent.getRegion());
         if (surf_zone > 0.001f)
         {
             const F32 dW = 80.f, dH = 80.f;   // <WolfViewer 2026-09-20/> waterV.glsl: 80 m either side, not 1/32 of the span

@@ -100,6 +100,17 @@ public:
         F32 mZoneSY = 768.f;
         std::vector<F32> mZone;
         std::vector<F32> mSurfW;   // <WolfViewer 2026-10-01/> G of mZoneTex, same layout as mZone
+        // [T1042 BORDER SEAM 2026-11-24] B and A of mZoneTex (the texture is RGBA since): how much of the surf train is kept at
+        // each texel, 1 inside, 0 at every edge where the water beyond is drawn by ANOTHER field. Each region's own plane bakes
+        // its surf (path, depth, painted weight) from its own field, so where two fields meet (a border between two regions,
+        // or a region's border with the void planes, which take the agent region's field) the trains disagree in height and
+        // phase: a tear the height of the surf (ticket 1042, IndigoQueen King: a 14.7 m surf painted over Indigo Blue Realm
+        // split at its border with Indigos Ocean, the sea floor and the sky showing through). Two per texel: [0] (B) for this
+        // field drawn as a NEIGHBOUR's (only this region's own plane uses it: every edge of the region fades), [1] (A) for
+        // this field as the AGENT region's (its own plane and the void / hole planes around it use it: only the edges with
+        // another loaded region fade, on both sides of that edge). lldrawpoolwater.cpp says which (wolfZoneAgent).
+        std::vector<F32> mSurfKeep;
+        U64 mSpanRegions = 0;   // [T1042 BORDER SEAM 2026-11-24/] spanRegionsStamp() at the bake: the regions the keep was baked against
     };
 
     static constexpr S32 RES = 256;
@@ -192,6 +203,12 @@ public:
      * Source: wave_zones.js surfWeightAt().
      */
     static F32 surfWeightAt(const Field& f, F32 rx, F32 ry);
+    /**
+     * [T1042 BORDER SEAM 2026-11-24] The surf train's keep at region-relative (rx, ry) (Field::mSurfKeep), nearest texel
+     * like surfWeightAt; 1 outside the span or before a bake. agent_field: the field is the agent region's (waterV.glsl
+     * wolfZoneAgent). waterV.glsl surfKeep the same.
+     */
+    static F32 surfKeepAt(const Field& f, F32 rx, F32 ry, bool agent_field);
     /** [SURF HEIGHT 2026-10-02] The shader's surf zone for a surf weight G (waterV.glsl surfZone), and its inverse. */
     static F32 surfZoneOf(F32 w);
     static F32 surfWeightFor(F32 z);
@@ -248,6 +265,11 @@ private:
      * re-baking every field forever whether anything had changed or not.
      */
     static U64 neighbourStamp(LLViewerRegion* regionp);
+    /**
+     * [T1042 BORDER SEAM 2026-11-24] Which live regions overlap the region-relative rect (x0, y0, sx, sy) - the zone span the
+     * surf keep is baked over: a region arriving or leaving there moves an edge where the water changes field.
+     */
+    static U64 spanRegionsStamp(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy);
     /** <WolfViewer 2026-09-20/> terrainStamp over the patches inside region rect (x0, y0, sx, sy) only: a 51,200 m region has 10 million patches, a 2048 m window 16 thousand. */
     static U64 terrainStampIn(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy);
     /** Terrain height at region-relative (px, py) metres, answering from this region or
@@ -262,7 +284,8 @@ private:
     // Scratch, reused across bakes.
     std::vector<F32> mH, mTmp, mSm, mDist, mOpen, mDepthData, mExpoData, mZoneData;   // <WolfViewer 2026-09-20/> mOpen
     std::vector<F32> mEDepth, mPath;   // <WolfViewer 2026-09-21/> depth per exposure texel, and the eikonal path baked from it
-    std::vector<F32> mSurfMask, mSurfTmp, mSurfGrown, mSurfW, mZoneRG;   // <WolfViewer 2026-10-01/> the surf weight bake
+    std::vector<F32> mSurfMask, mSurfTmp, mSurfGrown, mSurfW, mZoneRG;   // <WolfViewer 2026-10-01/> the surf weight bake (mZoneRG: RGBA since T1042)
+    std::vector<F32> mKeepDist;   // [T1042 BORDER SEAM 2026-11-24/] the surf keep's distance transform
     std::vector<F32> mSurfScale, mScaleNum, mScaleDen, mScaleTmpN, mScaleTmpD;   // [SURF HEIGHT 2026-10-02/] the surf height bake
     bool mRebakeAll = false;   // [WAVES 2026-09-07] set by invalidate()
     U32 mBakes = 0;

@@ -243,7 +243,8 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
                 // [SURF HEIGHT 2026-10-02] the painted surf height there (the weight inside painted
                 // cells is the coverage 1 times the height, wolfwaterfield.cpp bake)
                 run.push_back({ p.first, p.second, gx, gy, dd,
-                                WolfWaterField::surfZoneOf(WolfWaterField::surfWeightAt(*fld, p.first, p.second)) });
+                                WolfWaterField::surfZoneOf(WolfWaterField::surfWeightAt(*fld, p.first, p.second))
+                                    * WolfWaterField::surfKeepAt(*fld, p.first, p.second, true) });   // [T1042 BORDER SEAM 2026-11-24/] the agent region's field
             else
                 flush();
         }

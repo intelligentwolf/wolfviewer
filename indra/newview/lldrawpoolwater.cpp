@@ -863,6 +863,11 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                 cur_shader->uniform2f(s_zone_origin, fld->mZoneX0, fld->mZoneY0);
                 cur_shader->uniform2f(s_zone_size, fld->mZoneSX, fld->mZoneSY);
                 cur_shader->uniform1f(s_zone_ready, fld->mZoneTex ? 1.f : 0.f);
+                // [T1042 BORDER SEAM 2026-11-24] which surf keep this plane reads (wolfwaterfield.h Field::mSurfKeep): the agent
+                // region's own plane and the void / hole planes that share its field (span_plane) read it as the agent's, a
+                // neighbour's own plane as a neighbour's.
+                static LLStaticHashedString s_zone_agent("wolfZoneAgent");
+                cur_shader->uniform1f(s_zone_agent, (rgn == agent_rgn) ? 1.f : 0.f);
             }
             else
             {

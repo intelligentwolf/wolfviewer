@@ -42,6 +42,7 @@ uniform float fftReady;
 uniform float wakeReady;
 uniform float exposureReady;
 uniform float zoneReady;
+uniform float wolfZoneAgent;   // [T1042 BORDER SEAM 2026-11-24/] 1: the zone field is the agent region's (its surf keep in A), 0: a neighbour's (B)
 // [DRY BUILDS 2026-10-26] The waterline clearance field (wolfwaterfield.h WolfWaterClearance): LEVELS (3) camera-window
 // levels of N (256) texels stacked in rows, RGBA32F (R S_all, G D, B S_dry, A open weight - see wolfClearSample), then the
 // two terrain blocks waterF.glsl reads. wolfClearLevel[k] = (agent-space SW corner of block k's texel grid, texel metres, 0);
@@ -68,6 +69,7 @@ uniform vec4 wolfClearMisc;
 #define wakeReady 0.0
 #define exposureReady 0.0
 #define zoneReady 0.0
+#define wolfZoneAgent 0.0   // [T1042 BORDER SEAM 2026-11-24/] read only behind zoneReady
 #define WOLF_CLEAR_READY 0.0
 #endif
 
@@ -698,6 +700,10 @@ void main()
     // <WolfViewer 2026-10-01> the surf weight (zone field G: the surf cells grown and blurred by a
     // quarter of the surf wavelength, wolfwaterfield.cpp bake). Water.js surfW same.
     float surfW = 0.0;
+    // [T1042 BORDER SEAM 2026-11-24] how much of the surf train this field keeps here (zone field B / A, wolfwaterfield.h
+    // Field::mSurfKeep): 0 at every edge where the water beyond is drawn with another region's field, so two planes' surf
+    // trains (each from its own field: height, depth, phase) never meet at a border. 1 with no zone field, as before.
+    float surfKeep = 1.0;
     if (zoneReady > 0.5)
     {
         vec2 zuv = (regionXY - zoneOrigin) / zoneSize;
@@ -708,6 +714,7 @@ void main()
             vec4 ztex = WOLF_TEX_WOLF_ZONE_FIELD( zuv);
             zoneEnergy = mix(0.55, ztex.r, zf.x * zf.y);
             surfW = ztex.g * zf.x * zf.y;
+            surfKeep = mix(1.0, wolfZoneAgent > 0.5 ? ztex.a : ztex.b, zf.x * zf.y);   // [T1042 BORDER SEAM 2026-11-24/]
             float calmFloor = clamp(calmRipple / max(waveAmplitude, 0.02), 0.0, 1.0);
             float small = clamp(smallScale, calmFloor, 1.0);
             if (zoneEnergy < 0.15)      zoneScale = calmFloor * max(zoneEnergy, 0.0) / 0.15;
@@ -1069,6 +1076,7 @@ void main()
         {
             surfZone = shoreGate;   // [TICKET 271 2026-10-27/] was openW: the painted zone gates it too
         }
+        surfZone *= surfKeep;   // [T1042 BORDER SEAM 2026-11-24/] painted and automatic surf alike: none where two fields meet
         vec2 euv = (regionXY - exposureOrigin) / exposureSize;
         if (surfZone > 0.01 && euv.x >= 0.0 && euv.x <= 1.0 && euv.y >= 0.0 && euv.y <= 1.0)
         {
@@ -1340,7 +1348,10 @@ void main()
                 // surf zone by the water's edge instead of on every crest within 200 m of land. Painted surf is the
                 // designer's (Paul 09-07: "the PEAK of every surf wave carries some") and keeps every crest.
                 float crestFoamW = autoS ? breakF : 1.0;
-                vSurf = vec4(smoothstep(0.3, 1.0, upk) * foamRes * crestFoamW, breakF, crestH, wash * foamRes);   // peak only
+                // [T1042 BORDER SEAM 2026-11-24] the foam fades with the keep too: the crest foam does not follow the height, so
+                // a lowered crest by a border kept its full white up to the edge, and the field beyond (its crests under 0.01 m
+                // there) none - a straight white edge along the border
+                vSurf = vec4(smoothstep(0.3, 1.0, upk) * foamRes * crestFoamW * surfKeep, breakF, crestH, wash * foamRes * surfKeep);   // peak only
                 vShore.w = autoS ? 1.0 : 0.0;
             }
         }

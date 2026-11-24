@@ -17,7 +17,7 @@ done
 c++ -std=c++20 -O2 -g -Wall -Wextra -Wno-unused-parameter -DBOOST_BIND_GLOBAL_PLACEHOLDERS \
     -isystem "$PKG/include" \
     "$NV/wolfvrpipe.cpp" "$NV/wolfvrdevice.cpp" "$NV/wolfvrpipe_video.cpp" "$NV/tests/wolfvrpipe_selftest.cpp" "$NV/qrcodegen/qrcodegen.cpp" \
-    "$NV/wolfvr_openh264.cpp" "$NV/wolfvrcodecfetch.cpp" "${BZ[@]}" \
+    "$NV/wolfvr_openh264.cpp" "$NV/wolfvr_yuv.cpp" "$NV/wolfvrcodecfetch.cpp" "${BZ[@]}" \
     -o "$OUT/wolfvrpipe_selftest" \
     "$PKG/lib/release/libboost_json.a" "$PKG/lib/release/libboost_container.a" \
     "$PKG/lib/release/libssl.a" "$PKG/lib/release/libcrypto.a" "$PKG/lib/release/libjpeg.a" "$PKG/lib/release/libz.a" \

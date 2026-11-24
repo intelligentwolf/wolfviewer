@@ -15,6 +15,7 @@
 
 #include "wolfvrpipe_video.h"
 #include "wolfvr_openh264.h"
+#include "wolfvr_osh264.h"
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,7 @@
 #include <csetjmp>
 #include <cstring>
 #include <cstdlib>
+#include <functional>
 #include <thread>
 #include <type_traits>
 
@@ -595,10 +597,36 @@ std::unique_ptr<Encoder> openEncoder(const std::string& which, uint32_t width, u
 {
     tried.clear();
     const bool any = which.empty() || which == "auto";
+    // [W111 VIDEO 2026-11-24] "h264": every H.264 encoder in the "auto" order, never JPEG (the video recorder).
+    const bool h264 = which == "h264";
     // A grey picture to prove an encoder really produces H.264 (with an SPS) before the stream is handed to it.
     std::vector<uint8_t> probe;
+    // [W111 VIDEO 2026-11-24] Opens with make(), encodes the grey probe, and on an SPS opens a fresh one (the probe used
+    // up the IDR and fed the rate control a grey picture). Failures are added to `tried`.
+    auto probed = [&](const std::function<std::unique_ptr<Encoder>(std::string&)>& make,
+                      const std::string& label) -> std::unique_ptr<Encoder> {
+        std::string err;
+        auto enc = make(err);
+        if (enc)
+        {
+            if (probe.empty()) probe.assign((size_t)width * height * 4, 128);
+            EncodedFrame test;
+            if (enc->encode(probe.data(), test, err) && !avcCodecString(test.data).empty())
+            {
+                enc.reset();   // one hardware session at a time (some GPUs allow very few)
+                enc = make(err);
+                if (enc) return enc;
+            }
+            else if (err.empty())
+            {
+                err = label + ": no SPS in output";
+            }
+        }
+        tried += (err.empty() ? label + ": failed" : err) + "; ";
+        return nullptr;
+    };
 #if defined(__linux__)
-    if (any || which == "nvenc" || which == "va" || which == "x264")
+    if (any || h264 || which == "nvenc" || which == "va" || which == "x264")
     {
         GstApi& g = gst();
         if (!g.loaded)
@@ -607,54 +635,57 @@ std::unique_ptr<Encoder> openEncoder(const std::string& which, uint32_t width, u
         }
         else
         {
-            probe.assign((size_t)width * height * 4, 128);
             for (const Chain& c : kChains)
             {
-                if (!any && which != c.family) continue;
+                if (!any && !h264 && which != c.family) continue;
                 if (!haveElement(c.element)) { tried += std::string(c.element) + ": not installed; "; continue; }
                 char chain[400];
                 std::snprintf(chain, sizeof(chain), c.fmt, bitrate_kbps, fps * 2);
-                auto enc = std::make_unique<GstH264Encoder>();
-                std::string err;
-                EncodedFrame test;
-                if (enc->open(c.element, chain, width, height, fps, err) && enc->encode(probe.data(), test, err) &&
-                    !avcCodecString(test.data).empty())
-                {
-                    // The probe picture used up the IDR; reopen so the stream starts with one.
-                    enc = std::make_unique<GstH264Encoder>();
-                    if (enc->open(c.element, chain, width, height, fps, err))
-                    {
-                        return enc;
-                    }
-                }
-                tried += (err.empty() ? std::string(c.element) + ": no SPS in output" : err) + "; ";
+                auto enc = probed([&](std::string& err) -> std::unique_ptr<Encoder> {
+                    auto e = std::make_unique<GstH264Encoder>();
+                    if (!e->open(c.element, chain, width, height, fps, err)) return nullptr;
+                    return e;
+                }, c.element);
+                if (enc) return enc;
             }
         }
     }
 #endif
-    // [VR OPENH264 2026-11-03] Cisco's OpenH264, driven directly: the H.264 encoder on Windows and macOS, and the
-    // fallback after the GStreamer ones on Linux.
-    if (any || which == "openh264")
+#if defined(_WIN32)
+    // [W111 VIDEO 2026-11-24] Windows' own H.264 encoders through Media Foundation: the GPU's (hardware MFT) first,
+    // then Microsoft's software encoder. wolfvr_osh264.h.
+    if (any || h264 || which == "mf")
+    {
+        for (bool hw : {true, false})
+        {
+            auto enc = probed([&](std::string& err) {
+                return openMediaFoundationH264(width, height, fps, bitrate_kbps, hw, err);
+            }, hw ? "Media Foundation H.264 (hardware)" : "Media Foundation H.264 (software)");
+            if (enc) return enc;
+        }
+    }
+#elif defined(__APPLE__)
+    // [W111 VIDEO 2026-11-24] macOS's own H.264 encoder, VideoToolbox: hardware first, then Apple's software one.
+    if (any || h264 || which == "vt")
+    {
+        for (bool hw : {true, false})
+        {
+            auto enc = probed([&](std::string& err) {
+                return openVideoToolboxH264(width, height, fps, bitrate_kbps, hw, err);
+            }, hw ? "VideoToolbox H.264 (hardware)" : "VideoToolbox H.264 (software)");
+            if (enc) return enc;
+        }
+    }
+#endif
+    // [VR OPENH264 2026-11-03] Cisco's OpenH264, driven directly: the fallback after the system encoders on Windows
+    // and macOS, and after the GStreamer ones on Linux.
+    if (any || h264 || which == "openh264")
     {
         const OpenH264Tuning tuning;
-        std::string err;
-        auto enc = openOpenH264Encoder(width, height, fps, bitrate_kbps, tuning, err);
-        if (enc)
-        {
-            if (probe.empty()) probe.assign((size_t)width * height * 4, 128);
-            EncodedFrame test;
-            if (enc->encode(probe.data(), test, err) && !avcCodecString(test.data).empty())
-            {
-                // The probe used up the IDR and fed the rate control a grey picture: start again from a fresh one.
-                enc = openOpenH264Encoder(width, height, fps, bitrate_kbps, tuning, err);
-                if (enc) return enc;
-            }
-            else if (err.empty())
-            {
-                err = "openh264: no SPS in output";
-            }
-        }
-        tried += err + "; ";
+        auto enc = probed([&](std::string& err) {
+            return openOpenH264Encoder(width, height, fps, bitrate_kbps, tuning, err);
+        }, "openh264");
+        if (enc) return enc;
     }
     if (any || which == "jpeg")
     {

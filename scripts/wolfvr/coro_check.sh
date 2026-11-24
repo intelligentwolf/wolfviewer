@@ -14,7 +14,7 @@ BZ=()
 for f in blocksort bzlib compress crctable decompress huffman randtable; do gcc-11 -O2 -g -w -c $NV/bzip2/\$f.c -o $OUT/bz2_\$f.o; BZ+=($OUT/bz2_\$f.o); done
 g++-11 -std=c++20 -O2 -g -fsanitize=address -fno-omit-frame-pointer -w -DBOOST_BIND_GLOBAL_PLACEHOLDERS -isystem $PKG/include \
   $NV/wolfvrpipe.cpp $NV/wolfvrdevice.cpp $NV/wolfvrpipe_video.cpp $NV/tests/wolfvrpipe_selftest.cpp $NV/qrcodegen/qrcodegen.cpp \
-  $NV/wolfvr_openh264.cpp $NV/wolfvrcodecfetch.cpp \${BZ[@]} -o $OUT/selftest \
+  $NV/wolfvr_openh264.cpp $NV/wolfvr_yuv.cpp $NV/wolfvrcodecfetch.cpp \${BZ[@]} -o $OUT/selftest \
   $PKG/lib/release/libboost_json.a $PKG/lib/release/libboost_container.a $PKG/lib/release/libssl.a $PKG/lib/release/libcrypto.a \
   $PKG/lib/release/libjpeg.a $PKG/lib/release/libz.a -ldl -lpthread
 EOS

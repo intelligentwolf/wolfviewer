@@ -962,6 +962,9 @@ set(viewer_SOURCE_FILES
     qrcodegen/qrcodegen.cpp   # [VR PIPE 2026-11-03] Nayuki QR Code generator v1.8.0 (MIT), qrcodegen/SOURCES.md
     wolfvr_openh264.cpp   # [VR OPENH264 2026-11-03] Cisco OpenH264 driven directly, loaded at run time (openh264/SOURCES.md)
     wolfvrcodecfetch.cpp   # [VR OPENH264 2026-11-03] first-use download of Cisco's OpenH264 binary (licence: Cisco's own)
+    wolfvr_yuv.cpp   # [W111 VIDEO 2026-11-24] RGBA -> NV12/I420 BT.709 for the H.264 encoders
+    wolfrec_audioenc.cpp   # [W111 VIDEO 2026-11-24] video recorder: sound encoders (Opus via llwebrtc; AAC per platform)
+    wolfrec_mp4.cpp   # [W111 VIDEO 2026-11-24] video recorder: the MP4 writer
     wolffloaterinvisallow.cpp   # [SELECTIVE INVISIBLE MODE 2026-10-30] Invisible Mode: People Who Can See Me
     wolfadultcontent.cpp   # [ADULT CONTENT 2026-10-26] the Adult Content region type (badges, refusals)
     wolffloateragecheck.cpp   # [ADULT CONTENT 2026-10-26] Wolf World > Age Check
@@ -2033,6 +2036,10 @@ set(viewer_HEADER_FILES
     qrcodegen/qrcodegen.hpp   # [VR PIPE 2026-11-03]
     wolfvr_openh264.h   # [VR OPENH264 2026-11-03]
     wolfvrcodecfetch.h   # [VR OPENH264 2026-11-03]
+    wolfvr_yuv.h   # [W111 VIDEO 2026-11-24]
+    wolfvr_osh264.h   # [W111 VIDEO 2026-11-24]
+    wolfrec_audioenc.h   # [W111 VIDEO 2026-11-24]
+    wolfrec_mp4.h   # [W111 VIDEO 2026-11-24]
     wolffloaterinvisallow.h   # [SELECTIVE INVISIBLE MODE 2026-10-30]
     wolfadultcontent.h   # [ADULT CONTENT 2026-10-26]
     wolffloateragecheck.h   # [ADULT CONTENT 2026-10-26]
@@ -2301,6 +2308,14 @@ if (DARWIN)
     SKIP_PRECOMPILE_HEADERS TRUE
   )
 
+  # [W111 VIDEO 2026-11-24] the video recorder's macOS encoders: VideoToolbox H.264, AudioToolbox AAC
+  LIST(APPEND viewer_SOURCE_FILES wolfvr_vth264.mm wolfrec_audioenc_at.mm)
+  set_source_files_properties(
+    wolfvr_vth264.mm wolfrec_audioenc_at.mm
+    PROPERTIES
+    SKIP_PRECOMPILE_HEADERS TRUE
+  )
+
   # This should be compiled with the viewer.
   LIST(APPEND viewer_SOURCE_FILES llappdelegate-objc.mm)
   set_source_files_properties(
@@ -2413,6 +2428,8 @@ if (WINDOWS)
          growlnotifierwin.cpp
          llappviewerwin32.cpp
          wolfdjcapture_win.cpp
+         wolfvr_mfh264.cpp   # [W111 VIDEO 2026-11-24] Media Foundation H.264 (hardware / software MFT)
+         wolfrec_audioenc_mf.cpp   # [W111 VIDEO 2026-11-24] Media Foundation AAC encoder
          llvelopack.cpp
          llwindebug.cpp
          )
@@ -2745,6 +2762,13 @@ endif(USE_PRECOMPILED_HEADERS)
 set_source_files_properties(wolfvrpipe.cpp wolfvrpipe_video.cpp wolfvrdevice.cpp qrcodegen/qrcodegen.cpp
     wolfvr_openh264.cpp wolfvrcodecfetch.cpp
     PROPERTIES SKIP_PRECOMPILE_HEADERS TRUE)
+# [W111 VIDEO 2026-11-24] the video recorder's encoders and MP4 writer include no viewer headers either (windows.h /
+# Media Foundation headers must come in their own order, and the standalone test compiles them as they are)
+set_source_files_properties(wolfvr_yuv.cpp wolfrec_audioenc.cpp wolfrec_mp4.cpp
+    PROPERTIES SKIP_PRECOMPILE_HEADERS TRUE)
+if (WINDOWS)
+  set_source_files_properties(wolfvr_mfh264.cpp wolfrec_audioenc_mf.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS TRUE)
+endif ()
 
 # [VR OPENH264 2026-11-03] bzip2 1.0.8 (vendored unmodified, bzip2/SOURCES.md) unpacks Cisco's OpenH264 download.
 # It is C that is not valid C++ (void* assignments, "register"), so it is its own static library compiled as C: the
@@ -3075,10 +3099,18 @@ endif (WINDOWS)
 # wolfdjcapture_mac.mm: ScreenCaptureKit is weak-linked (absent before macOS 12.3; used from 13).
 if (WINDOWS)
   target_link_libraries(${VIEWER_BINARY_NAME} mmdevapi)
+  # [W111 VIDEO 2026-11-24] wolfvr_mfh264.cpp / wolfrec_audioenc_mf.cpp: MFStartup, MFTEnumEx, MFCreate* are in
+  # mfplat; the MF_MT_* / MFVideoFormat_* / MFT_CATEGORY_* GUIDs in mfuuid (Microsoft's pages for those functions
+  # and attributes: "Library: Mfplat.lib" / "Mfuuid.lib"). CODECAPI_* GUIDs come from codecapi.h (__uuidof).
+  target_link_libraries(${VIEWER_BINARY_NAME} mfplat mfuuid)
 endif ()
 target_link_libraries(${VIEWER_BINARY_NAME} wolfvr_bzip2)   # [VR OPENH264 2026-11-03]
 if (DARWIN)
   target_link_libraries(${VIEWER_BINARY_NAME} "-weak_framework ScreenCaptureKit" "-framework CoreMedia")
+  # [W111 VIDEO 2026-11-24] wolfvr_vth264.mm (VideoToolbox, CoreVideo, CoreFoundation), wolfrec_audioenc_at.mm
+  # (AudioToolbox)
+  target_link_libraries(${VIEWER_BINARY_NAME} "-framework VideoToolbox" "-framework CoreVideo"
+                        "-framework AudioToolbox" "-framework CoreFoundation")
 endif ()
 
 target_link_libraries(${VIEWER_BINARY_NAME}

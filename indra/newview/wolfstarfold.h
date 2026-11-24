@@ -29,6 +29,7 @@
 class LLGLSLShader;
 class LLRenderTarget;
 class LLVertexBuffer;
+class LLViewerTexture;
 class WolfStarfoldBeamSource;
 
 // Paul, 24 Nov 2026: Starfold, our own space game - "space high above regions whose owner opts in, ships, a station, an
@@ -152,6 +153,13 @@ public:
     F32 nebula(LLColor3& colour) const;
     /** The planet's uniforms (wolfStarfoldSkyF.glsl) on a sky program; `lum` the sky's units for a white surface in full sun. */
     void bindSkyUniforms(LLGLSLShader& shader, F32 lum, const LLVector3& sun_dir_world) const;
+    /** [STARFOLD 2026-11-24, Paul: "i was expecting to be actually in space"] the space itself for the Wolf dome (wolftk/skyF.glsl
+     *  sf_space_on, sf_space_map): the fade above the line (0 in a reflection-probe face) and the all-sky map of the Wolf space sky
+     *  (WolfSpaceSky::paintSphere, made the first time it is wanted) on texture unit `unit`. The sampler is set to `unit` on every
+     *  call, drawn or not, so it never sits on unit 0 beside another sampler type (wolfenvironmentrender.cpp "THE MAGENTA SKY"). */
+    void bindSpaceSky(LLGLSLShader& shader, S32 unit);
+    /** The stars' brightness above the line by day, in the frame's units (WolfEnvironmentRender::starTint): 0 below the line's edge. */
+    F32 spaceStarFloor() const;
 
     // ── drawing ──────────────────────────────────────────────────────────────────────────────────────────────────────
     /** The belt's rocks as lit geometry (pipeline.cpp, the deferred pass beside the birds). */
@@ -295,6 +303,7 @@ private:
     LLPointer<LLVertexBuffer> mRockVB;
     U32     mRockVerts = 0;
     LLVector3 mRockOrigin;           // the region's agent origin the buffer was written for
+    LLPointer<LLViewerTexture> mSpaceMap;   // bindSpaceSky: the all-sky map, made once
 };
 
 #endif // WOLF_STARFOLD_H

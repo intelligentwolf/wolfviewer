@@ -315,3 +315,88 @@ LLPointer<LLImageRaw> WolfSpaceSky::paint(S32 width, S32 height, F32 scale, cons
     }
     return raw;
 }
+
+// [STARFOLD 2026-11-24] Source: paint() above (the dot, the add-then-lay-over order, the alpha held to 1), on an
+// equirectangular grid instead of a perspective view. The angular distance of a texel's direction t from a point's
+// direction d comes from the chord: |t - d|^2 = 2 - 2 t.d (the angle squared to within 0.1 % below 0.1 rad); a dot of
+// angular radius rho reaches rho / cos(latitude) in longitude on a row (the meridians close up towards the poles).
+LLPointer<LLImageRaw> WolfSpaceSky::paintSphere(S32 width)
+{
+    ensure();
+    const S32 W = llmax(64, width), H = W / 2;
+    const F32 texel = (F32)(2.0 * F_PI) / (F32)W;
+    std::vector<F32> buf((size_t)W * H * 3, 0.f);
+    // each texel's direction, as wolftk/skyF.glsl wolfStarfoldSpace reads the image back
+    std::vector<F32> rowZ((size_t)H), rowR((size_t)H), colX((size_t)W), colY((size_t)W);
+    for (S32 j = 0; j < H; ++j)
+    {
+        const F32 lat = ((F32)j + 0.5f) / (F32)H * F_PI - F_PI * 0.5f;
+        rowZ[j] = sinf(lat);
+        rowR[j] = cosf(lat);
+    }
+    for (S32 i = 0; i < W; ++i)
+    {
+        const F32 lon = ((F32)i + 0.5f) / (F32)W * 2.f * F_PI - F_PI;
+        colX[i] = cosf(lon);
+        colY[i] = sinf(lon);
+    }
+    auto splat = [&](const std::vector<Point>& list, bool over)
+    {
+        for (const Point& s : list)
+        {
+            // the map's pixels as texels; a dot never under 1.5 texels across, its light kept (alpha x its area's share)
+            F32 rho = s.size * 0.5f * texel;
+            F32 alpha = llmin(1.f, s.a);
+            const F32 least = texel * 0.75f;
+            if (rho < least)
+            {
+                alpha *= (rho * rho) / (least * least);
+                rho = least;
+            }
+            const F32 lat0 = asinf(llclamp(s.d[2], -1.f, 1.f));
+            const F32 lon0 = atan2f(s.d[1], s.d[0]);
+            const S32 j0 = llmax(0, (S32)floorf((lat0 - rho + F_PI * 0.5f) / F_PI * (F32)H));
+            const S32 j1 = llmin(H - 1, (S32)ceilf((lat0 + rho + F_PI * 0.5f) / F_PI * (F32)H));
+            const F32 inv = 1.f / (rho * rho);
+            for (S32 j = j0; j <= j1; ++j)
+            {
+                // the longitudes this row can reach: every one near a pole
+                S32 i0 = 0, i1 = W - 1;
+                const F32 reach = rowR[j] > 1e-4f ? rho / rowR[j] : 10.f;
+                if (reach < F_PI)
+                {
+                    i0 = (S32)floorf((lon0 - reach + F_PI) / (2.f * F_PI) * (F32)W);
+                    i1 = (S32)ceilf((lon0 + reach + F_PI) / (2.f * F_PI) * (F32)W);
+                }
+                for (S32 ii = i0; ii <= i1; ++ii)
+                {
+                    const S32 i = ((ii % W) + W) % W;   // across the seam at -pi / pi
+                    const F32 dot = rowR[j] * (colX[i] * s.d[0] + colY[i] * s.d[1]) + rowZ[j] * s.d[2];
+                    const F32 r2 = llmax(0.f, 2.f - 2.f * dot) * inv;
+                    if (r2 > 1.f) continue;
+                    const F32 a = alpha * expf(-4.f * r2);
+                    F32* o = &buf[((size_t)j * W + i) * 3];
+                    if (over)
+                    {
+                        for (int k = 0; k < 3; ++k) o[k] = s.c[k] * a + o[k] * (1.f - a);
+                    }
+                    else
+                    {
+                        for (int k = 0; k < 3; ++k) o[k] += s.c[k] * a;
+                    }
+                }
+            }
+        }
+    };
+    splat(starlight(), false);
+    splat(dust(), true);
+
+    LLPointer<LLImageRaw> raw = new LLImageRaw((U16)W, (U16)H, 3);
+    U8* out = raw->getData();
+    if (!out) return nullptr;
+    for (size_t i = 0; i < (size_t)W * H * 3; ++i)
+    {
+        out[i] = (U8)llclamp(ll_round(sqrtf(llclamp(buf[i], 0.f, 1.f)) * 255.f), 0, 255);
+    }
+    return raw;
+}

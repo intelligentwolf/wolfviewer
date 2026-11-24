@@ -1498,6 +1498,16 @@ namespace
                     l.altitude = llmax(0.f, cap - l.height);
                 }
             }
+            // [STARFOLD 2026-11-24] and from above the line they thin to a far world's weather (Paul's shot at 6,508 m on Dogfight:
+            // "it looks weird i was expecting to be actually in space" - a thick brown carpet of cloud under him): through the
+            // line's 300 m edge each layer keeps SPACE_CLOUD_KEEP of its density, so the sea shows between them as from orbit.
+            // The layers are made afresh each update (above), so this scales once. GAME TUNING.
+            const F32 SPACE_CLOUD_KEEP = 0.35f;
+            const F32 sfade = WolfStarfold::instance().spaceFade();
+            if (sfade > 0.f)
+            {
+                for (WolfTk::CloudLayer& l : sClouds->layers().layer) l.densityScale *= 1.f - (1.f - SPACE_CLOUD_KEEP) * sfade;
+            }
         }
         // [WolfViewer round 9] the haze from the EEP sky the server bakes (Paul: the EEP is the basis). The document's haze
         // and the weather's fog are already in it - WolfSim WolfEnvironment.cs:1066-1069 ApplyDoc multiplies the air's
@@ -2620,7 +2630,9 @@ LLColor3 WolfEnvironmentRender::starTint()
     const F32 R = LLEnvironment::instance().getCurrentSky() ? LLEnvironment::instance().getCurrentSky()->getDomeRadius() : 15000.f;
     const F32 omega = (32.f * 32.f) / (R * R);
     const LLColor3 tz = ratio(sAtmos->sunIlluminance(cameraECEFKm(sFrame), toECEF(sFrame, LLVector3::z_axis)), sAtmos->sunIlluminanceAboveAtmosphere());
-    return componentMult(c, tz) * (E1 / omega * sFrame.exposure * starBrightnessScale());
+    // [STARFOLD 2026-11-24] above a Starfold line by day the stars keep a night's brightness (WolfStarfold::spaceStarFloor; Paul
+    // at 6,508 m on Dogfight by day saw none: the sunlit frame's exposure put the real stars far under the screen's black)
+    return componentMult(c, tz) * llmax(E1 / omega * sFrame.exposure * starBrightnessScale(), WolfStarfold::instance().spaceStarFloor());
 }
 
 // static
@@ -4428,6 +4440,8 @@ bool WolfEnvironmentRender::renderSkyDome()
         static LLStaticHashedString s_vac("uWolfVacuum");
         sh.uniform1f(s_vac, WolfStarfold::instance().skyVacuum());
         WolfStarfold::instance().bindSkyUniforms(sh, (sunIrrTOA.mV[0] + sunIrrTOA.mV[1] + sunIrrTOA.mV[2]) / 3.f, sFrame.sunWorld);
+        // the space itself (skyF.glsl wolfStarfoldSpace): its own named unit, after the shafts (+0), the moon (+1) and the sun (+2)
+        WolfStarfold::instance().bindSpaceSky(sh, WolfTk::NAMED_UNIT_BASE + 3);
     }
     // a nebula: an emission nebula's surface brightness, 3e-4 cd/m2 (21-22 mag/arcsec2, NPS's scale) at the
     // document's full strength

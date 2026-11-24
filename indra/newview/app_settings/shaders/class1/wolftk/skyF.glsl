@@ -127,6 +127,12 @@ vec3 wolfAuroraRadiance(vec3 dir);  // wolfAuroraF.glsl: linear sRGB cd/m2 (east
 vec4 wolfStarfoldPlanet(vec3 dir);
 bool wolfStarfoldCovers(vec3 dir);
 uniform float uWolfVacuum;
+// [STARFOLD 2026-11-24] Paul at 6,508 m over Dogfight by day: "it looks weird i was expecting to be actually in space" - a thick
+// white band round the horizon, no stars, no sun. Above the line: the space itself (wolfStarfoldSpace below; WolfStarfold::
+// bindSpaceSky): the fade (0 below the line's 300 m edge, in probe faces and off Starfold) and the Wolf space sky's all-sky map
+// (WolfSpaceSky::paintSphere: the field stars, the Milky Way with its dust lane, the nebulae), square-root encoded.
+uniform float sf_space_on;
+uniform sampler2D sf_space_map;
 uniform float wolf_sea_height;      // camera metres above the sea; < 0 = no sea to the horizon
 uniform vec3  waterFogColorLinear;  // the sea's body colour (reflectance-like)
 uniform float fresnelScale;         // the EEP water's fresnel (LLSettingsWater fresnel_scale / fresnel_offset, as
@@ -250,6 +256,25 @@ vec3 wolfBodies(vec3 dir, vec3 transmittance, inout float cover)
     return add;
 }
 
+// [STARFOLD 2026-11-24] above a space region's line the air thins to nothing (WolfStarfold::skyVacuum, from the remapped
+// height: README "The air"). The air above the camera is what scatters light into an upward ray and dims the sun, so the
+// in-scatter of a sky ray is scaled by what is left (1 - v) and its transmittance raised to that power (its optical depth
+// scaled the same way: T = exp(-tau)). Only the rays that graze the planet keep the real air: from the true horizon (its dip
+// below the level, mu_h = -sqrt(1 - (R / r)^2) for the camera r from the centre and the ground radius R: the tangent ray) up
+// to SF_LIMB_MU above it - a thin glowing limb, as seen from orbit, instead of the 6-degree white band Paul's shot showed
+// (the old window was smoothstep(0, 0.06) above the level, and everything from the dip to the level kept the full air).
+// GAME TUNING: SF_LIMB_MU 0.010 (about 0.6 deg).
+const float SF_LIMB_MU = 0.010;
+float wolfVacuumK(vec3 originKm, vec3 rayDirection)
+{
+    if (uWolfVacuum <= 0.0) return 1.0;
+    float r = length(originKm);
+    float upness = dot(rayDirection, originKm / max(r, 1e-6));
+    float x = ATMOSPHERE.bottom_radius / max(r, ATMOSPHERE.bottom_radius);
+    float muH = -sqrt(max(1.0 - x * x, 0.0));
+    return mix(1.0, 1.0 - clamp(uWolfVacuum, 0.0, 1.0), smoothstep(muH, muH + SF_LIMB_MU, upness));
+}
+
 // Source: sky.glsl:26-81 getSkyRadiance, PERSPECTIVE_CAMERA and SUN; MOON replaced (decision D5) by the caller
 vec3 wolfTkSkyRadiance(
   const vec3 cameraPositionKm,
@@ -267,13 +292,9 @@ vec3 wolfTkSkyRadiance(
     transmittance
   );
 
-  // [STARFOLD 2026-11-24] above a space region's line the air thins to nothing (WolfStarfold::skyVacuum, from the remapped
-  // height: README "The air"). The air above the camera is what scatters light into an upward ray and dims the sun, so for
-  // rays above the horizon the in-scatter is scaled by what is left (1 - v) and the transmittance raised to that power (its
-  // optical depth scaled the same way: T = exp(-tau)); rays below the horizon keep the real air's look of the ground.
+  // [STARFOLD 2026-11-24] the air thinned above a space region's line (wolfVacuumK, above)
   if (uWolfVacuum > 0.0) {
-    float upness = dot(rayDirection, normalize(cameraPositionKm));
-    float k = mix(1.0, 1.0 - clamp(uWolfVacuum, 0.0, 1.0), smoothstep(0.0, 0.06, upness));
+    float k = wolfVacuumK(cameraPositionKm, rayDirection);
     radiance *= k;
     transmittance = pow(max(transmittance, vec3(1e-6)), vec3(k));
   }
@@ -340,10 +361,10 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
     if (uMoonSkyScale > 0.0)
     {
         vec3 trMoon;
-        color += GetSkyRadiance(originKm, rayDirection, 0.0, uMoonDirECEF, trMoon) * uMoonSkyScale;
+        color += GetSkyRadiance(originKm, rayDirection, 0.0, uMoonDirECEF, trMoon) * (uMoonSkyScale * wolfVacuumK(originKm, rayDirection));   // [STARFOLD 2026-11-24/] the moonlit air thins as the sunlit
         if (uNight > 0.0)
         {
-            aureole = wolfSkyMieLuminance(originKm, rayDirection, uMoonDirECEF) * (uMoonSkyScale * clamp(uNight, 0.0, 1.0));
+            aureole = wolfSkyMieLuminance(originKm, rayDirection, uMoonDirECEF) * (uMoonSkyScale * clamp(uNight, 0.0, 1.0) * wolfVacuumK(originKm, rayDirection));
             color -= aureole;
             // [2026-10-30 ticket #391] the glow is the moon's own light scattered close to it: behind the weather's cloud it fades
             // with the disc (taken out of the colour in full above; only what comes through is added back)
@@ -375,7 +396,7 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
         // the moon is opaque: what lies behind it is hidden; the air in front of it still glows (the
         // scattering without the celestial terms)
         vec3 tr2;
-        vec3 air = GetSkyRadiance(originKm, rayDirection, shadowLength, sunDirection, tr2);
+        vec3 air = GetSkyRadiance(originKm, rayDirection, shadowLength, sunDirection, tr2) * wolfVacuumK(originKm, rayDirection);   // [STARFOLD 2026-11-24/]
         color = mix(color, air + moon.rgb, moon.a);
         aureole *= 1.0 - moon.a;   // behind the disc (the aurora behind it too, as it was hidden there before)
     }
@@ -537,6 +558,45 @@ vec3 wolfMeteors(vec3 dirWorld, float fragmentAngle)
 // moonV.glsl:43 pos.z = pos.w x 0.999991, sunDiscV.glsl:48 x 0.999999), so the stars (starsV.glsl:46 pos.z = pos.w, depth 1.0,
 // LEQUAL) are hidden behind them. Here the moon, the sun and the other bodies are drawn by this program, so a second draw of the
 // screen triangle with uBodyDepth 1 writes depth (colour masked off) on their discs only, every other pixel discarded.
+// [STARFOLD 2026-11-24] the space above a Starfold line (design.html "The native space sky": the stars and the Milky Way,
+// nebulae, "a harsh white sun"; README "client look rules"), added over the sky in the frame's units, never in a probe pixel.
+// It is the space LOOK, not a camera's: by day a sunlit frame's exposure would put every star under black (Paul's shot), so
+// the map, the system's nebula and the sun's glare are given in display terms. GAME TUNING:
+//   SF_SPACE_STARLIGHT  the map's full white in the frame's units
+//   SF_SPACE_NEBULA     the system's nebula (wolfNebula's shape and colour) at full strength
+//   SF_SUN_GLARE        the glare round the sun's disc and its four soft spikes (our own look: a cross of light, no lens ghosts)
+// The map is read at its top level (it has no mipmaps: WolfStarfold::bindSpaceSky) by longitude atan(y, x) and latitude
+// asin(z), the inverse of WolfSpaceSky::paintSphere's texel directions; its values are square-root encoded.
+const float SF_SPACE_STARLIGHT = 0.9;
+const float SF_SPACE_NEBULA = 0.35;
+const float SF_SUN_GLARE = 2.5;
+vec3 wolfStarfoldSpace(vec3 dirWorld, vec3 rayDirectionECEF)
+{
+    if (sf_space_on <= 0.0) return vec3(0.0);
+    vec3 c = vec3(0.0);
+    if (!wolfStarfoldCovers(dirWorld))
+    {
+        vec2 uv = vec2(atan(dirWorld.y, dirWorld.x + 1e-9) / (2.0 * WOLF_PI) + 0.5, asin(clamp(dirWorld.z, -1.0, 1.0)) / WOLF_PI + 0.5);
+        vec3 enc = textureLod(sf_space_map, uv, 0.0).rgb;
+        c = enc * enc * SF_SPACE_STARLIGHT;
+        if (uNebula > 0.0) c += wolfNebula(dirWorld) * (SF_SPACE_NEBULA / uNebula);
+    }
+    // the sun: a glare falling off with the angle from its centre, and two thin crossing streaks through it, square to the
+    // horizon (a frame round the sun: east-ish = sun x up, its up = east x sun), on the sun's side of the sky only
+    float a = acos(clamp(dot(rayDirectionECEF, sunDirection), -1.0, 1.0));
+    float glare = 0.6 * exp(-a / 0.015) + 0.15 * exp(-a / 0.08);
+    vec3 e1 = cross(uLitDir, vec3(0.0, 0.0, 1.0));
+    if (dot(e1, e1) < 1e-6) e1 = vec3(1.0, 0.0, 0.0);
+    e1 = normalize(e1);
+    vec3 n1 = cross(e1, uLitDir);
+    vec3 o = dirWorld - uLitDir * dot(dirWorld, uLitDir);
+    vec2 q = vec2(dot(o, e1), dot(o, n1));
+    float streaks = exp(-abs(q.y) / 0.0012) * exp(-abs(q.x) / 0.10) + exp(-abs(q.x) / 0.0012) * exp(-abs(q.y) / 0.10);
+    streaks *= step(0.0, dot(dirWorld, uLitDir));
+    c += vec3(1.0, 0.96, 0.88) * SF_SUN_GLARE * (glare + 0.5 * streaks);
+    return c * clamp(sf_space_on, 0.0, 1.0);
+}
+
 uniform float uBodyDepth;
 bool wolfBodyCovers(vec3 dirWorld, vec3 rayDirectionECEF)
 {
@@ -671,6 +731,16 @@ void main()
             sunIrradiance += sunMoon * uMoonSkyScale;
             skyIrradiance += skyMoon * uMoonSkyScale;
         }
+        // [STARFOLD 2026-11-24] above a space region's line the air between the camera and the sea thins too, as the sky's
+        // (wolfVacuumK), to SF_SEA_AIR_KEEP of it: the sea reads as a world far below under a little haze, not a white glare.
+        // Its transmittance is raised to the same power (the optical depth scaled alike). GAME TUNING.
+        if (uWolfVacuum > 0.0)
+        {
+            const float SF_SEA_AIR_KEEP = 0.55;
+            float kSea = mix(1.0, SF_SEA_AIR_KEEP, clamp(uWolfVacuum, 0.0, 1.0));
+            inscatter *= kSea;
+            tr = pow(max(tr, vec3(1e-6)), vec3(kSea));
+        }
         // the water surface instead of groundAlbedo * RECIPROCAL_PI (sky.frag:84): its body colour lit by the
         // same irradiance, and the sky mirrored - the body term is waterF.glsl's wolfWaterBody (the water fog
         // colour x the light on the water / pi); the mirror carries the moon, bodies and night sky as the sky does
@@ -726,6 +796,8 @@ void main()
         // [2026-10-25] the moon's aureole (and since 2026-10-26 the aurora) outside the gain (wolfSkyWithBodies); not in a probe
         // pixel - the gains are measured without them
         if (uProbe < 0.5) color += aureole;
+        // [STARFOLD 2026-11-24] the space above the line (wolfStarfoldSpace), after the EEP gain: not the stock sky's to match
+        if (uProbe < 0.5) color += wolfStarfoldSpace(dirWorld, rayDirection);
     }
 
     // [WolfViewer 2026-10-25] the sky and the sea are the night's light: as the eye sees it (nightLight.glsl); not in a probe pixel
@@ -737,7 +809,9 @@ void main()
     // meteors and LL's stars (renderStarsDeferred adds them over this): they stay as bright above the floor as above black.
     // Not on the sea below the horizon (a surface, not the sky), not in a probe pixel (the EEP gains compare the sky as it is),
     // not in a reflection-probe face (wolfNightFloorOn 0: that sky lights the scene and the water)
-    if (wolfNightFloorOn > 0.5 && uProbe < 0.5 && !(intersectsGround && distanceToGround >= 0.0)) color = wolfNightFloorLift(color, wolfNightFloorSky(dirWorld.z));
+    // [STARFOLD 2026-11-24] not above a Starfold line: space is black (the floor lets go through the line's 300 m edge)
+    if (wolfNightFloorOn > 0.5 && uProbe < 0.5 && !(intersectsGround && distanceToGround >= 0.0))
+        color = mix(wolfNightFloorLift(color, wolfNightFloorSky(dirWorld.z)), color, clamp(sf_space_on, 0.0, 1.0));
     // the EEP's moon over the corrected sky (not in a probe: the probes measure the sky alone, as the reference is)
     if (uProbe < 0.5 && !(intersectsGround && distanceToGround >= 0.0)) color = wolfEepMoon(dirWorld, color);
     // the shooting stars, over the sky only (not in a probe, not on the sea)

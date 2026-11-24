@@ -13172,6 +13172,13 @@ void initialize_menus()
         else if (verb == "setup") sf.setupRez(arg);
         else if (verb == "guide") sf.showGuide(arg != "0");
         else if (verb == "station") { if (arg == "0") sf.closeStation(); else sf.showStation(); }
+        // [GLASS ARC 2026-11-24] "steer:<pitch>,<yaw>" (each -1..1) holds the pointer as point-and-fly does; "steer:0" lets go
+        else if (verb == "steer")
+        {
+            const size_t comma = arg.find(',');
+            if (comma == std::string::npos) sf.setPointer(false, 0.f, 0.f);
+            else sf.setPointer(true, llclamp((F32)atof(arg.substr(0, comma).c_str()), -1.f, 1.f), llclamp((F32)atof(arg.substr(comma + 1).c_str()), -1.f, 1.f));
+        }
     });
     // <WolfViewer 2026-10-11> Wolf World > Show Wolf Icons (bottom right): checked while the icons show, i.e. the
     // inverse of WolfHideToolbarIcons (lltoolbarview.cpp draw hides them and keeps the toolbar showing). Every grid.

@@ -17,6 +17,7 @@
 
 #include "wolfstarfolddeck.h"
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 
@@ -33,7 +34,9 @@
 #include "llviewercontrol.h"
 #include "llviewerobject.h"
 #include "llviewerobjectlist.h"
+#include "llviewercamera.h"
 #include "llviewerregion.h"
+#include "llviewerwindow.h"
 #include "llwindow.h"
 #include "wolfgrid.h"
 #include "wolfstarfold.h"
@@ -55,22 +58,28 @@ namespace
     const LLColor4 C_PRIMARY(0.12f, 0.36f, 0.48f, 1.f);
     const LLColor4 C_EDGE(0.38f, 0.52f, 0.78f, 1.f);
 
-    // the backgrounds a pilot can choose (WolfStarfoldTheme 0..3; design: "a background the user can choose")
+    // the console's glass a pilot can choose (WolfStarfoldTheme 0..3; design: "a background the user can choose"). Glass Arc
+    // (make_mockups.py "glass": #16305e at 0.55 at the top to #050b1a at 0.85): a little more opaque here, so the words on it keep
+    // 4.5:1 over a sunlit cloud below.
     struct Theme { LLColor4 hi, lo; const char* name; };
     const Theme THEMES[4] = {
-        { LLColor4(0.06f, 0.12f, 0.26f, 0.96f), LLColor4(0.02f, 0.04f, 0.10f, 0.96f), "Deep blue" },
-        { LLColor4(0.15f, 0.07f, 0.24f, 0.96f), LLColor4(0.05f, 0.02f, 0.09f, 0.96f), "Nebula" },
-        { LLColor4(0.06f, 0.06f, 0.07f, 0.94f), LLColor4(0.01f, 0.01f, 0.02f, 0.94f), "Black glass" },
+        { LLColor4(0.086f, 0.188f, 0.369f, 0.62f), LLColor4(0.020f, 0.043f, 0.102f, 0.88f), "Navy glass" },
+        { LLColor4(0.20f, 0.10f, 0.32f, 0.62f), LLColor4(0.05f, 0.02f, 0.09f, 0.88f), "Nebula glass" },
+        { LLColor4(0.06f, 0.06f, 0.07f, 0.66f), LLColor4(0.f, 0.f, 0.01f, 0.90f), "Black glass" },
         { LLColor4(0.f, 0.f, 0.f, 0.f), LLColor4(0.f, 0.f, 0.f, 0.f), "No panel" },
     };
+    // the windows (Station, setup helper) and the ground panel stay solid: they are read, not flown through
+    const Theme SOLID = { LLColor4(0.06f, 0.12f, 0.26f, 0.96f), LLColor4(0.02f, 0.04f, 0.10f, 0.96f), "Deep blue" };
     S32 theme()
     {
         static LLCachedControl<S32> t(gSavedSettings, "WolfStarfoldTheme", 0);
         return llclamp((S32)t, 0, 3);
     }
 
-    // The picture's own units: the band is 1600 x 250 (as the cab's 1600 x 304, a little lower for a game).
-    const F32 PIC_W = 1600.f, PIC_H = 250.f;
+    // The picture's own units: 1600 across. The Glass Arc's console is ARC_EDGE_H tall at the window's sides and ARC_CENTRE_H in
+    // the middle; PIC_H is how tall the cockpit stands with the hold line and the radar's stalks over it (the size limit below).
+    const F32 PIC_W = 1600.f, PIC_H = 230.f;
+    const F32 ARC_EDGE_H = 128.f, ARC_CENTRE_H = 196.f;
 
     // ---- primitives, view-local, untextured (Source: wolftraincab.cpp's, after wolfhelmhud.cpp's) ----
     void noTex() { gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE); }
@@ -140,6 +149,66 @@ namespace
         }
     }
     void ring(F32 cx, F32 cy, F32 r, F32 w, const LLColor4& c) { clockArc(cx, cy, r, w, 0.f, 360.f, c, 64); }
+    // a filled fan from d0 to d1 degrees (clockwise from 12 o'clock, as clockArc)
+    void fan(F32 cx, F32 cy, F32 r, F32 d0, F32 d1, const LLColor4& c, S32 seg = 16)
+    {
+        noTex();
+        gGL.begin(LLRender::TRIANGLES);
+        for (S32 i = 0; i < seg; ++i)
+        {
+            F32 x0, y0, x1, y1;
+            pt(cx, cy, r, d0 + (d1 - d0) * (F32)i / (F32)seg, x0, y0);
+            pt(cx, cy, r, d0 + (d1 - d0) * (F32)(i + 1) / (F32)seg, x1, y1);
+            vtx(cx, cy, c); vtx(x0, y0, c); vtx(x1, y1, c);
+        }
+        gGL.end();
+    }
+    // a capsule (rounded ends of radius h / 2), filled once everywhere (no overlap, so a translucent fill stays even) ...
+    void pill(F32 l, F32 b, F32 r, F32 t, const LLColor4& c)
+    {
+        const F32 rad = llmin((t - b) * 0.5f, (r - l) * 0.5f), cy = (b + t) * 0.5f;
+        rectF(l + rad, b, r - rad, t, c);
+        fan(l + rad, cy, rad, 180.f, 360.f, c);
+        fan(r - rad, cy, rad, 0.f, 180.f, c);
+    }
+    // ... and its outline
+    void pillLine(F32 l, F32 b, F32 r, F32 t, F32 w, const LLColor4& c)
+    {
+        const F32 rad = llmin((t - b) * 0.5f, (r - l) * 0.5f), cy = (b + t) * 0.5f;
+        rectF(l + rad, b, r - rad, b + w, c);
+        rectF(l + rad, t - w, r - rad, t, c);
+        clockArc(l + rad, cy, rad - w * 0.5f, w, 180.f, 360.f, c, 16);
+        clockArc(r - rad, cy, rad - w * 0.5f, w, 0.f, 180.f, c, 16);
+    }
+    void ellipseF(F32 cx, F32 cy, F32 rx, F32 ry, const LLColor4& c, S32 seg = 48)
+    {
+        noTex();
+        gGL.begin(LLRender::TRIANGLES);
+        for (S32 i = 0; i < seg; ++i)
+        {
+            const F32 a0 = 2.f * F_PI * (F32)i / (F32)seg, a1 = 2.f * F_PI * (F32)(i + 1) / (F32)seg;
+            vtx(cx, cy, c); vtx(cx + rx * cosf(a0), cy + ry * sinf(a0), c); vtx(cx + rx * cosf(a1), cy + ry * sinf(a1), c);
+        }
+        gGL.end();
+    }
+    void ellipseLine(F32 cx, F32 cy, F32 rx, F32 ry, F32 w, const LLColor4& c, S32 seg = 64)
+    {
+        for (S32 i = 0; i < seg; ++i)
+        {
+            const F32 a0 = 2.f * F_PI * (F32)i / (F32)seg, a1 = 2.f * F_PI * (F32)(i + 1) / (F32)seg;
+            lineW(cx + rx * cosf(a0), cy + ry * sinf(a0), cx + rx * cosf(a1), cy + ry * sinf(a1), w, c);
+        }
+    }
+    // the wolf-ear chevron (make_mockups.py wolfmark: M x y l6 -10 l4 6 l4 -6 l6 10 l-10 8 Z, y down there, up here), at scale k
+    void wolfMark(F32 x, F32 y, F32 k, const LLColor4& c)
+    {
+        const F32 px[6] = { 0.f, 6.f, 10.f, 14.f, 20.f, 10.f }, py[6] = { 0.f, 10.f, 4.f, 10.f, 0.f, -8.f };
+        for (S32 i = 0; i < 6; ++i)
+        {
+            const S32 j = (i + 1) % 6;
+            lineW(x + px[i] * 2.f * k, y + py[i] * 2.f * k + 16.f * k, x + px[j] * 2.f * k, y + py[j] * 2.f * k + 16.f * k, llmax(1.5f, 1.6f * k), c);
+        }
+    }
 
     // Source: wolftraincab.cpp face() (itself wolfhelmhud.cpp) - the B612 face (fonts.xml Avionics0..11) at the largest size
     // whose line fits px.
@@ -290,6 +359,7 @@ void WolfStarfoldDeck::draw()
     WolfStarfold& sf = WolfStarfold::instance();
     mHits.clear();
     mBandDrawn = false;
+    mArcOn = false;
     const bool flying = sf.piloting();
     const bool band = sf.panelShown() && !(sf.stationShown() && !flying);
     const bool station = sf.stationShown() && !flying;
@@ -315,7 +385,13 @@ void WolfStarfoldDeck::draw()
     F32 top_of_world = bottom;
     if (band && WolfGrid::isOnWolfTerritoriesConfirmed())
     {
-        if (flying) drawCockpit(bottom, W, u);
+        if (flying)
+        {
+            mPanelB = bottom;                          // the overlay keeps clear of the console (drawCockpit sets the same)
+            mPanelT = bottom + ARC_CENTRE_H * u;
+            drawHud(u);
+            drawCockpit(bottom, W, u);
+        }
         else drawGround(bottom, W, u);
         top_of_world = mPanelT;
     }
@@ -360,208 +436,476 @@ void WolfStarfoldDeck::drawNotes(F32 above, F32 width, F32 u)
     }
 }
 
+// ── the Glass Arc (Paul chose design "A - Glass Arc", 24 Nov: mock-up ~/.cache/shadow-scratch/starfold-client/mockups/
+//    starfold_hud_A_glass_arc.png, make_mockups.py concept_a): one slim curved glass console along the bottom, the rest of the
+//    screen left to space; over the view a reticle, a pitch ladder, a heading tape and the target box. Our own look: navy glass,
+//    amber and cyan vector lines, the wolf-ear mark. All figures below are the picture's units (1600 across) and GAME TUNING. ──
+
+// the console's top edge at view-local x: EDGE at the window's sides, CENTRE in the middle, a parabola between (the mock-up's
+// "Q 960 850" curve)
+F32 WolfStarfoldDeck::arcTop(F32 x) const
+{
+    if (!mArcOn) return mPanelT;   // the ground panel is a plain band
+    const F32 t = mArcW > 0.f ? llclamp((x - mArcW * 0.5f) / (mArcW * 0.5f), -1.f, 1.f) : 0.f;
+    return mPanelB + mArcU * (ARC_EDGE_H + (ARC_CENTRE_H - ARC_EDGE_H) * (1.f - t * t));
+}
+
+bool WolfStarfoldDeck::onPanel(S32 x, S32 y) const
+{
+    return mBandDrawn && (F32)y >= mPanelB && (F32)y <= arcTop((F32)x);
+}
+
+void WolfStarfoldDeck::capsule(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& label, bool lit, const std::string& tip, F32 u,
+                               bool dim)
+{
+    // a fully rounded button (make_mockups.py btn: rx = h / 2, navy fill 0.75, a cyan outline; lit: amber on dark amber)
+    const bool down = mPressed == id;
+    const LLColor4 fill = down ? LLColor4(0.20f, 0.34f, 0.56f, 0.92f) : (lit ? LLColor4(0.23f, 0.16f, 0.03f, 0.85f) : LLColor4(0.05f, 0.13f, 0.27f, 0.80f));
+    const LLColor4 edge = lit ? C_AMBER : (dim ? C_CYAN * 0.45f : C_CYAN);
+    pill(l, b, r, t, fill);
+    pillLine(l, b, r, t, llmax(1.5f, 2.f * u), edge);
+    F32 px = llmin((t - b) * 0.42f, 20.f * u);
+    const F32 room = (r - l) - (t - b) * 0.6f, smallest = px * 0.6f;
+    while (px > smallest && textW(label, px, true) > room) px *= 0.92f;
+    T((l + r) * 0.5f, (b + t) * 0.5f, fit(label, px, true, room), px, lit ? C_AMBER : (dim ? C_DIM : C_TEXT), true);
+    // the target is at least 44 px tall and wide whatever the drawn size (design: "Every target is at least 44 px")
+    const F32 cy = (b + t) * 0.5f, hh = llmax((t - b) * 0.5f, 22.f), cx = (l + r) * 0.5f, hw = llmax((r - l) * 0.5f, 22.f);
+    addHit(cx - hw, cy - hh, cx + hw, cy + hh, id, tip);
+}
+
 void WolfStarfoldDeck::drawCockpit(F32 bottom, F32 W, F32 u)
 {
     WolfStarfold& sf = WolfStarfold::instance();
     const WolfStarfold::Ship& s = sf.ship();
-    const F32 bandH = PIC_H * u;
     const F32 ox = (W - PIC_W * u) * 0.5f;   // the picture centred when the window is wider than it scales to
     auto X = [&](F32 x) { return ox + x * u; };
     auto Y = [&](F32 y) { return bottom + y * u; };
     mPanelB = bottom;
-    mPanelT = bottom + bandH;
+    mPanelT = bottom + ARC_CENTRE_H * u;
+    mArcW = W;
+    mArcU = u;
+    mArcOn = true;
     mBandDrawn = true;
     mResize.place(mPanelB, mPanelT, W);
+
+    // ── the glass: strips under the curve, darker towards the bottom (make_mockups.py "glass": #16305e at 0.55 to #050b1a at
+    //    0.85, a little more opaque here so the words keep 4.5:1 over a bright cloud), a cyan edge with a faint glow ──
     const Theme& th = THEMES[theme()];
+    const S32 STRIPS = 64;
     if (th.hi.mV[VALPHA] > 0.f)
     {
-        rectG(0.f, mPanelB, W, mPanelT, th.hi, th.lo);
-        rectF(0.f, mPanelT - 2.f * u, W, mPanelT, C_EDGE * 0.8f);
+        noTex();
+        gGL.begin(LLRender::TRIANGLES);
+        for (S32 i = 0; i < STRIPS; ++i)
+        {
+            const F32 x0 = W * (F32)i / (F32)STRIPS, x1 = W * (F32)(i + 1) / (F32)STRIPS;
+            const F32 t0 = arcTop(x0), t1 = arcTop(x1);
+            vtx(x0, mPanelB, th.lo); vtx(x1, mPanelB, th.lo); vtx(x1, t1, th.hi);
+            vtx(x0, mPanelB, th.lo); vtx(x1, t1, th.hi); vtx(x0, t0, th.hi);
+        }
+        gGL.end();
+    }
+    for (S32 i = 0; i < STRIPS; ++i)
+    {
+        const F32 x0 = W * (F32)i / (F32)STRIPS, x1 = W * (F32)(i + 1) / (F32)STRIPS;
+        lineW(x0, arcTop(x0), x1, arcTop(x1), 7.f * u, LLColor4(0.24f, 0.50f, 0.84f, 0.18f));
+        lineW(x0, arcTop(x0), x1, arcTop(x1), llmax(1.5f, 2.f * u), LLColor4(0.37f, 0.82f, 1.f, 0.65f));
     }
 
-    // ── LEFT: the ship - shield, armour and hull as three arcs, with words and numbers ─────────────────────────────────
+    // ── LEFT: shield, armour and hull as three upper arcs (make_mockups.py arcgauge: 140 degrees over the top), with words and
+    //    numbers (never colour alone: WCAG 1.4.1) ──
     {
-        const F32 cx = X(130.f), cy = Y(120.f);
+        const F32 cx = X(150.f), cy = Y(24.f);
         struct Bar { const char* name; F32 v, full; LLColor4 c; F32 r; };   // "full", not "max": <windows.h> defines max
-        const Bar bars[3] = { { "SHIELD", s.mShield, s.mShieldMax, C_CYAN, 92.f }, { "ARMOUR", s.mArmour, s.mArmourMax, C_AMBER, 72.f },
-                              { "HULL", s.mHull, s.mHullMax, C_RED, 52.f } };
+        const Bar bars[3] = { { "SHIELD", s.mShield, s.mShieldMax, C_CYAN, 100.f }, { "ARMOUR", s.mArmour, s.mArmourMax, C_AMBER, 82.f },
+                              { "HULL", s.mHull, s.mHullMax, C_RED, 64.f } };
         for (const Bar& b : bars)
         {
             const F32 f = llclamp(b.v / llmax(b.full, 1.f), 0.f, 1.f);
-            clockArc(cx, cy, b.r * u, 13.f * u, -135.f, 135.f, LLColor4(b.c.mV[0] * 0.22f, b.c.mV[1] * 0.22f, b.c.mV[2] * 0.22f, 1.f));
-            if (f > 0.f) clockArc(cx, cy, b.r * u, 13.f * u, -135.f, -135.f + 270.f * f, b.c);
+            clockArc(cx, cy, b.r * u, 10.f * u, -72.f, 72.f, LLColor4(b.c.mV[0], b.c.mV[1], b.c.mV[2], 0.25f));
+            if (f > 0.f) clockArc(cx, cy, b.r * u, 10.f * u, -72.f, -72.f + 144.f * f, b.c);
         }
-        T(cx, cy + 4.f * u, s.mClass.empty() ? std::string("CUB") : upper(s.mClass), 22.f * u, C_TEXT, true);
-        // the figures, words and numbers (never colour alone: WCAG 1.4.1)
-        const F32 lx = X(250.f);
-        T(lx, Y(196.f), llformat("SHIELD %d", (S32)llround(s.mShield)), 21.f * u, C_CYAN, true, LLFontGL::LEFT);
-        T(lx, Y(162.f), llformat("ARMOUR %d", (S32)llround(s.mArmour)), 21.f * u, C_AMBER, true, LLFontGL::LEFT);
-        T(lx, Y(128.f), llformat("HULL %d", (S32)llround(s.mHull)), 21.f * u, C_RED, true, LLFontGL::LEFT);
-        T(lx, Y(88.f), llformat("HOLD %d / %d", (S32)floorf(s.mHold), (S32)llround(s.mHoldMax)), 19.f * u,
-          s.mHold >= s.mHoldMax - 0.5f && s.mHoldMax > 0.f ? C_AMBER : C_TEXT, true, LLFontGL::LEFT);
-        T(lx, Y(58.f), thousands(s.mCredits) + " " + WolfStarfold::currency(), 17.f * u, C_GREEN, false, LLFontGL::LEFT);
-        if (s.mSafe) T(lx, Y(28.f), "SAFE HARBOUR", 16.f * u, C_GREEN, true, LLFontGL::LEFT);
-        else if (s.mAir) T(lx, Y(28.f), "IN THE AIR - CLIMBING", 16.f * u, C_AMBER, true, LLFontGL::LEFT);
+        T(cx, Y(52.f), s.mClass.empty() ? std::string("CUB") : upper(s.mClass), 15.f * u, C_TEXT, true);
+        if (s.mSafe) T(cx, Y(32.f), "SAFE HARBOUR", 12.f * u, C_GREEN, true);
+        else if (s.mAir) T(cx, Y(32.f), "IN THE AIR - CLIMBING", 12.f * u, C_AMBER, true);
+        const F32 lx = X(272.f);
+        T(lx, Y(118.f), llformat("SHIELD %d", (S32)llround(s.mShield)), 19.f * u, C_CYAN, true, LLFontGL::LEFT);
+        T(lx, Y(94.f), llformat("ARMOUR %d", (S32)llround(s.mArmour)), 19.f * u, C_AMBER, true, LLFontGL::LEFT);
+        T(lx, Y(70.f), llformat("HULL %d", (S32)llround(s.mHull)), 19.f * u, LLColor4(1.f, 0.54f, 0.49f, 1.f), true, LLFontGL::LEFT);
     }
 
-    // ── CENTRE: speed, the throttle, the mode, the four big buttons and Fly there ──────────────────────────────────────
+    // ── CENTRE: the speed, the throttle and the mode in words, the throttle strip, the five big capsules ──
     {
-        // the throttle bar: drag it, or W / S
-        const F32 tl = X(470.f), tr = X(520.f), tb = Y(26.f), tt = Y(214.f);
-        mThrB = tb; mThrT = tt;
-        rectF(tl, tb, tr, tt, LLColor4(0.03f, 0.06f, 0.14f, 1.f));
-        frameW(tl, tb, tr, tt, 2.f * u, C_EDGE);
         const F32 thr = sf.throttle();
-        const F32 zero = sf.drift() ? (tb + tt) * 0.5f : tb;   // Drift has reverse: the bar's middle is stop
-        const F32 at = sf.drift() ? zero + (tt - tb) * 0.5f * thr : tb + (tt - tb) * thr;
-        rectF(tl + 4.f * u, llmin(zero, at), tr - 4.f * u, llmax(zero, at), thr < 0.f ? C_RED : C_AMBER);
-        rectF(tl - 6.f * u, at - 4.f * u, tr + 6.f * u, at + 4.f * u, C_TEXT);
-        addHit(tl - 14.f * u, tb, tr + 14.f * u, tt, H_THROTTLE, "Throttle: drag up for faster (W and S, or Page Up and Page Down)");
-        T((tl + tr) * 0.5f, Y(236.f), "THROTTLE", 13.f * u, C_DIM, true);
+        T(X(800.f), Y(172.f), llformat("%d m/s", (S32)llround(s.mSpeed)), 30.f * u, C_TEXT, true);
+        T(X(800.f), Y(148.f), llformat("THROTTLE %d%%   %s", (S32)llround(thr * 100.f), sf.drift() ? "DRIFT" : "STEADY"), 14.f * u, C_AMBER, false);
+        // the throttle strip: drag along it (W and S, Page Up and Page Down as well); in Drift its middle is stop
+        const F32 sl = X(560.f), sr = X(1040.f), sb = Y(118.f), st = Y(128.f);
+        mThrB = sl; mThrT = sr;
+        pill(sl, sb, sr, st, LLColor4(0.02f, 0.05f, 0.12f, 0.85f));
+        pillLine(sl, sb, sr, st, llmax(1.f, 1.5f * u), C_CYAN * 0.6f);
+        const F32 zero = sf.drift() ? (sl + sr) * 0.5f : sl;
+        const F32 at = sf.drift() ? zero + (sr - sl) * 0.5f * thr : sl + (sr - sl) * thr;
+        if (fabsf(at - zero) > 1.f) rectF(llmin(zero, at), sb + 2.f * u, llmax(zero, at), st - 2.f * u, thr < 0.f ? C_RED : C_AMBER);
+        rectF(at - 3.f * u, sb - 6.f * u, at + 3.f * u, st + 6.f * u, C_TEXT);
+        const F32 hy = (sb + st) * 0.5f, hh = llmax(19.f * u, 22.f);
+        addHit(sl - 10.f * u, hy - hh, sr + 10.f * u, hy + hh, H_THROTTLE, "Throttle: drag right for faster (W and S, or Page Up and Page Down)");
 
-        // speed and the throttle in words
-        T(X(640.f), Y(196.f), "SPEED", 15.f * u, C_DIM, true);
-        T(X(640.f), Y(158.f), llformat("%d m/s", (S32)llround(s.mSpeed)), 36.f * u, C_TEXT, true);
-        T(X(640.f), Y(124.f), llformat("THROTTLE %d%%", (S32)llround(thr * 100.f)), 15.f * u, C_AMBER, false);
-        // the mode switch (design: "a big switch on the cockpit")
-        button(X(560.f), Y(28.f), X(720.f), Y(96.f), H_MODE, sf.drift() ? "DRIFT" : "STEADY", sf.drift(),
-               "Steady flies where the nose points; Drift keeps sliding as you turn (Z)", u);
-
-        // the four big buttons (design: FIRE, MINE, NEXT TARGET, DOCK)
-        const F32 bl = 750.f, bw = 150.f, gap = 12.f;
-        button(X(bl), Y(140.f), X(bl + bw), Y(214.f), H_FIRE, "FIRE", sf.firing(), "Fire at your target (hold Space)", u);
-        button(X(bl + bw + gap), Y(140.f), X(bl + 2 * bw + gap), Y(214.f), H_MINE, "MINE", sf.mining(),
-               "Mine the nearest rock in reach (M)", u);
-        button(X(bl), Y(60.f), X(bl + bw), Y(130.f), H_NEXT, "NEXT TARGET", false, "Pick the next Glasswing (Tab)", u);
-        button(X(bl + bw + gap), Y(60.f), X(bl + 2 * bw + gap), Y(130.f), H_DOCK, "DOCK", false, "Dock at the station (within 150 m)", u);
-        // Fly there: one row of the places this region has
-        const WolfStarfold::System& sys = sf.system();
-        F32 fx = bl;
-        const F32 fw = 74.f;
-        auto fly = [&](bool have, EHit id, const char* label, const char* where, const char* tip)
+        // FIRE, MINE, NEXT TARGET, DOCK, FLY THERE (make_mockups.py concept_a: one row, FIRE lit while firing)
+        struct Big { EHit id; const char* label; F32 w; bool lit; bool dim; const char* tip; };
+        const Big bigs[5] = {
+            { H_FIRE, "FIRE", 120.f, sf.firing(), false, "Fire at your target (hold Space)" },
+            { H_MINE, "MINE", 120.f, sf.mining(), false, "Mine the nearest rock in reach (M)" },
+            { H_NEXT, "NEXT TARGET", 176.f, false, false, "Pick the next Glasswing (Tab)" },
+            { H_DOCK, "DOCK", 120.f, false, false, "Dock at the station (within 150 m)" },
+            { H_FLY_PICKED, "FLY THERE", 160.f, !mPicked.empty(), mPicked.empty(),
+              mPicked.empty() ? "Pick a place on the radar first, then FLY THERE" : "Fly to the place you picked on the radar" } };
+        F32 total = 0.f;
+        for (const Big& b : bigs) total += b.w;
+        total += 12.f * 4.f;
+        F32 bx = 800.f - total * 0.5f;
+        for (const Big& b : bigs)
         {
-            if (!have) return;
-            button(X(fx), Y(12.f), X(fx + fw), Y(50.f), id, label, sf.flyingTo() == where, tip, u);
-            fx += fw + 4.f;
-        };
-        fly(sys.mHaveStation, H_FLY_STATION, "STATION", "station", "Fly to the station and stop there");
-        fly(sys.mHaveBelt, H_FLY_BELT, "BELT", "belt", "Fly to the asteroid belt and stop at its edge");
-        fly(sys.mHaveWormhole, H_FLY_WORMHOLE, "WORMHOLE", "wormhole", "Fly into the wormhole");
-        if (!sf.flyingTo().empty()) button(X(fx), Y(12.f), X(fx + fw), Y(50.f), H_FLY_STOP, "STOP", false, "Stop flying there", u);
+            capsule(X(bx), Y(46.f), X(bx + b.w), Y(96.f), b.id, b.label, b.lit, b.tip, u, b.dim);
+            bx += b.w + 12.f;
+        }
 
-        // the target, in words (design: "TARGET Glasswing raider · 640 m / its shield 40 · armour 100")
-        const F32 tx = X(1080.f);
-        rectF(tx - 8.f * u, Y(126.f), X(1248.f), Y(226.f), LLColor4(0.02f, 0.03f, 0.08f, 0.75f));
+        // the small capsules: the mode and Fly there to the region's places on the left, the cockpit's own on the right
+        F32 fx = 785.f;
+        auto small = [&](F32 w, EHit id, const std::string& label, bool lit, const std::string& tip, bool leftward)
+        {
+            if (leftward) { capsule(X(fx - w), Y(6.f), X(fx), Y(40.f), id, label, lit, tip, u); fx -= w + 8.f; }
+            else { capsule(X(fx), Y(6.f), X(fx + w), Y(40.f), id, label, lit, tip, u); fx += w + 8.f; }
+        };
+        const WolfStarfold::System& sys = sf.system();
+        if (!sf.flyingTo().empty()) small(70.f, H_FLY_STOP, "STOP", false, "Stop flying there", true);
+        if (sys.mHaveWormhole) small(118.f, H_FLY_WORMHOLE, "WORMHOLE", sf.flyingTo() == "wormhole", "Fly into the wormhole", true);
+        if (sys.mHaveBelt) small(72.f, H_FLY_BELT, "BELT", sf.flyingTo() == "belt", "Fly to the asteroid belt and stop at its edge", true);
+        if (sys.mHaveStation) small(96.f, H_FLY_STATION, "STATION", sf.flyingTo() == "station", "Fly to the station and stop there", true);
+        small(96.f, H_MODE, sf.drift() ? "DRIFT" : "STEADY", sf.drift(), "Steady flies where the nose points; Drift keeps sliding as you turn (Z)", true);
+        fx = 815.f;
+        small(44.f, H_HELP, "?", sf.guideShown(), "The guide: how to fly, mine, sell and fight", false);
+        small(84.f, H_THEME, "PANEL", false, std::string("Change the console's glass (now: ") + THEMES[theme()].name + ")", false);
+        small(72.f, H_HIDE, "HIDE", false, "Hide the cockpit (a tab brings it back)", false);
+        small(124.f, H_LEAVE, "LEAVE SHIP", false, "Stand up and leave the ship", false);
+    }
+
+    // ── RIGHT: the hold and Starmarks, the target in words, the holographic radar and the wolf-ear mark ──
+    {
+        const F32 rx = X(1400.f);
+        auto backed = [&](F32 x, F32 y, const std::string& text, F32 px, const LLColor4& c, bool bold)
+        {
+            const F32 w = textW(text, px, bold) + 18.f * u, h = px * 1.6f;
+            pill(x - w * 0.5f, y - h * 0.5f, x + w * 0.5f, y + h * 0.5f, LLColor4(0.01f, 0.03f, 0.08f, 0.62f));
+            T(x, y, text, px, c, bold);
+        };
+        const bool full = s.mHold >= s.mHoldMax - 0.5f && s.mHoldMax > 0.f;
+        backed(rx, Y(240.f), llformat("HOLD %d/%d   %s %s", (S32)floorf(s.mHold), (S32)llround(s.mHoldMax), thousands(s.mCredits).c_str(),
+               WolfStarfold::currency()), 14.f * u, full ? C_AMBER : C_TEXT, false);
         if (s.mTarget.notNull())
         {
-            T(tx, Y(206.f), "TARGET", 14.f * u, C_VIOLET, true, LLFontGL::LEFT);
-            T(tx, Y(182.f), "Glasswing " + distance(s.mTargetM), 17.f * u, C_TEXT, true, LLFontGL::LEFT);
-            T(tx, Y(158.f), llformat("shield %d  armour %d", (S32)llround(s.mTargetShield), (S32)llround(s.mTargetArmour)), 14.f * u, C_DIM,
-              false, LLFontGL::LEFT);
-            T(tx, Y(138.f), llformat("hull %d", (S32)llround(s.mTargetHull)), 14.f * u, C_DIM, false, LLFontGL::LEFT);
+            backed(rx, Y(216.f), llformat("TARGET  shield %d  armour %d  hull %d", (S32)llround(s.mTargetShield), (S32)llround(s.mTargetArmour),
+                   (S32)llround(s.mTargetHull)), 13.f * u, C_VIOLET, true);
         }
         else
         {
-            T(tx, Y(206.f), "NO TARGET", 14.f * u, C_DIM, true, LLFontGL::LEFT);
-            T(tx, Y(178.f), s.mAliens.empty() ? "No Glasswings near" : llformat("%d Glasswing%s near", (S32)s.mAliens.size(),
-              s.mAliens.size() == 1 ? "" : "s"), 15.f * u, s.mAliens.empty() ? C_DIM : C_VIOLET, false, LLFontGL::LEFT);
+            backed(rx, Y(216.f), s.mAliens.empty() ? std::string("NO TARGET   no Glasswings near") : llformat("NO TARGET   %d Glasswing%s near",
+                   (S32)s.mAliens.size(), s.mAliens.size() == 1 ? "" : "s"), 13.f * u, s.mAliens.empty() ? C_DIM : C_VIOLET, true);
         }
-        // the small buttons: guide, panel background, hide, leave
-        const F32 sx = 1080.f, sw = 80.f;
-        button(X(sx), Y(66.f), X(sx + sw), Y(112.f), H_HELP, "?", sf.guideShown(), "The guide: how to fly, mine, sell and fight", u);
-        button(X(sx + sw + 8.f), Y(66.f), X(sx + 2 * sw + 8.f), Y(112.f), H_THEME, "PANEL", false,
-               std::string("Change the panel's background (now: ") + THEMES[theme()].name + ")", u);
-        button(X(sx), Y(12.f), X(sx + sw), Y(58.f), H_HIDE, "HIDE", false, "Hide the cockpit (a tab brings it back)", u);
-        button(X(sx + sw + 8.f), Y(12.f), X(sx + 2 * sw + 8.f), Y(58.f), H_LEAVE, "LEAVE SHIP", false, "Stand up and leave the ship", u);
+        drawRadar(rx, Y(80.f), 150.f * u, 56.f * u, u);
+        wolfMark(X(1548.f), Y(152.f), 1.2f * u, C_AMBER);
     }
 
-    // ── RIGHT: the radar ───────────────────────────────────────────────────────────────────────────────────────────────
-    drawRadar(X(1440.f), Y(130.f), 104.f * u, u);
-    if (!mPicked.empty())
+    // a word for a press that could not act (FLY THERE with nothing picked): shown, never only a sound (ARIA rules, CLAUDE.md)
+    if (!mHint.empty() && LLFrameTimer::getElapsedSeconds() < mHintUntil)
     {
-        button(X(1290.f), Y(4.f), X(1590.f), Y(24.f) + 16.f * u, H_FLY_PICKED, "FLY THERE: " + upper(mPicked), false,
-               "Fly to the place you picked on the radar", u, true);
+        const F32 px = 17.f * u, w = textW(mHint, px, true) + 30.f * u, h = px * 1.8f, y = mPanelT + 40.f * u;
+        pill(W * 0.5f - w * 0.5f, y - h * 0.5f, W * 0.5f + w * 0.5f, y + h * 0.5f, LLColor4(0.02f, 0.04f, 0.10f, 0.88f));
+        pillLine(W * 0.5f - w * 0.5f, y - h * 0.5f, W * 0.5f + w * 0.5f, y + h * 0.5f, llmax(1.f, 1.5f * u), C_AMBER);
+        T(W * 0.5f, y, mHint, px, C_AMBER, true);
     }
 }
 
-void WolfStarfoldDeck::drawRadar(F32 cx, F32 cy, F32 r, F32 u)
+void WolfStarfoldDeck::drawRadar(F32 cx, F32 cy, F32 rx, F32 ry, F32 u)
 {
-    // A flat round radar, nose up (design: "contacts above or below carry an up or down arrow and the word"). Its range: 1.5 km.
+    // A holographic radar (make_mockups.py radar): a flat ellipse seen from above and behind, nose away from the pilot; each
+    // contact stands on a stalk whose height is its height above or below the ship, and its label says the height in metres
+    // (never the stalk alone). Its range: 1.5 km. Labels never sit on each other: a label that would overlap one already
+    // placed moves up or down a line, and is left out (its mark stays) when there is no room.
     WolfStarfold& sf = WolfStarfold::instance();
     const WolfStarfold::Ship& s = sf.ship();
     const WolfStarfold::System& sys = sf.system();
     const F32 RANGE = 1500.f;
-    circleF(cx, cy, r, LLColor4(0.01f, 0.05f, 0.08f, 0.95f), 56);
-    ring(cx, cy, r, 2.f * u, C_CYAN * 0.8f);
-    ring(cx, cy, r * 0.5f, 1.f * u, C_CYAN * 0.35f);
-    lineW(cx - r, cy, cx + r, cy, 1.f * u, C_CYAN * 0.25f);
-    lineW(cx, cy - r, cx, cy + r, 1.f * u, C_CYAN * 0.25f);
-    T(cx + r - 6.f * u, cy + r - 4.f * u, "1.5 km", 11.f * u, C_DIM, false, LLFontGL::RIGHT);
-    // our ship
-    quadF(cx, cy + 9.f * u, cx + 6.f * u, cy - 6.f * u, cx, cy - 2.f * u, cx - 6.f * u, cy - 6.f * u, C_AMBER);
+    ellipseF(cx, cy, rx, ry, LLColor4(0.04f, 0.16f, 0.27f, 0.45f));
+    ellipseLine(cx, cy, rx, ry, llmax(1.5f, 2.f * u), C_CYAN);
+    ellipseLine(cx, cy, rx * 0.5f, ry * 0.5f, 1.f * u, C_CYAN * 0.45f);
+    lineW(cx - rx, cy, cx + rx, cy, 1.f * u, LLColor4(0.38f, 0.90f, 1.f, 0.3f));
+    lineW(cx, cy - ry, cx, cy + ry, 1.f * u, LLColor4(0.38f, 0.90f, 1.f, 0.3f));
+    T(cx + rx * 0.78f, cy - ry - 8.f * u, "1.5 km", 11.f * u, C_DIM, false);
+    // our ship (make_mockups.py: an amber triangle at the centre, nose up the scope)
+    quadF(cx, cy + 9.f * u, cx + 7.f * u, cy - 5.f * u, cx, cy - 2.f * u, cx - 7.f * u, cy - 5.f * u, C_AMBER);
     LLViewerObject* ship = gObjectList.findObject(s.mRoot);
     LLViewerRegion* region = gAgent.getRegion();
     if (!ship || !region) return;
     LLViewerObject* root = ship->getRootEdit() ? ship->getRootEdit() : ship;
     const LLVector3 me = root->getPositionAgent();
     const LLQuaternion inv = ~root->getRotationRegion();
-    auto place = [&](const LLVector3& agent, F32& x, F32& y, F32& dz) -> bool
+    const F32 STALK = 44.f * u;   // the longest stalk (a contact 1.5 km above or more)
+    struct Mark { F32 x, y, head; F32 dz; };
+    struct Lab { F32 x, y; std::string text; LLColor4 c; S32 pri; };   // pri: who gets the room first (lower first)
+    auto place = [&](const LLVector3& agent) -> Mark
     {
         const LLVector3 rel = (agent - me) * inv;   // the ship's frame: +X ahead, +Y left (SpaceMath: the nose is +X)
-        dz = agent.mV[VZ] - me.mV[VZ];
+        Mark m;
+        m.dz = agent.mV[VZ] - me.mV[VZ];
         F32 fx = rel.mV[VX], fy = rel.mV[VY];
         const F32 d = sqrtf(fx * fx + fy * fy);
-        const bool inside = d <= RANGE;
-        if (!inside) { fx *= RANGE / d; fy *= RANGE / d; }
-        x = cx - fy / RANGE * r * 0.94f;   // left of the nose is left on the scope
-        y = cy + fx / RANGE * r * 0.94f;
-        return inside;
+        if (d > RANGE) { fx *= RANGE / d; fy *= RANGE / d; }
+        m.x = cx - fy / RANGE * rx * 0.94f;   // left of the nose is left on the scope
+        m.y = cy + fx / RANGE * ry * 0.94f;
+        m.head = m.y + llclamp(m.dz / RANGE * STALK, -STALK, STALK);
+        return m;
     };
-    auto updown = [&](F32 x, F32 y, F32 dz)
+    auto stalk = [&](const Mark& m, const LLColor4& c)
     {
-        if (fabsf(dz) < 50.f) return;
-        const bool up = dz > 0.f;
-        const F32 a = 6.f * u, yy = y + (up ? 14.f : -14.f) * u;
-        quadF(x - a, yy - (up ? a : -a) * 0.5f, x + a, yy - (up ? a : -a) * 0.5f, x, yy + (up ? a : -a), x, yy + (up ? a : -a), C_TEXT);
-        T(x + 10.f * u, yy, up ? "above" : "below", 10.f * u, C_TEXT, false, LLFontGL::LEFT);
+        circleF(m.x, m.y, 2.5f * u, LLColor4(c.mV[0], c.mV[1], c.mV[2], 0.5f), 12);   // its foot on the plane
+        if (fabsf(m.head - m.y) > 1.f) lineW(m.x, m.y, m.x, m.head, llmax(1.f, 2.f * u), c);
     };
-    const F32 hit = 22.f * u;   // 44 px across at normal size (design: "Every target is at least 44 px")
-    F32 x, y, dz;
+    std::vector<LLRect> placed;
+    auto label = [&](F32 x, F32 y, const std::string& text, const LLColor4& c)
+    {
+        const F32 px = 11.f * u, w = textW(text, px, true), h = px * 1.4f;
+        const F32 tries[5] = { 0.f, h, -h, 2.f * h, -2.f * h };
+        for (F32 dy : tries)
+        {
+            const LLRect r((S32)(x - w * 0.5f - 2.f), (S32)(y + dy + h * 0.5f), (S32)(x + w * 0.5f + 2.f), (S32)(y + dy - h * 0.5f));
+            bool clear = true;
+            for (const LLRect& o : placed) if (r.overlaps(o)) { clear = false; break; }
+            if (!clear) continue;
+            placed.push_back(r);
+            T(x, y + dy, text, px, c, true);
+            return;
+        }
+    };
+    auto height = [](F32 dz) { return fabsf(dz) < 50.f ? std::string() : llformat(" %+d m", (S32)llround(dz)); };
+    const F32 hit = llmax(22.f * u, 22.f);   // 44 px across at normal size (design: "Every target is at least 44 px")
+    // marks first, labels after (nearest the pilot's eye first: the picked place, then the station, the wormhole, the belt)
+    std::vector<Lab> labels;
     if (sys.mHaveBelt)
     {
-        place(region->getPosAgentFromRegion(sys.mBeltCentre), x, y, dz);
-        const F32 br = llmin(r * 0.95f, sys.mBeltR / RANGE * r);
-        ring(x, y, llmax(br, 6.f * u), 4.f * u, LLColor4(0.62f, 0.50f, 0.38f, mPicked == "belt" ? 1.f : 0.6f));
-        T(x, y, "BELT", 11.f * u, C_DIM, true);
-        addHit(x - hit, y - hit, x + hit, y + hit, H_RADAR_BELT, "The asteroid belt: click, then FLY THERE");
+        const Mark m = place(region->getPosAgentFromRegion(sys.mBeltCentre));
+        const F32 br = llmin(rx * 0.95f, sys.mBeltR / RANGE * rx);
+        ellipseLine(m.x, m.y, llmax(br, 8.f * u), llmax(br * ry / rx, 3.f * u), 3.f * u,
+                    LLColor4(0.69f, 0.54f, 0.38f, mPicked == "belt" ? 1.f : 0.75f));
+        labels.push_back({ m.x, m.y - 12.f * u, "BELT" + height(m.dz), mPicked == "belt" ? C_AMBER : LLColor4(0.85f, 0.72f, 0.56f, 1.f), mPicked == "belt" ? 0 : 3 });
+        addHit(m.x - hit, m.y - hit, m.x + hit, m.y + hit, H_RADAR_BELT, "The asteroid belt: click, then FLY THERE");
     }
     if (sys.mHaveStation)
     {
-        place(region->getPosAgentFromRegion(sys.mStation), x, y, dz);
-        rectF(x - 7.f * u, y - 7.f * u, x + 7.f * u, y + 7.f * u, mPicked == "station" ? C_AMBER : C_TEXT);
-        T(x, y - 16.f * u, "STATION", 10.f * u, C_TEXT, true);
-        updown(x, y, dz);
-        addHit(x - hit, y - hit, x + hit, y + hit, H_RADAR_STATION, "The station: click, then FLY THERE");
+        const Mark m = place(region->getPosAgentFromRegion(sys.mStation));
+        const LLColor4 c = mPicked == "station" ? C_AMBER : C_TEXT;
+        stalk(m, c);
+        rectF(m.x - 6.f * u, m.head - 6.f * u, m.x + 6.f * u, m.head + 6.f * u, c);
+        labels.push_back({ m.x, m.head + 14.f * u, "STATION" + height(m.dz), c, mPicked == "station" ? 0 : 1 });
+        addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_STATION, "The station: click, then FLY THERE");
     }
     if (sys.mHaveWormhole)
     {
-        place(region->getPosAgentFromRegion(sys.mWormhole), x, y, dz);
-        ring(x, y, 8.f * u, 3.f * u, mPicked == "wormhole" ? C_AMBER : C_CYAN);
-        T(x, y - 18.f * u, "WORMHOLE", 10.f * u, C_CYAN, true);
-        updown(x, y, dz);
-        addHit(x - hit, y - hit, x + hit, y + hit, H_RADAR_WORMHOLE, "The wormhole to " + sys.mWormholeTo + ": click, then FLY THERE");
+        const Mark m = place(region->getPosAgentFromRegion(sys.mWormhole));
+        const LLColor4 c = mPicked == "wormhole" ? C_AMBER : C_CYAN;
+        stalk(m, c);
+        ring(m.x, m.head, 7.f * u, 2.5f * u, c);
+        labels.push_back({ m.x, m.head + 16.f * u, "WORMHOLE" + height(m.dz), c, mPicked == "wormhole" ? 0 : 2 });
+        addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_WORMHOLE, "The wormhole to " + sys.mWormholeTo + ": click, then FLY THERE");
     }
     for (size_t i = 0; i < s.mAliens.size() && i < 6; ++i)
     {
         LLViewerObject* a = gObjectList.findObject(s.mAliens[i]);
         if (!a) continue;
-        place(a->getPositionAgent(), x, y, dz);
+        const Mark m = place(a->getPositionAgent());
         const bool tg = s.mAliens[i] == s.mTarget || s.mAliens[i] == sf.selected();
-        quadF(x, y + 8.f * u, x + 7.f * u, y - 6.f * u, x, y - 3.f * u, x - 7.f * u, y - 6.f * u, C_VIOLET);
-        if (tg) frameW(x - 11.f * u, y - 11.f * u, x + 11.f * u, y + 11.f * u, 2.f * u, C_VIOLET);
-        updown(x, y, dz);
-        addHit(x - hit, y - hit, x + hit, y + hit, (EHit)(H_ALIEN_0 + (S32)i), "A Glasswing raider: click to make it your target");
+        stalk(m, C_VIOLET);
+        circleF(m.x, m.head, 5.f * u, C_VIOLET, 16);
+        if (tg)
+        {
+            ring(m.x, m.head, 10.f * u, 2.f * u, C_AMBER);
+            labels.push_back({ m.x, m.head + 16.f * u, "GLASSWING" + height(m.dz), LLColor4(0.85f, 0.77f, 1.f, 1.f), 0 });
+        }
+        addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, (EHit)(H_ALIEN_0 + (S32)i), "A Glasswing raider: click to make it your target");
     }
+    std::stable_sort(labels.begin(), labels.end(), [](const Lab& a, const Lab& b) { return a.pri < b.pri; });
+    for (const Lab& l : labels) label(l.x, l.y, l.text, l.c);
+}
+
+void WolfStarfoldDeck::drawHud(F32 u)
+{
+    // Over the view: the reticle where the nose points, the pitch ladder and the heading tape, and the amber box round the
+    // targeted Glasswing with its range and closing speed (make_mockups.py reticle). Every point is projected as
+    // WolfStarfold::renderLens places the wormhole: the camera basis (at, left, up), LLCamera's vertical field of view and
+    // aspect, onto the world view's rectangle (LLViewerWindow::getWorldViewRectScaled, in this view's coordinates).
+    WolfStarfold& sf = WolfStarfold::instance();
+    const WolfStarfold::Ship& s = sf.ship();
+    LLViewerObject* ship = gObjectList.findObject(s.mRoot);
+    if (!ship || !gViewerWindow) return;
+    LLViewerObject* root = ship->getRootEdit() ? ship->getRootEdit() : ship;
+    const LLVector3 me = root->getPositionAgent();
+    const LLVector3 fwd = LLVector3::x_axis * root->getRotationRegion();   // the nose is +X (SpaceMath)
+    LLRect world = gViewerWindow->getWorldViewRectScaled();
+    const LLRect mine = calcScreenRect();
+    world.translate(-mine.mLeft, -mine.mBottom);
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    const LLVector3 eye = cam->getOrigin();
+    const F32 tan_half = tanf(cam->getView() * 0.5f), aspect = cam->getAspect();
+    // agent point -> view-local x, y; false when it is behind the eye (x, y then hold its left / up offsets, for an edge arrow)
+    auto project = [&](const LLVector3& p, F32& x, F32& y) -> bool
+    {
+        const LLVector3 d = p - eye;
+        const F32 f = d * cam->getAtAxis();
+        const F32 lx = -(d * cam->getLeftAxis()), uy = d * cam->getUpAxis();
+        if (f <= 0.5f) { x = lx; y = uy; return false; }
+        x = (F32)world.mLeft + ((lx / f) / (tan_half * aspect) * 0.5f + 0.5f) * (F32)world.getWidth();
+        y = (F32)world.mBottom + ((uy / f) / tan_half * 0.5f + 0.5f) * (F32)world.getHeight();
+        return true;
+    };
+    const LLColor4 cyan(0.37f, 0.82f, 1.f, 0.9f);
+    const F32 lw = llmax(1.5f, 2.f * u);
+
+    // The reticle is the view's own middle (the chase camera does not look along the nose: the rig, 24 Nov 18:37Z, had the
+    // nose's point off the screen), and the ladder is laid on the camera's heading, so both always stand where the eye looks;
+    // where the nose points (3 km ahead) has its own small diamond when it is on the screen.
+    const F32 rx = (F32)world.getCenterX(), ry = (F32)world.getCenterY();
+    ring(rx, ry, 26.f * u, lw, cyan);
+    lineW(rx - 60.f * u, ry, rx - 30.f * u, ry, lw, cyan);
+    lineW(rx + 30.f * u, ry, rx + 60.f * u, ry, lw, cyan);
+    lineW(rx, ry + 30.f * u, rx, ry + 44.f * u, lw, cyan);
+    {
+        F32 nx, ny;
+        if (project(me + fwd * 3000.f, nx, ny) && nx > (F32)world.mLeft && nx < (F32)world.mRight && ny > mPanelT && ny < (F32)world.mTop)
+        {
+            const F32 d = 9.f * u;
+            lineW(nx - d, ny, nx, ny + d, lw, C_AMBER); lineW(nx, ny + d, nx + d, ny, lw, C_AMBER);
+            lineW(nx + d, ny, nx, ny - d, lw, C_AMBER); lineW(nx, ny - d, nx - d, ny, lw, C_AMBER);
+        }
+    }
+
+    // the pitch ladder: the horizon-level lines at +-10 and +-20 degrees on the camera's heading (solid above, dashed below)
+    LLVector3 hc(cam->getAtAxis().mV[VX], cam->getAtAxis().mV[VY], 0.f);
+    LLVector3 h(fwd.mV[VX], fwd.mV[VY], 0.f);
+    const bool level = h.normVec() > 0.1f;   // the nose not straight up or down: a heading makes sense
+    if (hc.normVec() > 0.1f)
+    {
+        const LLVector3& h = hc;
+        const LLVector3 side(-h.mV[VY], h.mV[VX], 0.f);
+        for (S32 k : { -2, -1, 1, 2 })
+        {
+            const F32 th = (F32)k * 10.f * DEG_TO_RAD;
+            const LLVector3 dir = h * cosf(th) + LLVector3::z_axis * sinf(th);
+            F32 x0, y0, x1, y1;
+            if (!project(eye + dir * 3000.f, x0, y0) || !project(eye + (dir + side * 0.02f) * 3000.f, x1, y1)) continue;
+            F32 sx = x1 - x0, sy = y1 - y0;
+            const F32 sl = sqrtf(sx * sx + sy * sy);
+            if (sl < 1e-3f) continue;
+            sx /= sl; sy /= sl;
+            for (F32 side_sign : { -1.f, 1.f })
+            {
+                const F32 a = 90.f * u, b = 170.f * u;
+                if (k > 0)
+                {
+                    lineW(x0 + sx * a * side_sign, y0 + sy * a * side_sign, x0 + sx * b * side_sign, y0 + sy * b * side_sign, lw, cyan);
+                }
+                else
+                {
+                    for (S32 d = 0; d < 5; ++d)   // dashed (make_mockups.py: "10 6")
+                    {
+                        const F32 p0 = a + (b - a) * (F32)d / 5.f, p1 = p0 + (b - a) / 5.f * 0.62f;
+                        lineW(x0 + sx * p0 * side_sign, y0 + sy * p0 * side_sign, x0 + sx * p1 * side_sign, y0 + sy * p1 * side_sign, lw, cyan);
+                    }
+                }
+            }
+            T(x0 - sx * 190.f * u, y0 - sy * 190.f * u, llformat("%+d", k * 10), 14.f * u, cyan, true);
+        }
+    }
+
+    // the heading tape across the top: compass degrees (the region's +y is north, +x east), ticks every 5, tall every 15
+    if (level)
+    {
+        const F32 heading = fmodf(atan2f(h.mV[VX], h.mV[VY]) * RAD_TO_DEG + 360.f, 360.f);
+        const F32 ty = (F32)world.mTop - 118.f * u, tcx = (F32)world.getCenterX(), per = 5.f * u;
+        for (S32 d = (S32)floorf((heading - 60.f) / 5.f) * 5; d <= (S32)(heading + 60.f); d += 5)
+        {
+            const F32 x = tcx + ((F32)d - heading) * per;
+            if (fabsf(x - tcx) > 60.f * per) continue;
+            const bool tall = ((d % 15) + 15) % 15 == 0;
+            lineW(x, ty, x, ty - (tall ? 18.f : 10.f) * u, llmax(1.f, 1.5f * u), LLColor4(0.37f, 0.82f, 1.f, 0.7f));
+        }
+        T(tcx, ty + 16.f * u, llformat("%03d", ((S32)llround(heading)) % 360), 20.f * u, cyan, true);
+    }
+
+    // the target: an amber box round it, "GLASSWING 640 m" over it and the closing speed under it; off the screen, an arrow at
+    // the edge pointing the way to turn
+    LLViewerObject* t = s.mTarget.notNull() ? gObjectList.findObject(s.mTarget) : nullptr;
+    if (!t)
+    {
+        mClosingFor.setNull();
+        return;
+    }
+    LLViewerObject* troot = t->getRootEdit() ? t->getRootEdit() : t;
+    const LLVector3 tp = troot->getPositionAgent();
+    const F32 range = (tp - me).length();
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (mClosingFor != s.mTarget)
+    {
+        mClosingFor = s.mTarget;
+        mClosing = 0.f;
+        mLastRange = range;
+        mLastRangeAt = now;
+    }
+    else if (now - mLastRangeAt > 0.05)
+    {
+        // closing = how fast the range falls, smoothed over about half a second (the positions arrive in steps)
+        const F32 dt = (F32)(now - mLastRangeAt);
+        const F32 rate = -(range - mLastRange) / dt;
+        mClosing += (rate - mClosing) * (1.f - expf(-dt / 0.5f));
+        mLastRange = range;
+        mLastRangeAt = now;
+    }
+    const std::string name = "GLASSWING  " + distance(range);
+    const std::string closing = fabsf(mClosing) < 1.f ? std::string("holding range")
+                              : (mClosing > 0.f ? llformat("closing %d m/s", (S32)llround(mClosing)) : llformat("opening %d m/s", (S32)llround(-mClosing)));
+    F32 x, y;
+    const bool front = project(tp, x, y);
+    const bool onScreen = front && x >= (F32)world.mLeft && x <= (F32)world.mRight && y >= mPanelT && y <= (F32)world.mTop;
+    if (onScreen)
+    {
+        const F32 hs = llclamp(9000.f / llmax(range, 1.f), 26.f, 70.f) * u, k = hs * 0.35f, bw = llmax(2.f, 2.5f * u);
+        for (S32 sx : { -1, 1 })
+            for (S32 sy : { -1, 1 })
+            {
+                const F32 cx = x + hs * (F32)sx, cy = y + hs * (F32)sy;
+                lineW(cx, cy, cx - k * (F32)sx, cy, bw, C_AMBER);
+                lineW(cx, cy, cx, cy - k * (F32)sy, bw, C_AMBER);
+            }
+        T(x, y + hs + 14.f * u, name, 17.f * u, C_AMBER, true);
+        T(x, y - hs - 14.f * u, closing, 14.f * u, C_AMBER, false);
+    }
+    else
+    {
+        // the way to it from the middle of the view: on screen past an edge, or behind (its left / up offsets)
+        const F32 mx = (F32)world.getCenterX(), my = ((F32)world.mTop + mPanelT) * 0.5f;
+        F32 dx = front ? x - mx : x, dy = front ? y - my : y;
+        const F32 dl = sqrtf(dx * dx + dy * dy);
+        if (dl < 1e-3f) { dx = 0.f; dy = -1.f; } else { dx /= dl; dy /= dl; }
+        const F32 reach = llmin((F32)world.getWidth() * 0.5f, ((F32)world.mTop - mPanelT) * 0.5f) * 0.82f;
+        const F32 ax = mx + dx * reach, ay = my + dy * reach, a = 16.f * u;
+        quadF(ax + dx * a, ay + dy * a, ax - dy * a * 0.6f, ay + dx * a * 0.6f, ax, ay, ax + dy * a * 0.6f, ay - dx * a * 0.6f, C_AMBER);
+        T(ax - dx * 34.f * u, ay - dy * 34.f * u, name, 15.f * u, C_AMBER, true);
+    }
+}
+
+void WolfStarfoldDeck::showHint(const std::string& text)
+{
+    mHint = text;
+    mHintUntil = LLFrameTimer::getElapsedSeconds() + 4.0;
 }
 
 void WolfStarfoldDeck::drawGround(F32 bottom, F32 W, F32 u)
@@ -573,8 +917,7 @@ void WolfStarfoldDeck::drawGround(F32 bottom, F32 W, F32 u)
     mPanelT = bottom + h;
     mBandDrawn = true;
     mResize.place(mPanelB, mPanelT, W);
-    const Theme& th = THEMES[theme() == 3 ? 0 : theme()];
-    rectG(0.f, mPanelB, W, mPanelT, th.hi, th.lo);
+    rectG(0.f, mPanelB, W, mPanelT, SOLID.hi, SOLID.lo);
     rectF(0.f, mPanelT - 2.f * u, W, mPanelT, C_EDGE * 0.8f);
     const F32 ox = (W - PIC_W * u) * 0.5f;
     auto X = [&](F32 x) { return ox + x * u; };
@@ -601,7 +944,7 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
     const F32 w = llmin(W - 32.f, 720.f * u), h = llmin(H - above - 32.f, 460.f * u);
     const F32 l = W * 0.5f - w * 0.5f, r = l + w;
     const F32 b = above + (H - above - h) * 0.5f, t = b + h;
-    rectG(l, b, r, t, THEMES[0].hi, THEMES[0].lo);
+    rectG(l, b, r, t, SOLID.hi, SOLID.lo);
     frameW(l, b, r, t, 3.f * u, C_EDGE);
     addHit(l, b, r, t, H_NONE, "");   // the window takes its clicks: none fall through to the world
     const F32 pad = 28.f * u;
@@ -697,7 +1040,7 @@ void WolfStarfoldDeck::drawSetup(F32 above, F32 W, F32 H, F32 u)
     const F32 w = llmin(W - 32.f, 760.f * u), h = llmin(H - above - 32.f, 470.f * u);
     const F32 l = W - w - 24.f * u, r = l + w;   // to the right, so the owner still sees where they stand
     const F32 b = above + (H - above - h) * 0.5f, t = b + h;
-    rectG(l, b, r, t, THEMES[0].hi, THEMES[0].lo);
+    rectG(l, b, r, t, SOLID.hi, SOLID.lo);
     frameW(l, b, r, t, 3.f * u, C_EDGE);
     addHit(l, b, r, t, H_NONE, "");
     const F32 pad = 26.f * u;
@@ -750,12 +1093,15 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
         case H_NEXT: sf.nextTarget(); break;
         case H_DOCK: sf.dock(); break;
         case H_MODE: sf.setDrift(!sf.drift()); break;
-        case H_THROTTLE: dragThrottle(y); break;
+        case H_THROTTLE: dragThrottle(x); break;
         case H_FLY_STATION: sf.flyTo("station"); break;
         case H_FLY_BELT: sf.flyTo("belt"); break;
         case H_FLY_WORMHOLE: sf.flyTo("wormhole"); break;
         case H_FLY_STOP: sf.flyTo("stop"); break;
-        case H_FLY_PICKED: if (!mPicked.empty()) sf.flyTo(mPicked); mPicked.clear(); break;
+        case H_FLY_PICKED:
+            if (mPicked.empty()) showHint("Pick a place on the radar first, then press FLY THERE");
+            else { sf.flyTo(mPicked); mPicked.clear(); }
+            break;
         case H_RADAR_STATION: mPicked = "station"; break;
         case H_RADAR_BELT: mPicked = "belt"; break;
         case H_RADAR_WORMHOLE: mPicked = "wormhole"; break;
@@ -794,10 +1140,11 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
     }
 }
 
-void WolfStarfoldDeck::dragThrottle(S32 y)
+void WolfStarfoldDeck::dragThrottle(S32 x)
 {
+    // the Glass Arc's strip runs left (stop, or full reverse in Drift) to right (full ahead): mThrB / mThrT its two ends
     WolfStarfold& sf = WolfStarfold::instance();
-    const F32 f = llclamp(((F32)y - mThrB) / llmax(mThrT - mThrB, 1.f), 0.f, 1.f);
+    const F32 f = llclamp(((F32)x - mThrB) / llmax(mThrT - mThrB, 1.f), 0.f, 1.f);
     sf.setThrottle(sf.drift() ? f * 2.f - 1.f : f);
 }
 
@@ -829,9 +1176,9 @@ bool WolfStarfoldDeck::handleMouseDown(S32 x, S32 y, MASK mask)
         }
         return true;
     }
-    if (mBandDrawn && (F32)y >= mPanelB && (F32)y <= mPanelT) return true;   // the panel itself: not the world behind it
+    if (onPanel(x, y)) return true;   // the console itself (under its curved edge): not the world behind it
     // piloting, on the world above the panel: point and fly while the button is held
-    if (sf.piloting() && !sf.panelHidden() && (F32)y > mPanelT)
+    if (sf.piloting() && !sf.panelHidden() && !onPanel(x, y))
     {
         mPressed = H_WORLD;
         gFocusMgr.setMouseCapture(this);
@@ -848,14 +1195,14 @@ bool WolfStarfoldDeck::handleMouseUp(S32 x, S32 y, MASK mask)
     if (mPressed == H_WORLD) WolfStarfold::instance().setPointer(false, 0.f, 0.f);
     if (hasMouseCapture()) gFocusMgr.setMouseCapture(nullptr);
     mPressed = H_NONE;
-    return was || hitAt(x, y) != nullptr || (mBandDrawn && (F32)y >= mPanelB && (F32)y <= mPanelT);
+    return was || hitAt(x, y) != nullptr || onPanel(x, y);
 }
 
 bool WolfStarfoldDeck::handleHover(S32 x, S32 y, MASK mask)
 {
     if (hasMouseCapture())
     {
-        if (mPressed == H_THROTTLE) { dragThrottle(y); getWindow()->setCursor(UI_CURSOR_HAND); return true; }
+        if (mPressed == H_THROTTLE) { dragThrottle(x); getWindow()->setCursor(UI_CURSOR_HAND); return true; }
         if (mPressed == H_WORLD) { steer(x, y); getWindow()->setCursor(UI_CURSOR_CROSS); return true; }
         if (mResize.dragging()) { mResize.drag(y); getWindow()->setCursor(UI_CURSOR_SIZENS); return true; }
     }
@@ -870,7 +1217,7 @@ bool WolfStarfoldDeck::handleHover(S32 x, S32 y, MASK mask)
         getWindow()->setCursor(hit->mId == H_NONE ? UI_CURSOR_ARROW : UI_CURSOR_HAND);
         return true;
     }
-    return mBandDrawn && (F32)y >= mPanelB && (F32)y <= mPanelT;
+    return onPanel(x, y);
 }
 
 bool WolfStarfoldDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
@@ -886,7 +1233,7 @@ bool WolfStarfoldDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
         if (hit->mId != H_NONE && hit->mId != H_THROTTLE) press(hit->mId, x, y);
         return true;
     }
-    return mBandDrawn && (F32)y >= mPanelB && (F32)y <= mPanelT;
+    return onPanel(x, y);
 }
 
 bool WolfStarfoldDeck::handleToolTip(S32 x, S32 y, MASK mask)

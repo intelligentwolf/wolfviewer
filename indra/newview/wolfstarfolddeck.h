@@ -37,6 +37,11 @@
 // fight off a raider without fast reactions. The flow: LAUNCH -> (the climb) -> BELT (Fly there) -> MINE -> STATION -> DOCK ->
 // SELL ALL ORE -> LAUNCH. Every one of those is one big button; the keys are a second way, never the only way.
 //
+// [GLASS ARC 2026-11-24] Paul chose design "A - Glass Arc" (~/.cache/shadow-scratch/starfold-client/mockups/
+// starfold_hud_A_glass_arc.png): while flying, the full-width band is now one slim curved translucent console along the bottom
+// (the same arcs, words, numbers and big targets), a holographic elliptical radar with contacts on stalks, and over the view a
+// reticle, a pitch ladder, a heading tape and an amber box round the target. The ground panel and the windows stay solid.
+//
 // One control the size of the main view (main_view.xml "wolf_starfold_deck"), after wolftraincab.cpp: it draws nothing and
 // takes no clicks unless WolfStarfold says the cockpit, the ground panel, the Station window or the guide is up.
 class WolfStarfoldDeck : public LLUICtrl
@@ -86,7 +91,7 @@ private:
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;
     void press(EHit id, S32 x, S32 y);
-    void dragThrottle(S32 y);
+    void dragThrottle(S32 x);
     void steer(S32 x, S32 y);
     F32 mThrB = 0.f, mThrT = 1.f;         // the throttle bar's travel, view-local
 
@@ -97,7 +102,20 @@ private:
     void drawSetup(F32 bottom, F32 width, F32 height, F32 u);
     bool mClearArmed = false;            // CLEAR pressed once: the second press removes the helper's parts
     void drawNotes(F32 above, F32 width, F32 u);
-    void drawRadar(F32 cx, F32 cy, F32 r, F32 u);
+    void drawRadar(F32 cx, F32 cy, F32 rx, F32 ry, F32 u);
+    // the Glass Arc (Paul's design "A", 24 Nov): the console's curved top edge, the view overlay, the capsules, the hint line
+    F32 arcTop(F32 x) const;
+    bool onPanel(S32 x, S32 y) const;    // on the console (under its curve) or the ground band: not the world behind
+    void drawHud(F32 u);
+    void capsule(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& label, bool lit, const std::string& tip, F32 u, bool dim = false);
+    void showHint(const std::string& text);
+    F32 mArcW = 0.f, mArcU = 1.f;
+    bool mArcOn = false;
+    std::string mHint;                   // a word for a press that could not act, shown for a few seconds
+    F64 mHintUntil = 0.0;
+    LLUUID mClosingFor;                  // the target the closing speed is for
+    F32 mClosing = 0.f, mLastRange = 0.f;
+    F64 mLastRangeAt = 0.0;
     void button(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& label, bool lit, const std::string& tip, F32 u,
                 bool primary = false);
 };

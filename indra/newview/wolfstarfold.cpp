@@ -34,6 +34,7 @@
 #include "llfile.h"
 #include "llframetimer.h"
 #include "llglslshader.h"
+#include "llimage.h"
 #include "llkeyboard.h"
 #include "llrender.h"
 #include "llrendertarget.h"
@@ -56,6 +57,7 @@
 #include "wolffx.h"
 #include "wolfgrid.h"
 #include "wolfhelm.h"
+#include "wolfspacesky.h"
 
 extern bool gCubeSnapshot;   // llviewerdisplay.cpp:208 (the same extern lldrawpoolalpha.cpp:140 uses)
 
@@ -177,6 +179,9 @@ namespace
         p.mRings = next(x) < 0.4;
         p.mNebulaHue = (F32)next(x);
         p.mDir.set(cosf(el) * cosf(az), cosf(el) * sinf(az), sinf(el));   // from east towards north, up
+        LL_INFOS("WolfStarfold") << "planet for seed " << seed << ": azimuth " << az * RAD_TO_DEG << " deg from east towards north, elevation "
+                                 << el * RAD_TO_DEG << " deg, radius " << p.mRadiusRad * RAD_TO_DEG << " deg, " << (p.mGas ? "gas" : "rocky")
+                                 << (p.mRings ? " with rings" : "") << LL_ENDL;
         return p;
     }
 
@@ -520,6 +525,51 @@ void WolfStarfold::bindSkyUniforms(LLGLSLShader& shader, F32 lum, const LLVector
     shader.uniform3fv(s_rim, 1, rim.mV);
     shader.uniform3fv(s_sun, 1, sun.mV);
     shader.uniform1f(s_lum, lum);
+}
+
+void WolfStarfold::bindSpaceSky(LLGLSLShader& shader, S32 unit)
+{
+    static LLStaticHashedString s_on("sf_space_on"), s_map("sf_space_map");
+    const S32 loc = shader.getUniformLocation(s_map);
+    if (loc < 0)
+    {
+        return;   // a program without the space (only the Wolf dome has it)
+    }
+    glUniform1i(loc, unit);
+    // not in a reflection-probe face: the probes light the scene, and starlight is no light to see by (as the sun's disc there)
+    const F32 fade = gCubeSnapshot ? 0.f : spaceFade();
+    if (fade > 0.f && mSpaceMap.isNull())
+    {
+        // GAME TUNING: 4096 x 2048 (one texel 0.088 deg, a little over a screen pixel at 1080 lines and 60 deg): the stars stay
+        // points, magnified rather than minified, so the map needs no mipmaps (and has no seam where a mip level would jump)
+        LLPointer<LLImageRaw> raw = WolfSpaceSky::paintSphere(4096);
+        if (raw.notNull())
+        {
+            mSpaceMap = LLViewerTextureManager::getLocalTexture(raw.get(), false);
+            if (mSpaceMap.notNull())
+            {
+                mSpaceMap->setAddressMode(LLTexUnit::TAM_WRAP);   // round the sphere in longitude (the poles never sample past the edge)
+                mSpaceMap->setFilteringOption(LLTexUnit::TFO_BILINEAR);
+            }
+        }
+        LL_INFOS("WolfStarfold") << "space sky map " << (mSpaceMap.notNull() ? "made" : "NOT made") << LL_ENDL;
+    }
+    const bool have = fade > 0.f && mSpaceMap.notNull() && mSpaceMap->hasGLTexture();
+    if (have)
+    {
+        gGL.getTexUnit(unit)->bind(mSpaceMap);
+    }
+    shader.uniform1f(s_on, have ? fade : 0.f);
+}
+
+F32 WolfStarfold::spaceStarFloor() const
+{
+    // GAME TUNING (README "client look rules", Paul 24 Nov: "i was expecting to be actually in space"): above the line the stars
+    // are as bright by day as on a dark night, whatever the sunlit frame's exposure would make of their real light - the space
+    // look, not a camera's. A star of magnitude -1 (the tint's reference: WolfEnvironmentRender::starTint) at this many of the
+    // frame's units; the catalogue's fainter stars scale down from it in starsF.glsl as before.
+    const F32 STAR_FLOOR = 6.f;
+    return spaceFade() * STAR_FLOOR;
 }
 
 // ── the wire ─────────────────────────────────────────────────────────────────────────────────────────────────────────

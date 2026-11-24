@@ -60,6 +60,15 @@ namespace WolfSpaceSky
     // starlight added and the dust lane laid over as the map blends them. A few tens of milliseconds: callers keep
     // the image (a window that shows it draws one textured quad a frame, nothing more).
     LLPointer<LLImageRaw> paint(S32 width, S32 height, F32 scale, const View& view);
+
+    // [STARFOLD 2026-11-24] The same sky over the WHOLE sphere, for Starfold's space above a region's line (Paul: "i was
+    // expecting to be actually in space"): an equirectangular RGB image width x width/2 (column = longitude from +x towards
+    // +y, -pi at the left edge; row = latitude, the south pole at row 0, rows bottom-up as GL draws them). A point's size
+    // in the map's pixels becomes an angle of one texel per pixel (2 pi / width radians); its dot is the map's (alpha
+    // exp(-4 r^2), r its angular distance over its angular radius), starlight added and the dust lane laid over in the
+    // same order. Values are linear, stored as their square root (the faint Milky Way glow keeps its steps in 8 bits; the
+    // shader squares them back). Some tenths of a second at 4096 wide: made once, by the caller, when first needed.
+    LLPointer<LLImageRaw> paintSphere(S32 width);
 }
 
 #endif // WOLF_SPACESKY_H

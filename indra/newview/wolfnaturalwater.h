@@ -196,11 +196,12 @@ private:
     //     W = STREAM_W0_M x (catchment / WolfTerrainWaterCatchment)^(3/8) x (rise/run)^(-3/16)
     // A steep reach is narrower than a gentle one carrying the same water (faster, so a smaller cross-section: same paper).
     // The old width (4 + 3 log2(...) metres, at least 3.5 m for a fall) made every tiny summit basin on hilly land a
-    // 3.5-10 m sheet; a hollow spilling a quarter of the threshold catchment (the `fed` rule) is now a 0.6 m trickle.
+    // 3.5-10 m sheet; a hollow spilling a quarter of the threshold catchment (the `fed` rule) is now a 0.9 m trickle.
     // STREAM_W0_M is a CONVENTION, not a measurement: the threshold catchment is a setting (5000 m^2 by default, far below
-    // where a real channel would be a metre wide), so 1 m is chosen as the narrowest water that still reads at a few
-    // tens of metres. STREAM_W_MIN_M keeps a ribbon above a pixel; STREAM_W_MAX_M is the old 24 m cap.
-    static constexpr F32 STREAM_W0_M = 1.0f;
+    // where a real channel would be a metre wide), so 1.5 m is chosen: the narrowest water that still reads as a line at
+    // 100-250 m (1 m went to a pixel or two there, Shadow 2026-11-24). STREAM_W_MIN_M keeps a ribbon above a pixel;
+    // STREAM_W_MAX_M is the old 24 m cap.
+    static constexpr F32 STREAM_W0_M = 1.5f;
     static constexpr F32 STREAM_W_MIN_M = 0.5f;
     static constexpr F32 STREAM_W_MAX_M = 24.f;
     static constexpr F32 WIDTH_Q_EXP = 0.375f;       // 3/8, Finnegan et al. 2005 eq. 5

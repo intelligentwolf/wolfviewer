@@ -379,12 +379,12 @@ void WolfStarfoldDeck::drawCockpit(F32 bottom, F32 W, F32 u)
     // ── LEFT: the ship - shield, armour and hull as three arcs, with words and numbers ─────────────────────────────────
     {
         const F32 cx = X(130.f), cy = Y(120.f);
-        struct Bar { const char* name; F32 v, max; LLColor4 c; F32 r; };
+        struct Bar { const char* name; F32 v, full;   // not "max": <windows.h> defines max LLColor4 c; F32 r; };
         const Bar bars[3] = { { "SHIELD", s.mShield, s.mShieldMax, C_CYAN, 92.f }, { "ARMOUR", s.mArmour, s.mArmourMax, C_AMBER, 72.f },
                               { "HULL", s.mHull, s.mHullMax, C_RED, 52.f } };
         for (const Bar& b : bars)
         {
-            const F32 f = llclamp(b.v / llmax(b.max, 1.f), 0.f, 1.f);
+            const F32 f = llclamp(b.v / llmax(b.full, 1.f), 0.f, 1.f);
             clockArc(cx, cy, b.r * u, 13.f * u, -135.f, 135.f, LLColor4(b.c.mV[0] * 0.22f, b.c.mV[1] * 0.22f, b.c.mV[2] * 0.22f, 1.f));
             if (f > 0.f) clockArc(cx, cy, b.r * u, 13.f * u, -135.f, -135.f + 270.f * f, b.c);
         }

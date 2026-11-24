@@ -26,6 +26,7 @@
 #include "wolfhelm.h"
 #include "wolfskis.h"
 #include "wolftraincab.h"   // [HUDS TRAIN 2026-11-13/] WolfTrain: the Train Cab
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-24/] WolfStarfold: the cockpit / Launch panel
 #include "wolffloatergreedy.h"   // [W104 FEATFIX 2026-11-11/] WolfGreedyGame: the Greedy HUD
 #include "wolfweatherprops.h"   // [WEATHER PROPS 2026-11-13/] the switch, for the tile's state line
 
@@ -42,7 +43,8 @@ namespace
         "fishing",   // [FISHING HUD 2026-11-11/]
         "train",   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml tile_train / state_train
         "weatherprops", "tutorials",   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml row 6
-        "trainbuilder", "track"   // [HUDS TILES 2 2026-11-14/] floater_wolf_huds.xml tile_trainbuilder (row 6 right) / tile_track (row 7)
+        "trainbuilder", "track",   // [HUDS TILES 2 2026-11-14/] floater_wolf_huds.xml tile_trainbuilder (row 6 right) / tile_track (row 7)
+        "starfold"   // [STARFOLD 2026-11-24/] floater_wolf_huds.xml tile_starfold (row 7 middle)
     };
 
     // [W104 FEATFIX 2026-11-11 A7] each tile's name as floater_wolf_huds.xml name_<id> shows it, for the status line
@@ -54,7 +56,8 @@ namespace
         "Fishing",   // [W104 MERGE 2026-11-11] floater_wolf_huds.xml name_fishing
         "The Train Cab",   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml name_train
         "Weather Props", "Tutorial Videos",   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml name_weatherprops / name_tutorials
-        "The Train Builder", "Lay Railway Track"   // [HUDS TILES 2 2026-11-14/] floater_wolf_huds.xml name_trainbuilder / name_track
+        "The Train Builder", "Lay Railway Track",   // [HUDS TILES 2 2026-11-14/] floater_wolf_huds.xml name_trainbuilder / name_track
+        "Starfold"   // [STARFOLD 2026-11-24/] the game's name is WolfStarfold::gameName(); this window's XML says it too (name_starfold)
     };
 
     // [HUDS SMALL 2026-11-14] the status line's two kinds of words, here once so fitToArea can measure the tallest
@@ -88,7 +91,8 @@ namespace
         true,   // [W104 MERGE 2026-11-11] Fishing: Wolf Territories only, as its menu item (menu_viewer.xml WolfWorldFishing on_visible WolfGrid.IsOnWolfTerritories)
         true,   // [HUDS TRAIN 2026-11-13] the Train Cab: Wolf Territories only, as its menu item (menu_viewer.xml WolfTrainCab on_visible WolfGrid.IsOnWolfTerritories) and WolfTrain::onWolf (wolftraincab.cpp)
         true, true,   // [WEATHER PROPS / TUTORIALS 2026-11-13] Wolf Territories only, as their menu items (menu_viewer.xml WolfWeatherProps / WolfTutorials on_visible WolfGrid.IsOnWolfTerritories)
-        true, true   // [HUDS TILES 2 2026-11-14] Wolf Territories only, as their menu items (menu_viewer.xml WolfWorldTrainBuilder / WolfVehiclesTrainBuilder / WolfWorldTrack on_visible WolfGrid.IsOnWolfTerritories)
+        true, true,   // [HUDS TILES 2 2026-11-14] Wolf Territories only, as their menu items (menu_viewer.xml WolfWorldTrainBuilder / WolfVehiclesTrainBuilder / WolfWorldTrack on_visible WolfGrid.IsOnWolfTerritories)
+        true   // [STARFOLD 2026-11-24] Wolf Territories only, as its menu item (menu_viewer.xml WolfStarfold on_visible WolfStarfold.Available)
     };
 
     // [W104 FEATFIX 2026-11-11] the windows these tiles show and hide (menu_viewer.xml WolfRoleplay / WolfCompass / WolfSpeed:
@@ -433,6 +437,8 @@ bool WolfFloaterHuds::tileOn(ETile t)
         // [HUDS TRAIN 2026-11-13] on while the Train Cab shows, as its menu tick (llviewermenu.cpp WolfTrain.IsShown ->
         // wolftraincab.cpp WolfTrain::shown: driving and not hidden, or opened by hand to read the guide)
         case T_TRAIN:     return WolfTrain::instance().shown();
+        // [STARFOLD 2026-11-24] on while the cockpit or the Launch panel shows, as its menu tick (WolfStarfold.IsShown)
+        case T_STARFOLD:  return WolfStarfold::instance().panelShown();
         default:          return false;
     }
 }
@@ -491,6 +497,12 @@ void WolfFloaterHuds::onTile(ETile t)
         // wolftraincab.cpp WolfTrain::toggleShown). Not in an engine's cab the Train Cab still opens, and says in its own
         // panel "Sit in the cab of a Wolf Rail engine to drive it." with the guide behind its ? (WolfTrainCabView::draw).
         case T_TRAIN:     WolfTrain::instance().toggleShown(); break;
+        // [STARFOLD 2026-11-24] the same as Wolf World > Vehicles & Travel > Starfold (Space) (WolfStarfold.Toggle); only where
+        // the region's space is on (refreshTiles greys the tile elsewhere and says why)
+        case T_STARFOLD:
+            if (!WolfStarfold::instance().spaceHere()) return;
+            WolfStarfold::instance().togglePanel();
+            break;
         default:          return;
     }
     if (was_on)
@@ -527,7 +539,11 @@ void WolfFloaterHuds::refreshTiles()
     {
         if (!mTiles[i] || !mStates[i]) continue;
         const ETile t = static_cast<ETile>(i);
-        const bool usable = wolf || !TILE_WOLF_ONLY[i];   // [W104 FEATFIX 2026-11-11/] Tessa's Compass works on every grid
+        bool usable = wolf || !TILE_WOLF_ONLY[i];   // [W104 FEATFIX 2026-11-11/] Tessa's Compass works on every grid
+        // [STARFOLD 2026-11-24] Starfold only where the region's space is on, as its menu item (WolfStarfold.Available): greyed
+        // elsewhere, the state line saying why (refreshTiles' words, below)
+        const bool noSpace = t == T_STARFOLD && wolf && !WolfStarfold::instance().spaceHere();
+        if (noSpace) usable = false;
         const bool on = usable && tileOn(t);
         mTiles[i]->setEnabled(usable || mChoosing);   // [T958/] choosing works off Wolf too: it is only this window
         mTiles[i]->setToggleState(on && !mChoosing);
@@ -544,7 +560,7 @@ void WolfFloaterHuds::refreshTiles()
             continue;
         }
         // The word as well as the light (never colour alone): ON / OFF, and what the old tooltips said beside it.
-        std::string state = on ? "ON" : "OFF";
+        std::string state = on ? "ON" : (noSpace ? "Space isn't on here" : "OFF");
         bool running = on;   // the filled dot and the green word: the HUD shows, or its mode runs with it hidden
         if (wolf && t == T_GAME)
         {

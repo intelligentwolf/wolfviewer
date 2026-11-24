@@ -47,6 +47,7 @@ public:
                  T_TRAIN,     // [HUDS TRAIN 2026-11-13] Paul (W106 test build): "the train hud is not on the huds menu?" - the Train Cab (wolftraincab.h)
                  T_WEATHERPROPS, T_TUTORIALS,   // [WEATHER PROPS / TUTORIALS 2026-11-13] ticket 847: their windows (row 6)
                  T_TRAINBUILDER, T_TRACK,       // [HUDS TILES 2 2026-11-14] the Train Builder and Lay Railway Track windows (row 6 right, row 7)
+                 T_STARFOLD,                    // [STARFOLD 2026-11-24] Paul: "not on the hud menu it should be on there" (row 7 middle)
                  T_COUNT };
 
     /** Lit as its old icon was (the HUD shows). */

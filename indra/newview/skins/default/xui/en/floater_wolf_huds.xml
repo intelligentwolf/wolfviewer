@@ -174,6 +174,15 @@
         <text follows="left|top" layout="topleft" left="112" top="706" width="148" height="20" name="name_track" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Lay Railway Track</text>
         <text follows="left|top" layout="topleft" left="112" top="728" width="148" height="46" name="desc_track" font="SansSerif" wrap="true" mouse_opaque="false">Draw a railway on your land, then lay it.</text>
         <text follows="left|top" layout="topleft" left="112" top="778" width="148" height="18" name="state_track" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
+        <!-- [STARFOLD 2026-11-24] Paul: "not on the hud menu it should be on there" - Starfold, our space game (wolfstarfold.h), row 7
+             middle (left 276). Opens the cockpit (flying) or the Launch panel, as Wolf World > Vehicles &amp; Travel > Starfold (Space);
+             greyed where the region's space is off (wolffloaterhuds.cpp refreshTiles). Picture: region-terrain-work/
+             space-game-2026-11-24/huds-tile/make_hud_art_starfold.py. -->
+        <button follows="left|top" layout="topleft" left="276" top="696" width="256" height="108" name="tile_starfold" is_toggle="true" label="" tab_stop="true" tool_tip="Starfold: Fly a spaceship above this region - mine the belt, fight raiders, go through the wormhole. Only where the region's owner has switched space on." />
+        <icon follows="left|top" layout="topleft" left="286" top="710" width="80" height="80" name="pic_starfold" image_name="WolfHuds_starfold" mouse_opaque="false" />
+        <text follows="left|top" layout="topleft" left="376" top="706" width="148" height="20" name="name_starfold" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Starfold (Space)</text>
+        <text follows="left|top" layout="topleft" left="376" top="728" width="148" height="46" name="desc_starfold" font="SansSerif" wrap="true" mouse_opaque="false">Fly a spaceship high above this region.</text>
+        <text follows="left|top" layout="topleft" left="376" top="778" width="148" height="18" name="state_starfold" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
     </panel>
     </scroll_container>
     <text follows="left|bottom" font="SansSerif" height="36" layout="topleft" left="12" name="status" top="906" width="784" wrap="true" />

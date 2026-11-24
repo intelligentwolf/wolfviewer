@@ -77,7 +77,6 @@ void WolfWaterField::releaseField(Field& f)
     f.mDepth.clear();
     f.mExpo.clear();
     f.mSurfW.clear();   // <WolfViewer 2026-10-01/>
-    f.mSurfKeep.clear();   // [T1042 BORDER SEAM 2026-11-24/]
 }
 
 // Source: terrain_manager.js _swellExposureAt(x, y):
@@ -161,24 +160,6 @@ F32 WolfWaterField::surfWeightAt(const Field& f, F32 rx, F32 ry)
     const S32 i = llclamp((S32)(u * f.mZoneW), 0, f.mZoneW - 1);
     const S32 j = llclamp((S32)(v * f.mZoneH), 0, f.mZoneH - 1);
     return f.mSurfW[(size_t)j * f.mZoneW + i];
-}
-
-// [T1042 BORDER SEAM 2026-11-24] see wolfwaterfield.h. surfWeightAt's texel rule on Field::mSurfKeep.
-F32 WolfWaterField::surfKeepAt(const Field& f, F32 rx, F32 ry, bool agent_field)
-{
-    if (!f.mReady || f.mZoneW <= 0 || f.mSurfKeep.size() != (size_t)f.mZoneW * f.mZoneH * 2)
-    {
-        return 1.f;
-    }
-    const F32 u = (rx - f.mZoneX0) / f.mZoneSX;
-    const F32 v = (ry - f.mZoneY0) / f.mZoneSY;
-    if (!std::isfinite(u) || !std::isfinite(v) || u < 0.f || u > 1.f || v < 0.f || v > 1.f)
-    {
-        return 1.f;
-    }
-    const S32 i = llclamp((S32)(u * (F32)f.mZoneW), 0, f.mZoneW - 1);
-    const S32 j = llclamp((S32)(v * (F32)f.mZoneH), 0, f.mZoneH - 1);
-    return f.mSurfKeep[((size_t)j * f.mZoneW + i) * 2 + (agent_field ? 1 : 0)];
 }
 
 // <WolfViewer 2026-10-01> Source: wave_zones.js surfBlurRadius() — see wolfwaterfield.h.
@@ -311,6 +292,48 @@ bool WolfWaterField::depthAt(const Field& f, F32 rx, F32 ry, F32 out[4])
     return true;
 }
 
+// [T1042 ONE SEA 2026-11-24] see wolfwaterfield.h.
+const WolfWaterField::Field* WolfWaterField::seaField(LLViewerRegion* regionp, LLViewerRegion** frame_out) const
+{
+    if (frame_out) *frame_out = regionp;
+    if (!regionp) return nullptr;
+    const Field* own = get(regionp);
+    LLViewerRegion* agent = gAgent.getRegion();
+    if (!agent || agent == regionp) return own;
+    const Field* af = get(agent);
+    if (!af || !af->mZoneTex || !af->mExpoTex) return own;
+    // the region's rect in the agent region's frame (the fields' coordinates are region-relative)
+    const LLVector3 rel = regionp->getOriginAgent() - agent->getOriginAgent();
+    const F32 x0 = rel.mV[VX], y0 = rel.mV[VY], w = regionp->getWidth();
+    // 0.5 m of slack: the origins are agent-space floats, and a neighbour of the same width ends exactly on the span's edge
+    const F32 SLACK = 0.5f;
+    auto inside = [&](F32 ox, F32 oy, F32 sx, F32 sy)
+    {
+        return x0 >= ox - SLACK && y0 >= oy - SLACK && x0 + w <= ox + sx + SLACK && y0 + w <= oy + sy + SLACK;
+    };
+    const bool covered = inside(af->mExpoX0, af->mExpoY0, af->mExpoSX, af->mExpoSY)
+                      && inside(af->mZoneX0, af->mZoneY0, af->mZoneSX, af->mZoneSY);
+    {
+        // logged when a region's answer changes (a teleport, a crossing, a field re-baked over another window)
+        static std::map<U64, bool> s_logged;
+        auto it = s_logged.find(regionp->getHandle());
+        if (it == s_logged.end() || it->second != covered)
+        {
+            if (s_logged.size() > 64) s_logged.clear();
+            s_logged[regionp->getHandle()] = covered;
+            LL_INFOS("WolfWaterField") << "sea field for " << regionp->getName() << ": "
+                                       << (covered ? "the agent region's (" : "its own (outside the span of ") << agent->getName() << ")"
+                                       << LL_ENDL;
+        }
+    }
+    if (!covered)
+    {
+        return own;
+    }
+    if (frame_out) *frame_out = agent;
+    return af;
+}
+
 const WolfWaterField::Field* WolfWaterField::get(const LLViewerRegion* regionp) const
 {
     if (!regionp)
@@ -375,24 +398,6 @@ U64 WolfWaterField::neighbourStamp(LLViewerRegion* regionp)
         U64 h = n->getHandle() * 0x9E3779B97F4A7C15ULL;
         h ^= (n->getLand().hasZData() ? terrainStamp(n) : 0ULL) + 0x632BE59BD9B4E019ULL + (h << 6) + (h >> 2);
         sum += h;
-    }
-    return sum;
-}
-
-// [T1042 BORDER SEAM 2026-11-24] see wolfwaterfield.h. neighbourStamp's order-independent sum, of the handles only.
-U64 WolfWaterField::spanRegionsStamp(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy)
-{
-    const LLVector3d o = regionp->getOriginGlobal();
-    const F64 ax0 = o.mdV[VX] + (F64)x0, ay0 = o.mdV[VY] + (F64)y0;
-    const F64 ax1 = ax0 + (F64)sx, ay1 = ay0 + (F64)sy;
-    U64 sum = 0;
-    for (LLViewerRegion* n : LLWorld::getInstance()->getRegionList())
-    {
-        if (!n || n == regionp || !n->isAlive()) continue;
-        const LLVector3d no = n->getOriginGlobal();
-        const F64 w = (F64)n->getWidth();
-        if (no.mdV[VX] >= ax1 || no.mdV[VX] + w <= ax0 || no.mdV[VY] >= ay1 || no.mdV[VY] + w <= ay0) continue;
-        sum += (n->getHandle() ^ ((U64)n->getWidth() << 7)) * 0x9E3779B97F4A7C15ULL;
     }
     return sum;
 }
@@ -569,11 +574,8 @@ void WolfWaterField::idle()
         // painted zones (WolfWaveZones calls invalidate()).
         // [BASIC WOLF SEA 2026-10-19/] a field baked for another region of the same handle (a hypergrid jump) is no field at all
         const bool other_region = f.mReady && f.mRegionID != regionp->getRegionID();
-        // [T1042 BORDER SEAM 2026-11-24/] a region arriving in or leaving the zone span moves an edge the surf keep fades at
-        const bool regions_changed = f.mReady
-                                  && spanRegionsStamp(regionp, f.mZoneX0, f.mZoneY0, f.mZoneSX, f.mZoneSY) != f.mSpanRegions;
         const bool stale = !f.mReady || other_region || terrain_changed
-                        || f.mWaterLevel != regionp->getWaterHeight() || moved || regions_changed;
+                        || f.mWaterLevel != regionp->getWaterHeight() || moved;
         if (stale && (!f.mReady || other_region || now - f.mBakedAt >= MIN_REBAKE_SECS))
         {
             pick = regionp;
@@ -1147,113 +1149,14 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
                     }
                 }
             }
-            // [T1042 BORDER SEAM 2026-11-24] THE SURF KEEP (B, A): see Field::mSurfKeep. Each texel's owner is this region
-            // (its own plane), another live region (that region's own plane, its own field) or none (the void / hole planes,
-            // which take the AGENT region's field). Where the water beyond a texel is drawn with a different field, the surf
-            // train fades out to 0 at the shared edge: the Chebyshev distance d (in texels) to the nearest texel of the other
-            // side, and keep = smoothstep(1, 1 + 2 rad, d) - 0 on the last texel row, so the bilinear read is 0 on the edge
-            // itself (both texels either side are 0), full again half a wavelength in (the painted surf's own fade outside
-            // its paint, grow + blur by rad, above). The neighbour's field fades the same at its side of the same edge, so
-            // the two planes meet with no surf on either: the swell beneath is continuous across borders already
-            // (lldrawpoolwater.cpp wave_rgn, round 15). The automatic surf (waterV.glsl autoS) is kept by the same factor.
-            {
-                const LLVector3d o = regionp->getOriginGlobal();
-                const F32 rw = regionp->getWidth();
-                struct Rect { F32 x0, y0, x1, y1; };
-                std::vector<Rect> others;
-                for (LLViewerRegion* nb : LLWorld::getInstance()->getRegionList())
-                {
-                    if (!nb || nb == regionp || !nb->isAlive()) continue;
-                    const LLVector3d no = nb->getOriginGlobal() - o;
-                    const F32 nw = nb->getWidth();
-                    const F32 rx0 = (F32)no.mdV[VX], ry0 = (F32)no.mdV[VY];
-                    if (rx0 >= ex0 + esx || rx0 + nw <= ex0 || ry0 >= ey0 + esy || ry0 + nw <= ey0) continue;
-                    others.push_back({ rx0, ry0, rx0 + nw, ry0 + nw });
-                }
-                const F32 BIG = 1e6f;
-                // owner per texel: 0 this region, 1 another live region, 2 none (void)
-                mKeepDist.assign(n * 3, BIG);   // [0..n) owner, [n..2n) distance for the neighbour case, [2n..3n) agent case
-                for (S32 j = 0; j < zh; ++j)
-                {
-                    const F32 py = ey0 + ((F32)j + 0.5f) * texel;
-                    for (S32 i = 0; i < zw; ++i)
-                    {
-                        const F32 px = ex0 + ((F32)i + 0.5f) * texel;
-                        F32 owner = 2.f;
-                        if (px >= 0.f && px < rw && py >= 0.f && py < rw)
-                        {
-                            owner = 0.f;
-                        }
-                        else
-                        {
-                            for (const Rect& r : others)
-                            {
-                                if (px >= r.x0 && px < r.x1 && py >= r.y0 && py < r.y1) { owner = 1.f; break; }
-                            }
-                        }
-                        const size_t k = (size_t)j * zw + i;
-                        mKeepDist[k] = owner;
-                        if (owner != 0.f) mKeepDist[n + k] = 0.f;       // neighbour case: every texel outside this region
-                        if (owner == 1.f) mKeepDist[2 * n + k] = 0.f;   // agent case: another region's texels only
-                    }
-                }
-                // Two-pass Chebyshev distance transform (unit steps to the 8 neighbours), for both cases.
-                for (S32 c = 1; c <= 2; ++c)
-                {
-                    F32* d = mKeepDist.data() + (size_t)c * n;
-                    for (S32 j = 0; j < zh; ++j)
-                    {
-                        for (S32 i = 0; i < zw; ++i)
-                        {
-                            F32 v = d[(size_t)j * zw + i];
-                            if (i > 0) v = llmin(v, d[(size_t)j * zw + i - 1] + 1.f);
-                            if (j > 0)
-                            {
-                                v = llmin(v, d[(size_t)(j - 1) * zw + i] + 1.f);
-                                if (i > 0) v = llmin(v, d[(size_t)(j - 1) * zw + i - 1] + 1.f);
-                                if (i < zw - 1) v = llmin(v, d[(size_t)(j - 1) * zw + i + 1] + 1.f);
-                            }
-                            d[(size_t)j * zw + i] = v;
-                        }
-                    }
-                    for (S32 j = zh - 1; j >= 0; --j)
-                    {
-                        for (S32 i = zw - 1; i >= 0; --i)
-                        {
-                            F32 v = d[(size_t)j * zw + i];
-                            if (i < zw - 1) v = llmin(v, d[(size_t)j * zw + i + 1] + 1.f);
-                            if (j < zh - 1)
-                            {
-                                v = llmin(v, d[(size_t)(j + 1) * zw + i] + 1.f);
-                                if (i < zw - 1) v = llmin(v, d[(size_t)(j + 1) * zw + i + 1] + 1.f);
-                                if (i > 0) v = llmin(v, d[(size_t)(j + 1) * zw + i - 1] + 1.f);
-                            }
-                            d[(size_t)j * zw + i] = v;
-                        }
-                    }
-                }
-                const F32 ramp = 2.f * (F32)rad;
-                f.mSurfKeep.assign(n * 2, 1.f);
-                for (size_t k = 0; k < n; ++k)
-                {
-                    for (S32 c = 0; c < 2; ++c)
-                    {
-                        const F32 t = llclamp((mKeepDist[(size_t)(c + 1) * n + k] - 1.f) / ramp, 0.f, 1.f);
-                        f.mSurfKeep[k * 2 + c] = t * t * (3.f - 2.f * t);
-                    }
-                }
-                f.mSpanRegions = spanRegionsStamp(regionp, ex0, ey0, esx, esy);
-            }
-            mZoneRG.resize(n * 4);
+            mZoneRG.resize(n * 2);
             for (size_t k = 0; k < n; ++k)
             {
-                mZoneRG[k * 4] = mZoneData[k];
-                mZoneRG[k * 4 + 1] = mSurfW[k];
-                mZoneRG[k * 4 + 2] = f.mSurfKeep[k * 2];       // [T1042 BORDER SEAM 2026-11-24/] B: as a neighbour's field
-                mZoneRG[k * 4 + 3] = f.mSurfKeep[k * 2 + 1];   // A: as the agent region's field
+                mZoneRG[k * 2] = mZoneData[k];
+                mZoneRG[k * 2 + 1] = mSurfW[k];
             }
         }
-        upload(f.mZoneTex, zw, zh, GL_RGBA32F, GL_RGBA, mZoneRG.data());
+        upload(f.mZoneTex, zw, zh, GL_RG32F, GL_RG, mZoneRG.data());
         f.mSurfW = mSurfW;
         f.mZoneW = zw;
         f.mZoneH = zh;

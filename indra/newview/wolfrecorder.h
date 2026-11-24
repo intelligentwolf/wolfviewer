@@ -18,6 +18,9 @@
 
 #include "stdtypes.h"
 #include <string>
+#include <vector>
+
+class LLView;
 
 // [W111 VIDEO 2026-11-24] Ticket 1033 (Blkchina Foggarty: "a way to do short videos"); Paul: "yes definitly".
 //
@@ -40,11 +43,21 @@ namespace WolfRecorder
 {
     enum class State { IDLE, STARTING, RECORDING, FINISHING };
 
+    // [W111 RECORDER UI 2026-11-24] the sound sources, in the order of levels() and of the window's rows
+    enum Source { SOURCE_WORLD = 0, SOURCE_VOICE = 1, SOURCE_MIC = 2, SOURCE_COUNT = 3 };
+    // the preview picture: 16:9, RGB, bottom row first (as a GL texture takes it)
+    constexpr U32 PREVIEW_WIDTH = 256;
+    constexpr U32 PREVIEW_HEIGHT = 144;
+    // a recording stops by itself when the disk's free space falls under this (the window counts the time left to it)
+    constexpr U64 DISK_STOP_BYTES = 100ull * 1024 * 1024;
+
     struct Report
     {
         State       state = State::IDLE;
-        F64         seconds = 0.0;          // recorded so far
-        F64         limit_seconds = 0.0;    // stops by itself here
+        F64         seconds = 0.0;          // recorded so far (paused time not counted)
+        F64         limit_seconds = 0.0;    // stops by itself here; 0 = never (only the disk-space guard)
+        bool        paused = false;         // RECORDING, paused: no pictures and no sound are taken
+        F64         length = 0.0;           // the last saved video's length in seconds (with saved)
         F32         fps = 0.f;              // pictures a second really written (last two seconds)
         U32         dropped = 0;            // pictures that could not be kept up with
         U64         bytes = 0;              // file size so far
@@ -60,8 +73,29 @@ namespace WolfRecorder
     bool start(std::string& error);
     /** Main thread. Stops; the worker finishes the file in the background (state FINISHING, then IDLE). */
     void stop();
-    bool isRecording();      // STARTING or RECORDING
+    bool isRecording();      // STARTING or RECORDING (paused or not)
     Report status();
+
+    /** [W111 RECORDER UI 2026-11-24] Main thread. Pause and carry on: while paused no picture is taken, the world and
+     *  voice sound are not kept and the microphone capture is stopped; the video simply has no paused stretch (the
+     *  pictures' times and the sound both run on a clock that stands still while paused). Only while RECORDING. */
+    void pause();
+    void resume();
+    bool isPaused();
+
+    /** Main thread. The loudest sample of each source since the last call (0..1+, after its level slider), then
+     *  reset; all 0 when not recording or the source is off. */
+    void levels(F32 out[SOURCE_COUNT]);
+
+    /** Main thread. A small copy of a recent picture (PREVIEW_WIDTH x PREVIEW_HEIGHT RGB, bottom row first), made by
+     *  the encoder thread from the pictures it already has (no extra copy from the graphics card). True with the
+     *  picture when it is newer than `serial` (which is then updated). The last one stays after the recording. */
+    bool previewPicture(U32& serial, std::vector<U8>& rgb);
+
+    /** Main thread, from a view's draw(): true when a whole-window recording runs and this view must be kept out of
+     *  the video - the view then returns without drawing, and the recorder draws it right after the picture copy
+     *  (as it does the recording indicator). For the recorder's own window. */
+    bool holdBackFromVideo(LLView* view);
 
     /** True when the world sound can be recorded this session (the sound engine's mirror route is running). */
     bool worldSoundAvailable();

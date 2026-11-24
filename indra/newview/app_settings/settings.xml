@@ -21100,13 +21100,13 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfRecorderSoundMic</key>
 		<map>
 			<key>Comment</key>
-			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): record your own microphone. The microphone is opened only while a recording runs.</string>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): record your own microphone. The microphone is opened only while a recording runs (and its capture stops while paused). [W111 RECORDER UI 2026-11-24] On by default (Paul 24 Nov: "default My Microphone ON please").</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
-			<integer>0</integer>
+			<integer>1</integer>
 		</map>
 		<key>WolfRecorderLevelWorld</key>
 		<map>
@@ -21144,13 +21144,13 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfRecorderMaxMinutes</key>
 		<map>
 			<key>Comment</key>
-			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): a recording stops by itself after this many minutes (short videos; a warning shows 30 seconds before).</string>
+			<string>[W111 VIDEO 2026-11-24] Video Recorder (wolfrecorder.cpp, floater_wolf_recorder.xml): a recording stops by itself after this many minutes (a warning shows 30 seconds before); 0 = never. [W111 RECORDER UI 2026-11-24] Never by default (Paul 24 Nov: "stop by itself set to never i can imagine me running well over 5 minutes"); it still stops when the disk is nearly full (100 MB left).</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>S32</string>
 			<key>Value</key>
-			<integer>5</integer>
+			<integer>0</integer>
 		</map>
 		<key>WolfRecorderFolder</key>
 		<map>

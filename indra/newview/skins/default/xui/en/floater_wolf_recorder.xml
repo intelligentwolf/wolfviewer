@@ -1,83 +1,123 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <!-- [W111 VIDEO 2026-11-24] Video Recorder (wolffloaterrecorder.cpp, wolfrecorder.cpp). Ticket 1033; Paul: "yes definitly".
-     Who and why: a resident (often 35-65, some older or disabled) wants a short clip of what they see - dancing at a club
-     with the music, a build, a ride - to keep or share, in as few steps as possible.
-     Flow: open (Avatar menu, Wolf World > Tools, or the toolbar button) -> press Record -> the timer runs and a REC sign
-     shows on screen (never in the video) -> press Stop -> "Saved" with the file name -> Open folder.
-     Everything else has a sensible default and sits below, grouped: Picture, Sound, Saving. One primary action (the big
-     Record/Stop button, top left where the eye starts). Errors stay in the window until the next try. -->
+     [W111 RECORDER UI 2026-11-24] Paul: "make the video recorder floater look like a proper video recording tool".
+     Who and why: a resident (often 35-65, some older or disabled) wants to film what they see - dancing at a club with
+     the music, a build, a ride, often well over five minutes, talking over it - and find the video afterwards.
+     Flow: open (Avatar menu, Wolf World > Tools, or the toolbar button) -> press the big round Record button -> the
+     monitor shows the picture, the REC light and the running time; Pause/Resume if needed -> press Stop -> "Saved" with
+     the file name, size and length -> Play or Open folder.
+     Modelled on camcorders and OBS Studio: a dark monitor at the top (drawn by the window: preview, REC light, timecode),
+     the transport buttons under it (one primary action, the biggest target), then the settings grouped Picture, Sound
+     (each source with its level meter, also drawn by the window) and Saving. Errors stay until the next press.
+     While the whole window is recorded, this window is kept out of the video (WolfRecorder::holdBackFromVideo).
+     Resizable larger: the monitor (and its preview) grows, everything else keeps its place below it. -->
 <floater
  can_close="true"
  can_minimize="true"
- can_resize="false"
- height="676"
+ can_resize="true"
+ height="742"
  layout="topleft"
+ min_height="742"
+ min_width="500"
  name="wolf_recorder"
  help_topic="wolf_recorder"
  save_rect="true"
  single_instance="true"
  title="Video Recorder"
- width="460">
-    <button follows="left|top" font="SansSerifLargeBold" height="44" image_color="Red" layout="topleft" left="14" name="record_btn" top="28" width="200" label="Record" tool_tip="Start recording what you see. Press again to stop and save." />
-    <text follows="left|top" font="SansSerifHuge" halign="right" height="44" layout="topleft" left="226" name="timer" top="28" width="220">0:00</text>
-    <text follows="left|top" font="SansSerifLarge" height="40" layout="topleft" left="14" name="status" top="78" width="432" wrap="true">Ready. Press Record to start.</text>
-    <text follows="left|top" font="SansSerif" height="44" layout="topleft" left="14" name="message" top="120" width="432" wrap="true" />
-    <button follows="left|top" font="SansSerif" height="28" layout="topleft" left="14" name="open_folder_btn" top="166" width="150" label="Open folder" tool_tip="Show the folder your videos are saved in" />
-    <button follows="left|top" font="SansSerif" height="28" layout="topleft" left="174" name="codec_btn" top="166" width="272" label="Get the video codec (free, from Cisco)" tool_tip="Downloads Cisco's free H.264 video codec to this computer. Only needed when the computer's own video encoder cannot be used." visible="false" />
-    <text follows="left|top" font="SansSerifSmall" height="18" layout="topleft" left="174" name="codec_note" top="196" width="272" visible="false">OpenH264 Video Codec provided by Cisco Systems, Inc.</text>
+ width="500">
+    <view follows="all" height="140" layout="topleft" left="10" mouse_opaque="false" name="monitor" top="26" width="480" />
 
-    <text follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="14" name="picture_heading" top="220" width="432">Picture</text>
-    <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="size_label" top="250" width="140">Size</text>
-    <combo_box follows="left|top" height="24" layout="topleft" left="170" name="size_combo" top="248" width="276" tool_tip="The size of the video picture. Your window is fitted inside, with black bars when its shape differs.">
+    <wolf_recorder_transport_button follows="left|bottom" font="SansSerifHuge" height="58" label="Record" layout="topleft" left="12" name="record_btn" tab_stop="true" top="174" width="200" tool_tip="Start recording what you see and hear. Press again to stop and save." />
+    <wolf_recorder_transport_button follows="left|bottom" font="SansSerifHuge" height="58" label="Pause" layout="topleft" left="224" name="pause_btn" tab_stop="true" top="174" width="190" tool_tip="Pause the recording. Nothing is recorded until you press Resume." />
+
+    <text follows="left|bottom" font="SansSerif" height="46" layout="topleft" left="14" name="status" top="240" width="290" wrap="true">Press Record to start.</text>
+    <button follows="left|bottom" font="SansSerif" height="28" label="Play" layout="topleft" left="312" name="play_btn" top="242" width="84" tool_tip="Play the video you have just saved, in this computer's video player" visible="false" />
+    <button follows="left|bottom" font="SansSerif" height="28" label="Open folder" layout="topleft" left="402" name="saved_folder_btn" top="242" width="88" tool_tip="Show the folder your videos are saved in" visible="false" />
+    <button follows="left|bottom" font="SansSerif" height="28" label="Get the video codec (free, from Cisco)" layout="topleft" left="300" name="codec_btn" top="242" width="190" tool_tip="Downloads Cisco's free H.264 video codec to this computer. Only needed when the computer's own video encoder cannot be used." visible="false" />
+    <text follows="left|bottom" font="SansSerifSmall" height="30" layout="topleft" left="300" name="codec_note" top="272" width="190" visible="false" wrap="true">OpenH264 Video Codec provided by Cisco Systems, Inc.</text>
+    <text follows="left|bottom" font="SansSerif" height="34" layout="topleft" left="14" name="message" top="290" width="476" wrap="true" />
+
+    <text follows="left|bottom" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="picture_heading" top="332" width="200">Picture</text>
+    <text follows="left|bottom" font="SansSerif" height="22" layout="topleft" left="24" name="size_label" top="358" width="140">Size</text>
+    <combo_box follows="left|bottom" height="24" layout="topleft" left="170" name="size_combo" top="356" width="320" tool_tip="The size of the video picture. Your window is fitted inside, with black bars when its shape differs.">
         <combo_box.item label="Standard - 1280 x 720 (720p)" name="size_720" value="720" />
         <combo_box.item label="High - 1920 x 1080 (1080p)" name="size_1080" value="1080" />
     </combo_box>
-    <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="fps_label" top="282" width="140">Smoothness</text>
-    <combo_box follows="left|top" height="24" layout="topleft" left="170" name="fps_combo" top="280" width="276" tool_tip="How many pictures a second the video aims for. When WolfViewer draws fewer, the video has fewer.">
+    <text follows="left|bottom" font="SansSerif" height="22" layout="topleft" left="24" name="fps_label" top="386" width="140">Smoothness</text>
+    <combo_box follows="left|bottom" height="24" layout="topleft" left="170" name="fps_combo" top="384" width="320" tool_tip="How many pictures a second the video aims for. When WolfViewer draws fewer, the video has fewer.">
         <combo_box.item label="30 pictures a second" name="fps_30" value="30" />
         <combo_box.item label="60 pictures a second (busier computer)" name="fps_60" value="60" />
     </combo_box>
-    <check_box control_name="WolfRecorderShowInterface" follows="left|top" height="22" label="Show my windows, menus and name tags in the video" layout="topleft" left="24" name="show_ui_check" top="312" width="422" tool_tip="Off: only the world is recorded. On: the whole window, as you see it. The REC sign is never in the video." />
+    <check_box control_name="WolfRecorderShowInterface" follows="left|bottom" height="22" label="Show my windows, menus and name tags in the video" layout="topleft" left="24" name="show_ui_check" top="414" width="466" tool_tip="Off: only the world is recorded. On: the whole window, as you see it. This window and the REC sign are never in the video." />
 
-    <text follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="14" name="sound_heading" top="344" width="432">Sound</text>
-    <check_box control_name="WolfRecorderSoundWorld" follows="left|top" height="22" label="World sound and music" layout="topleft" left="24" name="world_check" top="372" width="230" tool_tip="Sounds, music and media as you hear them" />
-    <slider control_name="WolfRecorderLevelWorld" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="256" max_val="2" min_val="0" name="world_level" show_text="false" top="372" width="190" tool_tip="How loud the world sound is in the video" />
-    <text follows="left|top" font="SansSerifSmall" height="28" layout="topleft" left="44" name="world_note" top="396" width="402" wrap="true" />
-    <check_box control_name="WolfRecorderSoundVoice" follows="left|top" height="22" label="Voice chat (other people)" layout="topleft" left="24" name="voice_check" top="426" width="230" tool_tip="Other people's voices as you hear them in voice chat" />
-    <slider control_name="WolfRecorderLevelVoice" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="256" max_val="2" min_val="0" name="voice_level" show_text="false" top="426" width="190" tool_tip="How loud voice chat is in the video" />
-    <text follows="left|top" font="SansSerifSmall" height="28" layout="topleft" left="44" name="voice_note" top="450" width="402" wrap="true">Other people's voices will be recorded - please ask before sharing.</text>
-    <check_box control_name="WolfRecorderSoundMic" follows="left|top" height="22" label="My microphone" layout="topleft" left="24" name="mic_check" top="480" width="230" tool_tip="Your own voice, for talking over the video. Not sent to voice chat." />
-    <slider control_name="WolfRecorderLevelMic" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="256" max_val="2" min_val="0" name="mic_level" show_text="false" top="480" width="190" tool_tip="How loud your microphone is in the video" />
-    <text follows="left|top" font="SansSerifSmall" height="28" layout="topleft" left="44" name="mic_note" top="504" width="402" wrap="true">The microphone is only switched on while a recording runs. With speakers, it also picks up the world sound.</text>
+    <text follows="left|bottom" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="sound_heading" top="444" width="120">Sound</text>
+    <text follows="left|bottom" font="SansSerifSmall" halign="right" height="16" layout="topleft" left="140" name="sound_hint" top="448" width="350">The bars show how loud each sound is while you record.</text>
+    <check_box control_name="WolfRecorderSoundWorld" follows="left|bottom" height="22" label="World sound and music" layout="topleft" left="24" name="world_check" top="468" width="200" tool_tip="Sounds, music and media as you hear them" />
+    <slider control_name="WolfRecorderLevelWorld" decimal_digits="1" follows="left|bottom" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="world_level" show_text="false" top="468" width="130" tool_tip="How loud the world sound is in the video" />
+    <view follows="left|bottom" height="22" layout="topleft" left="364" name="world_meter" top="468" width="126" tool_tip="How loud the world sound is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
+    <text follows="left|bottom" font="SansSerif" height="28" layout="topleft" left="44" name="world_note" top="490" width="446" wrap="true" />
+    <check_box control_name="WolfRecorderSoundVoice" follows="left|bottom" height="22" label="Voice chat (other people)" layout="topleft" left="24" name="voice_check" top="520" width="200" tool_tip="Other people's voices as you hear them in voice chat" />
+    <slider control_name="WolfRecorderLevelVoice" decimal_digits="1" follows="left|bottom" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="voice_level" show_text="false" top="520" width="130" tool_tip="How loud voice chat is in the video" />
+    <view follows="left|bottom" height="22" layout="topleft" left="364" name="voice_meter" top="520" width="126" tool_tip="How loud voice chat is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
+    <text follows="left|bottom" font="SansSerif" height="18" layout="topleft" left="44" name="voice_note" top="542" width="446" wrap="true">Other people's voices will be recorded - please ask before sharing.</text>
+    <check_box control_name="WolfRecorderSoundMic" follows="left|bottom" height="22" label="My microphone" layout="topleft" left="24" name="mic_check" top="562" width="200" tool_tip="Your own voice, for talking over the video. Not sent to voice chat." />
+    <slider control_name="WolfRecorderLevelMic" decimal_digits="1" follows="left|bottom" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="mic_level" show_text="false" top="562" width="130" tool_tip="How loud your microphone is in the video" />
+    <view follows="left|bottom" height="22" layout="topleft" left="364" name="mic_meter" top="562" width="126" tool_tip="How loud your microphone is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
+    <text follows="left|bottom" font="SansSerif" height="30" layout="topleft" left="44" name="mic_note" top="584" width="446" wrap="true">The microphone is only switched on while a recording runs, and off while it is paused. With speakers, it also picks up the world sound.</text>
 
-    <text follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="14" name="saving_heading" top="540" width="432">Saving</text>
-    <text follows="left|top" font="SansSerif" height="34" layout="topleft" left="24" name="folder_text" top="568" width="312" wrap="true">...</text>
-    <button follows="left|top" font="SansSerif" height="28" layout="topleft" left="346" name="change_folder_btn" top="566" width="100" label="Change..." tool_tip="Choose the folder your videos are saved in" />
-    <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="limit_label" top="610" width="140">Stop by itself after</text>
-    <combo_box follows="left|top" height="24" layout="topleft" left="170" name="limit_combo" top="608" width="276" tool_tip="Recordings stop by themselves after this long, so a forgotten recording does not fill the disk. A warning shows 30 seconds before.">
-        <combo_box.item label="1 minute" name="limit_1" value="1" />
-        <combo_box.item label="2 minutes" name="limit_2" value="2" />
-        <combo_box.item label="5 minutes" name="limit_5" value="5" />
-        <combo_box.item label="10 minutes" name="limit_10" value="10" />
-        <combo_box.item label="15 minutes" name="limit_15" value="15" />
-        <combo_box.item label="30 minutes" name="limit_30" value="30" />
-        <combo_box.item label="60 minutes" name="limit_60" value="60" />
+    <text follows="left|bottom" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="saving_heading" top="622" width="200">Saving</text>
+    <text follows="left|bottom" font="SansSerif" height="32" layout="topleft" left="24" name="folder_text" top="648" width="250" wrap="true">...</text>
+    <button follows="left|bottom" font="SansSerif" height="28" label="Change..." layout="topleft" left="280" name="change_folder_btn" top="646" width="100" tool_tip="Choose the folder your videos are saved in" />
+    <button follows="left|bottom" font="SansSerif" height="28" label="Open folder" layout="topleft" left="386" name="open_folder_btn" top="646" width="104" tool_tip="Show the folder your videos are saved in" />
+    <text follows="left|bottom" font="SansSerif" height="22" layout="topleft" left="24" name="limit_label" top="688" width="140">Stop by itself</text>
+    <combo_box follows="left|bottom" height="24" layout="topleft" left="170" name="limit_combo" top="686" width="320" tool_tip="Whether a recording stops by itself after a set time. With Never it runs until you press Stop; it still stops by itself, and says so, if the disk gets nearly full.">
+        <combo_box.item label="Never - I will press Stop" name="limit_never" value="0" />
+        <combo_box.item label="After 1 minute" name="limit_1" value="1" />
+        <combo_box.item label="After 2 minutes" name="limit_2" value="2" />
+        <combo_box.item label="After 5 minutes" name="limit_5" value="5" />
+        <combo_box.item label="After 10 minutes" name="limit_10" value="10" />
+        <combo_box.item label="After 15 minutes" name="limit_15" value="15" />
+        <combo_box.item label="After 30 minutes" name="limit_30" value="30" />
+        <combo_box.item label="After 60 minutes" name="limit_60" value="60" />
     </combo_box>
-    <text follows="left|top" font="SansSerifSmall" height="20" layout="topleft" left="24" name="space_note" top="640" width="422" wrap="true" />
+    <text follows="left|bottom" font="SansSerif" height="20" layout="topleft" left="24" name="space_note" top="716" width="466" wrap="true" />
 
     <string name="record_label">Record</string>
     <string name="stop_label">Stop</string>
     <string name="saving_label">Saving...</string>
-    <string name="ready">Ready. Press Record to start.</string>
+    <string name="pause_label">Pause</string>
+    <string name="resume_label">Resume</string>
+    <string name="record_tip">Start recording what you see and hear. Press again to stop and save.</string>
+    <string name="stop_tip">Stop recording and save the video.</string>
+    <string name="pause_tip">Pause the recording. Nothing is recorded until you press Resume.</string>
+    <string name="resume_tip">Carry on recording, in the same video.</string>
+    <string name="ready">Press Record to start. Press Stop when you have finished, and the video is saved.</string>
     <string name="starting">Starting...</string>
-    <string name="recording">Recording - [FPS] pictures a second[DROPPED]</string>
-    <string name="dropped">, [N] skipped</string>
-    <string name="near_end">Recording - stops by itself at [END]</string>
+    <string name="recording">Recording. Press Stop to finish and save the video.</string>
+    <string name="paused">Paused - nothing is being recorded. Press Resume to carry on, or Stop to save.</string>
+    <string name="near_end">Recording - it stops by itself at [END].</string>
     <string name="finishing">Saving the video...</string>
-    <string name="saved_as">Saved as [FILE] ([SIZE]).</string>
+    <string name="saved_as">Saved: [FILE]&#10;[SIZE], [LENGTH] long.</string>
+    <string name="play_missing">The saved video is no longer in its folder.</string>
+    <string name="detail_idle">[SIZE] - [FPS] pictures a second</string>
+    <string name="detail_recording">[FPS] pictures a second[DROPPED]</string>
+    <string name="dropped">, [N] skipped</string>
+    <string name="detail_paused">Nothing is recorded while paused</string>
+    <string name="monitor_stops_at">Stops by itself at [END]</string>
+    <string name="state_ready">READY</string>
+    <string name="state_starting">STARTING</string>
+    <string name="state_rec">REC</string>
+    <string name="state_paused">PAUSED</string>
+    <string name="state_saving">SAVING</string>
+    <string name="state_saved">SAVED</string>
+    <string name="chip_mic">Microphone on</string>
+    <string name="chip_voice">Voice chat on</string>
+    <string name="preview_empty_1">The picture shows here</string>
+    <string name="preview_empty_2">while you record</string>
+    <string name="meter_loud">Loud</string>
     <string name="world_restart">Takes effect after restarting WolfViewer.</string>
     <string name="world_unavailable">This computer's sound system could not start the route the world sound is recorded from.</string>
     <string name="world_fmod">World sound can only be recorded with the OpenAL sound engine.</string>
-    <string name="space_free">[FREE] free on this disk - about [MIN] minutes at this size.</string>
-    <string name="mic_on_indicator">Microphone on</string>
+    <string name="space_free">[FREE] free - room for about [TIME] of video at this size.</string>
+    <string name="space_recording">[FREE] free - about [TIME] left at the current rate.</string>
 </floater>

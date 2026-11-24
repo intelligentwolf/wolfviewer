@@ -47,8 +47,11 @@
 #include "llviewerdisplay.h"
 #include "llviewershadermgr.h"
 #include "llviewerwindow.h"
+#include "llui.h"
+#include "llview.h"
 #include "llwebrtc.h"
 #include "llwindow.h"
+#include "pipeline.h"           // [W111 RECORDER UI 2026-11-24/] LLPipeline::RenderUIBuffer (holdBackFromVideo)
 #include "wolfrec_audioenc.h"
 #include "wolfrec_mp4.h"
 #include "wolfvkbridge.h"
@@ -80,10 +83,57 @@ namespace
     constexpr S64 kAudioLagUs = 100000;    // the mix runs 100 ms behind real time: every source has delivered by then
     constexpr F64 kWarnBeforeEnd = 30.0;   // the indicator and the window warn this long before the length limit
     constexpr U64 kDiskReserve = 200ull * 1024 * 1024;   // never fill the disk: stop with this much left (before: refuse)
-    constexpr U64 kDiskStopAt = 100ull * 1024 * 1024;
+    constexpr U64 kDiskStopAt = WolfRecorder::DISK_STOP_BYTES;
+    constexpr F64 kNeverPlanSecs = 60.0;   // [W111 RECORDER UI 2026-11-24] "Never": room for at least a minute to start
+    constexpr S64 kPreviewEveryUs = 250000;   // the window's preview picture: four a second
 
     using Clock = std::chrono::steady_clock;
     S64 nowUs() { return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count(); }
+
+    // [W111 RECORDER UI 2026-11-24] The recording clock: the steady clock less the time spent paused, standing still
+    // while paused. The pictures' times (capture) and the sound mix (the worker's mixUpTo) both run on it, so a pause
+    // leaves no gap in either and they stay in step. Main thread writes, the worker reads.
+    std::mutex gClockM;
+    S64 gPausedTotalUs = 0;   // gClockM: time paused so far in this recording
+    S64 gPauseStartUs = 0;    // gClockM: when the current pause began; 0 = not paused
+    std::atomic<bool> gPaused{false};   // the sound taps and the microphone read this (no lock on the audio threads)
+    // [W111 RECORDER UI 2026-11-24] The microphone is really open (the worker opened it; not when it could not be opened
+    // or there is no sound encoder): only then do the window and the REC sign say "Microphone on".
+    std::atomic<bool> gMicLive{false};
+    S64 recNowUs()
+    {
+        std::lock_guard<std::mutex> lk(gClockM);
+        return (gPauseStartUs ? gPauseStartUs : nowUs()) - gPausedTotalUs;
+    }
+    void setClockPaused(bool paused)   // main thread
+    {
+        std::lock_guard<std::mutex> lk(gClockM);
+        if (paused && !gPauseStartUs)
+        {
+            gPauseStartUs = nowUs();
+        }
+        else if (!paused && gPauseStartUs)
+        {
+            gPausedTotalUs += nowUs() - gPauseStartUs;
+            gPauseStartUs = 0;
+        }
+        gPaused = paused;
+    }
+    void resetClock()   // main thread, at the start of a recording
+    {
+        std::lock_guard<std::mutex> lk(gClockM);
+        gPausedTotalUs = 0;
+        gPauseStartUs = 0;
+        gPaused = false;
+    }
+
+    // The loudest sample of each source since the window last asked (WolfRecorder::levels); worker writes, main reads.
+    std::atomic<F32> gPeak[WolfRecorder::SOURCE_COUNT];
+    void notePeak(int src, F32 v)
+    {
+        F32 cur = gPeak[src].load(std::memory_order_relaxed);
+        while (v > cur && !gPeak[src].compare_exchange_weak(cur, v, std::memory_order_relaxed)) {}
+    }
 
     // ---------------------------------------------------------------------------------------------------------------
     // One producer thread, one consumer thread (the same ring as wolfvraudio.cpp). Counts only grow.
@@ -172,7 +222,7 @@ namespace
     // OpenAL's mixer thread (llaudioengine_openal.cpp onOutputPull): the engine's final mix, the speakers' block.
     void onWorldMix(const F32* stereo, U32 frames, U32 rate, void*)
     {
-        if (!gSoundOn.load(std::memory_order_acquire) || rate != kRate || !stereo) return;
+        if (!gSoundOn.load(std::memory_order_acquire) || gPaused.load(std::memory_order_acquire) || rate != kRate || !stereo) return;
         gWorldRing.push(stereo, (size_t)frames * 2);
     }
 #endif
@@ -184,7 +234,7 @@ namespace
         ToRate rs;
         void onPlayoutAudio(const int16_t* s, size_t frames, size_t channels, uint32_t rate) override
         {
-            if (!gSoundOn.load(std::memory_order_acquire) || !s || !frames || !channels) return;
+            if (!gSoundOn.load(std::memory_order_acquire) || gPaused.load(std::memory_order_acquire) || !s || !frames || !channels) return;
             stereo.resize(frames * 2);
             for (size_t i = 0; i < frames; ++i)
             {
@@ -222,6 +272,9 @@ namespace
         bool worker_done = true;
         bool encoder_ready = false;
         std::deque<S64> written_us;       // write times of the pictures of the last two seconds (the real fps)
+        F64 length = 0.0;                 // the saved video's length in seconds
+        std::vector<U8> preview;          // [W111 RECORDER UI 2026-11-24] the window's preview picture (PREVIEW_WIDTH x
+        U32 preview_serial = 0;           // PREVIEW_HEIGHT RGB, bottom row first) and its number (0 = none yet)
     };
     Shared gS;
     std::thread gWorker;
@@ -403,7 +456,7 @@ namespace
                 return;
             }
         }
-        const S64 now = nowUs();
+        const S64 now = recNowUs();   // [W111 RECORDER UI 2026-11-24/] the recording clock (no paused time)
         const int slot = (int)gGpu.next;
         if (gGpu.fence[slot])
         {
@@ -466,6 +519,7 @@ namespace
     bool pictureDue()
     {
         if (gSess.state != WolfRecorder::State::RECORDING && gSess.state != WolfRecorder::State::STARTING) return false;
+        if (gPaused.load()) return false;   // [W111 RECORDER UI 2026-11-24/] paused: no pictures
         if (gSnapshot || gCubeSnapshot || !gViewerWindow) return false;
         const U32 frame = LLFrameTimer::getFrameCount();
         if (frame == gSess.captured_frame) return false;   // VR stereo draws twice a frame
@@ -599,6 +653,23 @@ namespace
             for (ALCint i = 0; i < n; ++i) st[(size_t)i * 2] = st[(size_t)i * 2 + 1] = (float)buf[(size_t)i] / 32768.f;
             gMicRing.push(st.data(), st.size());
         }
+        // [W111 RECORDER UI 2026-11-24] Paused: what was captured before the pause goes in, then the capture stops
+        // (OpenAL 1.1 spec 6.4.2: alcCaptureStop halts capture, the device stays open; alcCaptureStart carries on).
+        bool stopped = false;
+        void setPaused(bool paused)
+        {
+            if (!dev || paused == stopped) return;
+            if (paused)
+            {
+                pump();
+                alcCaptureStop(dev);
+            }
+            else
+            {
+                alcCaptureStart(dev);
+            }
+            stopped = paused;
+        }
         void close()
         {
             if (!dev) return;
@@ -623,6 +694,41 @@ namespace
         std::lock_guard<std::mutex> lk(gS.m);
         if (gS.error.empty()) gS.error = e;
         gS.stop_wanted = true;
+    }
+
+    // [W111 RECORDER UI 2026-11-24] The window's preview: a box-sampled PREVIEW_WIDTH x PREVIEW_HEIGHT copy of a picture
+    // the worker already holds (RGBA, top row first - capture() flips it), as RGB bottom row first for a GL texture.
+    // Four samples a pixel: ~150k reads, four times a second, on this thread - nothing more from the graphics card.
+    void makePreview(const std::vector<U8>& rgba, U32 w, U32 h)
+    {
+        constexpr U32 PW = WolfRecorder::PREVIEW_WIDTH, PH = WolfRecorder::PREVIEW_HEIGHT;
+        if (rgba.size() < (size_t)w * h * 4 || w < PW * 2 || h < PH * 2) return;
+        std::vector<U8> out((size_t)PW * PH * 3);
+        const U32 cw = w / PW, ch = h / PH;   // the source cell of one preview pixel
+        for (U32 y = 0; y < PH; ++y)
+        {
+            const U32 sy = (PH - 1 - y) * h / PH;   // flip: the picture is top row first, the texture bottom row first
+            for (U32 x = 0; x < PW; ++x)
+            {
+                const U32 sx = x * w / PW;
+                U32 acc[3] = {};
+                for (U32 k = 0; k < 4; ++k)
+                {
+                    const U32 px = sx + (k & 1) * cw / 2, py = sy + (k >> 1) * ch / 2;
+                    const U8* p = &rgba[((size_t)py * w + px) * 4];
+                    acc[0] += p[0];
+                    acc[1] += p[1];
+                    acc[2] += p[2];
+                }
+                U8* o = &out[((size_t)y * PW + x) * 3];
+                o[0] = (U8)(acc[0] / 4);
+                o[1] = (U8)(acc[1] / 4);
+                o[2] = (U8)(acc[2] / 4);
+            }
+        }
+        std::lock_guard<std::mutex> lk(gS.m);
+        gS.preview.swap(out);
+        ++gS.preview_serial;
     }
 
     void workerMain(WorkerConfig cfg)
@@ -673,6 +779,7 @@ namespace
             gS.notice = err + " The video is recorded without it.";
             cfg.mic = false;
         }
+        gMicLive = mic.dev != nullptr;
 #else
         cfg.mic = false;
 #endif
@@ -699,6 +806,7 @@ namespace
         // Timeline: picture time 0 = the first picture's capture time; the sound is mixed from that same instant.
         S64 t0 = -1;
         S64 last_pts = 0, prev_pts = -1;
+        S64 next_preview_us = 0;
         U64 mixed = 0;           // sound frames mixed so far
         bool trimmed = false;    // the sound that arrived before t0 has been dropped
         std::vector<float> mix, part;
@@ -714,7 +822,7 @@ namespace
             if (!trimmed)
             {
                 // drop what each source delivered before the first picture (it arrived since the taps went on)
-                const size_t want = (size_t)std::max<S64>(0, (nowUs() - t0) * (S64)kRate / 1000000) * 2;
+                const size_t want = (size_t)std::max<S64>(0, (recNowUs() - t0) * (S64)kRate / 1000000) * 2;
                 for (SpscRing* r : { &gWorldRing, &gVoiceRing, &gMicRing })
                 {
                     const size_t have = r->size();
@@ -726,10 +834,10 @@ namespace
             {
                 const size_t n = (size_t)std::min<S64>(target - (S64)mixed, kRate / 50);   // 20 ms at a time
                 mix.assign(n * 2, 0.f);
-                struct Src { SpscRing* ring; bool on; F32 level; };
-                const Src srcs[] = { { &gWorldRing, cfg.world, gLevelWorld.load() },
-                                     { &gVoiceRing, cfg.voice, gLevelVoice.load() },
-                                     { &gMicRing, cfg.mic, gLevelMic.load() } };
+                struct Src { SpscRing* ring; bool on; F32 level; int id; };
+                const Src srcs[] = { { &gWorldRing, cfg.world, gLevelWorld.load(), WolfRecorder::SOURCE_WORLD },
+                                     { &gVoiceRing, cfg.voice, gLevelVoice.load(), WolfRecorder::SOURCE_VOICE },
+                                     { &gMicRing, cfg.mic, gLevelMic.load(), WolfRecorder::SOURCE_MIC } };
                 for (const Src& s : srcs)
                 {
                     if (!s.on) { s.ring->clear(); continue; }
@@ -740,7 +848,14 @@ namespace
                     if (have > limit) s.ring->skip((have - (n + kRate / 10) * 2) & ~(size_t)1);
                     part.resize(n * 2);
                     const size_t got = s.ring->pop(part.data(), n * 2);   // less = silence for the rest
-                    for (size_t k = 0; k < got; ++k) mix[k] += part[k] * s.level;
+                    F32 peak = 0.f;   // [W111 RECORDER UI 2026-11-24/] the window's level meter: as it goes into the mix
+                    for (size_t k = 0; k < got; ++k)
+                    {
+                        const F32 v = part[k] * s.level;
+                        mix[k] += v;
+                        peak = std::max(peak, std::fabs(v));
+                    }
+                    notePeak(s.id, peak);
                 }
                 for (float& x : mix) x = std::max(-1.f, std::min(1.f, x));
                 packets.clear();
@@ -776,13 +891,22 @@ namespace
                 stop = gS.stop_wanted && gS.queue.empty();
             }
 #if LL_OPENAL
-            if (cfg.mic) mic.pump();
+            if (cfg.mic)
+            {
+                mic.setPaused(gPaused.load());   // [W111 RECORDER UI 2026-11-24/] no capture while paused
+                if (!mic.stopped) mic.pump();
+            }
 #endif
             if (have)
             {
                 if (!failed)
                 {
                     if (t0 < 0) t0 = f.t_us;
+                    if (nowUs() >= next_preview_us)   // [W111 RECORDER UI 2026-11-24/] the window's preview
+                    {
+                        next_preview_us = nowUs() + kPreviewEveryUs;
+                        makePreview(f.rgba, cfg.width, cfg.height);
+                    }
                     S64 pts = f.t_us - t0;
                     if (pts <= prev_pts) pts = prev_pts + 1;   // strictly rising
                     if (!venc->encode(f.rgba.data(), ef, err))
@@ -806,7 +930,7 @@ namespace
                 std::lock_guard<std::mutex> lk(gS.m);
                 gS.pool.push_back(std::move(f.rgba));
             }
-            mixUpTo(nowUs() - kAudioLagUs);
+            mixUpTo(recNowUs() - kAudioLagUs);
             if (stop) break;
         }
 
@@ -816,7 +940,8 @@ namespace
         {
             // what the sources still hold for the last 100 ms arrives within that time: wait for it (bounded)
             const S64 end_us = t0 + last_pts + frame_us;
-            while (nowUs() < end_us + kAudioLagUs / 2) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            // (the recording clock: stop() ends any pause first, so it runs)
+            while (recNowUs() < end_us + kAudioLagUs / 2) std::this_thread::sleep_for(std::chrono::milliseconds(5));
             mixUpTo(end_us);
             packets.clear();
             if (!audio_dead && aenc->flush(packets, err))
@@ -828,6 +953,7 @@ namespace
         gSoundOn = false;
 #if LL_OPENAL
         mic.close();
+        gMicLive = false;
 #endif
         bool saved = false;
         if (venc && t0 >= 0)
@@ -846,6 +972,7 @@ namespace
             std::lock_guard<std::mutex> lk(gS.m);
             gS.saved = saved;
             gS.bytes = mp4.bytesWritten();
+            gS.length = saved ? (F64)(last_pts + frame_us) / 1e6 : 0.0;
             gS.worker_done = true;
         }
         LL_INFOS("WolfRecorder") << (saved ? "saved '" : "not saved '") << cfg.path << "', " << mp4.bytesWritten()
@@ -900,8 +1027,8 @@ namespace
             }
             else
             {
-                const F64 secs = (F64)(nowUs() - gSess.start_us) / 1e6;
-                if (secs >= gSess.limit)
+                const F64 secs = (F64)(recNowUs() - gSess.start_us) / 1e6;
+                if (gSess.limit > 0.0 && secs >= gSess.limit)   // 0 = "Never" (the disk guard below still stops)
                 {
                     gLastNotice = "The recording stopped at its length limit (" + minutes(gSess.limit) +
                                   "). You can change the limit in the Video Recorder window.";
@@ -939,6 +1066,43 @@ namespace
         }
     }
 
+    // [W111 RECORDER UI 2026-11-24] Views kept out of a whole-window video (holdBackFromVideo): collected while the UI
+    // draws, drawn after the picture copy. Handles, not pointers: a window can close between the two.
+    std::vector<LLHandle<LLView>> gHeldViews;
+    bool gDrawingHeld = false;
+
+    // Each held view at its place on screen, as LLView::drawChildren would have drawn it (llview.cpp: LLUI::pushMatrix,
+    // LLUI::translate to the view's rect) under the root view's UI scale (llviewerwindow.cpp LLViewerWindow::draw:
+    // gUIProgram, scaleUI by the display scale). calcScreenRect is in the root view's coordinates, the root view being at
+    // 0,0. LLUI's own matrix calls, not gGL's: they also move the text origin (llrender2dutils.cpp LLRender2D::translate
+    // moves LLFontGL::sCurOrigin, which LLFontGL::render adds), else the text lands elsewhere than the shapes.
+    void drawHeldViews(const std::vector<LLHandle<LLView>>& views)
+    {
+        if (views.empty()) return;
+        gDrawingHeld = true;
+        gUIProgram.bind();
+        gGL.color4f(1.f, 1.f, 1.f, 1.f);
+        gGL.pushMatrix();
+        LLUI::pushMatrix();
+        LLUI::loadIdentity();
+        gGL.scaleUI(gViewerWindow->getDisplayScale().mV[VX], gViewerWindow->getDisplayScale().mV[VY], 1.f);
+        for (const LLHandle<LLView>& h : views)
+        {
+            LLView* v = h.get();
+            if (!v || !v->isInVisibleChain()) continue;
+            const LLRect r = v->calcScreenRect();
+            LLUI::pushMatrix();
+            LLUI::translate((F32)r.mLeft, (F32)r.mBottom);
+            v->draw();
+            LLUI::popMatrix();
+        }
+        LLUI::popMatrix();
+        gGL.popMatrix();
+        gGL.flush();
+        gUIProgram.unbind();
+        gDrawingHeld = false;
+    }
+
     bool gIdleAdded = false;
     void ensureIdle()
     {
@@ -947,19 +1111,24 @@ namespace
         gIdleCallbacks.addFunction(idle, nullptr);
     }
 
+    std::string timecode(F64 secs)   // [W111 RECORDER UI 2026-11-24] HH:MM:SS, as the window shows it
+    {
+        const S32 s = (S32)std::max(0.0, secs);
+        return llformat("%02d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60);
+    }
+
     void drawIndicator()
     {
-        const F64 secs = (F64)(nowUs() - gSess.start_us) / 1e6;
-        const S32 s = (S32)secs;
-        std::string text = llformat("REC  %d:%02d", s / 60, s % 60);
-        const bool near_end = gSess.limit - secs <= kWarnBeforeEnd;
+        const F64 secs = (F64)(recNowUs() - gSess.start_us) / 1e6;
+        const bool paused = gPaused.load();
+        std::string text = (paused ? "PAUSED  " : "REC  ") + timecode(secs);
+        const bool near_end = gSess.limit > 0.0 && gSess.limit - secs <= kWarnBeforeEnd;
         if (near_end)
         {
-            const S32 l = (S32)gSess.limit;
-            text += llformat("  - stops at %d:%02d", l / 60, l % 60);
+            text += "  - stops at " + timecode(gSess.limit);
         }
-        if (gSess.mic) text += "  |  Microphone on";
-        if (gSess.voice) text += "  |  Voice recorded";
+        if (gMicLive.load() && !paused) text += "  |  Microphone on";   // paused: the capture is stopped (Mic::setPaused)
+        if (gSess.voice && !paused) text += "  |  Voice recorded";
         const LLFontGL* font = LLFontGL::getFontSansSerifBold();
         const S32 W = gViewerWindow->getWindowWidthScaled(), H = gViewerWindow->getWindowHeightScaled();
         const S32 pad = 10, dot = 14;
@@ -975,10 +1144,17 @@ namespace
         gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
         // dark backing (contrast for the white text over any scene), red dot blinking once a second
         gl_rect_2d(left, top, right, bottom, LLColor4(0.08f, 0.08f, 0.08f, 0.85f), true);
-        if (near_end) gl_rect_2d(left, top, right, bottom, LLColor4(1.f, 0.75f, 0.2f, 1.f), false);
-        if (((S64)(secs * 2.0)) % 2 == 0)
+        if (near_end || paused) gl_rect_2d(left, top, right, bottom, LLColor4(1.f, 0.75f, 0.2f, 1.f), false);
+        const F32 cx = (F32)(left + pad + dot / 2), cy = (F32)(bottom + (top - bottom) / 2);
+        if (paused)
         {
-            const F32 cx = (F32)(left + pad + dot / 2), cy = (F32)(bottom + (top - bottom) / 2);
+            // two amber bars, steady: the pause sign
+            const LLColor4 amber(1.f, 0.75f, 0.2f, 1.f);
+            gl_rect_2d(left + pad + 1, (S32)cy + dot / 2, left + pad + 5, (S32)cy - dot / 2, amber, true);
+            gl_rect_2d(left + pad + dot - 5, (S32)cy + dot / 2, left + pad + dot - 1, (S32)cy - dot / 2, amber, true);
+        }
+        else if (((S64)(secs * 2.0)) % 2 == 0)
+        {
             gGL.color4f(0.9f, 0.12f, 0.12f, 1.f);
             gl_circle_2d(cx, cy, (F32)dot / 2.f, 16, true);
         }
@@ -1062,7 +1238,11 @@ bool start(std::string& error)
     gLevelWorld = llclamp(gSavedSettings.getF32("WolfRecorderLevelWorld"), 0.f, 2.f);
     gLevelVoice = llclamp(gSavedSettings.getF32("WolfRecorderLevelVoice"), 0.f, 2.f);
     gLevelMic = llclamp(gSavedSettings.getF32("WolfRecorderLevelMic"), 0.f, 2.f);
-    gSess.limit = 60.0 * llclamp(gSavedSettings.getS32("WolfRecorderMaxMinutes"), 1, 60);
+    // [W111 RECORDER UI 2026-11-24] 0 (or less) = "Never" (Paul: "i can imagine me running well over 5 minutes"); the
+    // disk-space guard (idle) still stops a recording when the disk is nearly full
+    const S32 max_minutes = gSavedSettings.getS32("WolfRecorderMaxMinutes");
+    gSess.limit = max_minutes <= 0 ? 0.0 : 60.0 * llclamp(max_minutes, 1, 60);
+    const F64 plan = gSess.limit > 0.0 ? gSess.limit : kNeverPlanSecs;   // what must fit on the disk to start
 
     // the folder, and room on its disk for a whole recording at its limit
     const std::string dir = folder();
@@ -1074,12 +1254,15 @@ bool start(std::string& error)
         gLastError = error;
         return false;
     }
-    const U64 need = (U64)((F64)gSess.kbps * 1000.0 / 8.0 * gSess.limit * 1.1) + 192000 / 8 * (U64)gSess.limit + kDiskReserve;
+    const U64 need = (U64)((F64)gSess.kbps * 1000.0 / 8.0 * plan * 1.1) + 192000 / 8 * (U64)plan + kDiskReserve;
     U64 have = 0;
     if (freeBytes(dir, have) && have < need)
     {
-        error = "There is not enough free space on the disk for a video of up to " + minutes(gSess.limit) + ": about " +
-                mb(need) + " is needed and " + mb(have) + " is free. Choose another folder or a shorter length limit.";
+        error = gSess.limit > 0.0
+            ? "There is not enough free space on the disk for a video of up to " + minutes(gSess.limit) + ": about " +
+                  mb(need) + " is needed and " + mb(have) + " is free. Choose another folder or a shorter length limit."
+            : "There is not enough free space on the disk to start a video: about " + mb(need) + " is needed and " +
+                  mb(have) + " is free. Choose another folder or make some room on this disk.";
         gLastError = error;
         return false;
     }
@@ -1111,12 +1294,16 @@ bool start(std::string& error)
         gS.worker_done = false;
         gS.encoder_ready = false;
         gS.written_us.clear();
+        gS.length = 0.0;
     }
+    resetClock();
+    gMicLive = false;
+    for (std::atomic<F32>& p : gPeak) p = 0.f;
     gWorldRing.clear();
     gVoiceRing.clear();
     gMicRing.clear();
-    gSess.start_us = nowUs();
-    gSess.next_due_us = gSess.start_us;
+    gSess.start_us = recNowUs();   // the recording clock (just reset: no paused time)
+    gSess.next_due_us = nowUs();
     gSess.dropped = 0;
     gSess.warned = false;
     gSess.captured_frame = 0;
@@ -1136,6 +1323,7 @@ void stop()
     if (!isRecording()) return;
     gSess.state = State::FINISHING;
     setTaps(false);
+    setClockPaused(false);   // [W111 RECORDER UI 2026-11-24/] the clock runs again: the worker waits on it for the end
     // the pictures still in their pixel buffers: collect whatever has finished (the rest is a frame or two)
     collect();
     {
@@ -1153,9 +1341,11 @@ Report status()
     st.dropped = gSess.dropped;
     st.world = gSess.world;
     st.voice = gSess.voice;
-    st.mic = gSess.mic;
-    if (isRecording()) st.seconds = (F64)(nowUs() - gSess.start_us) / 1e6;
+    st.mic = gMicLive.load();   // [W111 RECORDER UI 2026-11-24/] really open, not only asked for
+    if (isRecording()) st.seconds = (F64)(recNowUs() - gSess.start_us) / 1e6;
+    st.paused = isRecording() && gPaused.load();
     std::lock_guard<std::mutex> lk(gS.m);
+    st.length = gS.length;
     st.file = gS.file;
     st.encoder = gS.encoder_name;
     st.bytes = gS.bytes;
@@ -1177,12 +1367,68 @@ void captureWorld()
 
 void captureWholeWindowAndDrawIndicator()
 {
+    std::vector<LLHandle<LLView>> held;
+    held.swap(gHeldViews);   // this pass's held views; none carry over to another pass
     if (!isRecording() || gSnapshot || gCubeSnapshot || !gViewerWindow) return;
     if (gSess.ui && pictureDue())
     {
         capture(WolfVRScreen::wholeWindowFramebuffer());   // 0 = the back buffer; Vulkan mode: the composite
     }
+    drawHeldViews(held);   // [W111 RECORDER UI 2026-11-24/] the recorder's own window, after the copy: never in the video
     drawIndicator();
+}
+
+void pause()
+{
+    if (gSess.state != State::RECORDING || gPaused.load()) return;
+    setClockPaused(true);
+    LL_INFOS("WolfRecorder") << "paused at " << (F64)(recNowUs() - gSess.start_us) / 1e6 << " s" << LL_ENDL;
+}
+
+void resume()
+{
+    if (gSess.state != State::RECORDING || !gPaused.load()) return;
+    setClockPaused(false);
+    gSess.next_due_us = nowUs();   // a picture straight away
+    LL_INFOS("WolfRecorder") << "resumed" << LL_ENDL;
+}
+
+bool isPaused()
+{
+    return isRecording() && gPaused.load();
+}
+
+void levels(F32 out[SOURCE_COUNT])
+{
+    const bool on[SOURCE_COUNT] = { gSess.world, gSess.voice, gSess.mic };
+    for (int i = 0; i < SOURCE_COUNT; ++i)
+    {
+        const F32 v = gPeak[i].exchange(0.f);
+        out[i] = (gSess.state == State::RECORDING && on[i]) ? v : 0.f;
+    }
+}
+
+bool previewPicture(U32& serial, std::vector<U8>& rgb)
+{
+    std::lock_guard<std::mutex> lk(gS.m);
+    if (gS.preview_serial == serial || gS.preview.empty()) return false;
+    serial = gS.preview_serial;
+    rgb = gS.preview;
+    return true;
+}
+
+bool holdBackFromVideo(LLView* view)
+{
+    // the same test captureWholeWindowAndDrawIndicator makes before it draws the held views; and not with the cached UI
+    // buffer (the debug setting RenderUIBuffer, llviewerdisplay.cpp render_ui_2d: the UI is redrawn only when it
+    // changes, so a view held back would be missing from every other frame)
+    if (gDrawingHeld || !view || !isRecording() || !gSess.ui || gSnapshot || gCubeSnapshot || !gViewerWindow ||
+        LLPipeline::RenderUIBuffer)
+    {
+        return false;
+    }
+    gHeldViews.push_back(view->getHandle());
+    return true;
 }
 
 bool wantsWholeWindow()
@@ -1201,6 +1447,7 @@ void shutdown()
     gS.cv.notify_one();
     joinWorker();
     gSoundOn = false;
+    resetClock();
     gSess.state = State::IDLE;
 }
 }

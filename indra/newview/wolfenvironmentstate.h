@@ -100,6 +100,7 @@ struct WolfEnvDoc
     bool  mHaveTemperature = false; F32 mTemperature = 15.f;   // air_temperature C
     F32   mHumidity = 60.f;                                     // relative_humidity %
     F32   mPrecipitation = 0.f;                                 // precipitation_amount mm, next 1 h
+    F32   mVisibility = -1.f;                                   // [2026-11-24 ticket 655] Open-Meteo visibility m (auto_env_lib.php ae_add_openmeteo); < 0 unknown
     F32   mThunderChance = 0.f;                                 // probability_of_thunder %
     std::string mWeatherSymbol;                                 // symbol_code
     struct HourlyRow { F64 t = 0.0; F32 low = 0.f, medium = 0.f, high = 0.f; };

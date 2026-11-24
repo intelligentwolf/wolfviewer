@@ -232,6 +232,8 @@ WolfEnvDoc WolfEnvDoc::fromEntry(const LLSD& entry)
         d.mTemperature = num(o["temperature"], -60, 60, 15);
         d.mHumidity = num(o["humidity"], 0, 100, 60);
         d.mPrecipitation = num(o["precipitation"], 0, 200, 0);
+        // [WolfViewer 2026-11-24 ticket 655] metres; null (an older web, or no Open-Meteo reply) stays unknown
+        d.mVisibility = (o["visibility"].isReal() || o["visibility"].isInteger()) ? num(o["visibility"], 0, 1000000, 0) : -1.f;
         d.mThunderChance = num(o["thunderChance"], 0, 100, 0);
         d.mWeatherSymbol = o["symbol"].isString() ? o["symbol"].asString() : std::string();
         d.mHourly.clear();

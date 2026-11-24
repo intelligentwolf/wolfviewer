@@ -2153,6 +2153,7 @@ set(viewer_HEADER_FILES
     wolfadventurestudioutil.h  # [WOLF ADVENTURE AUDIT 2026-10-17]
     wolffloateradventureguide.h # [WOLF ADVENTURE AUDIT 2026-10-17]
     wolfwavezones.h
+    wolfweatherhaze.h
     wolfweatherprofile.h
     wolfweathersound.h
     wolfsoundeffects.h   # [SOUND EFFECTS 2026-11-06]

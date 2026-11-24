@@ -21,6 +21,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfenvironmentrender.h"
+#include "wolfweatherhaze.h"   // [2026-11-24 ticket 655]
 #include "wolfvrscreen.h"   // [VR CLOUDS 2026-11-05] WolfVRScreen::secondEye / stereoEye (cloudsFrame)
 
 #include <algorithm>
@@ -291,6 +292,7 @@ namespace
         F32      moonCloudT = 1.f;                   // [2026-10-30 ticket #391] the moon's direct light through the weather's cloud (moon391)
         F32      hazeScale = 1.f;
         F32      weatherHazeSigma = -1.f;           // [2026-10-27] the world's haze extinction the weather allows, 1/m (-1: no limit)
+        bool     weatherHazeWet = false;            // [2026-11-24 ticket 655] wet air: the weather SETS the world's haze (wolfweatherhaze.h)
         bool     wolfWeather = false;               // [2026-10-27] a Wolf-mode document with weather and an EEP sky (updateLight)
         F32      weatherRepeatScale = 1.f;          // [WolfViewer round 9] the EEP's cloud_scale over its default
         LLColor3 sunTint = LLColor3::white;         // [WolfViewer 2026-10-13] x the direct light: LL's own light's hue (hueSwap)
@@ -1526,19 +1528,27 @@ namespace
         // haze, and a foggy forecast (whose EEP the server already fogged by the same rule) is unchanged. Humidity is not used:
         // no rule of ours or the server's turns it into haze, and fog 0 at 72-76 % RH is clear air. The sky dome is untouched
         // (it does not use distance_multiplier).
+        // [WolfViewer 2026-11-24 ticket 655] AND IN WET AIR THE WEATHER SETS IT (Jimmy Olsen, TROMSO in rain: real Tromsø "has
+        // haze on horizon (caused by precipitation)", ours "too clean"; Paul: rain, snow, mist or drizzle make the horizon paler
+        // and hazier, clear stays as now). The rule and its sources are in wolfweatherhaze.h, the same as the server's
+        // (WolfAutoEnvironmentModule.cs WeatherWorldSigma): the dry limit above, unchanged; with rain, drizzle or snow falling
+        // or visibility of 5 km or less, the world's extinction is the real visibility's / the precipitation's (Gultepe et al.
+        // 2010), raised or lowered to it, so a W112 viewer shows it whether or not the region's EEP was baked with it yet.
         {
             F32 limit = -1.f;
+            bool wet = false;
             if (psky && d.mMode == WolfEnvDoc::WOLF && d.mHaveWeather)
             {
-                const F32 fog = llclamp(d.mWeatherFog, 0.f, 1.f);
-                const F32 haze = llclamp(z.haze, 0.f, 1.f);
-                F32 hd = 0.7f + (5.f - 0.7f) * 0.7f * fog;   // WolfEnvironment.cs:1029
-                F32 dist = 0.8f * (1.f + 4.f * fog);          // :1030
-                hd += (5.f - hd) * 0.6f * haze;               // :1068
-                dist *= 1.f + 3.f * haze;                     // :1069
-                limit = (0.2447f + hd) * 0.0001f * dist;
+                WolfWeatherHaze::Weather ww;
+                ww.fog = d.mWeatherFog;
+                ww.kind = d.mWeatherKind;
+                ww.precipitation = d.mPrecipitation;
+                ww.visibility = d.mVisibility;
+                limit = WolfWeatherHaze::worldSigma(ww, z.haze);
+                wet = WolfWeatherHaze::isWet(ww);
             }
             sNext.weatherHazeSigma = limit;
+            sNext.weatherHazeWet = wet;
             sNext.wolfWeather = psky && d.mMode == WolfEnvDoc::WOLF && d.mHaveWeather;   // [2026-10-27] measureCloudCover
         }
         // [WolfViewer round 9] the clouds' size from the EEP's cloud_scale (llsettingssky.cpp:904 default 0.4199): the weather
@@ -2482,8 +2492,8 @@ F32 WolfEnvironmentRender::worldDistanceMultiplier(F32 blueDensityR, F32 hazeDen
 {
     if (!skyActive() || sFrame.weatherHazeSigma < 0.f) return distanceMultiplier;
     const F32 sigma = llmax(blueDensityR + hazeDensity, 0.f) * densityMultiplier * distanceMultiplier;
-    if (sigma <= sFrame.weatherHazeSigma || sigma <= 0.f) return distanceMultiplier;
-    return distanceMultiplier * (sFrame.weatherHazeSigma / sigma);
+    // [2026-11-24 ticket 655] dry: held as before; wet: set to the weather's (wolfweatherhaze.h)
+    return WolfWeatherHaze::distanceMultiplier(sigma, distanceMultiplier, sFrame.weatherHazeSigma, sFrame.weatherHazeWet);
 }
 
 // static
@@ -3012,8 +3022,9 @@ namespace
                 // [2026-10-27] the world's haze as drawn: held to the weather's (WolfEnvironmentRender::worldDistanceMultiplier)
                 const F32 bd = psky->getBlueDensity().mV[0], hd = psky->getHazeDensity(), dm = psky->getDensityMultiplier();
                 const F32 held = WolfEnvironmentRender::worldDistanceMultiplier(bd, hd, dm, psky->getDistanceMultiplier());
-                o << "\n  haze 1 km      drawn " << expf(-llmax(bd + hd, 1e-6f) * 1000.f * dm * held) << " (the weather's limit "
-                  << expf(-sFrame.weatherHazeSigma * 1000.f) << ")";
+                o << "\n  haze 1 km      drawn " << expf(-llmax(bd + hd, 1e-6f) * 1000.f * dm * held) << (sFrame.weatherHazeWet
+                  ? " (wet air, the weather's, ticket 655: " : " (the weather's limit ") << expf(-sFrame.weatherHazeSigma * 1000.f)
+                  << ", visibility " << WolfWeatherHaze::MOR_LN / llmax(sFrame.weatherHazeSigma, 1e-9f) << " m)";
             }
             o << "\n  haze 1 km      EEP surface " << d8(WolfEepReference::display(path, WolfEepReference::hazedSurfaceLinear(psky, LLVector3(0.f, 1.f, 0.f), 1000.f)))
               << "  5 km " << d8(WolfEepReference::display(path, WolfEepReference::hazedSurfaceLinear(psky, LLVector3(0.f, 1.f, 0.f), 5000.f)));

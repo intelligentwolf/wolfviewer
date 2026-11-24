@@ -71,6 +71,18 @@ LL_GST_SYM( true, gst_buffer_unmap, void, GstBuffer*, GstMapInfo* )
 
 LL_GST_SYM( true, gst_app_sink_set_caps, void, GstAppSink*, GstCaps const* )
 LL_GST_SYM( true, gst_app_sink_pull_sample, GstSample*, GstAppSink* )
+// [W111 VIDEO 2026-11-24] media sound through the viewer (MediaPluginGStreamer10::installAudioSink). Optional: without
+// any of them the plugin plays its own sound as before. Signatures: gst/app/gstappsink.h:121 gst_app_sink_set_callbacks,
+// gst/gstsample.h:60 gst_sample_get_segment, gst/gstsegment.h:221 gst_segment_to_running_time, gst/gstelement.h:735/738
+// gst_element_get_clock / gst_element_get_base_time, gst/gstclock.h:493 gst_clock_get_time, gst/base/gstbasesink.h:234
+// gst_base_sink_get_latency (libgstbase: found through libgstapp's handle, dlsym searches a library's dependencies).
+LL_GST_SYM( false, gst_app_sink_set_callbacks, void, GstAppSink*, GstAppSinkCallbacks*, gpointer, GDestroyNotify )
+LL_GST_SYM( false, gst_sample_get_segment, GstSegment*, GstSample* )
+LL_GST_SYM( false, gst_segment_to_running_time, guint64, const GstSegment*, GstFormat, guint64 )
+LL_GST_SYM( false, gst_element_get_clock, GstClock*, GstElement* )
+LL_GST_SYM( false, gst_element_get_base_time, GstClockTime, GstElement* )
+LL_GST_SYM( false, gst_clock_get_time, GstClockTime, GstClock* )
+LL_GST_SYM( false, gst_base_sink_get_latency, GstClockTime, GstBaseSink* )
 
 LL_GST_SYM( true, g_free, void, gpointer )
 LL_GST_SYM( true, g_error_free, void, GError* )

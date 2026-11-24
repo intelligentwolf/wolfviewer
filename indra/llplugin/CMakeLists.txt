@@ -16,6 +16,7 @@ set(llplugin_SOURCE_FILES
     llpluginprocesschild.cpp
     llpluginprocessparent.cpp
     llpluginsharedmemory.cpp
+    wolfpluginaudio.cpp
     )
 
 set(llplugin_HEADER_FILES
@@ -29,6 +30,7 @@ set(llplugin_HEADER_FILES
     llpluginprocesschild.h
     llpluginprocessparent.h
     llpluginsharedmemory.h
+    wolfpluginaudio.h
     )
 
 list(APPEND llplugin_SOURCE_FILES ${llplugin_HEADER_FILES})

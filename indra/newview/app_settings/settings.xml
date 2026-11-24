@@ -19847,6 +19847,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<string>auto</string>
 		</map>
+		<key>WolfMediaAudioThroughViewer</key>
+		<map>
+			<key>Comment</key>
+			<string>[W111] Play the sound of media (parcel music, sound and video on prims, web pages) through the viewer's own sound engine, so it is in the viewer's mix (the video recorder and the VR headset hear it). Off = each media player plays its own sound, as before W111. Takes effect for media started after the change.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
 		<key>WolfViewerAudioDeviceWatch</key>
 		<map>
 			<key>Comment</key>

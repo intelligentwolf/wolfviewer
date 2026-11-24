@@ -28,6 +28,7 @@
 
 #include "llappviewer.h"
 #include "llstartup.h"
+#include "wolfmediaaudio.h"     // [W111 VIDEO 2026-11-24]
 #include "wolfsoundeffects.h"   // [SOUND EFFECTS 2026-11-06/]
 #include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels::init
 
@@ -1166,6 +1167,8 @@ bool idle_startup()
                     gAudiop->setDevice(LLUUID(gSavedSettings.getString("FSOutputDeviceUUID")));
                     // <WolfViewer 2026-09-13> follow the default output device across hot-plugs, unless switched off
                     gAudiop->setDeviceWatchEnabled(gSavedSettings.getBOOL("WolfViewerAudioDeviceWatch"));
+                    // [W111 VIDEO 2026-11-24] media plugins made from now on may play their sound in this engine
+                    WolfMediaAudio::registerHost();
 
                     gAudiop->setMuted(true);
                 }

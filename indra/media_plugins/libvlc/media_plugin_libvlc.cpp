@@ -33,6 +33,10 @@
 #include "llpluginmessage.h"
 #include "llpluginmessageclasses.h"
 #include "media_plugin_base.h"
+#include "wolfpluginaudio.h"    // [W111 VIDEO 2026-11-24] WolfPluginAudio::nowUs
+
+#include <cstring>
+#include <vector>
 
 #if defined(_MSC_VER)
 #include <basetsd.h>
@@ -87,6 +91,14 @@ private:
     void setDurationDirty();
 
     static void eventCallbacks(const libvlc_event_t* event, void* ptr);
+
+    // [W111 VIDEO 2026-11-24] sound through the viewer (MediaPluginBase::wolfAudioThroughViewer); see playMedia()
+    static int  audioSetup(void** data, char* format, unsigned* rate, unsigned* channels);
+    static void audioPlay(void* data, const void* samples, unsigned count, int64_t pts);
+    static void audioPause(void* data, int64_t pts);
+    static void audioResume(void* data, int64_t pts);
+    static void audioFlush(void* data, int64_t pts);
+    static void audioSetVolume(void* data, float volume, bool mute);
 
     libvlc_instance_t* mLibVLC;
     libvlc_media_t* mLibVLCMedia;
@@ -385,6 +397,25 @@ void MediaPluginLibVLC::playMedia()
     mAudioDevicePlayer = nullptr;
     applyAudioDevice();
 
+    // [W111 VIDEO 2026-11-24] Sound through the viewer: libVLC hands its decoded sound to these callbacks and plays
+    // nothing itself.
+    // Source: libVLC 3.0.24 include/vlc/libvlc_media_player.h:
+    //   :687-711 libvlc_audio_set_callbacks - "The audio callbacks override any other audio output mechanism. If the
+    //            callbacks are set, LibVLC will not output audio in any way." (play must not be NULL);
+    //   :712-724 libvlc_audio_set_volume_callback - a callback "to apply audio volume, or NULL to apply volume in
+    //            software": ours does nothing, so libVLC never changes the level (the viewer applies the volume);
+    //   :726-761 libvlc_audio_set_format_callbacks - setup(format, rate, channels) [IN/OUT] when an output starts.
+    // The callbacks run on libVLC's own threads (":604 decodes and post-processes the audio signal asynchronously (in
+    // an internal thread)"); the wolfAudio* calls are thread-safe.
+    // Wolf's own device choice ("wolf_audio_device") is the viewer's to apply then; applyAudioDevice() leaves it.
+    if (wolfAudioThroughViewer())
+    {
+        wolfAudioFlush();       // a new player: nothing of the old one plays on
+        libvlc_audio_set_callbacks(mLibVLCMediaPlayer, audioPlay, audioPause, audioResume, audioFlush, NULL, this);
+        libvlc_audio_set_volume_callback(mLibVLCMediaPlayer, audioSetVolume);
+        libvlc_audio_set_format_callbacks(mLibVLCMediaPlayer, audioSetup, NULL);
+    }
+
     libvlc_video_set_callbacks(mLibVLCMediaPlayer, lock, unlock, display, &mLibVLCCallbackContext);
     libvlc_video_set_format(mLibVLCMediaPlayer, "RV32", mWidth, mHeight, mWidth * mDepth);
 
@@ -501,8 +532,87 @@ void MediaPluginLibVLC::updateStreamMetadata()
 }
 // </WolfViewer>
 
+// [W111 VIDEO 2026-11-24] ─── sound through the viewer (see playMedia) ────────────────────────────────────────────────
+// A new audio output for the player. VLC 3.0.x's callback output only delivers "S16N" (signed 16-bit, native
+// endianness): Source: VLC 3.0.x modules/audio_output/amem.c Start() - "strcmp(format, "S16N") /* TODO: amem-format */"
+// refuses any other format, so the format is left as it comes in ("S16N", amem.c Start: char format[5] = "S16N") and
+// converted to float in audioPlay. The rate is kept (OpenAL resamples); the channels are set to 2: amem.c Start then
+// asks for AOUT_CHANS_2_0 ("case 2: fmt->i_physical_channels = AOUT_CHANS_2_0"), so VLC's own audio filters turn mono
+// or surround into stereo before the callback, as they do for a stereo sound card.
+int MediaPluginLibVLC::audioSetup(void** data, char* format, unsigned* rate, unsigned* channels)
+{
+    MediaPluginLibVLC* self = static_cast<MediaPluginLibVLC*>(*data);
+    if (!self || strncmp(format, "S16N", 4) != 0 || *rate < WolfPluginAudio::MIN_RATE || *rate > WolfPluginAudio::MAX_RATE)
+    {
+        return -1;      // "anything else to skip audio playback" (libvlc_media_player.h:736)
+    }
+    *channels = 2;
+    self->wolfAudioFormat(2, (int)*rate);
+    self->wolfAudioResume();    // a new output is not paused
+    return 0;
+}
+
+// count = frames ("the number of samples is per channel", libvlc_media_player.h:618-621); pts is on libvlc_clock()
+// (":625 expected play time stamp (see libvlc_delay())", libvlc.h:547-572 libvlc_delay = pts - libvlc_clock()). VLC
+// 3's callback output has no timing of its own (amem.c Open: aout->time_get = NULL) and is handed each block as soon
+// as it is decoded (src/audio_output/dec.c aout_DecPlay), up to 3 s early (AOUT_MAX_ADVANCE_TIME, vlc_aout.h:38-42):
+// the viewer holds each block until its time, which keeps the sound with the picture (VLC shows each frame at its
+// time itself).
+void MediaPluginLibVLC::audioPlay(void* data, const void* samples, unsigned count, int64_t pts)
+{
+    MediaPluginLibVLC* self = static_cast<MediaPluginLibVLC*>(data);
+    if (!self || !samples || !count)
+    {
+        return;
+    }
+    const int64_t due_us = WolfPluginAudio::nowUs() + libvlc_delay(pts);
+    thread_local std::vector<float> stereo;
+    stereo.resize((size_t)count * 2);
+    const int16_t* in = static_cast<const int16_t*>(samples);
+    for (size_t i = 0; i < stereo.size(); ++i)
+    {
+        stereo[i] = (float)in[i] * (1.0f / 32768.0f);
+    }
+    self->wolfAudioPushAt(stereo.data(), count, due_us);
+}
+
+void MediaPluginLibVLC::audioPause(void* data, int64_t pts)
+{
+    if (MediaPluginLibVLC* self = static_cast<MediaPluginLibVLC*>(data))
+    {
+        self->wolfAudioPause();
+    }
+}
+
+void MediaPluginLibVLC::audioResume(void* data, int64_t pts)
+{
+    if (MediaPluginLibVLC* self = static_cast<MediaPluginLibVLC*>(data))
+    {
+        self->wolfAudioResume();
+    }
+}
+
+// "discard all pending buffers and stop playback as soon as possible" (libvlc_media_player.h:653-662): a seek or stop.
+// VLC 3.0.x's amem.c Flush calls it with the opaque pointer only (void (*cb)(void *) = sys->flush), so pts is not used.
+void MediaPluginLibVLC::audioFlush(void* data, int64_t pts)
+{
+    if (MediaPluginLibVLC* self = static_cast<MediaPluginLibVLC*>(data))
+    {
+        self->wolfAudioFlush();
+    }
+}
+
+void MediaPluginLibVLC::audioSetVolume(void* data, float volume, bool mute)
+{
+    // The viewer applies the volume to the sound it plays; libVLC must leave the samples as they are.
+}
+
 void MediaPluginLibVLC::setVolumeVLC()
 {
+    if (wolfAudioThroughViewer())
+    {
+        return;     // [W111 VIDEO 2026-11-24] the viewer applies the volume (and nothing plays in this process)
+    }
     if (mLibVLCMediaPlayer)
     {
         int vlc_vol = (int)(mCurVolume * 100);
@@ -571,7 +681,8 @@ void MediaPluginLibVLC::setVolumeVLC()
 // The default is only set on a player that was moved off it: a new player is on the default already.
 void MediaPluginLibVLC::applyAudioDevice()
 {
-    if (!mAudioDeviceWanted || !mLibVLCMediaPlayer)
+    // [W111 VIDEO 2026-11-24] with the sound through the viewer, the viewer's own device choice applies
+    if (!mAudioDeviceWanted || !mLibVLCMediaPlayer || wolfAudioThroughViewer())
     {
         return;
     }
@@ -810,6 +921,9 @@ void MediaPluginLibVLC::receiveMessage(const char* message_string)
                     {
                         libvlc_media_player_stop(mLibVLCMediaPlayer);
                     }
+                    // [W111 VIDEO 2026-11-24] stopped: the viewer drops what it holds; the next start is not a resume
+                    wolfAudioFlush();
+                    wolfAudioResume();
                 }
                 else if (message_name == "start")
                 {

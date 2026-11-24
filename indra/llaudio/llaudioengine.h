@@ -47,6 +47,8 @@
 #include "lllistener.h"
 
 #include <boost/signals2.hpp> // <FS:Ansariel> Output device selection
+#include <memory>   // [W111 VIDEO 2026-11-24] PCM streams
+#include <vector>
 
 const F32 LL_WIND_UPDATE_INTERVAL = 0.1f;
 const F32 LL_WIND_UNDERWATER_CENTER_FREQ = 20.f;
@@ -67,6 +69,27 @@ class LLAudioChannelOpenAL;
 class LLAudioBuffer;
 class LLStreamingAudioInterface;
 struct SoundData;
+
+// [W111 VIDEO 2026-11-24] A PCM STREAM: sound made elsewhere (a media plugin, llplugin/wolfpluginaudio.h) and played
+// in this engine, so it is part of the engine's mix (the VR/recorder mirror, llaudioengine_openal.h setMirrorMix).
+// The engine pulls from the feed on its own thread; the feed must be safe to read from there.
+class LLAudioPCMFeed
+{
+public:
+    enum EKind { KIND_DATA = 1, KIND_FLUSH = 2, KIND_PAUSE = 3, KIND_RESUME = 4 };  // as WolfPluginAudio::EKind
+    struct Chunk
+    {
+        U32              mKind = 0;
+        U32              mRate = 0;
+        S64              mDueUs = 0;     // when the first frame should be heard, on nowUs()'s clock; 0 = as soon as possible
+        std::vector<F32> mSamples;       // interleaved STEREO float (KIND_DATA)
+    };
+    virtual ~LLAudioPCMFeed() {}
+    /** The engine's feeder thread: the next chunk, false when none is waiting. */
+    virtual bool read(Chunk& out) = 0;
+    /** The clock the due times are on (microseconds). */
+    virtual S64 nowUs() const = 0;
+};
 
 //
 //  LLAudioEngine definition
@@ -198,6 +221,19 @@ public:
     typedef std::map<LLUUID, std::string> output_device_map_t;
     virtual output_device_map_t getDevices();
     virtual void setDevice(const LLUUID& device_uuid) { };
+    // [W111 VIDEO 2026-11-24] PCM streams (see LLAudioPCMFeed). An engine that cannot host them says so here, and the
+    // viewer then leaves media sound in the media plugins (LLPluginClassMedia::init does not ask for it). The FMOD
+    // engine does not host them: no WolfViewer build compiles FMOD (ReleaseOS, -DUSE_OPENAL=ON, no USE_FMODSTUDIO),
+    // and with this answer an FMOD build keeps the old, complete path instead of a second, never-built one.
+    virtual bool supportsPCMStreams() const { return false; }
+    /** Main thread. A stream id (0 = could not). The gain is 0 until setPCMStreamGain. */
+    virtual U32  createPCMStream(const std::shared_ptr<LLAudioPCMFeed>& feed) { return 0; }
+    /** Main thread. The full gain the resident hears this stream at (it already holds master volume and mutes, as a
+     *  media plugin's "set_volume" did); the engine's own master gain and mute are NOT applied on top. */
+    virtual void setPCMStreamGain(U32 id, F32 gain) {}
+    /** Main thread. Stops the stream and frees its sound; unknown ids are ignored. */
+    virtual void destroyPCMStream(U32 id) {}
+
     /** <WolfViewer 2026-09-13> Follow the default output device across hot-plugs (OpenAL only). */
     virtual void setDeviceWatchEnabled(bool enabled) { };
     /** [T937 2026-11-20] The operating system's name for the output device the engine is playing on because the

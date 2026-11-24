@@ -36,6 +36,7 @@
 #include "llpluginmessage.h"
 #include "llpluginmessageclasses.h"
 #include "media_plugin_base.h"
+#include "wolfpluginaudio.h"    // [W111 VIDEO 2026-11-24] WolfPluginAudio::nowUs
 
 #define G_DISABLE_CAST_CHECKS
 extern "C" {
@@ -56,6 +57,14 @@ static inline void llgst_sample_unref( GstSample *aSample )
 {
     llgst_mini_object_unref( GST_MINI_OBJECT_CAST( aSample ) );
 }
+
+// [W111 VIDEO 2026-11-24] releases a pulled sample on every way out of onAudioSample
+struct GstSampleUnrefGuard
+{
+    GstSample* mSample;
+    explicit GstSampleUnrefGuard(GstSample* sample) : mSample(sample) {}
+    ~GstSampleUnrefGuard() { llgst_sample_unref(mSample); }
+};
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -85,6 +94,11 @@ private:
     bool getTimePos(double &sec_out);
     // <WolfViewer> Stream metadata (ICY "now playing") for the Linux build — see updateStreamMetadata()
     void updateStreamMetadata(GstTagList* tags);
+    // [W111 VIDEO 2026-11-24] sound through the viewer (MediaPluginBase::wolfAudioThroughViewer), see installAudioSink()
+    void installAudioSink();
+    static GstFlowReturn onAudioSample(GstAppSink* sink, gpointer user_data);
+    GstAppSink* mAudioSink = NULL;      // playbin's audio-sink while the viewer plays the sound; NULL = playbin's own
+    int mAudioRate = 0;                 // the rate last announced (streaming thread only)
     std::string mLastMetaTitle;
     std::string mLastMetaArtist;
     // </WolfViewer>
@@ -374,6 +388,7 @@ bool MediaPluginGStreamer10::navigateTo ( const std::string urlIn )
         return false; // error
     }
 
+    wolfAudioFlush();       // [W111 VIDEO 2026-11-24] new media: nothing of the old one may play on
     llg_object_set (G_OBJECT (mPlaybin), "uri", urlIn.c_str(), NULL);
 
     // navigateTo implicitly plays, too.
@@ -508,6 +523,7 @@ bool MediaPluginGStreamer10::pause()
     if (mDoneInit && mPlaybin)
     {
         llgst_element_set_state(mPlaybin, GST_STATE_PAUSED);
+        wolfAudioPause();       // [W111 VIDEO 2026-11-24] the viewer holds what it has (no-op unless through the viewer)
         return true;
     }
     return false;
@@ -758,12 +774,127 @@ void MediaPluginGStreamer10::applyAudioDevice()
 }
 #endif
 
+// [W111 VIDEO 2026-11-24] SOUND THROUGH THE VIEWER (ticket 1033). playbin's audio output becomes an appsink, and each
+// decoded block goes to the viewer (MediaPluginBase::wolfAudioPushAt), which plays it in its OpenAL engine.
+// Source: GStreamer playbin "audio-sink" (gstplaybin2.c:841, as applyAudioDevice() above): the element playbin plays
+// sound into. playbin's sink chain puts its converter in front of it unless GST_PLAY_FLAG_NATIVE_AUDIO is set (not by
+// default) and, for a sink with no "volume" property such as appsink, its own soft volume element (GStreamer 1.24
+// gst-plugins-base gst/playback/gstplaysink.c:2854-2890 gen_audio_chain: use_converters / use_volume); that volume is left
+// at its default 1.0 (set_volume is not applied, see receiveMessage) and the caps below make the converter deliver
+// interleaved 32-bit float stereo (F32LE: every platform this plugin builds for is little-endian), any rate.
+// Timing: appsink is a GstBaseSink with "sync" on (default), so each sample is handed over when the pipeline clock
+// reaches its time; "ts-offset" moves that: "A negative value will render buffers earlier than their timestamp"
+// (GStreamer 1.24 libs/gst/base/gstbasesink.c:965-966 gst_base_sink_set_ts_offset). AUDIO_LEAD_NS early leaves the viewer room to queue each block
+// so it is heard at its time (its feeder runs every 10 ms, the sound device adds tens of ms). Each block carries the
+// time it is due: the clock time basesink would render it at without the offset - base time + running time of its
+// PTS + the sink's latency (gstbasesink.c:2279-2307 gst_base_sink_adjust_time: running time + latency + ts-offset -
+// render delay, which is DEFAULT_RENDER_DELAY 0 (:305) for appsink; :2351-2357 adds the base time) - turned into the
+// viewer's clock by how far ahead of the pipeline clock's "now" it is. The video appsink renders at that same clock time, so picture
+// and sound stay together.
+static const gint64 AUDIO_LEAD_NS = 300 * GST_MSECOND;
+
+void MediaPluginGStreamer10::installAudioSink()
+{
+    if (!mDoneInit || !mPlaybin || mAudioSink || !llgst_app_sink_set_callbacks)
+    {
+        return;     // the symbols are missing: playbin keeps its own sink and the viewer's "set_volume" is applied
+    }
+    GstAppSink* sink = (GstAppSink*)llgst_element_factory_make("appsink", "wolfaudio");
+    if (!sink)
+    {
+        return;
+    }
+    GstCaps* caps = llgst_caps_new_simple("audio/x-raw",
+                                          "format", G_TYPE_STRING, "F32LE",
+                                          "layout", G_TYPE_STRING, "interleaved",
+                                          "channels", G_TYPE_INT, 2,
+                                          NULL);
+    llgst_app_sink_set_caps(sink, caps);
+    llgst_caps_unref(caps);
+    llg_object_set(sink, "sync", TRUE, "ts-offset", (gint64)-AUDIO_LEAD_NS, NULL);
+    GstAppSinkCallbacks callbacks = {};
+    callbacks.new_sample = &MediaPluginGStreamer10::onAudioSample;
+    llgst_app_sink_set_callbacks(sink, &callbacks, this, NULL);
+    llg_object_set(mPlaybin, "audio-sink", sink, NULL);    // playbin takes the (floating) reference
+    mAudioSink = sink;
+    mAudioRate = 0;
+}
+
+// GStreamer's streaming thread, when the sample's (offset) render time comes.
+GstFlowReturn MediaPluginGStreamer10::onAudioSample(GstAppSink* sink, gpointer user_data)
+{
+    MediaPluginGStreamer10* self = static_cast<MediaPluginGStreamer10*>(user_data);
+    GstSample* sample = llgst_app_sink_pull_sample(sink);
+    if (!sample)
+    {
+        return GST_FLOW_OK;
+    }
+    GstSampleUnrefGuard unref(sample);
+    GstCaps* caps = llgst_sample_get_caps(sample);
+    GstStructure* st = caps ? llgst_caps_get_structure(caps, 0) : NULL;
+    gint rate = 0;
+    gint channels = 0;
+    if (!st || !llgst_structure_get_int(st, "rate", &rate) || !llgst_structure_get_int(st, "channels", &channels)
+        || channels != 2 || rate <= 0)
+    {
+        return GST_FLOW_OK;
+    }
+    if (rate != self->mAudioRate)
+    {
+        self->mAudioRate = rate;
+        self->wolfAudioFormat(channels, rate);
+    }
+    GstBuffer* buffer = llgst_sample_get_buffer(sample);
+    if (!buffer)
+    {
+        return GST_FLOW_OK;
+    }
+
+    // When it is due, on the viewer's clock (WolfPluginAudio::nowUs); without the timing calls, AUDIO_LEAD_NS from now.
+    int64_t due_us = WolfPluginAudio::nowUs() + AUDIO_LEAD_NS / 1000;
+    GstSegment* segment = llgst_sample_get_segment ? llgst_sample_get_segment(sample) : NULL;
+    const GstClockTime pts = GST_BUFFER_PTS(buffer);
+    if (segment && GST_CLOCK_TIME_IS_VALID(pts) && llgst_segment_to_running_time && llgst_element_get_clock
+        && llgst_element_get_base_time && llgst_clock_get_time)
+    {
+        const guint64 running = llgst_segment_to_running_time(segment, GST_FORMAT_TIME, pts);
+        GstClock* clock = llgst_element_get_clock((GstElement*)sink);     // a new reference (gstelement.c), or NULL
+        if (clock && GST_CLOCK_TIME_IS_VALID(running))
+        {
+            const GstClockTime latency = llgst_base_sink_get_latency ? llgst_base_sink_get_latency((GstBaseSink*)sink) : 0;
+            const GstClockTime at = llgst_element_get_base_time((GstElement*)sink) + running
+                + (GST_CLOCK_TIME_IS_VALID(latency) ? latency : 0);
+            const GstClockTime now = llgst_clock_get_time(clock);
+            due_us = WolfPluginAudio::nowUs() + ((gint64)at - (gint64)now) / 1000;
+        }
+        if (clock)
+        {
+            llgst_object_unref(clock);
+        }
+    }
+
+    GstMapInfo map;
+    if (llgst_buffer_map(buffer, &map, GST_MAP_READ))
+    {
+        const size_t frames = map.size / (2 * sizeof(float));
+        if (frames)
+        {
+            self->wolfAudioPushAt(reinterpret_cast<const float*>(map.data), frames, due_us);
+        }
+        llgst_buffer_unmap(buffer, &map);
+    }
+    return GST_FLOW_OK;
+}
+
 bool MediaPluginGStreamer10::stop()
 {
     // todo: error-check this?
     if (mDoneInit && mPlaybin)
     {
         llgst_element_set_state(mPlaybin, GST_STATE_READY);
+        // [W111 VIDEO 2026-11-24] stopped: what the viewer holds is dropped, and the next start is not a resume
+        wolfAudioFlush();
+        wolfAudioResume();
         return true;
     }
     return false;
@@ -777,6 +908,7 @@ bool MediaPluginGStreamer10::play(double rate)
     if (mDoneInit && mPlaybin)
     {
         llgst_element_set_state(mPlaybin, GST_STATE_PLAYING);
+        wolfAudioResume();      // [W111 VIDEO 2026-11-24] only sent after a pause
         return true;
     }
     return false;
@@ -805,6 +937,7 @@ bool MediaPluginGStreamer10::seek(double time_sec)
     bool success = false;
     if (mDoneInit && mPlaybin)
     {
+        wolfAudioFlush();       // [W111 VIDEO 2026-11-24] a flushing seek: what the viewer holds is from before it
         success = llgst_element_seek(mPlaybin, 1.0F, GST_FORMAT_TIME,
                 GstSeekFlags(GST_SEEK_FLAG_FLUSH |
                          GST_SEEK_FLAG_KEY_UNIT),
@@ -945,6 +1078,8 @@ bool MediaPluginGStreamer10::unload ()
     }
 
     mAppSink = NULL;
+    mAudioSink = NULL;      // [W111 VIDEO 2026-11-24] playbin owned it (gone with playbin above)
+    wolfAudioFlush();
 
     setStatus(STATUS_NONE);
 
@@ -1171,6 +1306,12 @@ void MediaPluginGStreamer10::receiveMessage(const char *message_string)
         {
             if(message_name == "init")
             {
+                // [W111 VIDEO 2026-11-24] the viewer's choice came in this message (MediaPluginBase read it before
+                // this): playbin has no URI yet, so its audio sink can still be chosen.
+                if (wolfAudioThroughViewer())
+                {
+                    installAudioSink();
+                }
                 // Plugin gets to decide the texture parameters to use.
                 LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA, "texture_params");
                 // lame to have to decide this now, it depends on the movie.  Oh well.
@@ -1290,11 +1431,16 @@ void MediaPluginGStreamer10::receiveMessage(const char *message_string)
             }
             else if(message_name == "set_volume")
             {
-                double volume = message_in.getValueReal("volume");
-                setVolume(volume);
+                // [W111 VIDEO 2026-11-24] with the sound played by the viewer, the viewer applies the volume; playbin
+                // stays at its own default, full volume
+                if (!mAudioSink)
+                {
+                    double volume = message_in.getValueReal("volume");
+                    setVolume((float)volume);   // setVolume takes float (as before, now explicit)
+                }
             }
 #if LL_LINUX
-            else if(message_name == "wolf_audio_device")
+            else if(message_name == "wolf_audio_device" && !mAudioSink)  // [W111 VIDEO 2026-11-24] the viewer's device applies
             {
                 // [T937 2026-11-20] LLPluginClassMedia::setAudioOutputDevice
                 mAudioDevice = message_in.getValue("name");

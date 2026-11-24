@@ -972,6 +972,7 @@ set(viewer_SOURCE_FILES
     wolfspeed.cpp   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
     wolfswim.cpp   # [WOLF SWIM 2026-10-20] swimming under the water
     wolfdjaudio.cpp
+    wolfmediaaudio.cpp
     wolfcamerafx.cpp
     wolffx.cpp
     wolfdjdesk.cpp
@@ -2049,6 +2050,7 @@ set(viewer_HEADER_FILES
     wolfspeed.h   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
     wolfswim.h   # [WOLF SWIM 2026-10-20] swimming under the water
     wolfdjaudio.h
+    wolfmediaaudio.h
     wolfdjcapture.h
     wolfcamerafx.h
     wolffx.h

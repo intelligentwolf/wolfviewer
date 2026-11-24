@@ -130,7 +130,69 @@ bool LLAudioEngine_OpenAL::init(void* userdata, const std::string &app_title)
         LL_WARNS() << "OpenAL: the VR headset sound mirror could not start; sound plays on this PC only" << LL_ENDL;
     }
 
+    // [W111 VIDEO 2026-11-24] media plugin sound in the engine (llaudiopcm_openal.h): the engine's context is fixed from
+    // here to shutdown (the loopback context when mirrored, alutInit's otherwise); device reopens keep it.
+    mEngineContext = alcGetCurrentContext();
+    if (alcIsExtensionPresent(nullptr, "ALC_EXT_thread_local_context"))
+    {
+        mPCMSetThreadContext = (PFNALCSETTHREADCONTEXTPROC)alcGetProcAddress(nullptr, "alcSetThreadContext");
+    }
+    if (alcIsExtensionPresent(nullptr, "ALC_SOFT_device_clock"))
+    {
+        mGetInteger64v = (LPALCGETINTEGER64VSOFT)alcGetProcAddress(nullptr, "alcGetInteger64vSOFT");
+    }
+    mPCMSupported = mEngineContext && mPCMSetThreadContext && LLAudioPCMStreamsOpenAL::supported();
+    LL_INFOS() << "OpenAL: media sound in the engine " << (mPCMSupported ? "available" : "NOT available (media plugins play their own)")
+               << LL_ENDL;
+
     return true;
+}
+
+// [W111 VIDEO 2026-11-24] ─── PCM streams (media plugin sound) ────────────────────────────────────────────────────────
+bool LLAudioEngine_OpenAL::sChannelsSilenced = false;
+
+U32 LLAudioEngine_OpenAL::createPCMStream(const std::shared_ptr<LLAudioPCMFeed>& feed)
+{
+    if (!mPCMSupported || !feed)
+    {
+        return 0;
+    }
+    if (!mPCM)
+    {
+        mPCM.reset(new LLAudioPCMStreamsOpenAL(mEngineContext, mPCMSetThreadContext, [this]() { return mirrorLatencyUs(); }));
+        mPCM->setListenerGain(mListenerGain, []() {});   // the listener gain set before the first stream
+    }
+    return mPCM->create(feed);
+}
+
+void LLAudioEngine_OpenAL::setPCMStreamGain(U32 id, F32 gain)
+{
+    if (mPCM)
+    {
+        mPCM->setGain(id, gain);
+    }
+}
+
+void LLAudioEngine_OpenAL::destroyPCMStream(U32 id)
+{
+    if (mPCM)
+    {
+        mPCM->destroy(id);
+    }
+}
+
+// Feeder thread. With the mirror on, the engine's device is the loopback one, rendered when the speakers' callback
+// buffer asks for it (onOutputPull): what the speakers' device adds after that is still to come.
+// Source: alext.h:490-503 ALC_SOFT_device_clock ALC_DEVICE_LATENCY_SOFT - the device's output latency, nanoseconds.
+S64 LLAudioEngine_OpenAL::mirrorLatencyUs() const
+{
+    if (!mLoopDevice || !mOutDevice || !mGetInteger64v)
+    {
+        return 0;
+    }
+    ALCint64SOFT ns = 0;
+    mGetInteger64v(mOutDevice, ALC_DEVICE_LATENCY_SOFT, 1, &ns);
+    return ns > 0 ? (S64)(ns / 1000) : 0;
 }
 
 // [VR AUDIO 2026-11-04] ─── the final mix for the VR headset ─────────────────────────────────────────
@@ -712,6 +774,11 @@ void LLAudioEngine_OpenAL::shutdown()
     LL_INFOS() << "About to LLAudioEngine::shutdown()" << LL_ENDL;
     shutdownDeviceWatch();   // <WolfViewer 2026-09-13> no callback may fire into a dead engine
     LLAudioEngine::shutdown();
+    // [W111 VIDEO 2026-11-24] the media streams' feeder thread deletes their sources and stops (the parcel music's
+    // stream was closed by LLAudioEngine::shutdown deleting the streaming audio above); before the mirror and alutExit
+    // take the context away.
+    mPCM.reset();
+    mPCMSupported = false;
     shutdownMirrorMix();     // [VR AUDIO 2026-11-04] after the engine's sources are gone, before alutExit
 
     // If a subsequent error occurs while there is still an error recorded
@@ -749,7 +816,59 @@ LLAudioChannel *LLAudioEngine_OpenAL::createChannel()
 void LLAudioEngine_OpenAL::setInternalGain(F32 gain)
 {
     //LL_INFOS() << "LLAudioEngine_OpenAL::setInternalGain() Gain: " << gain << LL_ENDL;
-    alListenerf(AL_GAIN, gain);
+    // [W111 VIDEO 2026-11-24] The listener gain multiplies every source in the context (openal-soft 1.24.2
+    // alc/alu.cpp:1493-1494 and :1664 - source gain x context->mParams.Gain, the listener's AL_GAIN, :440), media plugin
+    // sound now included. A media's gain already holds master volume and every mute that applies to it
+    // (llvieweraudio.cpp audio_update_volume), so its source is set to that gain / the listener gain
+    // (LLAudioPCMStreamsOpenAL::applyGain). That cannot undo a listener gain of 0, which the engine uses while the
+    // progress screen is up (a teleport: setMuted(mute_audio || progress_view_visible)), when media and parcel music on
+    // the same stream played on before. So a gain of 0 leaves the listener at 1 and sets the engine's own sources -
+    // the channels and the wind, the only sources in this context besides the media's - to 0 instead: silent exactly as
+    // before for the engine's sounds, and the media keep the gain the resident set.
+    const bool silence = gain <= 0.f;
+    const F32 listener = silence ? 1.f : gain;
+    auto apply = [this, silence, listener]()
+    {
+        alListenerf(AL_GAIN, listener);
+        if (silence != sChannelsSilenced)
+        {
+            sChannelsSilenced = silence;
+            for (LLAudioChannel* channelp : mChannels)
+            {
+                if (channelp)
+                {
+                    static_cast<LLAudioChannelOpenAL*>(channelp)->reapplyGain();
+                }
+            }
+            if (mWindSource != AL_NONE)
+            {
+                alSourcef(mWindSource, AL_GAIN, silence ? 0.f : 1.f);    // never set otherwise: AL's initial 1.0
+            }
+        }
+    };
+    mListenerGain = listener;
+    if (mPCM)
+    {
+        mPCM->setListenerGain(listener, apply);     // one deferred-update batch with the media sources
+    }
+    else
+    {
+        apply();
+    }
+}
+
+void LLAudioChannelOpenAL::setALGain(F32 gain)
+{
+    mALGain = gain;
+    alSourcef(mALSource, AL_GAIN, LLAudioEngine_OpenAL::channelsSilenced() ? 0.f : gain);
+}
+
+void LLAudioChannelOpenAL::reapplyGain()
+{
+    if (mALSource != AL_NONE)
+    {
+        alSourcef(mALSource, AL_GAIN, LLAudioEngine_OpenAL::channelsSilenced() ? 0.f : mALGain);
+    }
 }
 
 LLAudioChannelOpenAL::LLAudioChannelOpenAL()
@@ -758,6 +877,7 @@ LLAudioChannelOpenAL::LLAudioChannelOpenAL()
     mLastSamplePos(0)
 {
     alGenSources(1, &mALSource);
+    reapplyGain();      // [W111 VIDEO 2026-11-24] silent if made while the engine is muted
 }
 
 LLAudioChannelOpenAL::~LLAudioChannelOpenAL()
@@ -848,8 +968,7 @@ bool LLAudioChannelOpenAL::updateBuffer()
 
     if (mCurrentSourcep)
     {
-        alSourcef(mALSource, AL_GAIN,
-              mCurrentSourcep->getGain() * getSecondaryGain());
+        setALGain(mCurrentSourcep->getGain() * getSecondaryGain());   // [W111 VIDEO 2026-11-24] was alSourcef(AL_GAIN)
         alSourcei(mALSource, AL_LOOPING,
               mCurrentSourcep->isLoop() ? AL_TRUE : AL_FALSE);
         alSourcef(mALSource, AL_ROLLOFF_FACTOR,
@@ -900,7 +1019,7 @@ void LLAudioChannelOpenAL::update3DPosition()
         alSourcei (mALSource, AL_SOURCE_RELATIVE, AL_FALSE);
     }
 
-    alSourcef(mALSource, AL_GAIN, mCurrentSourcep->getGain() * getSecondaryGain());
+    setALGain(mCurrentSourcep->getGain() * getSecondaryGain());     // [W111 VIDEO 2026-11-24] was alSourcef(AL_GAIN)
 }
 
 LLAudioBufferOpenAL::LLAudioBufferOpenAL()
@@ -981,6 +1100,10 @@ bool LLAudioEngine_OpenAL::initWind()
     alGetError(); /* clear error */
 
     alGenSources(1,&mWindSource);
+    if (mWindSource != AL_NONE && sChannelsSilenced)
+    {
+        alSourcef(mWindSource, AL_GAIN, 0.f);   // [W111 VIDEO 2026-11-24] made while the engine is muted (setInternalGain)
+    }
 
     if((error=alGetError()) != AL_NO_ERROR)
     {

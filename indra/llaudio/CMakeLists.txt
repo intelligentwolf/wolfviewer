@@ -43,11 +43,13 @@ endif ()
 if (TARGET ll::openal)
   list(APPEND llaudio_SOURCE_FILES
     llaudioengine_openal.cpp
+    llaudiopcm_openal.cpp
     lllistener_openal.cpp
     )
   
   list(APPEND llaudio_HEADER_FILES
     llaudioengine_openal.h
+    llaudiopcm_openal.h
     lllistener_openal.h
     )
 endif ()

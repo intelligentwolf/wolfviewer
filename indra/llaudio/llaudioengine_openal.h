@@ -33,6 +33,7 @@
 #include "llaudioengine.h"
 #include "lllistener_openal.h"
 #include "llwindgen.h"
+#include "llaudiopcm_openal.h"   // [W111 VIDEO 2026-11-24] media plugin sound in the engine
 #include <atomic>   // <WolfViewer 2026-09-13> the device-change flag set from OpenAL's thread
 #include <map>      // <WolfViewer 2026-09-18> the output-device list
 #include <string>
@@ -70,6 +71,15 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
 
         void setInternalGain(F32 gain);
 
+        // [W111 VIDEO 2026-11-24] PCM streams: media plugin sound played in this engine (llaudiopcm_openal.h)
+        virtual bool supportsPCMStreams() const { return mPCMSupported; }
+        virtual U32  createPCMStream(const std::shared_ptr<LLAudioPCMFeed>& feed);
+        virtual void setPCMStreamGain(U32 id, F32 gain);
+        virtual void destroyPCMStream(U32 id);
+        /** While the engine is muted (setInternalGain(0)) its own sources are silenced one by one and the listener stays
+         *  at 1, so PCM streams (which carry their own mute) are not muted with it; see setInternalGain. */
+        static bool channelsSilenced() { return sChannelsSilenced; }
+
         LLAudioBuffer* createBuffer();
         LLAudioChannel* createChannel();
 
@@ -100,6 +110,16 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         void setSpeakersMuted(bool muted) { mSpeakersMuted.store(muted); }
 
     private:
+        // [W111 VIDEO 2026-11-24] see createPCMStream above
+        S64    mirrorLatencyUs() const;                 // the speakers' latency after the loopback mix (0 unmirrored)
+        std::unique_ptr<LLAudioPCMStreamsOpenAL> mPCM;  // made on the first stream; gone in shutdown()
+        ALCcontext*               mEngineContext = nullptr;   // the context the engine's sources live in
+        PFNALCSETTHREADCONTEXTPROC mPCMSetThreadContext = nullptr;
+        LPALCGETINTEGER64VSOFT    mGetInteger64v = nullptr;
+        bool                      mPCMSupported = false;
+        F32                       mListenerGain = 1.f;        // what the listener's AL_GAIN is set to
+        static bool               sChannelsSilenced;
+
         // [VR AUDIO 2026-11-04] see setMirrorMix above
         bool   initMirrorMix();
         void   shutdownMirrorMix();
@@ -198,6 +218,9 @@ class LLAudioChannelOpenAL : public LLAudioChannel
     public:
         LLAudioChannelOpenAL();
         virtual ~LLAudioChannelOpenAL();
+        // [W111 VIDEO 2026-11-24] the source's gain, or 0 while the engine is muted (LLAudioEngine_OpenAL::setInternalGain)
+        void setALGain(F32 gain);
+        void reapplyGain();
     protected:
         /*virtual*/ void play();
         /*virtual*/ void playSynced(LLAudioChannel *channelp);
@@ -210,6 +233,7 @@ class LLAudioChannelOpenAL : public LLAudioChannel
 
         ALuint mALSource;
             ALint mLastSamplePos;
+        F32 mALGain = 1.f;      // [W111 VIDEO 2026-11-24] the gain last asked for (AL's initial AL_GAIN is 1.0)
 };
 
 class LLAudioBufferOpenAL : public LLAudioBuffer{

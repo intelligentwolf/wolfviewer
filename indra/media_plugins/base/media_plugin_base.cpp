@@ -30,6 +30,11 @@
 
 #include "linden_common.h"
 #include "media_plugin_base.h"
+#include "wolfpluginaudio.h"    // [W111 VIDEO 2026-11-24]
+
+#include <algorithm>
+#include <cstring>
+#include <iostream>
 
 
 // TODO: Make sure that the only symbol exported from this library is LLPluginInitEntryPoint
@@ -53,6 +58,11 @@ MediaPluginBase::MediaPluginBase(
     mTextureHeight = 0;
     mDepth = 0;
     mStatus = STATUS_NONE;
+}
+
+// [W111 VIDEO 2026-11-24] out of line: ~unique_ptr<WolfPluginAudioWriter> needs the complete type
+MediaPluginBase::~MediaPluginBase()
+{
 }
 
 /**
@@ -110,6 +120,13 @@ void MediaPluginBase::staticReceiveMessage(const char *message_string, void **us
 
     if(self != NULL)
     {
+        // [W111 VIDEO 2026-11-24] the viewer's "sound through the viewer" choice comes in the media "init" message;
+        // take it before the plugin's own receiveMessage handles "init" (and makes its player or browser).
+        // The cheap text test keeps every other message from being parsed twice.
+        if (!self->mWolfAudio && message_string && strstr(message_string, WolfPluginAudio::KEY_THROUGH_VIEWER))
+        {
+            self->wolfAudioInit(message_string);
+        }
         self->receiveMessage(message_string);
 
         // If the plugin has processed the delete message, delete it.
@@ -167,6 +184,132 @@ void MediaPluginBase::sendStatus()
     sendMessage(message);
 }
 
+
+// ─── [W111 VIDEO 2026-11-24] sound through the viewer (see media_plugin_base.h, llplugin/wolfpluginaudio.h) ───────
+
+void MediaPluginBase::wolfAudioInit(const char* message_string)
+{
+    LLPluginMessage message;
+    if (message.parse(message_string) < 0)
+    {
+        return;
+    }
+    if (message.getClass() != LLPLUGIN_MESSAGE_CLASS_MEDIA || message.getName() != "init"
+        || !message.hasValue(WolfPluginAudio::KEY_THROUGH_VIEWER)
+        || !message.getValueBoolean(WolfPluginAudio::KEY_THROUGH_VIEWER))
+    {
+        return;
+    }
+    const std::string name = message.getValue(WolfPluginAudio::KEY_SHM_NAME);
+    const S32 size = message.getValueS32(WolfPluginAudio::KEY_SHM_SIZE);
+    std::unique_ptr<WolfPluginAudioWriter> writer(new WolfPluginAudioWriter);
+    if (size > 0 && writer->attach(name, (size_t)size))
+    {
+        mWolfAudio = std::move(writer);
+    }
+    else
+    {
+        // The plugin plays its own sound, as before; the viewer still sends "set_volume", so nothing is lost.
+        std::cerr << "media plugin: could not attach the viewer's sound ring '" << name << "'; playing sound here" << std::endl;
+    }
+}
+
+bool MediaPluginBase::wolfAudioThroughViewer() const
+{
+    return mWolfAudio != nullptr;
+}
+
+void MediaPluginBase::wolfAudioFormat(int channels, int sample_rate)
+{
+    std::lock_guard<std::mutex> lock(mWolfAudioMutex);
+    mWolfAudioChannels = channels;
+    mWolfAudioRate = sample_rate;
+    if ((channels != 1 && channels != 2) || sample_rate < (int)WolfPluginAudio::MIN_RATE
+        || sample_rate > (int)WolfPluginAudio::MAX_RATE)
+    {
+        if (!mWolfAudioFormatWarned)
+        {
+            mWolfAudioFormatWarned = true;
+            std::cerr << "media plugin: sound format " << channels << " ch " << sample_rate
+                      << " Hz is not one the viewer takes (1-2 ch, 8000-384000 Hz); dropped" << std::endl;
+        }
+    }
+}
+
+void MediaPluginBase::wolfAudioPush(const float* interleaved, size_t frames)
+{
+    wolfAudioWrite(interleaved, frames, WolfPluginAudio::NO_DUE);
+}
+
+void MediaPluginBase::wolfAudioPushAt(const float* interleaved, size_t frames, int64_t due_us)
+{
+    wolfAudioWrite(interleaved, frames, due_us);    // WolfPluginAudio::NO_DUE (0) = as soon as possible
+}
+
+void MediaPluginBase::wolfAudioWrite(const float* interleaved, size_t frames, int64_t due_us)
+{
+    if (!mWolfAudio || !interleaved || frames == 0)
+    {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(mWolfAudioMutex);
+    const int channels = mWolfAudioChannels;
+    const int rate = mWolfAudioRate;
+    if ((channels != 1 && channels != 2) || rate < (int)WolfPluginAudio::MIN_RATE || rate > (int)WolfPluginAudio::MAX_RATE)
+    {
+        return;
+    }
+    size_t done = 0;
+    while (done < frames)
+    {
+        const size_t n = std::min<size_t>(frames - done, WolfPluginAudio::MAX_RECORD_FRAMES);
+        const float* stereo = interleaved + done * (size_t)channels;
+        if (channels == 1)
+        {
+            // Mono plays the same on both sides (the ring is always stereo).
+            mWolfAudioScratch.resize(n * 2);
+            for (size_t i = 0; i < n; ++i)
+            {
+                mWolfAudioScratch[i * 2] = mWolfAudioScratch[i * 2 + 1] = stereo[i];
+            }
+            stereo = mWolfAudioScratch.data();
+        }
+        // A split block's later parts are due later by the frames before them.
+        const int64_t due = due_us == WolfPluginAudio::NO_DUE ? due_us : due_us + (int64_t)(done * 1000000 / (size_t)rate);
+        mWolfAudio->write(WolfPluginAudio::KIND_DATA, (uint32_t)rate, due, stereo, (uint32_t)n);
+        done += n;
+    }
+}
+
+void MediaPluginBase::wolfAudioFlush()
+{
+    if (mWolfAudio)
+    {
+        mWolfAudio->write(WolfPluginAudio::KIND_FLUSH, 0, WolfPluginAudio::NO_DUE, nullptr, 0);
+    }
+}
+
+void MediaPluginBase::wolfAudioPause()
+{
+    if (mWolfAudio && !mWolfAudioPaused.exchange(true))
+    {
+        if (!mWolfAudio->write(WolfPluginAudio::KIND_PAUSE, 0, WolfPluginAudio::nowUs(), nullptr, 0))
+        {
+            mWolfAudioPaused.store(false);      // not delivered (ring full): the viewer is not paused
+        }
+    }
+}
+
+void MediaPluginBase::wolfAudioResume()
+{
+    if (mWolfAudio && mWolfAudioPaused.exchange(false))
+    {
+        if (!mWolfAudio->write(WolfPluginAudio::KIND_RESUME, 0, WolfPluginAudio::nowUs(), nullptr, 0))
+        {
+            mWolfAudioPaused.store(true);       // not delivered: the viewer is still paused
+        }
+    }
+}
 
 #if LL_WINDOWS
 # define LLSYMEXPORT __declspec(dllexport)

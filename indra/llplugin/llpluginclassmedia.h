@@ -33,7 +33,27 @@
 #include "llrect.h"
 #include "llpluginclassmediaowner.h"
 #include <queue>
+#include <memory>   // [W111 VIDEO 2026-11-24]
 #include "v4color.h"
+
+class WolfPluginAudioRing;
+
+// [W111 VIDEO 2026-11-24] SOUND THROUGH THE VIEWER (ticket 1033; llplugin/wolfpluginaudio.h). llplugin knows nothing of
+// the audio engine; the viewer registers this (newview/wolfmediaaudio.cpp) and every media plugin made after that asks
+// it whether to send its sound to the viewer, and where to play it.
+class LLPluginClassMediaAudioHost
+{
+public:
+    virtual ~LLPluginClassMediaAudioHost() {}
+    /** Main thread, as each plugin is made: should it hand its sound to the viewer? */
+    virtual bool wantAudioThroughViewer() = 0;
+    /** Main thread: play what the plugin writes to the ring; a handle, 0 = could not (the plugin then plays itself). */
+    virtual U32  openAudio(const std::shared_ptr<WolfPluginAudioRing>& ring) = 0;
+    /** Main thread: the volume LLPluginClassMedia::setVolume was given, which the plugin no longer applies. */
+    virtual void setAudioGain(U32 handle, F32 gain) = 0;
+    /** Main thread: stop and free the sound (the plugin is gone or going). */
+    virtual void closeAudio(U32 handle) = 0;
+};
 
 class LLPluginClassMedia : public LLPluginProcessParentOwner
 {
@@ -341,6 +361,8 @@ public:
     // [T937 2026-11-20] Play this plugin's sound on the output device the system calls `name` (empty = the system
     // default). Sent as "wolf_audio_device" (media_time); the libVLC and GStreamer plugins act on it, others ignore it.
     void setAudioOutputDevice(const std::string& name);
+    // [W111 VIDEO 2026-11-24] see LLPluginClassMediaAudioHost; NULL = media plugins play their own sound
+    static void setAudioHost(LLPluginClassMediaAudioHost* host) { sAudioHost = host; }
 
     F64 getCurrentTime(void) const { return mCurrentTime; };
     F64 getDuration(void) const { return mDuration; };
@@ -414,6 +436,11 @@ protected:
     float       mRequestedVolume;
     // [T931 2026-11-19] false until the first "set_volume" has gone to this plugin (setVolume, llpluginclassmedia.cpp)
     bool        mVolumeSent;
+    // [W111 VIDEO 2026-11-24] the sound this plugin hands to the viewer (see LLPluginClassMediaAudioHost)
+    void        closeWolfAudio();
+    static LLPluginClassMediaAudioHost* sAudioHost;
+    std::shared_ptr<WolfPluginAudioRing> mWolfAudioRing;
+    U32         mWolfAudioStream = 0;
 
     // Priority of this media stream
     EPriority   mPriority;

@@ -653,6 +653,17 @@ namespace
                 std::lock_guard<std::mutex> lk(gS.m);
                 gS.notice = "The sound encoder could not be started, so this video has no sound.";
             }
+#if LL_WINDOWS || LL_DARWIN
+            else if (aenc->codec() == "opus")
+            {
+                // wolfrec_audioenc.h openAudioEncoder: the system AAC encoder failed and Opus stood in; Opus sound in
+                // MP4 does not play in QuickTime before macOS 14 (Sonoma)
+                LL_WARNS("WolfRecorder") << "system AAC encoder unavailable, sound in Opus: " << atried << LL_ENDL;
+                std::lock_guard<std::mutex> lk(gS.m);
+                gS.notice = "This computer's own sound encoder could not be used, so the sound is in Opus. It plays in "
+                            "browsers, VLC and Windows, but not in QuickTime on Macs older than macOS 14.";
+            }
+#endif
         }
 #if LL_OPENAL
         Mic mic;

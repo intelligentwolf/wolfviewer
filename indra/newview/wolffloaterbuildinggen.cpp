@@ -656,9 +656,10 @@ void WolfFloaterBuildingGen::markPlanEarlier()
 {
     // [t1006 2026-11-23] the plan on show is not what the last request asked for (that one failed): said in its title and,
     // in bold first, in its words (the words already there follow as plain text)
+    const std::string title = mPlanTitle->getText();
+    if (title.rfind(getString("plan_earlier_prefix"), 0) == 0) return;      // already marked (a second failure)
     LLStringUtil::format_map_t a;
-    a["[TITLE]"] = mPlanTitle->getText();
-    if (a["[TITLE]"].rfind(getString("plan_earlier_prefix"), 0) == 0) return;      // already marked (a second failure)
+    a["[TITLE]"] = title;
     mPlanTitle->setText(getString("plan_earlier_title", a));
     const std::string was = mPlanText->getText();
     LLStyle::Params noteStyle;

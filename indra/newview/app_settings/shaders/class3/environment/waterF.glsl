@@ -1160,8 +1160,13 @@ void main()
     // (vary_wolf_cascade, wolfnaturalwater.h LIP_BAND_M .. DENSE_W_M):
     //   threads  value noise stretched down the fall (2.5 m / 1 m long, 0.35 m / 0.15 m across) falling at 5 and 7 m/s
     //            (v = sqrt(2 g h) after 1.3 m and 2.5 m of free fall), white where it exceeds 1 - cover, cover = the
-    //            aeration x the falling share, at most 0.6 (CONVENTION: never one sheet); beyond 60-250 m the fine noise
+    //            aeration x the falling share, at most 0.7 (CONVENTION: never one sheet); beyond 60-250 m the fine noise
     //            would shimmer, so it goes to its mean there (as the storm streaks above)
+    //   far      [W112 WATERFALLS 2026-11-24, Shadow: "a real waterfall stays visible as a white line from afar"] from 40 m to
+    //            150 m away the threads, spray and churn become finer than a pixel and what is seen is their average over
+    //            the whole fall, which white-water dominates (its reflectance is ten times the 2 % of the clear film): a
+    //            falling reach goes to at least 0.65 white there (CONVENTION), and its sides stop thinning (the sides'
+    //            fade is a near-field detail; far off it only ate the line)
     //   breaks   the WHITE channel in slow churning patches (0.6 m x 0.8 m, rising at 1.5 m/s: spray thrown up)
     //   water    what `color` already is: the reflection by Fresnel, the sun's glint, the ground seen through, the body
     //   thin     the sides and the gathering / dying ends let the ground through (THIN channel)
@@ -1171,7 +1176,8 @@ void main()
     {
         float cThin = vary_wolf_cascade.r;
         float cWhite = vary_wolf_cascade.g;
-        float cover = min(vary_wolf_cascade.b * vary_fall, 0.6);
+        float cover = min(vary_wolf_cascade.b * vary_fall, 0.7);
+        float farT = smoothstep(40.0, 150.0, dist);
         float across = littleWave.w * 5.0;   // waterV.glsl: littleWave.w = 0.2 x (metres across the ribbon + a slow sway)
         float zf = vary_world_pos.z;
         float tn = 0.6 * wolfFoamNoise(vec2(across / 0.35, (zf + time * 5.0) / 2.5))
@@ -1180,10 +1186,10 @@ void main()
         threads = mix(threads, cover, smoothstep(60.0, 250.0, dist));
         float churn = wolfFoamNoise(vec2(across / 0.6, (zf - time * 1.5) / 0.8) + vec2(3.0, 19.0));
         float breaks = cWhite * mix(0.55 + 0.45 * churn, 0.775, smoothstep(60.0, 250.0, dist));
-        float white = clamp(max(threads * 0.75, breaks), 0.0, 0.85);
+        float white = clamp(max(max(threads * 0.75, breaks), 0.65 * vary_fall * farT), 0.0, 0.85);
         color = mix(color, vec3(0.93, 0.96, 0.99) * wolfFoamLight(sunlit_linear, amblit, shadow), white);
         wolfBehind *= 1.0 - white;
-        float sheet = 1.0 - smoothstep(0.5, 1.0, cThin);
+        float sheet = 1.0 - smoothstep(mix(0.5, 0.9, farT), 1.0, cThin);
         color = mix(fb.rgb, color, sheet);
         wolfBehind = 1.0 - sheet * (1.0 - wolfBehind);
     }

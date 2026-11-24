@@ -14,6 +14,23 @@
  * $/LicenseInfo$
  */
 
+// The exported entry points need LLSYMEXPORT to mean "export" here, as in every llwebrtc source: Source:
+// llwebrtc_impl.h:30-39 defines LL_MAKEDLL and the platform's WEBRTC_WIN / WEBRTC_MAC / WEBRTC_LINUX before it includes
+// llwebrtc.h (llwebrtc.h:49-59 LLSYMEXPORT - dllexport on Windows, visibility("default") on Linux, where the library is
+// built with -fvisibility=hidden). Without them newOpusEncoder / freeOpusEncoder / opusErrorText were hidden and the
+// viewer could not link (first W111 build, 24 Nov). The same block, not llwebrtc_impl.h itself: that pulls in all of
+// libwebrtc's headers, which this file does not use.
+#define LL_MAKEDLL
+#if defined(_WIN32) || defined(_WIN64)
+#define WEBRTC_WIN 1
+#elif defined(__APPLE__)
+#define WEBRTC_MAC 1
+#define WEBRTC_POSIX 1
+#elif __linux__
+#define WEBRTC_LINUX 1
+#define WEBRTC_POSIX 1
+#endif
+
 #include "llwebrtc.h"
 
 // libopus as packaged with libwebrtc (packages/include/webrtc is on ll::webrtc's include path; the same header

@@ -15,6 +15,7 @@
 #include "llenvironment.h"
 #include "llviewercontrol.h"
 #include "v3colorutil.h"
+#include "wolfaltitudesky.h"   // [STARFOLD 2026-11-24/] airFraction
 
 namespace
 {
@@ -273,7 +274,11 @@ namespace WolfEepReference
         HazeParams h;
         LLColor3 sunlight = l.sunUp ? l.sun : l.moon;
         const LLColor3 BD = sky->getBlueDensity(), BH = sky->getBlueHorizon();
-        const F32 HD = sky->getHazeDensity(), HH = sky->getHazeHorizon(), DM = sky->getDensityMultiplier();
+        // [STARFOLD 2026-11-24] the stock dome's density_multiplier is the EEP's x the altitude sky's air fraction (llsettingsvo.cpp
+        // applySpecial: SG_SKY DENSITY_MULTIPLIER = getDensityMultiplier() * WolfAltitudeSky::airFraction()), so the reference the
+        // native sky's gains chase thins with height as the stock sky does. Without it, above a Starfold line by day (the rig's
+        // Dogfight shot, 24 Nov 17:01Z) the gains drove the vacuum-black dome back to the ground's bright day sky.
+        const F32 HD = sky->getHazeDensity(), HH = sky->getHazeHorizon(), DM = sky->getDensityMultiplier() * WolfAltitudeSky::airFraction();
         const F32 max_y = sky->getMaxY();
         const LLColor3 light_atten = (BD + LLColor3(HD * 0.25f, HD * 0.25f, HD * 0.25f)) * (DM * max_y);
         h.combined = cmax(BD + LLColor3(HD, HD, HD), 1e-6f);

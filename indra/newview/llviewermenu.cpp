@@ -13159,6 +13159,7 @@ void initialize_menus()
         const size_t colon = a.find(':');
         const std::string verb = a.substr(0, colon), arg = colon == std::string::npos ? std::string() : a.substr(colon + 1);
         if (verb == "launch") sf.launch();
+        else if (verb == "goto") sf.goTo(arg.empty() ? std::string("pad") : arg);
         else if (verb == "fire") sf.fire(arg.empty() ? !sf.firing() : arg == "1");
         else if (verb == "mine") sf.mine(arg.empty() ? !sf.mining() : arg == "1");
         else if (verb == "target") sf.nextTarget();

@@ -356,11 +356,17 @@ public:
             const S32 n = llclamp((S32)ceilf(len / BEAM_SEG_M), 1, BEAM_SEGS_MAX);
             const F32 seg = len / (F32)n;
             const U32 flags = LLViewerPart::LL_PART_FOLLOW_VELOCITY_MASK | LLViewerPart::LL_PART_EMISSIVE_MASK;
+            const LLVector3 eye = LLViewerCamera::getInstance()->getOrigin();
             for (S32 i = 0; i < n; ++i)
             {
                 const LLVector3 c = a + d * (seg * ((F32)i + 0.5f));
-                part(c, d, life, LLVector2(width, seg * 1.08f), glow, 0.9f, flags);
-                part(c, d, life, LLVector2(width * 0.18f, seg * 1.04f), core, 1.f, flags);
+                // [rig 24 Nov 16:58Z] a beam from our own ship starts at the camera's shoulder: there a 1.6 m glow filled half the
+                // screen as a flat card. Near the eye the beam is no wider than ~3 % of its distance, and nothing within 3 m.
+                const F32 fromEye = (c - eye).length();   // not "near": <windef.h> defines it
+                if (fromEye < 3.f) continue;
+                const F32 w = llmin(width, 0.03f * fromEye);
+                part(c, d, life, LLVector2(w, seg * 1.08f), glow, 0.9f, flags);
+                part(c, d, life, LLVector2(w * 0.18f, seg * 1.04f), core, 1.f, flags);
             }
         }
     }
@@ -583,6 +589,8 @@ void WolfStarfold::receive(const LLUUID& region_id, const std::vector<std::strin
         // SpaceEngine.Jump: the teleport follows (SceneSpaceWorld.SendToRegion); the tunnel holds until the region changes
         mJumpAt = now();
         mJumpFromRegion = region_id;
+        mJumpTpSeen = false;
+        mJumpEndAt = -1.0;
         for (const auto& p : kv) if (p.first == "to") addNote("Through the wormhole to " + clean(p.second) + "...");
     }
 }
@@ -899,6 +907,13 @@ void WolfStarfold::launch()
     say("launch");
 }
 
+void WolfStarfold::goTo(const std::string& where)
+{
+    // Source: wolf-space 1.0.4 (README "goto"): SF1|goto|to=pad or to=station; at most once every 5 s per avatar there
+    if (!canLaunch() || (where != "pad" && where != "station")) return;
+    say("goto|to=" + where);
+}
+
 void WolfStarfold::fire(bool on)
 {
     if (!piloting()) return;
@@ -1056,6 +1071,9 @@ F32 WolfStarfold::tunnel() const
     // out once the region has changed (the teleport landed), or after the hold
     const bool landed = agentRegionId() != mJumpFromRegion;
     if (landed) return 0.f;
+    // [24 Nov, WolfStorm's live run] a jump the region could not complete ("The wormhole is closed just now") starts no
+    // teleport, or one that fails: then the tunnel goes at once (idle sets mJumpEndAt) instead of holding to the cap
+    if (mJumpEndAt >= 0.0) return in * (F32)llmax(0.0, 1.0 - (now() - mJumpEndAt) / 0.6);
     if (t > JUMP_HOLD_S) return in * (F32)llmax(0.0, 1.0 - (t - JUMP_HOLD_S) / JUMP_FADE_S);
     return in;
 }
@@ -1158,6 +1176,14 @@ void WolfStarfold::idle()
         }
         sendControls();
     }
+    // the jump's tunnel: did a teleport begin, and did it end without landing? (tunnel)
+    if (mJumpAt > 0.0 && mJumpEndAt < 0.0 && agentRegionId() == mJumpFromRegion)
+    {
+        const bool tp = gAgent.getTeleportState() != LLAgent::TELEPORT_NONE;
+        if (tp) mJumpTpSeen = true;
+        const F64 t = now() - mJumpAt;
+        if ((!mJumpTpSeen && t > 6.0) || (mJumpTpSeen && !tp)) mJumpEndAt = now();
+    }
     // notes go after a while
     while (!mNotes.empty() && now() - mNotes.front().mAt > NOTE_SHOW_S) mNotes.pop_front();
     // the beams' particle source, alive while space is here
@@ -1218,6 +1244,13 @@ void WolfStarfold::setupClear()
 }
 
 // ── the cockpit's visibility ─────────────────────────────────────────────────────────────────────────────────────────
+
+void WolfStarfold::showGuide(bool on)
+{
+    if (mGuide && !on) gSavedSettings.setBOOL("WolfStarfoldGuideSeen", true);
+    mGuide = on;
+    mGuideCard = 0;
+}
 
 bool WolfStarfold::panelShown() const
 {

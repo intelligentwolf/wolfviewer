@@ -273,8 +273,11 @@ void WolfStarfoldDeck::button(F32 l, F32 b, F32 r, F32 t, EHit id, const std::st
     const LLColor4 fill = down ? C_EDGE : (lit ? C_BUTTON_LIT : (primary ? C_PRIMARY : C_BUTTON));
     rectG(l, b, r, t, fill * 1.25f, fill);
     frameW(l, b, r, t, llmax(1.f, 2.f * u), lit ? C_AMBER : C_EDGE);
-    const F32 px = llmin((t - b) * 0.36f, 22.f * u);
-    T((l + r) * 0.5f, (b + t) * 0.5f, fit(label, px, true, (r - l) - 10.f * u), px, lit ? C_AMBER : C_TEXT, true);
+    // the label at its size, made smaller (to 60 %) before it is ever cut short ([rig 24 Nov]: "NEXT TARG...", "LEAVE ...")
+    F32 px = llmin((t - b) * 0.36f, 22.f * u);
+    const F32 room = (r - l) - 10.f * u, smallest = px * 0.6f;
+    while (px > smallest && textW(label, px, true) > room) px *= 0.92f;
+    T((l + r) * 0.5f, (b + t) * 0.5f, fit(label, px, true, room), px, lit ? C_AMBER : C_TEXT, true);
     addHit(l, b, r, t, id, tip);
 }
 
@@ -577,9 +580,14 @@ void WolfStarfoldDeck::drawGround(F32 bottom, F32 W, F32 u)
     auto X = [&](F32 x) { return ox + x * u; };
     auto Y = [&](F32 y) { return bottom + y * u; };
     T(X(40.f), Y(84.f), upper(WolfStarfold::gameName()), 30.f * u, C_AMBER, true, LLFontGL::LEFT);
-    T(X(40.f), Y(50.f), llformat("Space starts %s above the sea here.", distance(sf.system().mHeight).c_str()), 18.f * u, C_TEXT,
-      false, LLFontGL::LEFT);
-    T(X(40.f), Y(22.f), "Go to a launch pad or the station, then press LAUNCH.", 16.f * u, C_DIM, false, LLFontGL::LEFT);
+    T(X(40.f), Y(50.f), fit(llformat("Space starts %s above the sea here.", distance(sf.system().mHeight).c_str()), 18.f * u, false, 630.f * u),
+      18.f * u, C_TEXT, false, LLFontGL::LEFT);
+    T(X(40.f), Y(22.f), fit("Press LAUNCH where you stand, or go to the pad or the station first.", 16.f * u, false, 630.f * u), 16.f * u,
+      C_DIM, false, LLFontGL::LEFT);
+    // wolf-space 1.0.4 "goto": the region takes you there (past the landing point); its answer shows above the panel (k=msg)
+    button(X(690.f), Y(16.f), X(880.f), Y(100.f), H_GOTO_PAD, "TO THE PAD", false, "Take me to the launch pad", u);
+    if (sf.system().mHaveStation)
+        button(X(890.f), Y(16.f), X(1060.f), Y(100.f), H_GOTO_STATION, "TO THE STATION", false, "Take me onto the station's deck", u);
     button(X(1080.f), Y(16.f), X(1300.f), Y(100.f), H_LAUNCH, "LAUNCH", false, "Bring out your Cub and climb to space", u, true);
     button(X(1320.f), Y(16.f), X(1430.f), Y(100.f), H_HELP, "GUIDE", sf.guideShown(), "How to fly, mine, sell and fight", u);
     button(X(1450.f), Y(16.f), X(1560.f), Y(100.f), H_CLOSE, "CLOSE", false, "Close this panel (Wolf World > Starfold opens it)", u);
@@ -757,6 +765,8 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
         case H_SHOW_TAB: sf.togglePanel(); break;
         case H_LEAVE: sf.leave(); break;
         case H_LAUNCH: sf.launch(); break;
+        case H_GOTO_PAD: sf.goTo("pad"); break;
+        case H_GOTO_STATION: sf.goTo("station"); break;
         case H_CLOSE: sf.togglePanel(); break;
         case H_SELL: sf.sell(); break;
         case H_STATION_LAUNCH: sf.launch(); break;

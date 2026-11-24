@@ -164,6 +164,9 @@ public:
     // ── the pilot's intents ──────────────────────────────────────────────────────────────────────────────────────────
     bool canLaunch() const;         // a Wolf login, space here, not flying
     void launch();
+    /** wolf-space 1.0.4 "goto": the region takes the avatar to the nearest pad ("pad") or onto the station deck ("station"),
+     *  past the landing point; it answers by k=msg. Not while flying (the region says to use Fly there). */
+    void goTo(const std::string& where);
     void fire(bool on);
     bool firing() const { return mFireWanted; }
     void nextTarget();
@@ -204,7 +207,9 @@ public:
     void togglePanel();
     bool panelHidden() const { return mHidden; }
     bool guideShown() const { return mGuide; }
-    void showGuide(bool on) { mGuide = on; mGuideCard = 0; }
+    /** Closing the guide by any way (X, DONE, the ? button, WolfStarfold.Do guide:0) counts as read: it no longer opens by
+     *  itself on the next ship (WolfStarfoldGuideSeen). */
+    void showGuide(bool on);
     S32  guideCard() const { return mGuideCard; }
     void setGuideCard(S32 c) { mGuideCard = c; }
     /** The jump's tunnel: 0..1. */
@@ -278,6 +283,8 @@ private:
     // the jump
     F64     mJumpAt = -100.0;
     LLUUID  mJumpFromRegion;
+    bool    mJumpTpSeen = false;     // a teleport began after k=jump
+    F64     mJumpEndAt = -1.0;       // the tunnel fades from here: no teleport began, or it ended without landing
 
     // sounds
     S32     mSoundState = 0;         // 0 not written, 1 written, -1 failed

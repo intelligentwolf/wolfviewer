@@ -30,6 +30,7 @@
 #include "indra_constants.h"
 
 #include "llpluginclassmedia.h"
+#include "wolfpluginaudio.h"     // [W111 VIDEO 2026-11-24]
 #include "llpluginmessageclasses.h"
 #include "llcontrol.h"
 
@@ -80,6 +81,32 @@ bool LLPluginClassMedia::init(const std::string &launcher_filename, const std::s
     LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA, "init");
     message.setValue("target", mTarget);
     message.setValueReal("factor", mZoomFactor);
+    // [W111 VIDEO 2026-11-24] Sound through the viewer: the ring is made here and named in "init", which the plugin's
+    // base class reads before the plugin makes any player or browser (MediaPluginBase::staticReceiveMessage). If any
+    // step fails the plugin is simply not asked and plays its own sound, as before.
+    closeWolfAudio();
+    if (sAudioHost && sAudioHost->wantAudioThroughViewer())
+    {
+        std::shared_ptr<WolfPluginAudioRing> ring = std::make_shared<WolfPluginAudioRing>();
+        if (ring->create(WolfPluginAudio::RING_BYTES))
+        {
+            mWolfAudioStream = sAudioHost->openAudio(ring);
+            if (mWolfAudioStream)
+            {
+                mWolfAudioRing = ring;
+                message.setValueBoolean(WolfPluginAudio::KEY_THROUGH_VIEWER, true);
+                message.setValue(WolfPluginAudio::KEY_SHM_NAME, ring->name());
+                message.setValueS32(WolfPluginAudio::KEY_SHM_SIZE, (S32)ring->size());
+                // Until the owner sets a volume the plugin's own starting volume held, which is full volume (libVLC's
+                // and playbin's defaults, see setVolume); a "set_volume" sent before init is kept.
+                sAudioHost->setAudioGain(mWolfAudioStream, mVolumeSent ? mRequestedVolume : 1.0f);
+            }
+        }
+        else
+        {
+            LL_WARNS("Plugin") << "Could not make the media sound ring; the plugin plays its own sound" << LL_ENDL;
+        }
+    }
     sendMessage(message);
 
     mPlugin->init(launcher_filename, plugin_dir, plugin_filename, debug);
@@ -95,6 +122,7 @@ void LLPluginClassMedia::reset()
         mPlugin->requestShutdown();
         mPlugin.reset();
     }
+    closeWolfAudio();   // [W111 VIDEO 2026-11-24]
 
     mTextureParamsReceived = false;
     mRequestedTextureDepth = 0;
@@ -1421,6 +1449,7 @@ void LLPluginClassMedia::receivePluginMessage(const LLPluginMessage &message)
 /* virtual */
 void LLPluginClassMedia::pluginLaunchFailed()
 {
+    closeWolfAudio();   // [W111 VIDEO 2026-11-24]
 #if LL_LINUX
     mWolfPluginLaunchFailed = true;     // <WolfViewer 2026-10-23> polled by LLStreamingAudio_MediaPlugins (no owner)
 #endif
@@ -1430,6 +1459,7 @@ void LLPluginClassMedia::pluginLaunchFailed()
 /* virtual */
 void LLPluginClassMedia::pluginDied()
 {
+    closeWolfAudio();   // [W111 VIDEO 2026-11-24] a crashed plugin writes no more; free its sound now
     mediaEvent(LLPluginClassMediaOwner::MEDIA_EVENT_PLUGIN_FAILED);
 }
 
@@ -1677,6 +1707,25 @@ void LLPluginClassMedia::setVolume(float volume)
 
         sendMessage(message);
     }
+    // [W111 VIDEO 2026-11-24] With its sound through the viewer the plugin ignores "set_volume" (it still goes, so a
+    // plugin that does not hand its sound over plays at the right volume itself) and the viewer applies it here.
+    if (mWolfAudioStream && sAudioHost)
+    {
+        sAudioHost->setAudioGain(mWolfAudioStream, volume);
+    }
+}
+
+// [W111 VIDEO 2026-11-24]
+LLPluginClassMediaAudioHost* LLPluginClassMedia::sAudioHost = nullptr;
+
+void LLPluginClassMedia::closeWolfAudio()
+{
+    if (mWolfAudioStream && sAudioHost)
+    {
+        sAudioHost->closeAudio(mWolfAudioStream);
+    }
+    mWolfAudioStream = 0;
+    mWolfAudioRing.reset();     // the engine's feed keeps its own reference until its feeder lets go
 }
 
 float LLPluginClassMedia::getVolume()

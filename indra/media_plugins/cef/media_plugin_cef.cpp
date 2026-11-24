@@ -145,6 +145,12 @@ private:
     bool onJSDialogCallback(const std::string origin_url, const std::string message_text, const std::string default_prompt_text);
     bool onJSBeforeUnloadCallback();
 
+    // [W111 VIDEO 2026-11-24] web media sound handed to the viewer (dullahan's audio_to_host) - see receiveMessage "init"
+    void onWolfAudioStreamStarted(int channels, int sample_rate, int frames_per_buffer);
+    void onWolfAudioStreamPacket(const float** data, int channels, int frames, int64_t pts_ms);
+    void onWolfAudioStreamStopped();
+    void onWolfAudioStreamError(const std::string message);
+
     void postDebugMessage(const std::string& msg);
     void authResponse(LLPluginMessage &message);
 
@@ -193,6 +199,11 @@ private:
     std::chrono::steady_clock::time_point mWolfSizeAskedAt;
     bool mWolfZoomNudged = false;   // the page zoom is WOLF_RESIZE_NUDGE_ZOOM off mWolfPageZoom until the next "idle"
     F32 mWolfPageZoom = 1.f;        // the zoom last given to mCEFLib->setPageZoom from a viewer message
+
+    // [W111 VIDEO 2026-11-24] packets interleaved for wolfAudioPush. Only touched in onWolfAudioStreamPacket, which
+    // CEF calls on its one audio stream thread (cef_audio_handler.h OnAudioStreamPacket), so it needs no lock; it only
+    // grows, so after the first packets of a stream no allocation happens on that thread.
+    std::vector<float> mWolfAudioInterleaved;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -820,6 +831,21 @@ void MediaPluginCEF::receiveMessage(const char* message_string)
                 std::vector<std::string> custom_schemes(1, "secondlife");
                 mCEFLib->setCustomSchemes(custom_schemes);
 
+                // [W111 VIDEO 2026-11-24] the viewer plays web media sound through its own audio engine (so the video
+                // recorder can record it): dullahan hands CEF's audio to us (CefAudioHandler) and CEF plays nothing out
+                // itself (dullahan adds --disable-audio-output, so CEF's output streams are fake; the capture taps them
+                // before their output - tested on Linux 24 Nov: no sound on the local sink, all of it here). Decided by the viewer
+                // in "init" before any browser exists, as dullahan reads audio_to_host only in init(). When off, nothing
+                // changes: no audio handler, CEF plays the sound itself and the volume catcher works as before.
+                if (wolfAudioThroughViewer())
+                {
+                    settings.audio_to_host = true;
+                    mCEFLib->setOnAudioStreamStartedCallback(std::bind(&MediaPluginCEF::onWolfAudioStreamStarted, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+                    mCEFLib->setOnAudioStreamPacketCallback(std::bind(&MediaPluginCEF::onWolfAudioStreamPacket, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+                    mCEFLib->setOnAudioStreamStoppedCallback(std::bind(&MediaPluginCEF::onWolfAudioStreamStopped, this));
+                    mCEFLib->setOnAudioStreamErrorCallback(std::bind(&MediaPluginCEF::onWolfAudioStreamError, this, std::placeholders::_1));
+                }
+
                 bool result = mCEFLib->init(settings);
                 if (!result)
                 {
@@ -1337,8 +1363,69 @@ void MediaPluginCEF::checkEditState()
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// [W111 VIDEO 2026-11-24] dullahan audio_to_host callbacks (only set when wolfAudioThroughViewer()).
+// Threads (CEF's include/cef_audio_handler.h): started - a browser audio capture thread; packet - the audio stream
+// thread; stopped - the UI thread (here: inside mCEFLib->update()); error - the UI or the audio stream thread.
+// wolfAudioPush is non-blocking and may be called from any thread (MediaPluginBase).
+void MediaPluginCEF::onWolfAudioStreamStarted(int channels, int sample_rate, int frames_per_buffer)
+{
+    // CEF fills the parameters before asking us (AlloyBrowserHostImpl::StartAudioCapturer: stereo, the CD sample rate,
+    // 1024 frames) and dullahan keeps them (dullahan_browser_client.cpp GetAudioParameters) - pass on what was used
+    wolfAudioFormat(channels, sample_rate);
+}
+
+void MediaPluginCEF::onWolfAudioStreamPacket(const float** data, int channels, int frames, int64_t pts_ms)
+{
+    if (!data || channels <= 0 || frames <= 0)
+    {
+        return;
+    }
+
+    // CEF gives one array of 32 bit floats per channel (CefAudioCapturer::Capture in CEF's
+    // libcef/browser/audio_capturer.cc passes media::AudioBus::channel(c)); wolfAudioPush takes interleaved frames
+    const size_t chans = (size_t)channels;
+    const size_t count = (size_t)frames * chans;
+    if (mWolfAudioInterleaved.size() < count)
+    {
+        mWolfAudioInterleaved.resize(count);
+    }
+    float* out = mWolfAudioInterleaved.data();
+    for (size_t c = 0; c < chans; ++c)
+    {
+        const float* in = data[c];
+        for (size_t i = 0; i < (size_t)frames; ++i)
+        {
+            out[i * chans + c] = in[i];
+        }
+    }
+    wolfAudioPush(out, (size_t)frames);
+}
+
+void MediaPluginCEF::onWolfAudioStreamStopped()
+{
+    // CEF stops a stream 2 s after the page goes quiet (kRecentlyAudibleTimeout in CEF's
+    // libcef/browser/alloy/alloy_browser_host_impl.cc) - those 2 s are still captured and pushed (silence), so dropping
+    // what the viewer has queued loses no sound - or when the browser closes
+    wolfAudioFlush();
+}
+
+void MediaPluginCEF::onWolfAudioStreamError(const std::string message)
+{
+    // CEF stops the stream after an error (cef_audio_handler.h OnAudioStreamError)
+    wolfAudioFlush();
+}
+
 void MediaPluginCEF::setVolume()
 {
+    // [W111 VIDEO 2026-11-24] with the sound through the viewer, the viewer applies the media volume to the sound it
+    // plays and the plugin must not apply "set_volume" itself (MediaPluginBase::wolfAudioThroughViewer contract). CEF
+    // plays nothing locally then anyway (dullahan's audio_to_host adds --disable-audio-output), so the volume catcher
+    // (Windows: waveOutSetVolume for this process) is left alone instead of scaling a silent output.
+    if (wolfAudioThroughViewer())
+    {
+        return;
+    }
 #if LL_VOLUME_CATCHER
     mVolumeCatcher.setVolume(mCurVolume);
 #endif

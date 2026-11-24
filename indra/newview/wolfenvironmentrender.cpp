@@ -1780,6 +1780,7 @@ namespace
         const F32 toward = (windFrom + 180.f) * DEG_TO_RAD;
         const F32 uvPerMetre = (F32)(1.0 / (sFrame.bottomRadius * F_PI * 0.5));
         f.haze_density_scale = 3.0e-5f * sFrame.hazeScale;   // Source: CloudsMaterial.ts:536 hazeDensityScale 3e-5
+        f.haze_density_scale *= 1.f - WolfStarfold::instance().skyVacuum();   // [STARFOLD 2026-11-24/] as the EEP branch below
         // [WolfViewer 2026-10-13] THE EEP DRIVES THE HAZE. The stock haze pass dims a surface d metres away by
         // exp(-(blue_density.r + haze_density) d density_multiplier distance_multiplier) ([S] atmosphericsFuncs.glsl:79-87,
         // hazeF.glsl:79-83 atten.r), the same density everywhere around the camera up to max_y above it (:57 the ray cut at
@@ -1798,6 +1799,11 @@ namespace
                 const F32 maxY = llmax(psky->getMaxY(), 1.f);
                 f.haze_exponent = 1.f / maxY;
                 f.haze_density_scale = sigma * expf(llmin(sFrame.cameraHeight / maxY, 20.f));
+                // [STARFOLD 2026-11-24] above a Starfold line the air the haze stands for has thinned away (WolfStarfold::skyVacuum,
+                // as the dome's uWolfVacuum): the rig's Dogfight shots by day (17:01Z, 17:17Z) were a flat grey wash over sky and
+                // station alike at 5,000 m, the stock haze grown with the camera's height (the exp term above) while the sky
+                // above it had gone black
+                f.haze_density_scale *= 1.f - WolfStarfold::instance().skyVacuum();
                 f.haze_always = sigma > 0.f;
                 // [WolfViewer 2026-10-13] and the haze itself is the stock haze pass's (cloudsF.glsl wolfLLHaze): Paul, "Jimmy's
                 // EEP has like a haze, ours is very bright" - takram's haze only took the EEP's density, its light was physical

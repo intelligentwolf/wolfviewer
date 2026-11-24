@@ -13210,6 +13210,7 @@ void initialize_menus()
             else if (bv == "putback") sb.putBack(ba);
             else if (bv == "down") sb.takeDown(ba);
             else if (bv == "core") sb.buyCore(ba);
+            else if (bv == "seat") sb.makeSeat(ba);
         }
         // [GLASS ARC 2026-11-24] "steer:<pitch>,<yaw>" (each -1..1) holds the pointer as point-and-fly does; "steer:0" lets go
         else if (verb == "steer")

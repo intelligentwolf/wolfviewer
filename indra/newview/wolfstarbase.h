@@ -168,6 +168,9 @@ public:
     void takeDown(const std::string& part);
     void putBack(const std::string& part);
     void buyCore(const std::string& part);
+    /** "Make this a seat" (design.html#bases: own quarters need one seat; wolf-space 1.0.8 seat=<part>|prim=<link>): the prim the
+     *  resident has selected with the build tools, by its link number (root 1). Says plainly when nothing is selected. */
+    void makeSeat(const std::string& part);
     void showGhosts(const std::string& what);   // a kit kind, "own:<id>" or "part:<id>"
     void build();                   // add / attach / place at the chosen ghost
     void attachAsIs(const std::string& object);

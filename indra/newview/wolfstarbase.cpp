@@ -23,6 +23,8 @@
 #include <cstdlib>
 
 #include "llagent.h"
+#include "llselectmgr.h"
+#include "llviewerobject.h"
 #include "llframetimer.h"
 #include "llviewerregion.h"
 #include "wolfgrid.h"
@@ -677,6 +679,31 @@ void WolfStarbase::build()
     else if (mGhostFor.rfind("part:", 0) == 0) args = "base|place=" + mGhostFor.substr(5) + at;
     else args = "base|add=" + mGhostFor + at;
     if (order(args)) clearGhosts();
+}
+
+void WolfStarbase::makeSeat(const std::string& p)
+{
+    if (token(p).empty()) return;
+    LLViewerObject* o = LLSelectMgr::getInstance()->getSelection()->getFirstObject();
+    if (!o)
+    {
+        mAnswer = "First choose the prim to sit on: right-click your quarters, Edit, tick Edit linked, and click that prim. Then press Make seat.";
+        return;
+    }
+    // Source: llfloatertools.cpp LLFloaterTools::updatePopup (the build floater's link number): the root is link 1, a child is 1 +
+    // its place in the root's children (the first child is 2); a prim with no children is the root itself (link 1 here)
+    LLViewerObject* root = o->getRootEdit();
+    S32 link = 1;
+    if (root && root != o)
+    {
+        S32 index = 1;
+        for (LLViewerObject* child : root->getChildren())
+        {
+            ++index;
+            if (child == o) { link = index; break; }
+        }
+    }
+    order("base|seat=" + token(p) + llformat("|prim=%d", link));
 }
 
 void WolfStarbase::placeAsIs(const std::string& p) { if (!token(p).empty()) order("base|place=" + token(p)); }

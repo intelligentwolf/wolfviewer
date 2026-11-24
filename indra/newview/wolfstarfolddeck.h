@@ -86,6 +86,7 @@ public:
         H_BASE_CARD_0, H_BASE_CARD_LAST = H_BASE_CARD_0 + 7,
         H_BASE_ROWA_0, H_BASE_ROWA_LAST = H_BASE_ROWA_0 + 11,   // a row's first button (Put it back, Place it, Attach)
         H_BASE_ROWB_0, H_BASE_ROWB_LAST = H_BASE_ROWB_0 + 11,   // its second (Take down, Send to my base)
+        H_BASE_ROWC_0, H_BASE_ROWC_LAST = H_BASE_ROWC_0 + 11,   // a row's third (Make seat)
         H_BASE_GHOST_0, H_BASE_GHOST_LAST = H_BASE_GHOST_0 + 11, // a ghost in the world: click to choose it
         H_RADAR_BASE_0, H_RADAR_BASE_LAST = H_RADAR_BASE_0 + 23,  // a starbase on the radar (BaseRules.CAP_MAX 24)
     };

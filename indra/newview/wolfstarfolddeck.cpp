@@ -1613,6 +1613,13 @@ void WolfStarfoldDeck::drawBaseHome(F32 l, F32 b, F32 r, F32 t, F32 u)
             button(bx - bw, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWA_0 + slot), k ? "BUY CORE " + thousands(k->mPrice) : std::string("BUY ITS CORE"),
                    false, "Buy this kind's core so your own build does its work", u);
             bx -= bw + 8.f * u;
+            // own quarters need a seat first (design.html#bases: "choose a prim and press Make this a seat")
+            if (p.mKind == "quarters")
+            {
+                button(bx - bw * 0.8f, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWC_0 + slot), "MAKE SEAT", false,
+                       "Make the prim you have selected (Edit, Edit linked) the seat of your quarters", u);
+                bx -= bw * 0.8f + 8.f * u;
+            }
         }
         const F32 room = bx - tx - 8.f * u;
         T(tx, mid + 10.f * u, fit(title, 18.f * u, true, room), 18.f * u, C_TEXT, true, LLFontGL::LEFT);
@@ -1822,6 +1829,12 @@ void WolfStarfoldDeck::pressBase(EHit id)
         return;
     }
     if (id >= H_BASE_GHOST_0 && id <= H_BASE_GHOST_LAST) { sb.choose((size_t)(id - H_BASE_GHOST_0)); return; }
+    if (id >= H_BASE_ROWC_0 && id <= H_BASE_ROWC_LAST)
+    {
+        const size_t slot = (size_t)(id - H_BASE_ROWC_0);
+        if (slot < mRowIds.size() && !mRowIds[slot].empty()) sb.makeSeat(mRowIds[slot]);
+        return;
+    }
     const bool rowA = id >= H_BASE_ROWA_0 && id <= H_BASE_ROWA_LAST, rowB = id >= H_BASE_ROWB_0 && id <= H_BASE_ROWB_LAST;
     if (rowA || rowB)
     {

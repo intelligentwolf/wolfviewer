@@ -34,7 +34,7 @@ namespace
 {
     // ── the wire's limits (Source: wolf-space/src/SpaceBases.cs) ─────────────────────────────────────────────────────
     const F64 BASE_ACTION_S = 1.0;           // SpaceBases.cs BASE_ACTION_MS: one base action a second per pilot (status, ghost
-                                             // and own are not counted: BaseVerb's exemption)
+                                             // and own are never refused by it, but each one restarts the second)
     const size_t GHOSTS_MAX = 12;            // SpaceBases.cs Ghost: BasePlacement.Ghosts max = 12
     const size_t OWN_MAX = 12;               // README wire k=bown: at most 12
     const size_t PARTS_MAX = 64;             // a base's parts (design.html#bases: 20 home-made + the kit's, far below this)
@@ -616,7 +616,11 @@ bool WolfStarbase::order(const std::string& args, bool exempt)
         mAnswer = "One order a second, please - press it again.";
         return false;
     }
-    if (!exempt) { mOrderedAt = now(); mAnswer.clear(); }
+    // every base verb stamps the region's one-a-second clock, the exempt status / ghost / own as well (SpaceBases.cs BaseVerb sets
+    // m_baseActionMs before it looks at the verb), so an order just after the window's own status ask was dropped unanswered
+    // (rig 24 Nov 23:42Z: dock:all right after opening): the next order waits for it here, and says so
+    mOrderedAt = now();
+    if (!exempt) mAnswer.clear();
     mAskedAt = now();
     WolfStarfold::instance().intent(args);
     return true;

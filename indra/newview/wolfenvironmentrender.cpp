@@ -1532,7 +1532,7 @@ namespace
         // haze on horizon (caused by precipitation)", ours "too clean"; Paul: rain, snow, mist or drizzle make the horizon paler
         // and hazier, clear stays as now). The rule and its sources are in wolfweatherhaze.h, the same as the server's
         // (WolfAutoEnvironmentModule.cs WeatherWorldSigma): the dry limit above, unchanged; with rain, drizzle or snow falling
-        // or visibility of 5 km or less, the world's extinction is the real visibility's / the precipitation's (Gultepe et al.
+        // or mist (visibility of 5 km or less at 95 % RH or more), the world's extinction is the real visibility's / the precipitation's (Gultepe et al.
         // 2010), raised or lowered to it, so a W112 viewer shows it whether or not the region's EEP was baked with it yet.
         {
             F32 limit = -1.f;
@@ -1544,6 +1544,7 @@ namespace
                 ww.kind = d.mWeatherKind;
                 ww.precipitation = d.mPrecipitation;
                 ww.visibility = d.mVisibility;
+                ww.humidity = d.mHumidity;
                 limit = WolfWeatherHaze::worldSigma(ww, z.haze);
                 wet = WolfWeatherHaze::isWet(ww);
             }

@@ -21,8 +21,11 @@
 
 namespace WolfWeatherHaze
 {
-    /// WMO-No. 306 Manual on Codes / ICAO Annex 3 (4678 code): mist (BR) is reported for visibility 1,000-5,000 m.
+    /// UK CAA CAP 746 (Requirements for Meteorological Observations at Aerodromes) 4.67-4.68, 4.86: mist (BR) is reported
+    /// for prevailing visibility 1000-5000 m due to water droplets, relative humidity at least 95 %; below 95 % it is haze
+    /// (dry particles), which keeps today's look.
     constexpr float MIST_VISIBILITY_M = 5000.f;
+    constexpr float MIST_HUMIDITY = 95.f;
     /// Under 1 km is fog (WMO), which the fog rules carry (fog % into the EEP and the viewer's own fog): the floor here.
     constexpr float FOG_VISIBILITY_M = 1000.f;
     /// -ln(0.05): the meteorological optical range is where a beam falls to 5 % (WMO-No. 8, Guide to Instruments and
@@ -38,20 +41,22 @@ namespace WolfWeatherHaze
         std::string kind = "clear";   // clear | rain | snow (drizzle is MET's light rain)
         float precipitation = 0.f;    // mm/h
         float visibility = -1.f;      // m, < 0 unknown
+        float humidity = 0.f;         // relative humidity % (the observation's)
     };
 
-    /// Wet air: rain/drizzle/snow falling, or mist (visibility 5 km or less). Source: WolfAutoEnvironmentModule.cs Weather.IsWet.
+    /// Wet air: rain/drizzle/snow falling, or mist (visibility 5 km or less at 95 % RH or more). Source:
+    /// WolfAutoEnvironmentModule.cs Weather.IsWet.
     inline bool isWet(const Weather& w)
     {
         if ((w.kind == "rain" || w.kind == "snow") && w.precipitation > 0.f) return true;
-        return w.visibility > 0.f && w.visibility <= MIST_VISIBILITY_M;
+        return w.visibility > 0.f && w.visibility <= MIST_VISIBILITY_M && w.humidity >= MIST_HUMIDITY;
     }
 
     /// The world's haze extinction, 1/m, in the stock haze's terms ((blue_density.r + haze_density) x density_multiplier x
     /// distance_multiplier, [S] atmosphericsFuncs.glsl:79-87). Source: WolfAutoEnvironmentModule.cs WeatherWorldSigma.
     ///  Dry: EEP's default air (llsettingssky.cpp:1226-1231, ~52 km) under the server's fog rule (WolfEnvironment.cs
     ///       OverlayWeather: haze_density 70 % to 5, distance_multiplier x (1 + 4 fog)) and haze rule (ApplyDoc: 60 %, 1 + 3 haze).
-    ///  Wet: the largest of that, the real visibility (2.996 / V, V >= 1 km) and the falling precipitation's own (Gultepe et
+    ///  Wet: the largest of that, the real visibility in mist air (RH >= 95 %; 2.996 / V, V >= 1 km) and the falling precipitation's own (Gultepe et
     ///       al. 2010 Table 2 rain/drizzle mean V_km = 9.01 - 4.12 R^0.176; Table 3 snow mean V_km = 1.10 R^-0.701; R mm/h;
     ///       held to 1..50 km). Extinction adds over species (their Eq. 6); the precipitation term is a floor beside the model
     ///       visibility, which may already hold it.
@@ -65,7 +70,9 @@ namespace WolfWeatherHaze
         dist *= 1.f + 3.f * hz;                         // ditto
         float sigma = (0.2447f + hd) * 0.0001f * dist;
         if (!isWet(w)) return sigma;
-        if (w.visibility > 0.f)
+        // the visibility only in mist air (RH >= 95 %): lower, it is haze or a model artefact (24 Nov, Open-Meteo: Bergen 1.6 km
+        // at 46 % RH, Narvik 240 m at 71 % under a clear sky); rain's and snow's own extinction is the term below
+        if (w.visibility > 0.f && w.humidity >= MIST_HUMIDITY)
             sigma = std::max(sigma, MOR_LN / std::max(w.visibility, FOG_VISIBILITY_M));
         if ((w.kind == "rain" || w.kind == "snow") && w.precipitation > 0.f)
         {

@@ -546,7 +546,9 @@ void WolfFloaterRecorder::drawMonitor()
 
     const bool live = state == WolfRecorder::State::RECORDING || state == WolfRecorder::State::STARTING ||
                       state == WolfRecorder::State::FINISHING;
-    drawTimecode(time_font, timecode(live ? mSeconds : 0.0), x, y, kMonText);
+    // after Stop the saved video's length stays beside SAVED until the next Record (the same Report::length as the
+    // "Saved: ..." line under the buttons), not 00:00:00
+    drawTimecode(time_font, timecode(live ? mSeconds : (mSaved ? mSavedLength : 0.0)), x, y, kMonText);
     y -= (S32)time_font->getLineHeight() + 6;
 
     const LLFontGL* f = LLFontGL::getFontSansSerif();
@@ -647,6 +649,7 @@ void WolfFloaterRecorder::refresh()
     mMicOn = st.mic;
     mVoiceOn = st.voice;
     mSaved = st.state == WolfRecorder::State::IDLE && st.saved && !st.file.empty();
+    mSavedLength = mSaved ? st.length : 0.0;
     if (mSaved && st.file != mSavedFile)
     {
         // the file's real size (Report::bytes counts the samples only; the file also holds ~4 MB of reserved headers,

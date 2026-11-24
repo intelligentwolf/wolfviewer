@@ -90,6 +90,7 @@ private:
     S32 mState = 0;            // WolfRecorder::State as a number
     bool mPaused = false, mSaved = false, mMicOn = false, mVoiceOn = false;
     F64 mSeconds = 0.0, mLimitSecs = 0.0;
+    F64 mSavedLength = 0.0;  // the last saved video's length (Report::length) while mSaved, for the monitor's timecode
     std::string mDetail;       // the line under the timecode
 
     // the preview picture

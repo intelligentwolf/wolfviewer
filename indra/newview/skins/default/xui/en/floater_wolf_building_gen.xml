@@ -114,7 +114,7 @@
          Build it, so both presses are always on show with the status line; the plan's result scrolls into view. -->
     <scroll_container follows="all" height="580" layout="topleft" left="0" name="body_scroll" top="20" width="720"
      reserve_scroll_corner="false" opaque="false">
-    <panel follows="left|top" height="656" layout="topleft" left="0" name="body" top="0" width="704" background_visible="false">
+    <panel follows="left|top" height="668" layout="topleft" left="0" name="body" top="0" width="704" background_visible="false">
     <!-- left: the plan. The read-only boxes are opaque (DkGray, the dark of every skin, paired there with
          TextFgReadOnlyColor, the read-only text): the default TextBgReadOnlyColor is 5% white and let the world, hover text
          included, show through. -->
@@ -150,27 +150,29 @@
      tool_tip="Plan from your words only" />
     <text follows="left|top" height="28" layout="topleft" left="444" name="picture_state" top="182" width="248" wrap="true" />
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="style_label" top="212" width="336">2. Style</text>
-    <combo_box follows="left|top" height="23" layout="topleft" left="356" name="style" top="230" width="336"
+    <!-- [W111 2026-11-24] 12 px more room above "2. Style": the picture row's two-line hint (picture_state, to y 210) sat
+         against the heading (Paul). Everything below in this column moves down with it; the body panel is 12 px taller. -->
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="style_label" top="224" width="336">2. Style</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="356" name="style" top="242" width="336"
      tool_tip="The period and place it is built in" />
     <!-- the style's description: a fixed box that scrolls (a text label grows past its rect and ran into 3. Options) -->
-    <text_editor follows="left|top" height="52" layout="topleft" left="356" name="style_info" top="258" width="336" word_wrap="true"
+    <text_editor follows="left|top" height="52" layout="topleft" left="356" name="style_info" top="270" width="336" word_wrap="true"
      read_only="true" allow_scroll="true" parse_urls="false" max_length="4000" bg_readonly_color="Transparent" h_pad="0" v_pad="0" />
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="options_label" top="316" width="336">3. Options</text>
-    <check_box follows="left|top" height="16" label="Wartime damage" layout="topleft" left="356" name="option_1" top="334" width="336" />
-    <check_box follows="left|top" height="16" label="Interiors with doors and stairs" layout="topleft" left="356" name="option_2" top="354" width="336" />
-    <check_box follows="left|top" height="16" label="Street props" layout="topleft" left="356" name="option_3" top="374" width="336" />
-    <check_box follows="left|top" height="16" label="Lit at night" layout="topleft" left="356" name="option_4" top="394" width="336" />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="options_label" top="328" width="336">3. Options</text>
+    <check_box follows="left|top" height="16" label="Wartime damage" layout="topleft" left="356" name="option_1" top="346" width="336" />
+    <check_box follows="left|top" height="16" label="Interiors with doors and stairs" layout="topleft" left="356" name="option_2" top="366" width="336" />
+    <check_box follows="left|top" height="16" label="Street props" layout="topleft" left="356" name="option_3" top="386" width="336" />
+    <check_box follows="left|top" height="16" label="Lit at night" layout="topleft" left="356" name="option_4" top="406" width="336" />
 
-    <text_editor follows="left|top" height="52" layout="topleft" left="356" name="quote_text" top="416" width="336" word_wrap="true"
+    <text_editor follows="left|top" height="52" layout="topleft" left="356" name="quote_text" top="428" width="336" word_wrap="true"
      read_only="true" allow_scroll="true" parse_urls="false" max_length="4000" bg_readonly_color="Transparent" h_pad="0" v_pad="0"
      tool_tip="What designing it costs in AI credits: what the AI costs us, plus 10%. You are never charged more than the figure shown." />
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="price_label" top="502" width="336">4. Price to build it</text>
-    <text_editor follows="left|top" height="90" layout="topleft" left="356" name="price_text" top="520" width="336" word_wrap="true"
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="price_label" top="514" width="336">4. Price to build it</text>
+    <text_editor follows="left|top" height="90" layout="topleft" left="356" name="price_text" top="532" width="336" word_wrap="true"
      read_only="true" allow_scroll="true" parse_urls="false" max_length="8000" bg_readonly_color="DkGray" />
-    <text follows="left|top" height="34" layout="topleft" left="356" name="balance_text" top="616" width="336" wrap="true" />
+    <text follows="left|top" height="34" layout="topleft" left="356" name="balance_text" top="628" width="336" wrap="true" />
     </panel>
     </scroll_container>
 

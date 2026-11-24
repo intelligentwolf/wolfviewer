@@ -632,6 +632,11 @@ void main()
     // the sea's own body and glint (physically lit, in the frame's units like the world's water body) took it once with no
     // reason. At night the stock / physical ratio near the horizon is large, and its square clipped the sea to white.
     vec3 domeGain = wolfEepDomeGain > 0.5 ? wolfEepGainDirCore(vCameraPosition, rayDirection) : vec3(1.0);
+    // [STARFOLD 2026-11-24] above a Starfold line the stock EEP sky the gains chase does not thin to space (the rig, Dogfight by
+    // day 17:24Z: "EEP 119,122,141 native 119,122,141 (physical before gain 1, 2, 4)"), so the view lets go of the gain as the air
+    // goes (uWolfVacuum): there the dome is the physical sky in the frame's exposure - black overhead, the planet and the sun as
+    // they are. The probe (uProbe) still measures with the gain as before, so the EEP match and its sky check are unchanged.
+    if (uWolfVacuum > 0.0 && uProbe < 0.5) domeGain = mix(domeGain, vec3(1.0), clamp(uWolfVacuum, 0.0, 1.0));
 
     // ── the sea to the true horizon: sky.frag:56-86 (GROUND_ALBEDO) with a water surface; else the sky ──
     // Source: sky.frag:58-61 the ray meets the planet (the sea is the bottom of the atmosphere)

@@ -184,6 +184,50 @@ private:
     // a ribbon edge over a drop beside the stream is pulled down rather than left hanging.
     static constexpr F32 MAX_STAND_M = 0.35f;
 
+    // [W112 WATERFALLS 2026-11-24] Ticket 1039 (Indigo Blue Realm 10, very hilly generated land, Intel UHD 630): every
+    // fall was a wide white sheet. Paul 2026-11-24: soften them - the water's own width, translucent, white only where it
+    // breaks.
+    //
+    // THE WATER'S WIDTH FROM ITS FLOW. Finnegan, Roe, Montgomery & Hallet (2005), "Controls on the channel width of rivers:
+    // Implications for modeling fluvial incision of bedrock", Geology 33(3):229-232, eq. 5 (from Manning's equation and
+    // Q = U A, constant width-to-depth ratio and roughness): W = [a (a + 2)^(2/3)]^(3/8) Q^(3/8) S^(-3/16) n^(3/8). With
+    // the same rain on every square metre the discharge Q is proportional to the catchment, so relative to the smallest
+    // drawn stream (catchment = WolfTerrainWaterCatchment, on a 45-degree face):
+    //     W = STREAM_W0_M x (catchment / WolfTerrainWaterCatchment)^(3/8) x (rise/run)^(-3/16)
+    // A steep reach is narrower than a gentle one carrying the same water (faster, so a smaller cross-section: same paper).
+    // The old width (4 + 3 log2(...) metres, at least 3.5 m for a fall) made every tiny summit basin on hilly land a
+    // 3.5-10 m sheet; a hollow spilling a quarter of the threshold catchment (the `fed` rule) is now a 0.6 m trickle.
+    // STREAM_W0_M is a CONVENTION, not a measurement: the threshold catchment is a setting (5000 m^2 by default, far below
+    // where a real channel would be a metre wide), so 1 m is chosen as the narrowest water that still reads at a few
+    // tens of metres. STREAM_W_MIN_M keeps a ribbon above a pixel; STREAM_W_MAX_M is the old 24 m cap.
+    static constexpr F32 STREAM_W0_M = 1.0f;
+    static constexpr F32 STREAM_W_MIN_M = 0.5f;
+    static constexpr F32 STREAM_W_MAX_M = 24.f;
+    static constexpr F32 WIDTH_Q_EXP = 0.375f;       // 3/8, Finnegan et al. 2005 eq. 5
+    static constexpr F32 WIDTH_S_EXP = -0.1875f;     // -3/16, Finnegan et al. 2005 eq. 5
+    // The ribbon is drawn wider than the water, because its outer part sags into the ground (EDGE_SAG_FROM / EDGE_SAG_M):
+    // on a plane face a vertex at |u| shows only while the sag is less than the lift above the ground, so the water shows to
+    // |u| = EDGE_SAG_FROM + (1 - EDGE_SAG_FROM) sqrt(lift / EDGE_SAG_M) (0.70 of the half-width for a fall, 0.75 for a stream
+    // on its bed). The drawn half-width is the water's half-width over that.
+    //
+    // WHERE FALLING WATER IS WHITE. Water goes white where air is mixed into it (the brink, the impact, the spray); a thin
+    // film running down a face is clear, with white threads that thicken the further it has fallen. Koepke (1984),
+    // "Effective reflectance of oceanic whitecaps", Applied Optics 23(11):1816-1824: foam taken over its whole area reflects
+    // only ~22 % in the visible, half or less of what had been assumed, because most of it is thin and patchy - so
+    // white-water is drawn as threads and patches with clear water between them, never as one white sheet. The lengths
+    // below are CONVENTIONS for the look (no field data for terrain-generated falls): the brink band, how far down the threads
+    // develop, the plunge spray as a share of the fall's height, and the fade-in of a stream that starts from no pool.
+    static constexpr F32 LIP_BAND_M = 0.6f;          // white at a pool's brink, gone this far (vertical) below it
+    static constexpr F32 AERATION_M = 2.5f;          // the threads are 63 % developed this far (vertical) below the start
+    static constexpr F32 PLUNGE_SHARE = 0.15f;       // the plunge foam / spray rises this share of the fall's height...
+    static constexpr F32 PLUNGE_MIN_M = 0.5f;        // ...at least this...
+    static constexpr F32 PLUNGE_MAX_M = 4.f;         // ...at most this
+    static constexpr F32 HEAD_FADE_M = 3.f;          // a stream with no pool above it gathers over this length
+    static constexpr F32 TAIL_FADE_M = 2.f;          // a stream that ends in the ground (no water to join) thins out over this
+    // A trickle has sparse threads and little foam, a big fall dense ones: the share of each scales with the water's width
+    // from STREAM_W_MIN_M (sparse) to DENSE_W_M (full). CONVENTION.
+    static constexpr F32 DENSE_W_M = 8.f;
+
     /** Runs on the General queue: heights + built mask -> surfaces. */
     /** Hash of everything apply() would build from a result (any thread). */
     static U64 shapeHash(const Result& result);

@@ -438,8 +438,10 @@ U64 WolfNaturalWater::shapeHash(const Result& result)
             {
                 continue;
             }
-            const U64 sizes[5] = { m->mVerts.size(), m->mNormals.size(), m->mUVs.size(), m->mLodLift.size(), m->mIndices.size() };
+            const U64 sizes[6] = { m->mVerts.size(), m->mNormals.size(), m->mUVs.size(), m->mLodLift.size(), m->mIndices.size(),
+                                   m->mCascade.size() };   // [W112 WATERFALLS 2026-11-24/] + mCascade
             mix(sizes, sizeof(sizes));
+            mix(m->mCascade.data(), m->mCascade.size() * sizeof(LLColor4U));
             mix(m->mVerts.data(), m->mVerts.size() * sizeof(LLVector3));
             mix(m->mNormals.data(), m->mNormals.size() * sizeof(LLVector3));
             mix(m->mUVs.data(), m->mUVs.size() * sizeof(LLVector2));
@@ -915,14 +917,19 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
         if (!is_stream(k)) continue;
         slope[k] = grade[k];
         fallw[k] = smoothstep(FALL_START, FALL_FULL, slope[k]);
-        // A river reads wider than a brook; a fall is narrower than the stream feeding it,
-        // because its edges are in the open rather than hidden in a channel.
-        const F32 grow = log2f(acc[k] / catchment_m2 + 1.f);
-        width[k] = lerp(llclamp(4.f + 3.f * grow, 4.f, 24.f),
-                        llclamp(2.f + 1.5f * grow, 2.f, 10.f), fallw[k]);
+        // [W112 WATERFALLS 2026-11-24] The WATER's width from its flow and grade (Finnegan et al. 2005 eq. 5, see
+        // STREAM_W0_M in the header): W ~ Q^(3/8) S^(-3/16), Q ~ catchment. Was lerp(4 + 3 g, 2 + 1.5 g, fall) with
+        // g = log2(catchment / threshold + 1): never under 3.5 m for a fall, so on very hilly land every small summit basin
+        // poured a wide white sheet (ticket 1039). The ribbon drawn round this water is wider (shows_to / st_half below).
+        // Source: Finnegan, Roe, Montgomery & Hallet (2005) Geology 33(3):229-232, eq. 5.
+        width[k] = llclamp(STREAM_W0_M * powf(acc[k] / catchment_m2, WIDTH_Q_EXP) * powf(llmax(slope[k], 0.05f), WIDTH_S_EXP),
+                           STREAM_W_MIN_M, STREAM_W_MAX_M);
     }
 
-    struct Chain { std::vector<S32> mCells; F32 mEndLevel; F32 mAcc; };
+    // [W112 WATERFALLS 2026-11-24] How the end of a chain meets what is below it (the plunge foam goes only where water
+    // lands in water).
+    enum class ChainEnd : U8 { OFF_REGION, PLUNGE, INTO_GROUND };
+    struct Chain { std::vector<S32> mCells; F32 mEndLevel; F32 mAcc; ChainEnd mEnd = ChainEnd::OFF_REGION; bool mFromPool = false; };
     std::vector<Chain> chains;
     std::vector<U8> used(total, 0);
     for (S32 head : order)
@@ -946,11 +953,13 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
         bool has_end = false;
         if (c >= 0)
         {
-            if (is_stream(c))               { ch.mEndLevel = (F32)filled[c] + STREAM_FILL_M - 0.03f; }
-            else if (blocked[c])            { ch.mEndLevel = z[c] - BUILT_SINK_M; }
-            else if (pooled[c])             { ch.mEndLevel = (F32)filled[c] - 0.03f; }
-            else if (z[c] + STREAM_FILL_M <= sea || sea_basin[c]) { ch.mEndLevel = sea - 0.05f; }   // <WolfViewer 2026-10-06/> + a lake the region's water fills
-            else                            { ch.mEndLevel = (F32)filled[c] + STREAM_FILL_M - 0.03f; }
+            // [W112 WATERFALLS 2026-11-24] mEnd: PLUNGE where it lands in water (a river, a pool, the region's water), INTO_GROUND
+            // where there is none to land in (a prim, a hollow with no pool)
+            if (is_stream(c))               { ch.mEndLevel = (F32)filled[c] + STREAM_FILL_M - 0.03f; ch.mEnd = ChainEnd::PLUNGE; }
+            else if (blocked[c])            { ch.mEndLevel = z[c] - BUILT_SINK_M; ch.mEnd = ChainEnd::INTO_GROUND; }
+            else if (pooled[c])             { ch.mEndLevel = (F32)filled[c] - 0.03f; ch.mEnd = ChainEnd::PLUNGE; }
+            else if (z[c] + STREAM_FILL_M <= sea || sea_basin[c]) { ch.mEndLevel = sea - 0.05f; ch.mEnd = ChainEnd::PLUNGE; }   // <WolfViewer 2026-10-06/> + a lake the region's water fills
+            else                            { ch.mEndLevel = (F32)filled[c] + STREAM_FILL_M - 0.03f; ch.mEnd = ChainEnd::INTO_GROUND; }
             ch.mCells.push_back(c);
             has_end = true;
         }
@@ -1020,6 +1029,7 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
                         std::reverse(lead.begin(), lead.end());
                         lead.insert(lead.end(), ch.mCells.begin(), ch.mCells.end());
                         ch.mCells.swap(lead);
+                        ch.mFromPool = true;   // [W112 WATERFALLS 2026-11-24/] it pours over a pool's brink
                     }
                 }
                 chains.push_back(std::move(ch));
@@ -1073,6 +1083,16 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
         // straight grid path does not), so the water never dives under a spur on a bend.
         std::vector<LLVector3> st_pos;     // region space, z = level
         std::vector<F32> st_half, st_dist;
+        // [W112 WATERFALLS 2026-11-24] the water's own width at each station, and where across the ribbon it shows (|u|)
+        std::vector<F32> st_water, st_show;
+        // The ribbon's outer part sags into the ground (EDGE_SAG_FROM, EDGE_SAG_M) and its surface stands `lift` above the
+        // ground, so on a plane face a vertex at |u| shows while EDGE_SAG_M x sag_t^2 < lift, sag_t = (|u| - EDGE_SAG_FROM) /
+        // (1 - EDGE_SAG_FROM): up to |u| = EDGE_SAG_FROM + (1 - EDGE_SAG_FROM) sqrt(lift / EDGE_SAG_M). The ribbon is drawn
+        // that much wider than the water so the water itself, not the ribbon, is the width W (see STREAM_W0_M).
+        auto shows_to = [](F32 lift)
+        {
+            return EDGE_SAG_FROM + (1.f - EDGE_SAG_FROM) * sqrtf(llclamp(lift / EDGE_SAG_M, 0.f, 1.f));
+        };
         auto cell_xy = [&](S32 i)
         {
             const S32 k = ch.mCells[llclamp(i, 0, nc - 1)];
@@ -1097,7 +1117,11 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
                     dist += (xy - LLVector2(st_pos.back().mV[VX], st_pos.back().mV[VY])).length();
                 }
                 st_pos.push_back(pos);
-                st_half.push_back(0.5f * lerp(wd[i], wd[i + 1], t));
+                const F32 water = lerp(wd[i], wd[i + 1], t);
+                const F32 show = shows_to(lerp(STREAM_FILL_M, WATERFALL_LIFT_M, fall));
+                st_water.push_back(water);
+                st_show.push_back(show);
+                st_half.push_back(0.5f * water / show);   // [W112 WATERFALLS 2026-11-24/] was 0.5 x the width: the ribbon, not the water
                 st_dist.push_back(dist);
             }
         }
@@ -1110,7 +1134,10 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
             const LLVector3 pos(xy.mV[VX], xy.mV[VY], zend);
             dist += (xy - LLVector2(st_pos.back().mV[VX], st_pos.back().mV[VY])).length();
             st_pos.push_back(pos);
-            st_half.push_back(0.5f * wd[nc - 1]);
+            const F32 show = shows_to(lerp(STREAM_FILL_M, WATERFALL_LIFT_M, fl[nc - 1]));
+            st_water.push_back(wd[nc - 1]);
+            st_show.push_back(show);
+            st_half.push_back(0.5f * wd[nc - 1] / show);   // [W112 WATERFALLS 2026-11-24/]
             st_dist.push_back(dist);
         }
         const S32 ns = (S32)st_pos.size();
@@ -1131,6 +1158,45 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
                 st_pos[i].mV[VZ] = llmin(st_pos[i].mV[VZ], st_pos[i - 1].mV[VZ]);
             }
         }
+        // [W112 WATERFALLS 2026-11-24] Where this water is clear, white or thin (LLVOWater::ConformingMesh::mCascade; the
+        // lengths and why: LIP_BAND_M .. DENSE_W_M in the header). Measured from the first real stream station (the brink:
+        // the lead-in from a pool comes before it and stays glassy), on the final, never-rising levels.
+        std::vector<F32> st_thin(ns, 0.f), st_white(ns, 0.f), st_aer(ns, 0.f);
+        {
+            const S32 s_lip = llclamp(llmax(first_s, 0) * STATIONS_PER_CELL, 0, ns - 1);
+            const F32 z_lip = st_pos[s_lip].mV[VZ];
+            const F32 z_foot = st_pos[ns - 1].mV[VZ];
+            const F32 plunge_m = llclamp(PLUNGE_SHARE * (z_lip - z_foot), PLUNGE_MIN_M, PLUNGE_MAX_M);
+            const F32 dist_end = st_dist[ns - 1];
+            for (S32 s = 0; s < ns; ++s)
+            {
+                const F32 drop = s >= s_lip ? llmax(0.f, z_lip - st_pos[s].mV[VZ]) : 0.f;
+                // sparse threads and a little foam on a trickle, dense on a big fall
+                const F32 dense = llclamp(log2f(st_water[s] / STREAM_W_MIN_M) / log2f(DENSE_W_M / STREAM_W_MIN_M), 0.f, 1.f);
+                F32 thin = 0.f;
+                if (!ch.mFromPool)
+                {
+                    thin = llmax(thin, 1.f - st_dist[s] / HEAD_FADE_M);   // gathers from nothing: no white band at its head
+                }
+                if (ch.mEnd == ChainEnd::INTO_GROUND)
+                {
+                    thin = llmax(thin, 1.f - (dist_end - st_dist[s]) / TAIL_FADE_M);
+                }
+                F32 white = 0.f;
+                if (ch.mFromPool && s >= s_lip)
+                {
+                    white = expf(-drop / LIP_BAND_M);   // over the brink
+                }
+                if (ch.mEnd == ChainEnd::PLUNGE)
+                {
+                    white = llmax(white, expf(-llmax(0.f, st_pos[s].mV[VZ] - z_foot) / plunge_m));   // plunge foam and spray
+                }
+                st_thin[s] = llclamp(thin, 0.f, 1.f);
+                st_white[s] = white * (0.5f + 0.5f * dense);
+                st_aer[s] = (1.f - expf(-drop / AERATION_M)) * (0.35f + 0.65f * dense);
+            }
+        }
+        auto unit_u8 = [](F32 v) { return (U8)llclamp(ll_round(v * 255.f), 0, 255); };
         const S32 W = RIBBON_ACROSS;
         // One face strides U16 indices, so a very long river is cut into pieces that share a
         // station; a piece boundary is invisible because both sides hold the same vertices.
@@ -1154,6 +1220,7 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
             mesh->mVerts.resize(nverts);
             mesh->mNormals.resize(nverts);
             mesh->mUVs.resize(nverts);
+            mesh->mCascade.resize(nverts);   // [W112 WATERFALLS 2026-11-24/]
             mesh->mIndices.reserve((count - 1) * (W - 1) * 6);
             mesh->mMin.setVec(1e9f, 1e9f, 1e9f);
             mesh->mMax.setVec(-1e9f, -1e9f, -1e9f);
@@ -1193,6 +1260,11 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
                     }
                     P.setVec(px, py, pz);
                     mesh->mUVs[v].setVec(st_dist[s], across);
+                    // [W112 WATERFALLS 2026-11-24] thin toward the side where the water stops showing (|u| = st_show; 1 from
+                    // there out to the ribbon's buried edge), or as the station says
+                    const F32 side = fabsf(u) / st_show[s];
+                    mesh->mCascade[v] = LLColor4U(unit_u8(llmax(st_thin[s], llmin(side, 1.f))), unit_u8(st_white[s]),
+                                                  unit_u8(st_aer[s]), 255);
                     mesh->mMin.mV[VX] = llmin(mesh->mMin.mV[VX], P.mV[VX]);
                     mesh->mMin.mV[VY] = llmin(mesh->mMin.mV[VY], P.mV[VY]);
                     mesh->mMin.mV[VZ] = llmin(mesh->mMin.mV[VZ], P.mV[VZ]);

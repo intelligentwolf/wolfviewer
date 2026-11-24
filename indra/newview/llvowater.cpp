@@ -295,6 +295,10 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
         LLStrider<LLVector2> lodp;
         const bool has_lod = m.mLodLift.size() == m.mVerts.size()
                           && mbuff->getTexCoord1Strider(lodp, face->getGeomIndex(), face->getGeomCount());
+        // [W112 WATERFALLS 2026-11-24] the falls' look per vertex (ConformingMesh::mCascade); a mesh without it is clear water
+        LLStrider<LLColor4U> cascadep;
+        const bool has_cascade = mbuff->getColorStrider(cascadep, face->getGeomIndex(), face->getGeomCount());
+        const bool cascade_given = m.mCascade.size() == m.mVerts.size();
 
         const LLVector3 origin = mRegionp->getOriginAgent();
         face->mCenterAgent = origin + (m.mMin + m.mMax) * 0.5f;
@@ -307,6 +311,10 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
             if (has_lod)
             {
                 *lodp++ = m.mLodLift[i];
+            }
+            if (has_cascade)
+            {
+                *cascadep++ = cascade_given ? m.mCascade[i] : LLColor4U(0, 0, 0, 255);
             }
         }
         for (U16 idx : m.mIndices)
@@ -440,6 +448,8 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
         face->setVertexBuffer(buff);
     }
 
+    // [W112 WATERFALLS 2026-11-24] The colour (ConformingMesh::mCascade) and texcoord1 channels are left unwritten here:
+    // waterV.glsl reads them only for a stream mesh (wolfStream > 0 / wolfTerrainLod > 0), never for this lattice.
     index_offset = face->getGeometry(verticesp,normalsp,texCoordsp, indicesp);
 
     LLVector3 position_agent;

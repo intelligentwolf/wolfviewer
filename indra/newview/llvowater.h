@@ -32,6 +32,7 @@
 #include "pipeline.h"
 #include "v2math.h"
 #include "v4math.h"   // <WolfViewer 2026-09-21> LLVector4 mWolfLatticeGrade
+#include "v4coloru.h"   // [W112 WATERFALLS 2026-11-24/] LLColor4U ConformingMesh::mCascade
 #include <memory>   // <WolfViewer> ConformingMesh
 #include <vector>
 
@@ -51,7 +52,8 @@ public:
         VERTEX_DATA_MASK =  (1 << LLVertexBuffer::TYPE_VERTEX) |
                             (1 << LLVertexBuffer::TYPE_NORMAL) |
                             (1 << LLVertexBuffer::TYPE_TEXCOORD0) |
-                            (1 << LLVertexBuffer::TYPE_TEXCOORD1)   // <WolfViewer>
+                            (1 << LLVertexBuffer::TYPE_TEXCOORD1) |   // <WolfViewer>
+                            (1 << LLVertexBuffer::TYPE_COLOR)         // [W112 WATERFALLS 2026-11-24/] ConformingMesh::mCascade
     };
 
     LLVOWater(const LLUUID &id, const LLPCode pcode, LLViewerRegion *regionp);
@@ -135,6 +137,14 @@ public:
         // vertex's own distance and lifts the vertex by the interpolated value, so the
         // water rides the ground that is actually on screen. Zero for region water.
         std::vector<LLVector2> mLodLift;
+        // [W112 WATERFALLS 2026-11-24] Per vertex, how the falling water looks there (wolfnaturalwater.cpp compute, step 4;
+        // waterV.glsl reads it as the "diffuse_color" attribute, normalised 0..1, only for a stream mesh):
+        //   r  THIN   0 = the full water, 1 = none: the sides of the water and a stream's first / last metres
+        //   g  WHITE  white-water where it breaks: a pool's brink and the plunge foam / spray at the foot
+        //   b  AERATION  how much of the falling film has turned to white threads (grows down the fall)
+        //   a  255 (unused)
+        // Empty = all zero (clear water everywhere). Region water never fills it; the shader never reads it there.
+        std::vector<LLColor4U> mCascade;
         std::vector<U16>       mIndices;   // U16: LLFace strides indices as U16
         LLVector3 mMin, mMax;              // region-space bounds of mVerts
     };

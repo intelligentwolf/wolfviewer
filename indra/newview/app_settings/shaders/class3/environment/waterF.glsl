@@ -367,6 +367,10 @@ in vec3 vary_world_pos;
 // interpolated from the vertex stage so a ribbon blends into and out of a fall.
 in float vary_fall;
 uniform float wolfStream;
+// [W112 WATERFALLS 2026-11-24] waterV.glsl: how a stream mesh's falling water looks here (LLVOWater::ConformingMesh::mCascade):
+// r THIN (0 = the full water, 1 = none), g WHITE (a pool's brink, the plunge foam and spray), b AERATION (the share of the
+// falling film turned to white threads). 0 for everything that is not a stream mesh.
+in vec3 vary_wolf_cascade;
 // </WolfViewer>
 // <WolfViewer 2026-09-06> from waterV.glsl: shore phase + shoal, wake foam, the swell's
 // local amplitude / wavelength jitter / exposure scale.
@@ -837,6 +841,19 @@ void main()
     calcAtmosphericVarsLinear(pos.xyz, wavef, vary_light_dir, sunlit, amblit, additive, atten);
 
     calculateFresnelFactors(df3, df2, normalize(view.xyz), wave1, wave2, wave3, wavef);
+    // [W112 WATERFALLS 2026-11-24] calculateFresnelFactors dots the AGENT-space view (view.xyz, waterV.glsl oEyeVec) with
+    // TANGENT-space normals and the EEP's fresnelScale / fresnelOffset - an ocean model that holds only for a level surface.
+    // On a fall the vertical part of the view is small, the factor sat at its offset floor (about three quarters
+    // reflection) and the sheet hid the rock behind it (ticket 1039's opaque falls); on a shallow stream seen from above it
+    // also reflected far more than a few centimetres of water do, and with Low's reflection probes off what it reflects is
+    // black (a black channel). A stream mesh's normals are its real geometry everywhere, so its reflectance is Schlick's
+    // (Schlick 1994, "An Inexpensive BRDF Model for Physically-based Rendering", Computer Graphics Forum 13(3)) on the real
+    // surface normal: F = F0 + (1 - F0)(1 - cos theta)^5, F0 = ((n - 1)/(n + 1))^2 = 0.02 for water (n = 1.33).
+    if (wolfStream > 0.0)
+    {
+        float cosT = clamp(abs(dot(viewVec, transform_normal(wavef))), 0.0, 1.0);
+        df2.x = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
+    }
 
     vec3 waver = wavef*3;
 
@@ -862,6 +879,13 @@ void main()
 
     //figure out distortion vector (ripply)
     vec2 distort2 = distort + waver.xy * refScale / max(dmod, 1.0) * 2;
+    // [W112 WATERFALLS 2026-11-24] A falling film is a centimetre or two thick, and refraction shifts what is behind a
+    // slab of water by about its thickness (at most d tan(theta_i - theta_t)), so the ground behind a fall is not displaced
+    // visibly: with the fall's steep normal maps the stock offset scattered the screen copy into grain round every fall.
+    if (wolfStream > 0.0)
+    {
+        distort2 = mix(distort2, distort, vary_fall);
+    }
 
     distort2 = clamp(distort2, vec2(0), vec2(0.999));
 
@@ -970,6 +994,15 @@ void main()
 #else
     // Source: stock Firestorm waterF.glsl:285 fb = applyWaterFogViewLinear(viewVec*2048.0, vec4(1.0)) - see wolfDeepWaterPoint
     vec4 fb = applyWaterFogViewLinear(wolfDeepWaterPoint(pos.xyz, viewVec), vec4(1.0));   // [T424] Jimmy Olsen's white horizon strip
+    // [W112 WATERFALLS 2026-11-24] Ticket 1039 (Intel UHD 630, Transparent Water off): a stream or a fall is a few centimetres
+    // of water over the ground, not 2 km of it - with the deep water fog behind it every fall was an opaque sheet ("a white
+    // wall"). A stream mesh is BLENDED over what is already drawn instead (lldrawpoolwater.cpp pushWaterPlanes): nothing is
+    // behind it here (fb = 0), its colour accumulates premultiplied and wolfBehind (below) is how much of the ground shows
+    // through - the same composite the Transparent Water path makes in this shader with the refraction copy as fb.
+    if (wolfStream > 0.0)
+    {
+        fb = vec4(0.0);
+    }
 
     if (water_mask < 1)
         discard;
@@ -1024,6 +1057,9 @@ void main()
     //radiance = toneMapNoExposure(radiance);
     vec3 color = vec3(0);
     color = mix(fb.rgb, radiance, min(1, df2.x)) + punctual.rgb;
+    // [W112 WATERFALLS 2026-11-24] what share of fb (the ground behind) is left in `color` - kept for the stream meshes' blend
+    // (Transparent Water off) through every step a stream mesh takes below: this mix, the fade, the body tint, the white
+    float wolfBehind = 1.0 - clamp(df2.x, 0.0, 1.0);
 
     // <WolfViewer 2026-09-06> Light through the crests (Water.js [SSS 2026-09-06]): a
     // crest is a thin sheet of water with the sun behind it, so it glows the translucent
@@ -1059,6 +1095,7 @@ void main()
     fade *= 60;
     fade = min(1, fade);
     color = mix(fb.rgb, color, fade);
+    wolfBehind = 1.0 - fade * (1.0 - wolfBehind);   // [W112 WATERFALLS 2026-11-24/]
 
     // [WILD SEA 2026-10-30] README "The wild sea": the storm's sea is darker, x (1 - 0.35 k), k = W env(r) - full inside R, gone
     // by 1.3 R (CONVENTION 0.35: the sea under the storm's overcast; the region's sky is the region's own weather, not the storm's,
@@ -1101,11 +1138,56 @@ void main()
     if (boundedWaterDepth > 0.0)
     {
         float absorb = 1.0 - exp(-waterFogDensity * boundedWaterDepth);
-        color = mix(color, wolfWaterBody(), clamp(absorb, 0.22, 0.85));
+        // [W112 WATERFALLS 2026-11-24] A stream's film running down a face is a centimetre or two thick, not the ribbon's
+        // depth: with the EEP water fog density the Beer-Lambert term above reached the 0.85 cap on every fall and drew a
+        // near-black core. Where a stream mesh falls the tint goes to 0.08 (CONVENTION: enough to read as water) - never
+        // more than the level stream's own.
+        float tintK = clamp(absorb, 0.22, 0.85);
+        if (wolfStream > 0.0)
+        {
+            tintK = mix(tintK, min(tintK, 0.08), vary_fall);
+        }
+        color = mix(color, wolfWaterBody(), tintK);
+        wolfBehind *= 1.0 - tintK;
     }
     // <WolfViewer> waterfall body: aerated water is mostly white, in streaks that fall with
     // the flow (the same bump maps read as a brightness field, scrolled by world height).
-    if (vary_fall > 0.005)
+    // [W112 WATERFALLS 2026-11-24] THE FALLS OF A STREAM MESH (wolfnaturalwater.cpp). Ticket 1039: every fall was the block
+    // below - 35 % to 92 % white over its whole face, a white sheet as wide as the ribbon. Real falling water is mostly CLEAR:
+    // a film or a jet with white threads that thicken the further it falls, and solid white only where it breaks - over a
+    // pool's brink, in the plunge foam and spray at the foot (Koepke 1984, Applied Optics 23(11):1816: foam taken over its
+    // area reflects ~22 % in the visible because most of it is thin and patchy). So, from the mesh's own per-vertex look
+    // (vary_wolf_cascade, wolfnaturalwater.h LIP_BAND_M .. DENSE_W_M):
+    //   threads  value noise stretched down the fall (2.5 m / 1 m long, 0.35 m / 0.15 m across) falling at 5 and 7 m/s
+    //            (v = sqrt(2 g h) after 1.3 m and 2.5 m of free fall), white where it exceeds 1 - cover, cover = the
+    //            aeration x the falling share, at most 0.6 (CONVENTION: never one sheet); beyond 60-250 m the fine noise
+    //            would shimmer, so it goes to its mean there (as the storm streaks above)
+    //   breaks   the WHITE channel in slow churning patches (0.6 m x 0.8 m, rising at 1.5 m/s: spray thrown up)
+    //   water    what `color` already is: the reflection by Fresnel, the sun's glint, the ground seen through, the body
+    //   thin     the sides and the gathering / dying ends let the ground through (THIN channel)
+    // The look is the same with Transparent Water on (fb = the refraction copy) or off (blended, fb = 0 above).
+    // Every value here is ALU (wolfFoamNoise), no extra texture fetch.
+    if (wolfStream > 0.0)
+    {
+        float cThin = vary_wolf_cascade.r;
+        float cWhite = vary_wolf_cascade.g;
+        float cover = min(vary_wolf_cascade.b * vary_fall, 0.6);
+        float across = littleWave.w * 5.0;   // waterV.glsl: littleWave.w = 0.2 x (metres across the ribbon + a slow sway)
+        float zf = vary_world_pos.z;
+        float tn = 0.6 * wolfFoamNoise(vec2(across / 0.35, (zf + time * 5.0) / 2.5))
+                 + 0.4 * wolfFoamNoise(vec2(across / 0.15, (zf + time * 7.0) / 1.0) + vec2(11.0, 7.0));
+        float threads = smoothstep(1.0 - cover - 0.15, 1.0 - cover + 0.15, tn) * step(0.002, cover);
+        threads = mix(threads, cover, smoothstep(60.0, 250.0, dist));
+        float churn = wolfFoamNoise(vec2(across / 0.6, (zf - time * 1.5) / 0.8) + vec2(3.0, 19.0));
+        float breaks = cWhite * mix(0.55 + 0.45 * churn, 0.775, smoothstep(60.0, 250.0, dist));
+        float white = clamp(max(threads * 0.75, breaks), 0.0, 0.85);
+        color = mix(color, vec3(0.93, 0.96, 0.99) * wolfFoamLight(sunlit_linear, amblit, shadow), white);
+        wolfBehind *= 1.0 - white;
+        float sheet = 1.0 - smoothstep(0.5, 1.0, cThin);
+        color = mix(fb.rgb, color, sheet);
+        wolfBehind = 1.0 - sheet * (1.0 - wolfBehind);
+    }
+    else if (vary_fall > 0.005)
     {
         // z PLUS time, so the streaks fall (see the normal block above for the sign).
         float streak = texture(bumpMap, vec2((vary_world_pos.x - vary_world_pos.y) * 0.9, vary_world_pos.z * 0.25 + time * 2.2)).r;
@@ -1312,6 +1394,17 @@ void main()
     }
     // </FS:WolfViewer>
 
+    // [W112 WATERFALLS 2026-11-24] Transparent Water off: a stream mesh is blended (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) over the
+    // ground already drawn, with alpha = what it covers; its premultiplied colour goes back to straight colour here, before
+    // the distance haze and fog below are laid over it as they are over any surface.
+    float wolfStreamAlpha = 1.0;
+#ifndef TRANSPARENT_WATER
+    if (wolfStream > 0.0)
+    {
+        wolfStreamAlpha = clamp(1.0 - wolfBehind, 0.0, 1.0);
+        color /= max(wolfStreamAlpha, 0.001);
+    }
+#endif
 #ifdef WOLF_TK_LIB
     // [WOLF ENV TAKRAM 2026-10-12] decision D14 / the water seam: the aerial perspective on the water, the same
     // three-geospatial function the composite gives the opaque frame and the dome gives its sea, so own-region,
@@ -1340,6 +1433,12 @@ void main()
     // [WOLF ENV TAKRAM 2026-10-12] the frame is pre-exposed HDR under the native sky: the sun's glint and the bright
     // sky in the reflection are > 1 there, as the dome's sea beside it is (no clamp to 1, which drew a seam)
     if (wolf_phys > 0.5) frag_color.rgb = max(color.rgb, vec3(0.0));
+#ifndef TRANSPARENT_WATER
+    if (wolfStream > 0.0)
+    {
+        frag_color.a = wolfStreamAlpha;   // [W112 WATERFALLS 2026-11-24/] the blend's coverage (see above)
+    }
+#endif
 #ifdef WOLF_WATER_FULL
     gl_FragDepth = wolfFragDepth;   // [T358 SHORE HOLES 2026-10-29] every path that is not discarded writes it
 #endif

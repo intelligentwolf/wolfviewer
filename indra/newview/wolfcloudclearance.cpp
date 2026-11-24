@@ -638,7 +638,7 @@ void WolfCloudClearance::traceColumn() const
     LL_INFOS("WolfEnvTrace") << o.str() << LL_ENDL;
     // the highest builds near the column (the last finished pass), at most 8
     const LLVector3d agent_origin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
-    std::vector<std::pair<F32, size_t>> near;
+    std::vector<std::pair<F32, size_t>> nearby;
     for (size_t i = 0; i < mPrims.size(); ++i)
     {
         const PrimBox& pb = mPrims[i];
@@ -647,14 +647,14 @@ void WolfCloudClearance::traceColumn() const
         const F32 lx = pb.mLo.mV[VX] + dx, hx = pb.mHi.mV[VX] + dx, ly = pb.mLo.mV[VY] + dy, hy = pb.mHi.mV[VY] + dy;
         const F32 ex = llmax(llmax(lx - cam.mV[VX], cam.mV[VX] - hx), 0.f), ey = llmax(llmax(ly - cam.mV[VY], cam.mV[VY] - hy), 0.f);
         if (ex * ex + ey * ey > 150.f * 150.f) continue;
-        near.emplace_back(pb.mHi.mV[VZ], i);
+        nearby.emplace_back(pb.mHi.mV[VZ], i);
     }
-    std::sort(near.begin(), near.end(), [](const std::pair<F32, size_t>& a, const std::pair<F32, size_t>& b) { return a.first > b.first; });
+    std::sort(nearby.begin(), nearby.end(), [](const std::pair<F32, size_t>& a, const std::pair<F32, size_t>& b) { return a.first > b.first; });
     std::ostringstream p;
-    p << "cloud build clearance: " << near.size() << " builds within 150 m of the column; highest:";
-    for (size_t j = 0; j < near.size() && j < 8; ++j)
+    p << "cloud build clearance: " << nearby.size() << " builds within 150 m of the column; highest:";
+    for (size_t j = 0; j < nearby.size() && j < 8; ++j)
     {
-        const PrimBox& pb = mPrims[near[j].second];
+        const PrimBox& pb = mPrims[nearby[j].second];
         const LLVector3d& po = mPrimOrigins[pb.mOrigin];
         const F32 dx = (F32)(po.mdV[VX] - agent_origin.mdV[VX]), dy = (F32)(po.mdV[VY] - agent_origin.mdV[VY]);
         p << " [" << (pb.mGround ? "ground" : "sky") << " x " << pb.mLo.mV[VX] + dx << ".." << pb.mHi.mV[VX] + dx

@@ -21,6 +21,7 @@
 
 #include "lluictrl.h"
 #include "lluuid.h"
+#include "v3math.h"
 #include "wolfhudscale.h"
 
 // Source: region-terrain-work/space-game-2026-11-24/design.html "The cockpit": "A full-width bottom display in the flight-deck
@@ -76,6 +77,16 @@ public:
         H_ALIEN_0, H_ALIEN_LAST = H_ALIEN_0 + 5,
         H_SETUP_STATION, H_SETUP_BELT, H_SETUP_WORMHOLE, H_SETUP_PAD, H_SETUP_CLEAR, H_SETUP_CLOSE,
         H_WORLD,        // the sky above the panel while piloting: point and fly
+        // [STARBASES 2026-11-24] the Starbase window (drawBase)
+        H_BASE_OPEN, H_BASE_CLOSE, H_BASE_TAB_0, H_BASE_TAB_LAST = H_BASE_TAB_0 + 3,
+        H_BASE_FOUND, H_BASE_SPOT, H_BASE_RESTORE, H_BASE_HOME, H_BASE_FLY, H_BASE_DOCKAT,
+        H_BASE_DOCK_ALL, H_BASE_DOCK_FRIENDS, H_BASE_DOCK_GROUP, H_BASE_DOCK_ME,
+        H_BASE_PACK, H_BASE_SCRAP, H_BASE_PREV, H_BASE_NEXT, H_BASE_TURN, H_BASE_BUILD, H_BASE_CANCEL,
+        H_BASE_OWN_CHECK, H_BASE_PAGE_PREV, H_BASE_PAGE_NEXT,
+        H_BASE_CARD_0, H_BASE_CARD_LAST = H_BASE_CARD_0 + 7,
+        H_BASE_ROWA_0, H_BASE_ROWA_LAST = H_BASE_ROWA_0 + 11,   // a row's first button (Put it back, Place it, Attach)
+        H_BASE_ROWB_0, H_BASE_ROWB_LAST = H_BASE_ROWB_0 + 11,   // its second (Take down, Send to my base)
+        H_BASE_GHOST_0, H_BASE_GHOST_LAST = H_BASE_GHOST_0 + 11, // a ghost in the world: click to choose it
     };
 
 private:
@@ -100,6 +111,23 @@ private:
     void drawStation(F32 bottom, F32 width, F32 height, F32 u);
     void drawGuide(F32 bottom, F32 width, F32 height, F32 u);
     void drawSetup(F32 bottom, F32 width, F32 height, F32 u);
+    // [STARBASES 2026-11-24] the Starbase window (design.html#bases "Building it: the Starbase window") and its ghosts in the world
+    void drawBase(F32 bottom, F32 width, F32 height, F32 u);
+    void drawBaseHome(F32 l, F32 b, F32 r, F32 t, F32 u);
+    void drawBaseAdd(F32 l, F32 b, F32 r, F32 t, F32 u);
+    void drawBaseStore(F32 l, F32 b, F32 r, F32 t, F32 u);
+    void drawBaseOwn(F32 l, F32 b, F32 r, F32 t, F32 u);
+    void drawBasePicture(F32 cx, F32 cy, F32 size, F32 u);
+    void drawGhosts(F32 u);
+    void pressBase(EHit id);
+    /** Agent point -> view-local x, y over the world view (the camera's basis and field of view, as drawHud); false when it is
+     *  behind the eye (x, y then hold its left / up offsets). */
+    bool projectAgent(const LLVector3& p, F32& x, F32& y) const;
+    std::vector<std::string> mRowIds;    // the ids the rows' buttons act on this frame (a part or an object)
+    S32 mBasePage = 0;                   // the list's page (rows that do not fit go on the next)
+    std::string mArmed;                  // an order pressed once that needs a second press: "pack", "scrap", "down:<part>"
+    std::string mCard;                   // the module card chosen on the Add tab
+    std::vector<std::string> mCardIds;   // the kinds the cards show this frame
     bool mClearArmed = false;            // CLEAR pressed once: the second press removes the helper's parts
     void drawNotes(F32 above, F32 width, F32 u);
     void drawRadar(F32 cx, F32 cy, F32 rx, F32 ry, F32 u);

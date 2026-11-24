@@ -95,6 +95,12 @@ public:
         LLUUID      mTarget;            // tg=: the Glasswing the ship fires at
         F32         mTargetM = 0.f, mTargetShield = 0.f, mTargetArmour = 0.f, mTargetHull = 0.f;
         std::vector<LLUUID> mAliens;    // al=: the Glasswings near, nearest first
+        // [TARGET BOX 2026-11-24] ap= / tgp= (wolf-space SpaceEngine.Status, README wire k=st): their region positions, so the
+        // radar and the target box work beyond the objects this viewer has been sent (the far clip decides those: at the normal
+        // 128-256 m a Glasswing 600 m off is not in the object list)
+        std::vector<LLVector3> mAlienPos;   // the same order as mAliens; empty when the region did not send ap=
+        bool        mHaveTargetPos = false;
+        LLVector3   mTargetPos;             // region metres
     };
     struct Ore { std::string mId, mTitle; S32 mPrice = 0; F32 mHeld = 0.f; };
     /** k=docked (SpaceEngine.SendDocked). */
@@ -168,6 +174,8 @@ public:
     bool renderLens(LLRenderTarget* src, LLRenderTarget* dst, LLVertexBuffer* screen_triangle);
     /** A rock's or an object's place in agent space now; false when it is not known. */
     bool beamEnd(const LLUUID& id, S32 rock, LLVector3& agent) const;
+    /** A Glasswing's place in agent space: its object when this viewer has it, else the region's last word (k=st ap= / tgp=). */
+    bool alienAt(const LLUUID& id, LLVector3& agent) const;
 
     // ── the pilot's intents ──────────────────────────────────────────────────────────────────────────────────────────
     bool canLaunch() const;         // a Wolf login, space here, not flying
@@ -182,7 +190,10 @@ public:
     const LLUUID& selected() const { return mSelected; }
     void mine(bool on);
     bool mining() const;
-    void flyTo(const std::string& where);   // "station", "belt", "wormhole", "stop"
+    void flyTo(const std::string& where);   // "station", "belt", "wormhole", "stop", "base" (the pilot's own starbase)
+    /** An intent from another Starfold part (the Starbase window, wolfstarbase.cpp): "base|...", "dock|at=...". Sent as every
+     *  intent is (a Wolf login, the one-second budget). */
+    void intent(const std::string& verb_and_args);
     const std::string& flyingTo() const { return mFlyTo; }
     void dock();
     void sell();

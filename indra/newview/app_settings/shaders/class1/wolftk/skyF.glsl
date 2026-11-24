@@ -597,6 +597,32 @@ vec3 wolfStarfoldSpace(vec3 dirWorld, vec3 rayDirectionECEF)
     return c * clamp(sf_space_on, 0.0, 1.0);
 }
 
+// [STARFOLD 2026-11-24, polish] the world far below, above the line: the rig's shots read it DARK (the sea mirrored the black
+// sky over it). README "client look rules": WolfStorm "draws a far blue planet surface with cloud swirls" (wolf_starfold_draw.js,
+// render_manager.js createSky wolfSurface); here the same look natively: the far sea as a lit planet surface, its albedo the
+// Glass Arc mock-up's sea (#1d3b66 linear, WolfStorm's wolfGround at the limb) under domain-warped cloud swirls, lit by the same
+// sun and sky irradiance as the sea (so it follows day and night and the real sun), the glint between the clouds. Only where
+// sf_space_on > 0 (above the line's 300 m edge, never in a probe face), so the world's water and the sea below the line are as
+// they were. GAME TUNING:
+//   SF_SEA_ALBEDO    the mock-up's sea, linear
+//   SF_CLOUD_ALBEDO  a cloud deck's (a little grey: thin cloud lets the sea through)
+//   SF_CLOUD_KM      the swirls' size on the planet; SF_CLOUD_COVER the share of the sea under cloud
+const vec3 SF_SEA_ALBEDO = vec3(0.012, 0.043, 0.133);
+const vec3 SF_CLOUD_ALBEDO = vec3(0.62, 0.64, 0.68);
+const float SF_CLOUD_KM = 40.0;
+const float SF_CLOUD_COVER = 0.85;
+// groundKm: the sea point (km from the planet's centre, ECEF); out cloud: 0..1 for the glint between the clouds
+vec3 wolfStarfoldPlanet(vec3 groundKm, vec3 sunIrr, vec3 skyIrr, out float cloud)
+{
+    vec3 p = groundKm / SF_CLOUD_KM;
+    vec3 warp = vec3(wolfNoise3(p * 0.5 + vec3(3.1)), wolfNoise3(p * 0.5 + vec3(7.7)), wolfNoise3(p * 0.5 + vec3(11.3))) - vec3(0.5);
+    p += warp * 2.5;
+    float f = 0.5 * wolfNoise3(p) + 0.25 * wolfNoise3(p * 2.03) + 0.125 * wolfNoise3(p * 4.07) + 0.0625 * wolfNoise3(p * 8.11);
+    cloud = smoothstep(0.50, 0.72, f) * SF_CLOUD_COVER;
+    vec3 albedo = mix(SF_SEA_ALBEDO, SF_CLOUD_ALBEDO, cloud);
+    return albedo * RECIPROCAL_PI * (sunIrr + skyIrr);
+}
+
 uniform float uBodyDepth;
 bool wolfBodyCovers(vec3 dirWorld, vec3 rayDirectionECEF)
 {
@@ -775,16 +801,26 @@ void main()
         // F D / (4 V.N) x the sun's irradiance perpendicular to it at the sea (GetSunAndSkyIrradiance with the sun as the
         // normal: solar irradiance x the transmittance to the sun); the moon's the same, x its scale. Without it the open
         // sea past the water planes was the mirrored sky alone - the dark band under the dawn horizon (round 10, dawn_probe.py)
+        vec3 glint = vec3(0.0);
         {
             vec3 seaPoint = ATMOSPHERE.bottom_radius * surfaceNormal;
             vec3 dummySky;
             vec3 sunPerp = GetSunAndSkyIrradiance(seaPoint, sunDirection, sunDirection, dummySky);
-            radiance += wolfSeaGlint(surfaceNormal, -rayDirection, sunDirection, wolfSeaMss) * sunPerp;
+            glint += wolfSeaGlint(surfaceNormal, -rayDirection, sunDirection, wolfSeaMss) * sunPerp;
             if (uMoonSkyScale > 0.0)
             {
                 vec3 moonPerp = GetSunAndSkyIrradiance(seaPoint, uMoonDirECEF, uMoonDirECEF, dummySky) * uMoonSkyScale;
-                radiance += wolfSeaGlint(surfaceNormal, -rayDirection, uMoonDirECEF, wolfSeaMss) * moonPerp;
+                glint += wolfSeaGlint(surfaceNormal, -rayDirection, uMoonDirECEF, wolfSeaMss) * moonPerp;
             }
+        }
+        radiance += glint;
+        // [STARFOLD 2026-11-24, polish] above the line the far sea is the lit planet surface (wolfStarfoldPlanet), not a mirror
+        // of the black sky over it; only with sf_space_on (0 below the line's edge and in a probe face)
+        if (sf_space_on > 0.0 && uProbe < 0.5)
+        {
+            float cloud;
+            vec3 planet = wolfStarfoldPlanet(groundPosition, sunIrradiance, skyIrradiance, cloud) + glint * (1.0 - cloud);
+            radiance = mix(radiance, planet, clamp(sf_space_on, 0.0, 1.0));
         }
         // Source: sky.frag:85 radiance * transmittance + inscatter; the EEP gain on the in-scatter only (domeGain, above)
         color = radiance * tr + inscatter * domeGain;

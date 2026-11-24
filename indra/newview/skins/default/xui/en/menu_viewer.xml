@@ -2229,6 +2229,12 @@
                 <menu_item_check.on_click function="WolfStarfold.Toggle" />
                 <menu_item_check.on_visible function="WolfStarfold.Available" />
             </menu_item_check>
+            <!-- [STARBASES 2026-11-24] design.html#bases: "under Wolf World > Starfold > My starbase" (wolfstarbase.cpp): where space is on -->
+            <menu_item_check label="Starfold: My Starbase" name="WolfStarbase">
+                <menu_item_check.on_check function="WolfStarbase.IsShown" />
+                <menu_item_check.on_click function="WolfStarbase.Toggle" />
+                <menu_item_check.on_visible function="WolfStarfold.Available" />
+            </menu_item_check>
             <menu_item_check label="Starfold Setup Helper (Region Owner)" name="WolfStarfoldSetup">
                 <menu_item_check.on_check function="WolfStarfold.SetupShown" />
                 <menu_item_check.on_click function="WolfStarfold.ToggleSetup" />

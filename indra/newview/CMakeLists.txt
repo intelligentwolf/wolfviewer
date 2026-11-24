@@ -1117,6 +1117,7 @@ set(viewer_SOURCE_FILES
     wolfair.cpp
     wolfhelm.cpp
     wolfhelmhud.cpp
+    wolfstarbase.cpp
     wolfstarfold.cpp
     wolfstarfolddeck.cpp
     wolftraincab.cpp
@@ -2201,6 +2202,7 @@ set(viewer_HEADER_FILES
     wolfair.h
     wolfhelm.h
     wolfhelmhud.h
+    wolfstarbase.h
     wolfstarfold.h
     wolfstarfolddeck.h
     wolftraincab.h

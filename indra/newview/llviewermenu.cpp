@@ -37,6 +37,7 @@
 #include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/] Wolf World > Fishing on the screen
 #include "wolfdrive.h"   // [WOLF DRIVE 2026-10-09/] the Car Dashboard toolbar button
 #include "wolfhelm.h"   // <WolfViewer 2026-10-28/> Captain's Helm
+#include "wolfstarbase.h"
 #include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolftraincab.h"   // [TRAIN CAB 2026-11-13] the Train Cab (Wolf Rail)
 #include "wolffloatertunnels.h"   // [T934 2026-11-19/] a taken or returned tunnel rock takes its holes with it
@@ -13146,6 +13147,9 @@ void initialize_menus()
     {
         return WolfGrid::isOnWolfTerritories() && WolfStarfold::instance().spaceHere();
     });
+    // [STARBASES 2026-11-24] Wolf World > Starfold: My Starbase (wolfstarbase.h): the Starbase window
+    commit.add("WolfStarbase.Toggle", [](LLUICtrl*, const LLSD&) { WolfStarbase::instance().toggle(); });
+    enable.add("WolfStarbase.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfStarbase::instance().shown(); });
     commit.add("WolfStarfold.ToggleSetup", [](LLUICtrl*, const LLSD&) { WolfStarfold::instance().toggleSetup(); });
     enable.add("WolfStarfold.SetupShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfStarfold::instance().setupShown(); });
     enable.add("WolfStarfold.CanSetUp", [](LLUICtrl*, const LLSD&) -> bool { return WolfStarfold::instance().canSetUp(); });
@@ -13172,6 +13176,41 @@ void initialize_menus()
         else if (verb == "setup") sf.setupRez(arg);
         else if (verb == "guide") sf.showGuide(arg != "0");
         else if (verb == "station") { if (arg == "0") sf.closeStation(); else sf.showStation(); }
+        // [STARBASES 2026-11-24] the Starbase window's buttons by name: "base:open|close|found|spot|restore|home|fly|dockat|pack|
+        // scrap|scrapsure|next|prev|turn|build|cancel|own", "base:tab:<0..3>", "base:dock:<all|friends|group|me>", "base:ghost:<kind|
+        // own:id|part:id>", "base:attach|send|place|putback|down|core:<id>" (each the same order and checks as its button)
+        else if (verb == "base")
+        {
+            WolfStarbase& sb = WolfStarbase::instance();
+            const size_t c2 = arg.find(':');
+            const std::string bv = arg.substr(0, c2), ba = c2 == std::string::npos ? std::string() : arg.substr(c2 + 1);
+            if (bv == "open") sb.show(true);
+            else if (bv == "close") sb.show(false);
+            else if (bv == "tab") sb.setTab((WolfStarbase::ETab)llclamp(atoi(ba.c_str()), 0, (S32)WolfStarbase::TAB_COUNT - 1));
+            else if (bv == "found") sb.found();
+            else if (bv == "spot") sb.findSpot();
+            else if (bv == "restore") sb.restore();
+            else if (bv == "home") sb.home();
+            else if (bv == "fly") sb.flyHome();
+            else if (bv == "dockat") sb.dockHere();
+            else if (bv == "dock") sb.setDock(ba);
+            else if (bv == "pack") sb.pack();
+            else if (bv == "scrap") sb.scrap(false);
+            else if (bv == "scrapsure") sb.scrap(true);
+            else if (bv == "ghost") sb.showGhosts(ba);
+            else if (bv == "next") sb.nextSpot(1);
+            else if (bv == "prev") sb.nextSpot(-1);
+            else if (bv == "turn") sb.nextTurn();
+            else if (bv == "build") sb.build();
+            else if (bv == "cancel") sb.clearGhosts();
+            else if (bv == "own") sb.askOwn();
+            else if (bv == "attach") sb.attachAsIs(ba);
+            else if (bv == "send") sb.sendToBase(ba);
+            else if (bv == "place") sb.placeAsIs(ba);
+            else if (bv == "putback") sb.putBack(ba);
+            else if (bv == "down") sb.takeDown(ba);
+            else if (bv == "core") sb.buyCore(ba);
+        }
         // [GLASS ARC 2026-11-24] "steer:<pitch>,<yaw>" (each -1..1) holds the pointer as point-and-fly does; "steer:0" lets go
         else if (verb == "steer")
         {

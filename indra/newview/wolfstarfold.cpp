@@ -58,6 +58,7 @@
 #include "wolfgrid.h"
 #include "wolfhelm.h"
 #include "wolfspacesky.h"
+#include "wolfstarbase.h"
 
 extern bool gCubeSnapshot;   // llviewerdisplay.cpp:208 (the same extern lldrawpoolalpha.cpp:140 uses)
 
@@ -631,8 +632,15 @@ void WolfStarfold::receive(const LLUUID& region_id, const std::vector<std::strin
     }
     else if (kind == "msg")
     {
-        for (const auto& p : kv) if (p.first == "t") addNote(clean(p.second));
+        for (const auto& p : kv)
+        {
+            if (p.first != "t") continue;
+            addNote(clean(p.second));
+            WolfStarbase::instance().noteAnswer(clean(p.second));   // the Starbase window shows its answers until the next order
+        }
     }
+    // [STARBASES 2026-11-24] k=bases, base, bpart, bghost, bown (SpaceBases.cs): wolfstarbase.cpp
+    else if (WolfStarbase::instance().receive(kind, kv)) {}
     else if (kind == "end") endShip();
     else if (kind == "jump")
     {
@@ -733,6 +741,10 @@ void WolfStarfold::parseStatus(const std::vector<std::pair<std::string, std::str
     Ship s = mShip;
     s.mTarget.setNull();
     s.mAliens.clear();
+    s.mAlienPos.clear();
+    s.mHaveTargetPos = false;
+    std::vector<LLUUID> alRaw;           // al= and ap= as sent (index for index), paired up below
+    std::vector<std::string> apRaw;
     bool haveThr = false;
     F32 thr = 0.f;
     std::string mode;
@@ -772,9 +784,20 @@ void WolfStarfold::parseStatus(const std::vector<std::pair<std::string, std::str
             for (const std::string& g : split(v, ','))
             {
                 LLUUID id;
-                if (s.mAliens.size() < 6 && id.set(g, false) && id.notNull()) s.mAliens.push_back(id);
+                if (alRaw.size() < 6) { id.set(g, false); alRaw.push_back(id); }
             }
         }
+        else if (k == "ap") apRaw = split(v, ';');                    // x,y,z;x,y,z;... in al='s order
+        else if (k == "tgp") s.mHaveTargetPos = parseVec(v, s.mTargetPos);
+    }
+    const bool pos = apRaw.size() == alRaw.size();
+    for (size_t i = 0; i < alRaw.size(); ++i)
+    {
+        if (alRaw[i].isNull()) continue;
+        LLVector3 at;
+        if (pos && !parseVec(apRaw[i], at)) continue;   // a position that does not read: the pair is left out
+        s.mAliens.push_back(alRaw[i]);
+        if (pos) s.mAlienPos.push_back(at);
     }
     // The class's full figures (SpaceRules.Cub: Shield 100, Armour 100, Hull 100): stage 1 has only the Cub.
     s.mShieldMax = llmax(100.f, s.mShield);
@@ -906,6 +929,8 @@ void WolfStarfold::resetRegion()
     mStation = Station();
     mSetup = Setup();
     mSetupShown = false;
+    WolfStarbase::instance().reset();
+    WolfStarbase::instance().show(false);
     if (mPiloting) endShip();
     mByHand = false;
 }
@@ -944,6 +969,12 @@ void WolfStarfold::say(const std::string& verb_and_args, bool control)
     // Said, not shouted: the region's plugin hears every avatar's chat on its channel wherever they stand (the host's chat
     // event, WolfPluginHost SceneBridge.cs OnChatFromClient), and a channel other than 0 is never shown to anyone.
     FSNearbyChat::sendChatFromViewerFinal(text, text, CHAT_TYPE_NORMAL, false, CHANNEL);
+}
+
+void WolfStarfold::intent(const std::string& verb_and_args)
+{
+    // the Starbase window's orders (wolfstarbase.cpp): the same path, limits and checks as the cockpit's own
+    say(verb_and_args);
 }
 
 bool WolfStarfold::canLaunch() const
@@ -999,7 +1030,8 @@ void WolfStarfold::mine(bool on)
 void WolfStarfold::flyTo(const std::string& where)
 {
     if (!piloting()) return;
-    if (where != "station" && where != "belt" && where != "wormhole" && where != "stop") return;
+    // "base": the pilot's own starbase here (SpaceEngine.cs "fly" -> SpaceBases.cs FlyToBase, wolf-space 1.0.7)
+    if (where != "station" && where != "belt" && where != "wormhole" && where != "stop" && where != "base") return;
     mFlyTo = where == "stop" ? std::string() : where;
     say("fly|to=" + where);
     mSentAt = now();
@@ -1257,6 +1289,7 @@ void WolfStarfold::idle()
         if (now() - it->mSince > 5.0 && !beamEnd(it->mFrom, -1, p)) it = mBeams.erase(it);
         else ++it;
     }
+    WolfStarbase::instance().idle();
     sounds();
 }
 
@@ -1338,6 +1371,20 @@ bool WolfStarfold::beamEnd(const LLUUID& id, S32 rock, LLVector3& agent) const
     LLViewerObject* root = o->getRootEdit();
     agent = (root ? root : o)->getPositionAgent();
     return true;
+}
+
+bool WolfStarfold::alienAt(const LLUUID& id, LLVector3& agent) const
+{
+    if (id.isNull()) return false;
+    if (beamEnd(id, -1, agent)) return true;
+    LLViewerRegion* r = gAgent.getRegion();
+    if (!r) return false;
+    if (id == mShip.mTarget && mShip.mHaveTargetPos) { agent = r->getPosAgentFromRegion(mShip.mTargetPos); return true; }
+    for (size_t i = 0; i < mShip.mAliens.size() && i < mShip.mAlienPos.size(); ++i)
+    {
+        if (mShip.mAliens[i] == id) { agent = r->getPosAgentFromRegion(mShip.mAlienPos[i]); return true; }
+    }
+    return false;
 }
 
 namespace

@@ -39,6 +39,7 @@
 #include "llviewerwindow.h"
 #include "llwindow.h"
 #include "wolfgrid.h"
+#include "wolfstarbase.h"
 #include "wolfstarfold.h"
 
 static LLDefaultChildRegistry::Register<WolfStarfoldDeck> r_wolf_starfold_deck("wolf_starfold_deck");
@@ -366,8 +367,10 @@ void WolfStarfoldDeck::draw()
     const bool guide = sf.guideShown() && WolfGrid::isOnWolfTerritoriesConfirmed() && sf.spaceHere();
     const bool tab = flying && sf.panelHidden();
     const bool setup = sf.setupShown();
+    const bool basewin = WolfStarbase::instance().shown();   // [STARBASES 2026-11-24] the Starbase window
     if (!setup) mClearArmed = false;
-    if (!band && !station && !guide && !tab && !setup && sf.notes().empty())
+    if (!basewin) mArmed.clear();
+    if (!band && !station && !guide && !tab && !setup && !basewin && sf.notes().empty())
     {
         if (hasMouseCapture()) gFocusMgr.setMouseCapture(nullptr);
         mPressed = H_NONE;
@@ -413,7 +416,8 @@ void WolfStarfoldDeck::draw()
     mWorldHalfW = llmax(1.f, W * 0.5f);
     mWorldHalfH = llmax(1.f, (H - top_of_world) * 0.5f);
     drawNotes(top_of_world + 10.f * u, W, llmax(u, 0.8f));
-    if (station) drawStation(top_of_world, W, H, llmax(u, 0.8f));
+    if (basewin) drawBase(top_of_world, W, H, llmax(u, 0.8f));   // opened from the Station window too: it goes over it
+    else if (station) drawStation(top_of_world, W, H, llmax(u, 0.8f));
     else if (setup) drawSetup(top_of_world, W, H, llmax(u, 0.8f));
     if (guide) drawGuide(top_of_world, W, H, llmax(u, 0.8f));
     if (mBandDrawn) mResize.draw();
@@ -572,22 +576,24 @@ void WolfStarfoldDeck::drawCockpit(F32 bottom, F32 W, F32 u)
 
         // the small capsules: the mode and Fly there to the region's places on the left, the cockpit's own on the right
         F32 fx = 785.f;
-        auto small = [&](F32 w, EHit id, const std::string& label, bool lit, const std::string& tip, bool leftward)
+        auto capsuleSmall = [&](F32 w, EHit id, const std::string& label, bool lit, const std::string& tip, bool leftward)
         {
             if (leftward) { capsule(X(fx - w), Y(6.f), X(fx), Y(40.f), id, label, lit, tip, u); fx -= w + 8.f; }
             else { capsule(X(fx), Y(6.f), X(fx + w), Y(40.f), id, label, lit, tip, u); fx += w + 8.f; }
         };
         const WolfStarfold::System& sys = sf.system();
-        if (!sf.flyingTo().empty()) small(70.f, H_FLY_STOP, "STOP", false, "Stop flying there", true);
-        if (sys.mHaveWormhole) small(118.f, H_FLY_WORMHOLE, "WORMHOLE", sf.flyingTo() == "wormhole", "Fly into the wormhole", true);
-        if (sys.mHaveBelt) small(72.f, H_FLY_BELT, "BELT", sf.flyingTo() == "belt", "Fly to the asteroid belt and stop at its edge", true);
-        if (sys.mHaveStation) small(96.f, H_FLY_STATION, "STATION", sf.flyingTo() == "station", "Fly to the station and stop there", true);
-        small(96.f, H_MODE, sf.drift() ? "DRIFT" : "STEADY", sf.drift(), "Steady flies where the nose points; Drift keeps sliding as you turn (Z)", true);
+        if (!sf.flyingTo().empty()) capsuleSmall(70.f, H_FLY_STOP, "STOP", false, "Stop flying there", true);
+        if (sys.mHaveWormhole) capsuleSmall(118.f, H_FLY_WORMHOLE, "WORMHOLE", sf.flyingTo() == "wormhole", "Fly into the wormhole", true);
+        if (sys.mHaveBelt) capsuleSmall(72.f, H_FLY_BELT, "BELT", sf.flyingTo() == "belt", "Fly to the asteroid belt and stop at its edge", true);
+        if (sys.mHaveStation) capsuleSmall(96.f, H_FLY_STATION, "STATION", sf.flyingTo() == "station", "Fly to the station and stop there", true);
+        capsuleSmall(96.f, H_MODE, sf.drift() ? "DRIFT" : "STEADY", sf.drift(), "Steady flies where the nose points; Drift keeps sliding as you turn (Z)", true);
         fx = 815.f;
-        small(44.f, H_HELP, "?", sf.guideShown(), "The guide: how to fly, mine, sell and fight", false);
-        small(84.f, H_THEME, "PANEL", false, std::string("Change the console's glass (now: ") + THEMES[theme()].name + ")", false);
-        small(72.f, H_HIDE, "HIDE", false, "Hide the cockpit (a tab brings it back)", false);
-        small(124.f, H_LEAVE, "LEAVE SHIP", false, "Stand up and leave the ship", false);
+        capsuleSmall(44.f, H_HELP, "?", sf.guideShown(), "The guide: how to fly, mine, sell and fight", false);
+        capsuleSmall(84.f, H_THEME, "PANEL", false, std::string("Change the console's glass (now: ") + THEMES[theme()].name + ")", false);
+        capsuleSmall(72.f, H_HIDE, "HIDE", false, "Hide the cockpit (a tab brings it back)", false);
+        capsuleSmall(124.f, H_LEAVE, "LEAVE SHIP", false, "Stand up and leave the ship", false);
+        // [STARBASES 2026-11-24] design.html#bases: "in the cockpit (a Base button)"
+        capsuleSmall(76.f, H_BASE_OPEN, "BASE", WolfStarbase::instance().shown(), "Your starbase: found it, build on it, go home", false);
     }
 
     // ── RIGHT: the hold and Starmarks, the target in words, the holographic radar and the wolf-ear mark ──
@@ -720,9 +726,9 @@ void WolfStarfoldDeck::drawRadar(F32 cx, F32 cy, F32 rx, F32 ry, F32 u)
     }
     for (size_t i = 0; i < s.mAliens.size() && i < 6; ++i)
     {
-        LLViewerObject* a = gObjectList.findObject(s.mAliens[i]);
-        if (!a) continue;
-        const Mark m = place(a->getPositionAgent());
+        LLVector3 at;   // its object, or the region's position for it (ap=) when it is beyond what this viewer was sent
+        if (!sf.alienAt(s.mAliens[i], at)) continue;
+        const Mark m = place(at);
         const bool tg = s.mAliens[i] == s.mTarget || s.mAliens[i] == sf.selected();
         stalk(m, C_VIOLET);
         circleF(m.x, m.head, 5.f * u, C_VIOLET, 16);
@@ -843,14 +849,14 @@ void WolfStarfoldDeck::drawHud(F32 u)
 
     // the target: an amber box round it, "GLASSWING 640 m" over it and the closing speed under it; off the screen, an arrow at
     // the edge pointing the way to turn
-    LLViewerObject* t = s.mTarget.notNull() ? gObjectList.findObject(s.mTarget) : nullptr;
-    if (!t)
+    // (its object when this viewer has it, else the region's tgp= / ap= position: at the normal far clip the Glasswing is often
+    // not in the object list at all - the rig, 24 Nov: none reached it at RenderFarClip 512)
+    LLVector3 tp;
+    if (!sf.alienAt(s.mTarget, tp))
     {
         mClosingFor.setNull();
         return;
     }
-    LLViewerObject* troot = t->getRootEdit() ? t->getRootEdit() : t;
-    const LLVector3 tp = troot->getPositionAgent();
     const F32 range = (tp - me).length();
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (mClosingFor != s.mTarget)
@@ -975,6 +981,11 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
     }
     y -= 48.f * u;
     T(c1, y, std::string("Your ") + WolfStarfold::currency() + ": " + thousands(st.mCredits), 20.f * u, C_GREEN, true, LLFontGL::LEFT);
+    // [STARBASES 2026-11-24] design.html#bases: the Starbase window opens "in the Station window" too (on the Starmarks line, right)
+    {
+        const F32 sbh = llmax(52.f * u, 44.f);
+        button(c4 - 200.f * u, y - sbh * 0.5f, c4, y + sbh * 0.5f, H_BASE_OPEN, "STARBASE", false, "Your starbase: found it, build on it, go home", u);
+    }
     // the actions: SELL (only with something to sell), CLOSE apart from LAUNCH (the primary, bottom right)
     const F32 bh = 60.f * u, bb = b + pad;
     button(l + pad, bb, l + pad + 260.f * u, bb + bh, H_SELL, total > 0 ? "SELL ALL ORE (" + thousands(total) + ")" : "SELL ALL ORE",
@@ -982,6 +993,7 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
     button(r - pad - 200.f * u, bb, r - pad, bb + bh, H_STATION_LAUNCH, "LAUNCH", false, "Leave the station in your Cub", u, true);
     button(r - pad - 200.f * u - 160.f * u, bb, r - pad - 220.f * u, bb + bh, H_STATION_CLOSE, "CLOSE", false,
            "Close this window (you stay docked)", u);
+
 }
 
 void WolfStarfoldDeck::drawGuide(F32 above, F32 W, F32 H, F32 u)
@@ -1079,6 +1091,776 @@ void WolfStarfoldDeck::drawSetup(F32 above, F32 W, F32 H, F32 u)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// [STARBASES 2026-11-24] the Starbase window
+// Source: design.html#bases "Building it: the Starbase window" (Paul approved 24 Nov ~17:00Z): "One window, in the cockpit (a Base
+// button), in the Station window, and under Wolf World > Starfold > My starbase ... It is a game screen, not a settings dialog: our
+// own starbase logo, a lit picture of your base that turns slowly, the building drones, and a short celebration when a module is
+// finished"; "Glowing outlines (ghosts) appear on your base wherever that module fits. Press Next spot until you like it, then Build
+// it here"; "Plain refusals ... Never an error code"; "Every button is a large target with words; nothing is timed".
+// Who and what (ui-ux-design): a resident of 35 to 65, perhaps with unsteady hands, wants a home in space: found it, add a ring and
+// quarters, let friends dock, go home. Flow: MY BASE (Found / Find me a spot) -> ADD A MODULE (card -> ghosts -> Next spot / Turn it
+// round -> Build it here) -> MY BASE (ready in about N minutes; Go home). The STOREROOM and YOUR OWN BUILDS tabs are one list each.
+// Every target is at least 44 px; the region's answer stays on the window until the next order (never only a passing note).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+namespace
+{
+    // Source: wolf-space BaseRules.cs:43-55 (Modules: each kind's Title) and design.html#bases "Build your own modules" ("decor":
+    // decoration). The region's kit= titles win; these name a kind the region did not list (an own build's kind).
+    std::string kindTitle(const std::string& kind)
+    {
+        if (const WolfStarbase::Kit* k = WolfStarbase::instance().kit(kind)) return k->mTitle;
+        static const std::pair<const char*, const char*> NAMES[] = {
+            { "core", "Core" }, { "dock", "Docking ring" }, { "quarters", "Living quarters" }, { "hangar", "Hangar" },
+            { "refinery", "Refinery" }, { "market", "Market stall" }, { "shield", "Shield generator" }, { "turret", "Turret" },
+            { "decor", "Decoration" } };
+        for (const auto& n : NAMES) if (kind == n.first) return n.second;
+        return kind;
+    }
+
+    // the kinds' colours in the picture and the list (always with words beside them: never colour alone)
+    LLColor4 kindColour(const std::string& kind, bool own)
+    {
+        if (own) return C_VIOLET;
+        if (kind == "core") return C_AMBER;
+        if (kind == "dock") return C_CYAN;
+        if (kind == "quarters") return C_GREEN;
+        return C_TEXT;
+    }
+
+    // words wrapped at whole words to maxw, from y downwards (as drawGuide); the y under the last line
+    F32 para(F32 x, F32 y, const std::string& text, F32 px, F32 maxw, const LLColor4& c, bool bold = false, S32 maxLines = 5)
+    {
+        std::string rest = text, cur;
+        S32 lines = 0;
+        while (!rest.empty() && lines < maxLines)
+        {
+            const size_t sp = rest.find(' ');
+            const std::string word = rest.substr(0, sp);
+            rest = sp == std::string::npos ? std::string() : rest.substr(sp + 1);
+            const std::string trial = cur.empty() ? word : cur + " " + word;
+            if (textW(trial, px, bold) > maxw && !cur.empty())
+            {
+                T(x, y, cur, px, c, bold, LLFontGL::LEFT);
+                y -= px * 1.5f;
+                ++lines;
+                cur = word;
+            }
+            else cur = trial;
+        }
+        if (!cur.empty() && lines < maxLines) { T(x, y, fit(cur, px, bold, maxw), px, c, bold, LLFontGL::LEFT); y -= px * 1.5f; }
+        return y;
+    }
+
+    // "about N minutes" (design: "Ready in about 20 minutes. You don't need to wait here.")
+    std::string aboutMinutes(F64 seconds)
+    {
+        const S32 m = (S32)ceil(llmax(seconds, 0.0) / 60.0);
+        return m <= 1 ? std::string("about a minute") : llformat("about %d minutes", m);
+    }
+
+    F32 targetH(F32 u) { return llmax(52.f * u, 44.f); }   // design: "Every target is at least 44 px"
+}
+
+bool WolfStarfoldDeck::projectAgent(const LLVector3& p, F32& x, F32& y) const
+{
+    // Source: drawHud's projection (itself WolfStarfold::renderLens): the camera basis, LLCamera's vertical field of view and
+    // aspect, onto the world view's rectangle in this view's coordinates
+    if (!gViewerWindow) return false;
+    LLRect world = gViewerWindow->getWorldViewRectScaled();
+    const LLRect mine = calcScreenRect();
+    world.translate(-mine.mLeft, -mine.mBottom);
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    const F32 tan_half = tanf(cam->getView() * 0.5f), aspect = cam->getAspect();
+    const LLVector3 d = p - cam->getOrigin();
+    const F32 f = d * cam->getAtAxis();
+    const F32 lx = -(d * cam->getLeftAxis()), uy = d * cam->getUpAxis();
+    if (f <= 0.5f) { x = lx; y = uy; return false; }
+    x = (F32)world.mLeft + ((lx / f) / (tan_half * aspect) * 0.5f + 0.5f) * (F32)world.getWidth();
+    y = (F32)world.mBottom + ((uy / f) / tan_half * 0.5f + 0.5f) * (F32)world.getHeight();
+    return true;
+}
+
+void WolfStarfoldDeck::drawGhosts(F32 u)
+{
+    // "Ghosts cost nothing. They are drawn by the viewer ... see-through and glowing. Nothing is rezzed until you press Build."
+    // Each ghost is its module's cells (BasePlacement.Footprint) on the base's 10 m frame, turned with the base's quarter-turn yaw
+    // (PartPose); the chosen one amber, the others cyan. A click on one chooses it ("Clicking a ghost in the world chooses it too").
+    WolfStarbase& sb = WolfStarbase::instance();
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region || !sb.hasBase()) return;
+    const F32 C = WolfStarbase::CELL_M;
+    auto agentOf = [&](F32 x, F32 y, F32 z) { return region->getPosAgentFromRegion(sb.toRegion(LLVector3(x, y, z))); };
+    const F32 lw = llmax(1.5f, 2.f * u);
+    // the frame itself, faint: where a base may grow (BaseRules.cs FRAME_MIN_XY..FRAME_MAX_XY, FRAME_MIN_Z..FRAME_MAX_Z: -3..2
+    // and -2..1 cells, 60 x 60 x 40 m round the base's centre)
+    auto box = [&](F32 x0, F32 y0, F32 z0, F32 x1, F32 y1, F32 z1, const LLColor4& edge, const LLColor4& fill)
+    {
+        LLVector3 c[8];
+        F32 sx[8], sy[8];
+        bool ok[8];
+        for (S32 i = 0; i < 8; ++i)
+        {
+            c[i] = agentOf((i & 1) ? x1 : x0, (i & 2) ? y1 : y0, (i & 4) ? z1 : z0);
+            ok[i] = projectAgent(c[i], sx[i], sy[i]);
+        }
+        static const S32 E[12][2] = { { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 }, { 0, 2 }, { 1, 3 }, { 4, 6 }, { 5, 7 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+        static const S32 F[6][4] = { { 0, 1, 3, 2 }, { 4, 5, 7, 6 }, { 0, 1, 5, 4 }, { 2, 3, 7, 6 }, { 0, 2, 6, 4 }, { 1, 3, 7, 5 } };
+        if (fill.mV[VALPHA] > 0.f)
+            for (const auto& f : F)
+                if (ok[f[0]] && ok[f[1]] && ok[f[2]] && ok[f[3]])
+                    quadF(sx[f[0]], sy[f[0]], sx[f[1]], sy[f[1]], sx[f[2]], sy[f[2]], sx[f[3]], sy[f[3]], fill);
+        for (const auto& e : E)
+            if (ok[e[0]] && ok[e[1]]) lineW(sx[e[0]], sy[e[0]], sx[e[1]], sy[e[1]], lw, edge);
+    };
+    box(-3.f * C, -3.f * C, -2.f * C, 3.f * C, 3.f * C, 2.f * C, LLColor4(0.38f, 0.90f, 1.f, 0.22f), LLColor4(0.f, 0.f, 0.f, 0.f));
+    if (sb.ghostFor().empty() || !sb.ghostsArrived()) return;
+    S32 size[3];
+    sb.ghostSize(size);
+    const WolfStarbase::Ghost* pick = sb.chosen();
+    const F32 pulse = 0.75f + 0.25f * sinf((F32)LLFrameTimer::getElapsedSeconds() * 3.f);
+    const std::vector<WolfStarbase::Ghost>& gs = sb.ghosts();
+    // the others first, the chosen one last (on top)
+    for (S32 pass = 0; pass < 2; ++pass)
+    {
+        for (size_t i = 0; i < gs.size(); ++i)
+        {
+            const bool chosen = &gs[i] == pick;
+            if (chosen != (pass == 1)) continue;
+            const LLColor4 edge = chosen ? LLColor4(1.f, 0.74f, 0.28f, pulse) : LLColor4(0.38f, 0.90f, 1.f, 0.65f);
+            const LLColor4 fill = chosen ? LLColor4(1.f, 0.74f, 0.28f, 0.20f) : LLColor4(0.38f, 0.90f, 1.f, 0.07f);
+            LLVector3 mid;
+            const std::vector<std::vector<S32>> cells = WolfStarbase::footprint(size, gs[i].mCell, gs[i].mRot);
+            for (const std::vector<S32>& c : cells)
+            {
+                box((F32)c[0] * C, (F32)c[1] * C, (F32)c[2] * C, (F32)(c[0] + 1) * C, (F32)(c[1] + 1) * C, (F32)(c[2] + 1) * C, edge, fill);
+                mid += LLVector3(((F32)c[0] + 0.5f) * C, ((F32)c[1] + 0.5f) * C, ((F32)c[2] + 0.5f) * C);
+            }
+            if (cells.empty()) continue;
+            mid /= (F32)cells.size();
+            F32 x, y;
+            if (!projectAgent(agentOf(mid.mV[VX], mid.mV[VY], mid.mV[VZ]), x, y)) continue;
+            const F32 hit = llmax(22.f * u, 22.f);
+            addHit(x - hit, y - hit, x + hit, y + hit, (EHit)(H_BASE_GHOST_0 + (S32)i), chosen ? "The chosen spot" : "Click to choose this spot");
+            if (!chosen) continue;
+            T(x, y, "HERE", 16.f * u, C_AMBER, true);
+            // the docking lane in front of a module that needs one (kit= lane metres; BasePlacement.LaneCells: from its front face)
+            const WolfStarbase::Kit* k = sb.kit(sb.ghostKind());
+            if (k && k->mLane > 0.f)
+            {
+                S32 fr[3];
+                WolfStarbase::front(gs[i].mRot, fr);
+                const LLVector3 dir((F32)fr[0], (F32)fr[1], (F32)fr[2]);
+                const LLVector3 a = mid + dir * (C * 0.5f), bpt = a + dir * k->mLane;
+                F32 ax, ay, bx, by;
+                if (projectAgent(agentOf(a.mV[VX], a.mV[VY], a.mV[VZ]), ax, ay) && projectAgent(agentOf(bpt.mV[VX], bpt.mV[VY], bpt.mV[VZ]), bx, by))
+                {
+                    for (S32 d = 0; d < 8; ++d)   // dashed: a lane is kept clear, nothing is built there
+                    {
+                        const F32 p0 = (F32)d / 8.f, p1 = p0 + 0.6f / 8.f;
+                        lineW(ax + (bx - ax) * p0, ay + (by - ay) * p0, ax + (bx - ax) * p1, ay + (by - ay) * p1, lw, C_AMBER);
+                    }
+                    T(bx, by + 14.f * u, llformat("%d m CLEAR LANE", (S32)llround(k->mLane)), 13.f * u, C_AMBER, true);
+                }
+            }
+        }
+    }
+}
+
+void WolfStarfoldDeck::drawBasePicture(F32 cx, F32 cy, F32 size, F32 u)
+{
+    // "a lit picture of your base that turns slowly, the building drones": the parts' cells seen from above and to the side,
+    // turning once a minute or so, lit from the upper left; a part being built pulses and has its drones circling it
+    WolfStarbase& sb = WolfStarbase::instance();
+    const F32 t = (F32)LLFrameTimer::getElapsedSeconds();
+    const F32 a = t * 0.12f, ca = cosf(a), sa = sinf(a);
+    const F32 k = size / 80.f;   // pixels a metre: the 60 m frame with room round it
+    ellipseF(cx, cy - size * 0.30f, size * 0.46f, size * 0.12f, LLColor4(0.04f, 0.16f, 0.27f, 0.55f));
+    ellipseLine(cx, cy - size * 0.30f, size * 0.46f, size * 0.12f, llmax(1.f, 1.5f * u), C_CYAN * 0.5f);
+    auto P = [&](F32 x, F32 y, F32 z, F32& px, F32& py)
+    {
+        px = cx + (x * ca - y * sa) * k * 0.9f;
+        py = cy + (x * sa + y * ca) * k * 0.32f + z * k * 0.8f;
+    };
+    struct Cube { F32 depth; S32 c[3]; LLColor4 col; bool building; };
+    std::vector<Cube> cubes;
+    const F32 C = WolfStarbase::CELL_M;
+    for (const WolfStarbase::Part& p : sb.parts())
+    {
+        if (p.mState == "stored" || p.mState == "off") continue;
+        const bool building = p.building();
+        LLColor4 col = kindColour(p.mKind, p.mOwn);
+        for (const std::vector<S32>& c : WolfStarbase::footprint(p.mSize, p.mCell, p.mRot))
+        {
+            const F32 x = ((F32)c[0] + 0.5f) * C, y = ((F32)c[1] + 0.5f) * C;
+            cubes.push_back({ x * sa + y * ca, { c[0], c[1], c[2] }, col, building });
+        }
+    }
+    // far first (painter's order): depth grows away from the eye
+    std::sort(cubes.begin(), cubes.end(), [](const Cube& l, const Cube& r) { return l.depth > r.depth; });
+    const F32 pulse = 0.55f + 0.35f * sinf(t * 2.5f);
+    for (const Cube& q : cubes)
+    {
+        const F32 x0 = (F32)q.c[0] * C, y0 = (F32)q.c[1] * C, z0 = (F32)q.c[2] * C, x1 = x0 + C, y1 = y0 + C, z1 = z0 + C;
+        F32 px[8], py[8];
+        for (S32 i = 0; i < 8; ++i) P((i & 1) ? x1 : x0, (i & 2) ? y1 : y0, (i & 4) ? z1 : z0, px[i], py[i]);
+        const F32 alpha = q.building ? pulse : 0.95f;
+        const LLColor4 side(q.col.mV[0] * 0.45f, q.col.mV[1] * 0.45f, q.col.mV[2] * 0.45f, alpha);
+        const LLColor4 side2(q.col.mV[0] * 0.30f, q.col.mV[1] * 0.30f, q.col.mV[2] * 0.30f, alpha);
+        const LLColor4 top(q.col.mV[0] * 0.85f, q.col.mV[1] * 0.85f, q.col.mV[2] * 0.85f, alpha);
+        static const S32 SIDES[4][4] = { { 0, 1, 5, 4 }, { 2, 3, 7, 6 }, { 0, 2, 6, 4 }, { 1, 3, 7, 5 } };
+        S32 n = 0;
+        for (const auto& f : SIDES)
+            quadF(px[f[0]], py[f[0]], px[f[1]], py[f[1]], px[f[2]], py[f[2]], px[f[3]], py[f[3]], (n++ & 1) ? side : side2);
+        quadF(px[4], py[4], px[5], py[5], px[7], py[7], px[6], py[6], top);
+        for (S32 e : { 4, 5, 7, 6 })
+        {
+            const S32 nx = e == 4 ? 5 : e == 5 ? 7 : e == 7 ? 6 : 4;
+            lineW(px[e], py[e], px[nx], py[nx], llmax(1.f, 1.2f * u), LLColor4(1.f, 1.f, 1.f, 0.35f * alpha));
+        }
+        if (q.building)
+        {
+            // the building drones: three small lights circling the cell
+            for (S32 d = 0; d < 3; ++d)
+            {
+                const F32 da = t * 1.7f + (F32)d * 2.0944f;
+                F32 dx, dy;
+                P(x0 + C * 0.5f + cosf(da) * C * 0.8f, y0 + C * 0.5f + sinf(da) * C * 0.8f, z1 + 2.f, dx, dy);
+                circleF(dx, dy, 3.f * u, C_AMBER, 10);
+            }
+        }
+    }
+    if (cubes.empty()) T(cx, cy, "Your parts are in the storeroom", 14.f * u, C_DIM, false);
+}
+
+void WolfStarfoldDeck::drawBase(F32 above, F32 W, F32 H, F32 u)
+{
+    WolfStarbase& sb = WolfStarbase::instance();
+    mRowIds.assign(12, std::string());
+    mCardIds.clear();
+    drawGhosts(u);
+    const F32 w = llmin(W - 32.f, 860.f * u), h = llmin(H - above - 32.f, 660.f * u);
+    const F32 l = W - w - 24.f * u, r = l + w;   // to the right, so the base and its ghosts stay in view on the left
+    const F32 b = above + (H - above - h) * 0.5f, t = b + h;
+    rectG(l, b, r, t, SOLID.hi, SOLID.lo);
+    frameW(l, b, r, t, 3.f * u, C_EDGE);
+    addHit(l, b, r, t, H_NONE, "");   // the window takes its clicks: none fall through to the world
+    const F32 pad = 24.f * u, bh = targetH(u);
+    // the starbase logo: the wolf-ear mark in a ring (our own; design: "our own starbase logo")
+    ring(l + pad + 22.f * u, t - 40.f * u, 22.f * u, 2.5f * u, C_AMBER);
+    wolfMark(l + pad + 2.f * u, t - 58.f * u, 1.f * u, C_AMBER);
+    T(l + pad + 56.f * u, t - 30.f * u, "STARBASE", 28.f * u, C_AMBER, true, LLFontGL::LEFT);
+    T(l + pad + 56.f * u, t - 58.f * u, sb.hasBase() ? "Your own home in space." : "Found your own home in space.", 15.f * u, C_DIM, false, LLFontGL::LEFT);
+    button(r - pad - bh, t - pad - bh + 8.f * u, r - pad, t - pad + 8.f * u, H_BASE_CLOSE, "X", false, "Close the Starbase window", u);
+    // the tabs
+    S32 stored = 0;
+    for (const WolfStarbase::Part& p : sb.parts()) if (p.mState == "stored" || p.mState == "off") ++stored;
+    const char* labels[4] = { "MY BASE", "ADD A MODULE", "STOREROOM", "YOUR OWN BUILDS" };
+    const char* tips[4] = { "Your starbase: found it, go home, who may dock", "Buy a module and choose where it goes",
+                            "Parts waiting to go back on your base", "Things you built yourself with starbase in their description" };
+    const F32 tabT = t - 84.f * u, tabB = tabT - bh, gap = 8.f * u, tw = (w - 2.f * pad - 3.f * gap) / 4.f;
+    for (S32 i = 0; i < 4; ++i)
+    {
+        const F32 x0 = l + pad + (F32)i * (tw + gap);
+        std::string lab = labels[i];
+        if (i == 2 && stored > 0) lab += llformat(" (%d)", stored);
+        button(x0, tabB, x0 + tw, tabT, (EHit)(H_BASE_TAB_0 + i), lab, (S32)sb.tab() == i, tips[i], u);
+    }
+    // the bottom row and, over it, the region's answer (kept until the next order: never only a passing note)
+    const F32 bb = b + pad;
+    F32 contentB = bb + bh + 16.f * u;
+    const std::string done = sb.justFinished();
+    if (!done.empty())
+    {
+        // the celebration (design: "a short celebration when a module is finished")
+        const F32 cy = contentB + 22.f * u;
+        rectF(l + pad, cy - 20.f * u, r - pad, cy + 20.f * u, LLColor4(0.05f, 0.25f, 0.12f, 0.9f));
+        const F32 tt = (F32)LLFrameTimer::getElapsedSeconds();
+        for (S32 s = 0; s < 6; ++s)
+            circleF(l + pad + 30.f * u + (F32)s * 18.f * u, cy + 8.f * u * sinf(tt * 4.f + (F32)s), 3.f * u, C_AMBER, 8);
+        T((l + r) * 0.5f, cy, "Your " + done + " is ready!", 20.f * u, C_GREEN, true);
+        contentB = cy + 28.f * u;
+    }
+    // a press that waits for a second one says plainly what it will do (design: "a plain 'Are you sure?' that names what will go")
+    std::string answer = sb.answer();
+    if (mArmed == "pack") answer = "Packing up returns every part to you and keeps everything you bought. Press PACK UP again to pack it up.";
+    else if (mArmed == "scrap") answer = "Scrapping removes your starbase and all its parts for good, and returns half of what they cost. Press SCRAP again to be sure.";
+    else if (mArmed.rfind("down:", 0) == 0) answer = "Taking it down returns all its cost within 10 minutes of buying it, or three quarters after. Press again to take it down.";
+    if (!answer.empty())
+    {
+        const F32 px = 16.f * u, top = contentB + px * 3.2f;
+        rectF(l + pad, contentB, r - pad, top, LLColor4(0.18f, 0.12f, 0.02f, 0.92f));
+        frameW(l + pad, contentB, r - pad, top, llmax(1.f, 1.5f * u), C_AMBER);
+        para(l + pad + 12.f * u, top - px * 1.0f, answer, px, w - 2.f * pad - 24.f * u, C_AMBER, true, 2);
+        contentB = top + 8.f * u;
+    }
+    const F32 ct = tabB - 16.f * u;
+    switch (sb.tab())
+    {
+        case WolfStarbase::TAB_BASE: drawBaseHome(l + pad, contentB, r - pad, ct, u); break;
+        case WolfStarbase::TAB_ADD: drawBaseAdd(l + pad, contentB, r - pad, ct, u); break;
+        case WolfStarbase::TAB_STORE: drawBaseStore(l + pad, contentB, r - pad, ct, u); break;
+        default: drawBaseOwn(l + pad, contentB, r - pad, ct, u); break;
+    }
+    // the bottom row: choosing a spot, or the tab's own orders
+    struct Btn { EHit id; std::string label; std::string tip; bool lit; bool primary; F32 wt; };
+    std::vector<Btn> row;
+    if (!sb.ghostFor().empty())
+    {
+        const std::string kind = sb.ghostKind();
+        const WolfStarbase::Kit* k = sb.kit(kind);
+        std::string act = "BUILD IT HERE";
+        if (sb.ghostFor().rfind("own:", 0) == 0) act = "ATTACH IT HERE";
+        else if (sb.ghostFor().rfind("part:", 0) == 0) act = "PLACE IT HERE";
+        else if (k) act += " - " + thousands(k->mPrice);
+        row.push_back({ H_BASE_PREV, "PREVIOUS", "The spot before", false, false, 1.f });
+        row.push_back({ H_BASE_NEXT, "NEXT SPOT", "Show the next place it fits", false, false, 1.f });
+        row.push_back({ H_BASE_TURN, "TURN IT ROUND", "Turn it to face another way in this spot", false, false, 1.1f });
+        row.push_back({ H_BASE_BUILD, act, "Use the amber spot", false, true, 1.5f });
+        row.push_back({ H_BASE_CANCEL, "CANCEL", "Stop choosing a spot", false, false, 0.9f });
+    }
+    else
+    {
+        switch (sb.tab())
+        {
+            case WolfStarbase::TAB_BASE:
+                if (!sb.known()) break;
+                if (sb.hasBase())
+                {
+                    row.push_back({ H_BASE_HOME, "GO HOME", "Take me into my quarters (or the core)", false, true, 1.f });
+                    if (WolfStarfold::instance().piloting())
+                    {
+                        row.push_back({ H_BASE_FLY, "FLY THERE", "Fly my ship to my starbase", false, false, 1.f });
+                        row.push_back({ H_BASE_DOCKAT, "DOCK", "Dock at my starbase (fly close first)", false, false, 0.8f });
+                    }
+                    row.push_back({ H_BASE_PACK, mArmed == "pack" ? "PRESS AGAIN TO PACK" : "PACK UP", "Pack my starbase away, with everything in it", mArmed == "pack", false, 1.2f });
+                    row.push_back({ H_BASE_SCRAP, mArmed == "scrap" ? "PRESS AGAIN TO SCRAP" : "SCRAP", "Remove my starbase for good (half its cost back)", mArmed == "scrap", false, 1.2f });
+                }
+                else
+                {
+                    row.push_back({ H_BASE_FOUND, "FOUND MY STARBASE HERE", "Found it where my ship (or I) am now", false, true, 1.7f });
+                    row.push_back({ H_BASE_SPOT, "FIND ME A SPOT", "Find the nearest good spot (and fly me there)", false, false, 1.2f });
+                    row.push_back({ H_BASE_RESTORE, "BRING MY BASE BACK", "Put my packed-up starbase here", false, false, 1.4f });
+                }
+                break;
+            case WolfStarbase::TAB_STORE:
+                if (sb.known() && !sb.hasBase())
+                    row.push_back({ H_BASE_RESTORE, "BRING MY BASE BACK", "Put my packed-up starbase here", false, true, 1.f });
+                break;
+            case WolfStarbase::TAB_OWN:
+                row.push_back({ H_BASE_OWN_CHECK, "CHECK AGAIN", "Look again for my builds nearby", false, false, 1.f });
+                break;
+            default: break;
+        }
+    }
+    if (!row.empty())
+    {
+        F32 total = 0.f;
+        for (const Btn& bt : row) total += bt.wt;
+        const F32 avail = w - 2.f * pad - (F32)(row.size() - 1) * gap;
+        F32 x = l + pad;
+        for (const Btn& bt : row)
+        {
+            const F32 bw = avail * bt.wt / total;
+            button(x, bb, x + bw, bb + bh, bt.id, bt.label, bt.lit, bt.tip, u, bt.primary);
+            x += bw + gap;
+        }
+    }
+}
+
+void WolfStarfoldDeck::drawBaseHome(F32 l, F32 b, F32 r, F32 t, F32 u)
+{
+    WolfStarbase& sb = WolfStarbase::instance();
+    const F32 w = r - l;
+    if (!sb.known())
+    {
+        T(l, t - 20.f * u, "Asking the starbase office...", 18.f * u, C_DIM, false, LLFontGL::LEFT);
+        return;
+    }
+    if (!sb.hasBase())
+    {
+        F32 y = t - 16.f * u;
+        y = para(l, y, "You have no starbase in this region yet.", 21.f * u, w, C_TEXT, true);
+        y = para(l, y - 6.f * u, sb.regionOpen() ? llformat("Starbases are open here: %d of %d bases so far.", sb.regionCount(), sb.regionCap())
+                                                 : std::string("This region's owner has not opened it to player starbases."),
+                 17.f * u, w, sb.regionOpen() ? C_GREEN : C_AMBER);
+        const WolfStarbase::Kit* core = sb.kit("core");
+        const std::string cost = core ? llformat("Founding costs %s %s: the core, built in about %d minutes (%d prims).", thousands(core->mPrice).c_str(),
+                                                 WolfStarfold::currency(), core->mMinutes, core->mPrims)
+                                      : llformat("Founding costs %s %s: the core.", thousands(sb.corePrice()).c_str(), WolfStarfold::currency());
+        y = para(l, y - 6.f * u, cost, 17.f * u, w, C_TEXT);
+        y = para(l, y - 10.f * u, "Fly to an open part of space, well clear of the station, the belt and the wormhole, then press Found my "
+                 "starbase here. If the spot is not allowed, this window says what is in the way. Find me a spot flies you to the nearest good one.",
+                 16.f * u, w, C_DIM);
+        para(l, y - 6.f * u, "Packed your base up before? Bring my base back puts it here, with everything in it.", 16.f * u, w, C_DIM);
+        return;
+    }
+    // the picture on the left, the facts and who may dock on the right
+    const F32 pic = llmin(240.f * u, (t - b) * 0.55f);
+    drawBasePicture(l + pic * 0.5f, t - pic * 0.55f, pic, u);
+    const F32 x0 = l + pic + 20.f * u, cw = r - x0;
+    F32 y = t - 14.f * u;
+    std::string state = "Your starbase";
+    if (sb.baseState() == "packing") state += " is being packed away";
+    T(x0, y, state, 21.f * u, C_TEXT, true, LLFontGL::LEFT);
+    y -= 30.f * u;
+    if (LLViewerRegion* region = gAgent.getRegion())
+    {
+        const LLVector3 me = region->getPosRegionFromAgent(gAgent.getPositionAgent());
+        T(x0, y, distance((me - sb.basePos()).length()) + " from you", 17.f * u, C_TEXT, false, LLFontGL::LEFT);
+        y -= 26.f * u;
+    }
+    T(x0, y, llformat("Prims: %d of %d", sb.primsUsed(), sb.primsMax()), 17.f * u, C_TEXT, false, LLFontGL::LEFT);
+    y -= 26.f * u;
+    if (sb.haveStarmarks())
+    {
+        T(x0, y, std::string("Your ") + WolfStarfold::currency() + ": " + thousands(sb.starmarks()), 17.f * u, C_GREEN, true, LLFontGL::LEFT);
+        y -= 26.f * u;
+    }
+    T(x0, y, "Who may dock at your docking ring:", 16.f * u, C_DIM, true, LLFontGL::LEFT);
+    y -= 12.f * u;
+    {
+        const F32 bh = targetH(u), gap = 6.f * u, bw = (cw - 3.f * gap) / 4.f;
+        const struct { EHit id; const char* label; const char* who; const char* tip; } D[4] = {
+            { H_BASE_DOCK_ALL, "EVERYONE", "all", "Any pilot may dock" }, { H_BASE_DOCK_FRIENDS, "FRIENDS", "friends", "Only my friends may dock" },
+            { H_BASE_DOCK_GROUP, "MY GROUP", "group", "Only members of my base's group may dock" }, { H_BASE_DOCK_ME, "ONLY ME", "me", "Nobody else may dock" } };
+        for (S32 i = 0; i < 4; ++i)
+            button(x0 + (F32)i * (bw + gap), y - bh, x0 + (F32)i * (bw + gap) + bw, y, D[i].id, D[i].label, sb.dock() == D[i].who, D[i].tip, u);
+        y -= bh + 8.f * u;
+    }
+    // the parts on the base (the storeroom has its own tab)
+    std::vector<const WolfStarbase::Part*> rows;
+    for (const WolfStarbase::Part& p : sb.parts()) if (p.mState != "stored") rows.push_back(&p);
+    F32 ly = llmin(y, t - pic - 8.f * u);
+    const F32 rowH = targetH(u) + 12.f * u;
+    const S32 per = llmax(1, (S32)((ly - b) / rowH));
+    const S32 pages = llmax(1, ((S32)rows.size() + per - 1) / per);
+    mBasePage = llclamp(mBasePage, 0, pages - 1);
+    if (pages > 1)
+    {
+        const F32 bh = targetH(u);
+        T(l, ly - bh * 0.5f, llformat("Parts, page %d of %d", mBasePage + 1, pages), 15.f * u, C_DIM, true, LLFontGL::LEFT);
+        button(r - 2.f * bh - 6.f * u, ly - bh, r - bh - 6.f * u, ly, H_BASE_PAGE_PREV, "<", false, "The page before", u);
+        button(r - bh, ly - bh, r, ly, H_BASE_PAGE_NEXT, ">", false, "The next page", u);
+        ly -= bh + 6.f * u;
+    }
+    const F32 tnow = (F32)LLFrameTimer::getElapsedSeconds();
+    for (S32 i = 0; i < per && mBasePage * per + i < (S32)rows.size(); ++i)
+    {
+        const WolfStarbase::Part& p = *rows[(size_t)(mBasePage * per + i)];
+        const F32 top = ly - (F32)i * rowH, mid = top - rowH * 0.5f;
+        rectF(l, top - rowH + 4.f * u, r, top, LLColor4(0.03f, 0.07f, 0.16f, 0.75f));
+        rectF(l, top - rowH + 4.f * u, l + 5.f * u, top, kindColour(p.mKind, p.mOwn));
+        std::string title = kindTitle(p.mKind) + (p.mOwn ? " (your own build)" : "");
+        std::string status;
+        LLColor4 sc = C_GREEN;
+        const bool gameplay = p.mKind != "decor";
+        if (p.building())
+        {
+            status = "Being built: ready in " + aboutMinutes(p.mReadyAt - LLFrameTimer::getElapsedSeconds()) + ". You don't need to wait here.";
+            sc = C_AMBER;
+            for (S32 d = 0; d < 3; ++d)   // the drones at work
+                circleF(l + 22.f * u + cosf(tnow * 2.f + (F32)d * 2.1f) * 9.f * u, mid + sinf(tnow * 2.f + (F32)d * 2.1f) * 9.f * u, 2.5f * u, C_AMBER, 8);
+        }
+        else if (p.mState == "off") { status = "Moved off your starbase, so its work has paused."; sc = C_AMBER; }
+        else if (p.mState == "paused") { status = "Paused: the region's message says why."; sc = C_AMBER; }
+        else if (!gameplay) status = "Decoration";
+        else if (!p.mPowered) { status = "Decoration until you buy its core."; sc = C_AMBER; }
+        else status = "Working";
+        const F32 tx = l + 40.f * u;
+        // the buttons on the right: Put it back (off) or Buy its core (an own shell with none), and Take down (not the core)
+        const F32 bh = targetH(u), bw = 170.f * u;
+        F32 bx = r - 8.f * u;
+        const S32 slot = i;
+        mRowIds[(size_t)slot] = p.mId;
+        if (p.mKind != "core")
+        {
+            const bool armed = mArmed == "down:" + p.mId;
+            button(bx - bw, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWB_0 + slot), armed ? "PRESS AGAIN" : "TAKE DOWN", armed,
+                   "Take it down (all its cost back within 10 minutes of buying, three quarters after)", u);
+            bx -= bw + 8.f * u;
+        }
+        if (p.mState == "off")
+        {
+            button(bx - bw, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWA_0 + slot), "PUT IT BACK", false, "Snap it back to its old spot", u);
+            bx -= bw + 8.f * u;
+        }
+        else if (p.mOwn && gameplay && !p.mPowered)
+        {
+            const WolfStarbase::Kit* k = sb.kit(p.mKind);
+            button(bx - bw, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWA_0 + slot), k ? "BUY CORE " + thousands(k->mPrice) : std::string("BUY ITS CORE"),
+                   false, "Buy this kind's core so your own build does its work", u);
+            bx -= bw + 8.f * u;
+        }
+        const F32 room = bx - tx - 8.f * u;
+        T(tx, mid + 10.f * u, fit(title, 18.f * u, true, room), 18.f * u, C_TEXT, true, LLFontGL::LEFT);
+        T(tx, mid - 13.f * u, fit(status, 14.f * u, false, room), 14.f * u, sc, false, LLFontGL::LEFT);
+    }
+}
+
+void WolfStarfoldDeck::drawBaseAdd(F32 l, F32 b, F32 r, F32 t, F32 u)
+{
+    WolfStarbase& sb = WolfStarbase::instance();
+    const F32 w = r - l;
+    if (!sb.known()) { T(l, t - 20.f * u, "Asking the starbase office...", 18.f * u, C_DIM, false, LLFontGL::LEFT); return; }
+    if (!sb.hasBase())
+    {
+        para(l, t - 16.f * u, "Found your starbase first, on the My base tab. Then come back here to add modules to it.", 18.f * u, w, C_TEXT);
+        return;
+    }
+    // the cards: every module the region sells here now, but the core (design: "Choose a module from big picture cards")
+    std::vector<const WolfStarbase::Kit*> kits;
+    for (const WolfStarbase::Kit& k : sb.kits()) if (k.mKind != "core") kits.push_back(&k);
+    if (kits.empty())
+    {
+        para(l, t - 16.f * u, "No modules can be bought here just now.", 18.f * u, w, C_DIM);
+        return;
+    }
+    const F32 gap = 12.f * u, cw = llmin(250.f * u, (w - gap * 2.f) / 3.f), ch = 150.f * u;
+    F32 x = l, y = t;
+    for (size_t i = 0; i < kits.size() && i < 8; ++i)
+    {
+        const WolfStarbase::Kit& k = *kits[i];
+        if (x + cw > r + 1.f) { x = l; y -= ch + gap; }
+        const bool lit = mCard == k.mKind;
+        rectG(x, y - ch, x + cw, y, lit ? C_BUTTON_LIT * 1.3f : C_BUTTON * 1.25f, lit ? C_BUTTON_LIT : C_BUTTON);
+        frameW(x, y - ch, x + cw, y, llmax(1.f, 2.f * u), lit ? C_AMBER : C_EDGE);
+        // its little picture: the module's cells
+        const LLColor4 col = kindColour(k.mKind, false);
+        const F32 cell = 16.f * u;
+        for (S32 a = 0; a < llclamp(k.mSize[0], 1, 3); ++a)
+            for (S32 bb = 0; bb < llclamp(k.mSize[1], 1, 3); ++bb)
+            {
+                const F32 px = x + cw - 18.f * u - (F32)(a + 1) * cell - (F32)bb * cell * 0.5f, py = y - 18.f * u - cell - (F32)bb * cell * 0.5f;
+                rectF(px, py, px + cell - 2.f * u, py + cell - 2.f * u, col * 0.85f);
+            }
+        T(x + 14.f * u, y - 24.f * u, fit(k.mTitle, 19.f * u, true, cw - 90.f * u), 19.f * u, lit ? C_AMBER : C_TEXT, true, LLFontGL::LEFT);
+        T(x + 14.f * u, y - 58.f * u, thousands(k.mPrice) + " " + WolfStarfold::currency(), 17.f * u, C_GREEN, true, LLFontGL::LEFT);
+        T(x + 14.f * u, y - 84.f * u, llformat("Built in about %d minutes", k.mMinutes), 14.f * u, C_TEXT, false, LLFontGL::LEFT);
+        T(x + 14.f * u, y - 106.f * u, llformat("%d prims, %d x %d x %d cells", k.mPrims, k.mSize[0], k.mSize[1], k.mSize[2]), 14.f * u, C_TEXT, false, LLFontGL::LEFT);
+        if (k.mLane > 0.f) T(x + 14.f * u, y - 128.f * u, llformat("Needs a %d m clear lane", (S32)llround(k.mLane)), 14.f * u, C_DIM, false, LLFontGL::LEFT);
+        addHit(x, y - ch, x + cw, y, (EHit)(H_BASE_CARD_0 + (S32)i), "Choose the " + k.mTitle + " and see where it fits");
+        mCardIds.push_back(k.mKind);
+        x += cw + gap;
+    }
+    y -= ch + 18.f * u;
+    // where it fits
+    if (sb.ghostFor().empty() || sb.ghostFor() != mCard)
+    {
+        para(l, y, "Choose a card to see where it fits on your base. Glowing outlines show the places; nothing is built until you press "
+             "Build it here.", 16.f * u, w, C_DIM);
+        return;
+    }
+    if (!sb.ghostsArrived()) { para(l, y, "Finding the places it fits...", 17.f * u, w, C_DIM); return; }
+    if (sb.ghosts().empty())
+    {
+        para(l, y, sb.ghostText().empty() ? std::string("There is no room for that on your starbase.") : sb.ghostText(), 17.f * u, w, C_AMBER, true);
+        return;
+    }
+    const S32 n = sb.spotCount(), turns = sb.turnCount();
+    std::string line = n == 1 ? std::string("It fits in 1 place.") : llformat("It fits in %d places. Spot %d of %d", n, sb.spot() + 1, n);
+    if (turns > 1) line += llformat(", turned %d ways", turns);
+    if (n != 1 || turns > 1) line += ".";
+    y = para(l, y, line + " The amber outline in space is where it will go.", 17.f * u, w, C_TEXT, true);
+    if (const WolfStarbase::Kit* k = sb.kit(mCard))
+    {
+        if (sb.haveStarmarks() && sb.starmarks() < k->mPrice)
+            para(l, y - 4.f * u, "You need " + thousands(k->mPrice - sb.starmarks()) + " more " + WolfStarfold::currency() +
+                 ". A full hold of ore sells for 200 to 600 at the station.", 16.f * u, w, C_AMBER);
+    }
+}
+
+void WolfStarfoldDeck::drawBaseStore(F32 l, F32 b, F32 r, F32 t, F32 u)
+{
+    WolfStarbase& sb = WolfStarbase::instance();
+    const F32 w = r - l;
+    if (!sb.known()) { T(l, t - 20.f * u, "Asking the starbase office...", 18.f * u, C_DIM, false, LLFontGL::LEFT); return; }
+    if (!sb.hasBase())
+    {
+        para(l, t - 16.f * u, "Your storeroom travels with your starbase. If you packed your base up, bring it back here first: everything "
+             "you bought comes back with it.", 18.f * u, w, C_TEXT);
+        return;
+    }
+    std::vector<const WolfStarbase::Part*> rows;
+    for (const WolfStarbase::Part& p : sb.parts()) if (p.mState == "stored" || p.mState == "off") rows.push_back(&p);
+    F32 y = para(l, t - 14.f * u, "Nothing you bought is ever lost. A part that was returned, taken or moved off your base waits here until you "
+                 "place it again.", 16.f * u, w, C_DIM) - 6.f * u;
+    if (rows.empty()) { para(l, y, "Your storeroom is empty.", 18.f * u, w, C_TEXT, true); return; }
+    const F32 rowH = targetH(u) + 12.f * u, bh = targetH(u), bw = 190.f * u;
+    const S32 per = llmax(1, (S32)((y - b) / rowH));
+    const S32 pages = llmax(1, ((S32)rows.size() + per - 1) / per);
+    mBasePage = llclamp(mBasePage, 0, pages - 1);
+    if (pages > 1)
+    {
+        T(l, y - bh * 0.5f, llformat("Page %d of %d", mBasePage + 1, pages), 15.f * u, C_DIM, true, LLFontGL::LEFT);
+        button(r - 2.f * bh - 6.f * u, y - bh, r - bh - 6.f * u, y, H_BASE_PAGE_PREV, "<", false, "The page before", u);
+        button(r - bh, y - bh, r, y, H_BASE_PAGE_NEXT, ">", false, "The next page", u);
+        y -= bh + 6.f * u;
+    }
+    for (S32 i = 0; i < per && mBasePage * per + i < (S32)rows.size(); ++i)
+    {
+        const WolfStarbase::Part& p = *rows[(size_t)(mBasePage * per + i)];
+        const F32 top = y - (F32)i * rowH, mid = top - rowH * 0.5f;
+        rectF(l, top - rowH + 4.f * u, r, top, LLColor4(0.03f, 0.07f, 0.16f, 0.75f));
+        rectF(l, top - rowH + 4.f * u, l + 5.f * u, top, kindColour(p.mKind, p.mOwn));
+        mRowIds[(size_t)i] = p.mId;
+        F32 bx = r - 8.f * u;
+        if (p.mState == "off")
+        {
+            button(bx - bw, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWB_0 + i), "PLACE IT AGAIN", false, "Choose a new spot for it", u);
+            bx -= bw + 8.f * u;
+            button(bx - bw, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWA_0 + i), "PUT IT BACK", false, "Snap it back to its old spot", u, true);
+        }
+        else
+        {
+            button(bx - bw, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWA_0 + i), "PLACE IT", false,
+                   p.mKind == "decor" ? "Put it back inside your base's frame" : "See where it fits, then place it", u, true);
+        }
+        bx -= bw + 8.f * u;
+        const F32 tx = l + 20.f * u, room = bx - tx;
+        T(tx, mid + 10.f * u, fit(kindTitle(p.mKind) + (p.mOwn ? " (your own build)" : ""), 18.f * u, true, room), 18.f * u, C_TEXT, true, LLFontGL::LEFT);
+        T(tx, mid - 13.f * u, fit(p.mState == "off" ? "Moved off your starbase, so its work has paused." : "In your storeroom.", 14.f * u, false, room),
+          14.f * u, p.mState == "off" ? C_AMBER : C_DIM, false, LLFontGL::LEFT);
+    }
+}
+
+void WolfStarfoldDeck::drawBaseOwn(F32 l, F32 b, F32 r, F32 t, F32 u)
+{
+    // design.html#bases "Build your own modules": "write starbase in its description ... the window's Your own builds tab lists
+    // every object of yours nearby with the word, each with a green tick or a plain reason"; Attach where you can build, Send to
+    // my base from anywhere else (the object is moved, never copied)
+    WolfStarbase& sb = WolfStarbase::instance();
+    const F32 w = r - l;
+    F32 y = para(l, t - 14.f * u, "Build anything with the normal build tools and write starbase:quarters (or dock, hangar...) in its Description. "
+                 "Just starbase makes it decoration. No scripts or contents, at most 64 prims.", 16.f * u, w, C_DIM) - 6.f * u;
+    if (!sb.ownAsked()) { para(l, y, "Looking for your builds nearby...", 17.f * u, w, C_DIM); return; }
+    if (sb.own().empty())
+    {
+        para(l, y, sb.ownText().empty() ? std::string("No builds of yours with starbase in the description were found near you.") : sb.ownText(),
+             17.f * u, w, C_TEXT);
+        return;
+    }
+    if (!sb.ownHere())
+        y = para(l, y, "Your starbase is not in this region, so use Send to my base: it waits in your storeroom.", 15.f * u, w, C_AMBER) - 4.f * u;
+    const F32 rowH = targetH(u) + 12.f * u, bh = targetH(u), bw = 200.f * u;
+    const S32 per = llmax(1, (S32)((y - b) / rowH));
+    const S32 pages = llmax(1, ((S32)sb.own().size() + per - 1) / per);
+    mBasePage = llclamp(mBasePage, 0, pages - 1);
+    if (pages > 1)
+    {
+        T(l, y - bh * 0.5f, llformat("Page %d of %d", mBasePage + 1, pages), 15.f * u, C_DIM, true, LLFontGL::LEFT);
+        button(r - 2.f * bh - 6.f * u, y - bh, r - bh - 6.f * u, y, H_BASE_PAGE_PREV, "<", false, "The page before", u);
+        button(r - bh, y - bh, r, y, H_BASE_PAGE_NEXT, ">", false, "The next page", u);
+        y -= bh + 6.f * u;
+    }
+    for (S32 i = 0; i < per && mBasePage * per + i < (S32)sb.own().size(); ++i)
+    {
+        const WolfStarbase::Own& o = sb.own()[(size_t)(mBasePage * per + i)];
+        const F32 top = y - (F32)i * rowH, mid = top - rowH * 0.5f;
+        rectF(l, top - rowH + 4.f * u, r, top, LLColor4(0.03f, 0.07f, 0.16f, 0.75f));
+        rectF(l, top - rowH + 4.f * u, l + 5.f * u, top, o.mOk ? C_GREEN : C_AMBER);
+        mRowIds[(size_t)i] = o.mId;
+        F32 bx = r - 8.f * u;
+        if (o.mOk)
+        {
+            button(bx - bw, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWB_0 + i), "SEND TO MY BASE", false,
+                   "Move it (never copied) to your base's storeroom", u);
+            bx -= bw + 8.f * u;
+            if (sb.ownHere())
+            {
+                button(bx - bw * 0.7f, mid - bh * 0.5f, bx, mid + bh * 0.5f, (EHit)(H_BASE_ROWA_0 + i), "ATTACH", false,
+                       o.mKind == "decor" ? "Make it part of your base, where it is" : "See where it fits on your base, then attach it", u, true);
+                bx -= bw * 0.7f + 8.f * u;
+            }
+        }
+        const F32 tx = l + 20.f * u, room = bx - tx;
+        std::string facts = kindTitle(o.mKind) + llformat(", %d prims", o.mPrims);
+        if (o.mMetres >= 0.f) facts += ", " + distance(o.mMetres) + " from your base";
+        T(tx, mid + 12.f * u, fit((o.mName.empty() ? std::string("(no name)") : o.mName) + " - " + facts, 17.f * u, true, room), 17.f * u, C_TEXT, true, LLFontGL::LEFT);
+        T(tx, mid - 12.f * u, fit(o.mOk ? std::string("Ready") : o.mReason, 14.f * u, false, room), 14.f * u, o.mOk ? C_GREEN : C_AMBER, !o.mOk, LLFontGL::LEFT);
+    }
+}
+
+void WolfStarfoldDeck::pressBase(EHit id)
+{
+    WolfStarbase& sb = WolfStarbase::instance();
+    const std::string armed = mArmed;
+    mArmed.clear();   // any press disarms a waiting second press, but its own
+    if (id >= H_BASE_TAB_0 && id <= H_BASE_TAB_LAST)
+    {
+        sb.setTab((WolfStarbase::ETab)(id - H_BASE_TAB_0));
+        mBasePage = 0;
+        mCard.clear();
+        return;
+    }
+    if (id >= H_BASE_CARD_0 && id <= H_BASE_CARD_LAST)
+    {
+        const size_t i = (size_t)(id - H_BASE_CARD_0);
+        if (i < mCardIds.size()) { mCard = mCardIds[i]; sb.showGhosts(mCard); }
+        return;
+    }
+    if (id >= H_BASE_GHOST_0 && id <= H_BASE_GHOST_LAST) { sb.choose((size_t)(id - H_BASE_GHOST_0)); return; }
+    const bool rowA = id >= H_BASE_ROWA_0 && id <= H_BASE_ROWA_LAST, rowB = id >= H_BASE_ROWB_0 && id <= H_BASE_ROWB_LAST;
+    if (rowA || rowB)
+    {
+        const size_t slot = (size_t)(id - (rowA ? H_BASE_ROWA_0 : H_BASE_ROWB_0));
+        const std::string rid = slot < mRowIds.size() ? mRowIds[slot] : std::string();
+        if (rid.empty()) return;
+        if (sb.tab() == WolfStarbase::TAB_OWN)
+        {
+            if (rowB) { sb.sendToBase(rid); return; }
+            for (const WolfStarbase::Own& o : sb.own())
+                if (o.mId == rid) { if (o.mKind == "decor") sb.attachAsIs(rid); else sb.showGhosts("own:" + rid); }
+            return;
+        }
+        const WolfStarbase::Part* p = sb.part(rid);
+        if (!p) return;
+        if (sb.tab() == WolfStarbase::TAB_STORE)
+        {
+            if (rowA && p->mState == "off") { sb.putBack(rid); return; }
+            if (p->mKind == "decor") sb.placeAsIs(rid); else sb.showGhosts("part:" + rid);
+            return;
+        }
+        // My base: A puts an off part back or buys an own shell's core; B takes a part down (pressed twice)
+        if (rowA) { if (p->mState == "off") sb.putBack(rid); else sb.buyCore(rid); return; }
+        if (armed == "down:" + rid) sb.takeDown(rid);
+        else mArmed = "down:" + rid;
+        return;
+    }
+    switch (id)
+    {
+        case H_BASE_CLOSE: sb.show(false); break;
+        case H_BASE_FOUND: sb.found(); break;
+        case H_BASE_SPOT: sb.findSpot(); break;
+        case H_BASE_RESTORE: sb.restore(); break;
+        case H_BASE_HOME: sb.home(); break;
+        case H_BASE_FLY: sb.flyHome(); break;
+        case H_BASE_DOCKAT: sb.dockHere(); break;
+        case H_BASE_DOCK_ALL: sb.setDock("all"); break;
+        case H_BASE_DOCK_FRIENDS: sb.setDock("friends"); break;
+        case H_BASE_DOCK_GROUP: sb.setDock("group"); break;
+        case H_BASE_DOCK_ME: sb.setDock("me"); break;
+        case H_BASE_PACK:
+            if (armed == "pack") sb.pack(); else mArmed = "pack";
+            break;
+        case H_BASE_SCRAP:
+            // design.html#bases: "the owner can scrap their own base from the window, after a plain 'Are you sure?' that names what
+            // will go. Modules return 50 % of their price." The region asks again for sure=1 (SpaceBases.cs BaseVerb scrap).
+            if (armed == "scrap") sb.scrap(true); else mArmed = "scrap";
+            break;
+        case H_BASE_PREV: sb.nextSpot(-1); break;
+        case H_BASE_NEXT: sb.nextSpot(1); break;
+        case H_BASE_TURN: sb.nextTurn(); break;
+        case H_BASE_BUILD: sb.build(); mCard.clear(); break;
+        case H_BASE_CANCEL: sb.clearGhosts(); mCard.clear(); break;
+        case H_BASE_OWN_CHECK: sb.askOwn(); break;
+        case H_BASE_PAGE_PREV: mBasePage = llmax(0, mBasePage - 1); break;
+        case H_BASE_PAGE_NEXT: ++mBasePage; break;   // clamped when drawn
+        default: break;
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // the mouse
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -1130,7 +1912,9 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
             else mClearArmed = true;
             break;
         case H_SETUP_CLOSE: sf.closeSetup(); break;
+        case H_BASE_OPEN: WolfStarbase::instance().toggle(); break;
         default:
+            if (id >= H_BASE_CLOSE && id <= H_BASE_GHOST_LAST) { pressBase(id); break; }
             if (id >= H_ALIEN_0 && id <= H_ALIEN_LAST)
             {
                 const size_t i = (size_t)(id - H_ALIEN_0);

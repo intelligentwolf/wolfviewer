@@ -222,7 +222,7 @@
     enabled="false"
     height="16"
     label="Don't include me in other people's recordings"
-    tool_tip="Ticked: WolfViewer's and WolfStorm's video recorders show a grey shape instead of you and your name tag in other people's videos. Saved on your Wolf Territories account straight away (also on the website's account page). Other screen-recording programs can't be stopped. Wolf Territories residents only, while logged in."
+    tool_tip="Ticked: other people's WolfViewer video recordings show a grey shape instead of you and your name tag. Saved on your Wolf Territories account straight away (also on the website's account page). Other screen-recording programs can't be stopped. Wolf Territories residents only, while logged in."
     layout="topleft"
     name="WolfNoRecording"
     top_pad="3"

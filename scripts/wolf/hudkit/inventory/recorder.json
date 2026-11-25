@@ -604,7 +604,7 @@
    "kind": "toggle",
    "label": "Don't include me in other people's recordings",
    "when": "always; enabled once the account's answer is in (Wolf Territories residents only)",
-   "tip": "Ticked: WolfViewer's and WolfStorm's video recorders show a grey shape instead of you and your name tag in other people's videos. Saved on your Wolf Territories account straight away.",
+   "tip": "Ticked: other people's WolfViewer video recordings show a grey shape instead of you and your name tag. Saved on your Wolf Territories account straight away.",
    "action": "WolfRecordPrivacy::setOwn (gridmanager recordingprivacy.php action=set)",
    "source": [
     "name=\"no_recording_check\"",
@@ -616,7 +616,7 @@
   {
    "id": "no_recording_note",
    "kind": "readout",
-   "label": "WolfViewer and WolfStorm recorders leave you out. Other screen-recording programs can't be stopped. / Checking... / Saving... / Problem: ...",
+   "label": "Leaves you out of other people's WolfViewer recordings (other screen-recording programs can't be stopped). / Checking... / Saving... / Problem: ...",
    "when": "always",
    "source": [
     "name=\"no_recording_note\"",

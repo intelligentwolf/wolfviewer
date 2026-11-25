@@ -113,8 +113,8 @@
              account page. Saved as soon as it is ticked; honest about what it cannot do. -->
         <icon follows="left|top" height="112" layout="topleft" left="6" name="privacy_frame" top="594" width="474" color="WolfHudKitInlay" image_name="WolfHudKit_Inlay" mouse_opaque="false" />
         <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="privacy_heading" top="598" width="200" text_color="WolfHudKitText">Privacy</text>
-        <check_box follows="left|top" height="22" label="Don't include me in other people's recordings" layout="topleft" left="24" name="no_recording_check" top="624" width="446" tool_tip="Ticked: WolfViewer's and WolfStorm's video recorders show a grey shape instead of you and your name tag in other people's videos. Saved on your Wolf Territories account straight away." label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
-        <text follows="left|top" font="SansSerif" height="46" layout="topleft" left="44" name="no_recording_note" top="648" width="426" wrap="true" text_color="WolfHudKitTextDim">WolfViewer and WolfStorm recorders leave you out. Other screen-recording programs can't be stopped.</text>
+        <check_box follows="left|top" height="22" label="Don't include me in other people's recordings" layout="topleft" left="24" name="no_recording_check" top="624" width="446" tool_tip="Ticked: other people's WolfViewer video recordings show a grey shape instead of you and your name tag. Saved on your Wolf Territories account straight away." label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
+        <text follows="left|top" font="SansSerif" height="46" layout="topleft" left="44" name="no_recording_note" top="648" width="426" wrap="true" text_color="WolfHudKitTextDim">Leaves you out of other people's WolfViewer recordings (other screen-recording programs can't be stopped).</text>
     </panel>
     </scroll_container>
 

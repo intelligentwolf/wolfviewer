@@ -1426,7 +1426,12 @@ void WolfStarfoldDeck::drawBase(F32 above, F32 W, F32 H, F32 u)
         const F32 tt = (F32)LLFrameTimer::getElapsedSeconds();
         for (S32 s = 0; s < 6; ++s)
             circleF(l + pad + 30.f * u + (F32)s * 18.f * u, cy + 8.f * u * sinf(tt * 4.f + (F32)s), 3.f * u, C_AMBER, 8);
-        T((l + r) * 0.5f, cy, "Your " + done + " is ready!", 20.f * u, C_GREEN, true);
+        // [STARBASES 2026-11-25] in a sentence the kit's title is lower case and "living quarters" is plural (the rig showed "Your
+        // Living quarters is ready!"); WolfStorm's window says the same (wolf_starbase_window.js)
+        std::string said = done;
+        if (!said.empty()) said[0] = (char)tolower((unsigned char)said[0]);
+        const bool plural = said.size() >= 8 && said.compare(said.size() - 8, 8, "quarters") == 0;
+        T((l + r) * 0.5f, cy, "Your " + said + (plural ? " are ready!" : " is ready!"), 20.f * u, C_GREEN, true);
         contentB = cy + 28.f * u;
     }
     // a press that waits for a second one says plainly what it will do (design: "a plain 'Are you sure?' that names what will go")

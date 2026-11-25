@@ -15,6 +15,7 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-25] no rain or snow above the clouds' cap under a Starfold line
 #include "wolfweather.h"
 #include "llenvironment.h"   // <WolfViewer 2026-09-18/> auroraAmount(): the sun
 #include "wolfaurora.h"   // <WolfViewer 2026-10-12/> [WOLF AURORA] auroraAmount()
@@ -335,6 +336,16 @@ void WolfWeatherPartSource::update(const F32 dt)
     // given a quad, sorted and blended every frame) falls by g. Snow alike (a flake's two sides).
     const F32 g = WolfFrameGovernor::budget();
     mBudgetSize = 1.f / sqrtf(llmax(g, WolfFrameGovernor::MIN_BUDGET));
+    // [STARFOLD 2026-11-25] no rain or snow up in space: the drops come from the clouds, and no cloud reaches a Starfold line
+    // (every layer's top held at Ls - 200, WolfStarfold::cloudCapAboveSea). Once the camera is above that cap the camera-centred
+    // rain and snow stop, as WolfStorm's (wolf_starfold.js air(): weather = a < Ls - CLOUD_BELOW_M; environment_manager.js hides
+    // them). The rig, 25 Nov 00:44Z: rain streaks drawn round the cockpit at 3,140 m on Dogfight (line 3,000 m), Nassau's rain.
+    const F32 cap = WolfStarfold::instance().cloudCapAboveSea();
+    if (cap >= 0.f && WolfStarfold::cameraAboveSea() >= cap)
+    {
+        mCarry = 0.f;
+        return;
+    }
     const F32 rate = base_rate * ((F32)mProfile.mDensity / 100.f) * g;
     mCarry += rate * llclamp(dt, 0.f, 0.1f);
     S32 n = (S32)mCarry;

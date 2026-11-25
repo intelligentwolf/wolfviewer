@@ -122,6 +122,11 @@ public:
         F32  mSpeed = 0.f, mTurn = 0.f, mHold = 0.f, mShield = 0.f, mArmour = 0.f, mHull = 0.f, mMass = 0.f, mPad = 0.f;
         S32  mGuns = 0;
     };
+    /** [WOLFTREK v11 stage C] A saved design (SpaceShipDesigns.cs DesignArgs): design=<id: a Guid>;<name>;<class id>;<prims>;<active>. */
+    struct Design { std::string mId, mName, mClass; S32 mPrims = 0; bool mActive = false; };
+    /** k=bship (SpaceShipDesigns.cs OwnShipsList): o=<object, 32 hex>;<class or ->;<prims>;<ok 1|0>;<name>;<reason (the rest)>. */
+    struct Build { std::string mId, mClass, mName, mReason; S32 mPrims = 0; bool mOk = false; };
+    struct Builds { bool mAsked = false, mAsking = false; std::vector<Build> mItems; std::string mText; };
     /** k=docked (SpaceEngine.SendDocked). */
     struct Station
     {
@@ -134,6 +139,7 @@ public:
         LLUUID           mShip;
         S32              mPad = -1;
         std::vector<ShipInfo> mFleet;   // [WOLFTREK v11 stage B] the Shipyard's classes, in its order (none: no Shipyard here)
+        std::vector<Design>   mDesigns; // [WOLFTREK v11 stage C] the pilot's saved designs
     };
     struct Rock { LLVector3 mPos; F32 mSize = 0.f; U8 mOre = 0; bool mLeft = true; };
     /** A beam the region said is on (k=beam on=1): its shooter, its target (or a rock), its kind ('p', 'a', 'm'). */
@@ -243,6 +249,15 @@ public:
     /** SF1|ship|buy=<id> / SF1|ship|use=<id> (SpaceFleet.cs ShipVerb, docked only); the answer is a k=msg, kept in the Station window. */
     void buyShip(const std::string& id);
     void useShip(const std::string& id);
+    /** [WOLFTREK v11 stage C] SpaceShipDesigns.cs DesignVerb: own=1 (answered by k=bship), register=<object>, use=design:<id>,
+     *  forget=<id>. The answers are k=msg in the Station window's answer line; a fresh k=docked follows a success. */
+    void listOwnShips();
+    void registerShip(const std::string& object);
+    void useDesign(const std::string& id);
+    void forgetDesign(const std::string& id);
+    const Builds& builds() const { return mBuilds; }
+    /** A class's title by its id: the fleet= line's, else SpaceRules.cs's five, else the id. */
+    std::string classTitle(const std::string& id) const;
     /** A message of the viewer's own for the Station window's answer line (it stays until the next order or answer). */
     void stationSay(const std::string& text) { mStationAnswer = text; }
     /** [WOLFTREK v11] The hangar view: this pilot's docked ship framed on its pad, turning slowly, until the avatar or the camera
@@ -367,6 +382,7 @@ private:
     bool    mSetupShown = false;
     std::string mStationAnswer;      // the region's answer to a station rename or a ship order (k=msg), shown in the Station window
     std::vector<ShipInfo> mFleet;    // [WOLFTREK v11 stage B] the last k=docked fleet= lines
+    Builds  mBuilds;                 // [WOLFTREK v11 stage C] the last k=bship (your ship builds nearby)
     F64     mStationAskedAt = -100.0;
 
     // [WOLFTREK v11] the bay

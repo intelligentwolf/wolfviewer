@@ -392,7 +392,7 @@ void WolfStarfoldDeck::draw()
     const bool basewin = WolfStarbase::instance().shown();   // [STARBASES 2026-11-24] the Starbase window
     if (!setup) mClearArmed = false;
     if (!basewin) mArmed.clear();
-    if (!station) { mStationTab = 0; mBuyAsk.clear(); mShipPage = 0; }   // [v11 stage B] a fresh Station window opens on MARKET
+    if (!station) { mStationTab = 0; mBuyAsk.clear(); mShipPage = 0; mHangarOwn = false; mForgetAsk.clear(); mOwnPage = 0; }   // [v11 stage B/C] a fresh Station window opens on MARKET
     // [WOLFTREK v11] the rename field goes with its window (the Station window closed or left, the Starbase window off its own base)
     if (mEdit == EDIT_STATION && !(station && !basewin && sf.canRenameStation())) cancelEdit();
     if (mEdit == EDIT_BASE && !(basewin && WolfStarbase::instance().tab() == WolfStarbase::TAB_BASE && WolfStarbase::instance().known()
@@ -2144,7 +2144,7 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
                 break;
             }
             if (id >= H_BASE_CLOSE && id <= H_BASE_GHOST_LAST) { pressBase(id); break; }
-            if (id >= H_STAB_0 && id <= H_SHIP_PAGE_NEXT) { pressShip(id); break; }
+            if (id >= H_STAB_0 && id <= H_BUILD_USE_LAST) { pressShip(id); break; }
             if (id >= H_ALIEN_0 && id <= H_ALIEN_LAST)
             {
                 const size_t i = (size_t)(id - H_ALIEN_0);
@@ -2527,6 +2527,21 @@ void WolfStarfoldDeck::drawShips(F32 l, F32 b, F32 r, F32 t, F32 u)
     }
     const F32 w = r - l;
     F32 y = t - 12.f * u;
+    if (hangar)
+    {
+        // [WOLFTREK v11 stage C] the Hangar's two views: the ships you own, and your own designs
+        const F32 sbh = llmax(44.f * u, 44.f), sw = 240.f * u;
+        button(l, t - sbh, l + sw, t, H_HANGAR_SHIPS, "YOUR SHIPS", !mHangarOwn, "The ships you own: choose the one you fly next", u);
+        button(l + sw + 8.f * u, t - sbh, l + 2.f * sw + 8.f * u, t, H_HANGAR_OWN,
+               st.mDesigns.empty() ? std::string("YOUR OWN DESIGNS") : llformat("YOUR OWN DESIGNS (%d)", (S32)st.mDesigns.size()), mHangarOwn,
+               "Ships you built yourself: fly one, or make a new one", u);
+        if (mHangarOwn)
+        {
+            drawOwnDesigns(l, b, r, t - sbh - 10.f * u, u);
+            return;
+        }
+        y = t - sbh - 22.f * u;
+    }
     const std::string intro = hangar ? std::string("The ships you own. Choose the one you fly next, then Launch.")
         : "Every ship is good at one thing and weaker at another. A ship you buy is yours for good. You have " + thousands(st.mCredits) + " "
           + WolfStarfold::currency() + ".";
@@ -2614,7 +2629,18 @@ void WolfStarfoldDeck::drawShips(F32 l, F32 b, F32 r, F32 t, F32 u)
                     T(cx1, ly, sc[k].num, 13.f * u, C_TEXT, true, LLFontGL::RIGHT);
                 }
             }
-            if (c.mActive) T((al + ar) * 0.5f, mid, "YOU FLY THIS NEXT", 16.f * u, C_GREEN, true);
+            if (c.mActive)
+            {
+                // [WOLFTREK v11 stage C] an active design of this class flies as it (SpaceShipDesigns.cs)
+                const WolfStarfold::Design* dAct = nullptr;
+                for (const WolfStarfold::Design& d : st.mDesigns) if (d.mActive && d.mClass == c.mId) dAct = &d;
+                if (dAct)
+                {
+                    T((al + ar) * 0.5f, mid + 9.f * u, "YOU FLY THIS NEXT", 16.f * u, C_GREEN, true);
+                    T((al + ar) * 0.5f, mid - 12.f * u, fit("as your design " + dAct->mName, 12.f * u, true, aw), 12.f * u, C_GREEN, true);
+                }
+                else T((al + ar) * 0.5f, mid, "YOU FLY THIS NEXT", 16.f * u, C_GREEN, true);
+            }
             else if (c.mOwned)
                 button(al, mid - bh * 0.5f, ar, mid + bh * 0.5f, (EHit)(H_SHIP_USE_0 + i), "FLY THIS SHIP", false,
                        "Fly the " + c.mTitle + " next (then press Launch)", u, true);
@@ -2646,6 +2672,31 @@ void WolfStarfoldDeck::pressShip(EHit id)
         return;
     }
     if (id == H_SHIP_PAGE_PREV) { mShipPage = llmax(0, mShipPage - 1); mBuyAsk.clear(); return; }
+    // [WOLFTREK v11 stage C] your own designs
+    if (id == H_HANGAR_SHIPS) { mHangarOwn = false; mForgetAsk.clear(); return; }
+    if (id == H_HANGAR_OWN) { mHangarOwn = true; mForgetAsk.clear(); mOwnPage = 0; return; }
+    if (id == H_OWN_LIST) { sf.listOwnShips(); mOwnPage = 0; return; }
+    if (id == H_FLY_STANDARD) { if (!mStandardClass.empty()) sf.useShip(mStandardClass); return; }
+    if (id == H_OWN_PAGE_PREV) { mOwnPage = llmax(0, mOwnPage - 1); mForgetAsk.clear(); return; }
+    if (id == H_OWN_PAGE_NEXT) { ++mOwnPage; mForgetAsk.clear(); return; }   // clamped when drawn
+    auto designSlot = [&](S32 first) { const size_t i = (size_t)(id - first); return i < mDesignIds.size() ? mDesignIds[i] : std::string(); };
+    if (id >= H_DESIGN_USE_0 && id <= H_DESIGN_USE_LAST) { const std::string d = designSlot(H_DESIGN_USE_0); if (!d.empty()) sf.useDesign(d); return; }
+    if (id >= H_DESIGN_FORGET_0 && id <= H_DESIGN_FORGET_LAST) { mForgetAsk = designSlot(H_DESIGN_FORGET_0); return; }
+    if (id >= H_DESIGN_NO_0 && id <= H_DESIGN_NO_LAST) { mForgetAsk.clear(); return; }
+    if (id >= H_DESIGN_YES_0 && id <= H_DESIGN_YES_LAST)
+    {
+        const std::string d = designSlot(H_DESIGN_YES_0);
+        if (d.empty() || d != mForgetAsk) return;
+        mForgetAsk.clear();
+        sf.forgetDesign(d);
+        return;
+    }
+    if (id >= H_BUILD_USE_0 && id <= H_BUILD_USE_LAST)
+    {
+        const size_t i = (size_t)(id - H_BUILD_USE_0);
+        if (i < mBuildIds.size() && !mBuildIds[i].empty()) sf.registerShip(mBuildIds[i]);
+        return;
+    }
     if (id == H_SHIP_PAGE_NEXT) { ++mShipPage; mBuyAsk.clear(); return; }   // clamped when drawn
     auto slotOf = [&](S32 first) { const size_t i = (size_t)(id - first); return i < mShipIds.size() ? mShipIds[i] : std::string(); };
     auto find = [&](const std::string& cid) -> const WolfStarfold::ShipInfo*
@@ -2680,5 +2731,147 @@ void WolfStarfoldDeck::pressShip(EHit id)
     {
         const std::string cid = slotOf(H_SHIP_USE_0);
         if (!cid.empty()) sf.useShip(cid);
+    }
+}
+
+void WolfStarfoldDeck::drawOwnDesigns(F32 l, F32 b, F32 r, F32 t, F32 u)
+{
+    // [WOLFTREK v11 stage C] design.html#ownships: "at any station or starbase in the Station window's Hangar tab, press Use my own
+    // design. Your builds nearby are listed with a tick or a plain reason." Left: your saved designs (FLY THIS DESIGN or "You fly this
+    // next", FORGET with a plain question first: NO lit and where FORGET was) and, once asked, your builds nearby (USE when ready, else
+    // the region's reason). Right: the guide card and USE MY OWN BUILD. The words as WolfStorm 55ef93e (_ownDesigns, forgetConfirmText).
+    WolfStarfold& sf = WolfStarfold::instance();
+    const WolfStarfold::Station& st = sf.station();
+    mDesignIds.assign(10, std::string());
+    mBuildIds.assign(12, std::string());
+    mStandardClass.clear();
+    const F32 gw = llmin(400.f * u, (r - l) * 0.4f), gl = r - gw, lr = gl - 16.f * u;
+    const F32 bh = llmax(44.f * u, 44.f);
+
+    // ── the guide card (ShipBuilds.cs: MEDIUM_PRIMS 32 / MEDIUM_BOX 12 x 9 x 6 for the Cub, Lurcher, Runner; LARGE_PRIMS 64 / LARGE_BOX
+    //    20 x 14 x 9 for the Haulbear, Warden; MAX_LIT 6; nothing in its contents) ──
+    {
+        rectF(gl, b, r, t, LLColor4(0.f, 0.f, 0.f, 0.4f));
+        frameW(gl, b, r, t, llmax(1.f, 1.5f * u), C_EDGE);
+        F32 gy = t - 18.f * u;
+        T(gl + 12.f * u, gy, "MAKE YOUR OWN SHIP", 17.f * u, C_AMBER, true, LLFontGL::LEFT);
+        gy -= 26.f * u;
+        static const char* STEPS[5] = {
+            "1. Build your ship with the normal build tools, its nose along the root prim's red arrow.",
+            "2. Write starship:runner in its description (or cub, lurcher, haulbear or warden). You need to own that class.",
+            "3. Keep it within the class's size and prims: 32 prims and 12 x 9 x 6 m for the Cub, Lurcher and Runner; 64 prims and 20 x 14 x 9 m for the Haulbear and Warden. At most 6 lit prims.",
+            "4. No scripts or anything else in its contents. Your build stays where it is: the game flies a copy, with the class's own speed and strength.",
+            "5. Then press Use my own build." };
+        const F32 px = llclamp((t - b - bh - 80.f * u) / 22.f, 10.f * u, 14.f * u);
+        for (const char* stp : STEPS) gy = para(gl + 12.f * u, gy, stp, px, gw - 24.f * u, C_TEXT, false, 6) - 4.f * u;
+        button(gl + 12.f * u, b + 12.f * u, r - 12.f * u, b + 12.f * u + bh, H_OWN_LIST, "USE MY OWN BUILD",
+               false, "List your ship builds near you, each with a tick or what to change", u, true);
+    }
+
+    // ── the left: the standard class again, your designs, your builds ──
+    F32 y = t - 14.f * u;
+    T(l, y, "YOUR OWN DESIGNS", 17.f * u, C_AMBER, true, LLFontGL::LEFT);
+    const WolfStarfold::Design* act = nullptr;
+    for (const WolfStarfold::Design& d : st.mDesigns) if (d.mActive) act = &d;
+    if (act)
+    {
+        // "Fly the standard <class>" (SF1|ship|use=<class> leaves the active design of that class)
+        mStandardClass = act->mClass;
+        const F32 fw = llmin(300.f * u, lr - l - 220.f * u);
+        button(lr - fw, y - bh * 0.5f, lr, y + bh * 0.5f, H_FLY_STANDARD, "FLY THE STANDARD " + upper(sf.classTitle(act->mClass)), false,
+               "Fly the " + sf.classTitle(act->mClass) + "'s own model next, not your design", u);
+        y -= bh * 0.5f + 10.f * u;
+    }
+    else y -= 20.f * u;
+    if (st.mDesigns.empty())
+    {
+        y = para(l, y - 4.f * u, "You have no saved designs yet. Build your own ship, then press Use my own build.", 15.f * u, lr - l, C_DIM) - 4.f * u;
+    }
+    // rows: the designs, then (once asked) a heading and the builds
+    struct Row { S32 kind; size_t idx; };   // 0 a design, 1 the builds' heading, 2 a build, 3 a line of words
+    std::vector<Row> rows;
+    for (size_t i = 0; i < st.mDesigns.size() && i < 10; ++i) rows.push_back({ 0, i });
+    const WolfStarfold::Builds& bs = sf.builds();
+    if (bs.mAsked)
+    {
+        rows.push_back({ 1, 0 });
+        if (bs.mAsking || bs.mItems.empty()) rows.push_back({ 3, 0 });
+        else for (size_t i = 0; i < bs.mItems.size() && i < 12; ++i) rows.push_back({ 2, i });
+    }
+    if (rows.empty()) return;
+    const F32 rowH = llmax(64.f * u, bh + 12.f * u);
+    S32 per = (S32)((y - b) / rowH);
+    if (per < (S32)rows.size()) per = llmax(1, (S32)((y - b - bh - 6.f * u) / rowH));
+    const S32 pages = llmax(1, ((S32)rows.size() + per - 1) / per);
+    mOwnPage = llclamp(mOwnPage, 0, pages - 1);
+    if (pages > 1)
+    {
+        T(l, y - bh * 0.5f, llformat("Page %d of %d", mOwnPage + 1, pages), 15.f * u, C_DIM, true, LLFontGL::LEFT);
+        button(lr - 2.f * bh - 6.f * u, y - bh, lr - bh - 6.f * u, y, H_OWN_PAGE_PREV, "<", false, "The page before", u);
+        button(lr - bh, y - bh, lr, y, H_OWN_PAGE_NEXT, ">", false, "The next page", u);
+        y -= bh + 6.f * u;
+    }
+    for (S32 k = 0; k < per && mOwnPage * per + k < (S32)rows.size(); ++k)
+    {
+        const Row& rw = rows[(size_t)(mOwnPage * per + k)];
+        const F32 top = y - (F32)k * rowH, rb = top - rowH + 4.f * u, mid = (top + rb) * 0.5f;
+        if (rw.kind == 1)
+        {
+            T(l, mid, "YOUR SHIP BUILDS NEARBY", 15.f * u, C_AMBER, true, LLFontGL::LEFT);
+            continue;
+        }
+        if (rw.kind == 3)
+        {
+            para(l, mid + 8.f * u, bs.mAsking ? std::string("Looking for your builds nearby...")
+                                              : (bs.mText.empty() ? std::string("No ship builds of yours were found near you.") : bs.mText),
+                 14.f * u, lr - l, bs.mAsking ? C_DIM : C_AMBER, !bs.mAsking, 2);
+            continue;
+        }
+        const bool design = rw.kind == 0;
+        const bool good = design ? st.mDesigns[rw.idx].mActive : bs.mItems[rw.idx].mOk;
+        rectF(l, rb, lr, top, LLColor4(0.f, 0.f, 0.f, 0.4f));
+        rectF(l, rb, l + 5.f * u, top, design ? (good ? C_GREEN : C_CYAN) : (good ? C_GREEN : C_AMBER));   // with words beside it
+        const F32 bw = 190.f * u, bx1 = lr - 8.f * u;
+        F32 room = bx1 - l - 20.f * u;
+        if (design)
+        {
+            const WolfStarfold::Design& d = st.mDesigns[rw.idx];
+            const size_t slot = rw.idx;
+            mDesignIds[slot] = d.mId;
+            if (mForgetAsk == d.mId)
+            {
+                // the plain question (WolfStorm forgetConfirmText), NO lit and where FORGET was, YES beside it
+                button(bx1 - bw * 0.6f, mid - bh * 0.5f, bx1, mid + bh * 0.5f, (EHit)(H_DESIGN_NO_0 + (S32)slot), "NO", true, "Keep the design", u);
+                button(bx1 - bw * 1.6f - 8.f * u, mid - bh * 0.5f, bx1 - bw * 0.6f - 8.f * u, mid + bh * 0.5f, (EHit)(H_DESIGN_YES_0 + (S32)slot),
+                       "YES, FORGET IT", false, "Forget this design", u, true);
+                room = bx1 - bw * 1.6f - 16.f * u - l - 20.f * u;
+                para(l + 16.f * u, mid + 8.f * u, "Forget your design " + d.mName + "? Your build in the world stays where it is.", 14.f * u, room, C_AMBER, true, 2);
+                continue;
+            }
+            button(bx1 - bw * 0.6f, mid - bh * 0.5f, bx1, mid + bh * 0.5f, (EHit)(H_DESIGN_FORGET_0 + (S32)slot), "FORGET", false,
+                   "Forget the design " + d.mName + " (asks first)", u);
+            if (d.mActive) T(bx1 - bw * 0.6f - 8.f * u - bw * 0.5f, mid, "YOU FLY THIS NEXT", 13.f * u, C_GREEN, true);
+            else button(bx1 - bw * 1.6f - 8.f * u, mid - bh * 0.5f, bx1 - bw * 0.6f - 8.f * u, mid + bh * 0.5f, (EHit)(H_DESIGN_USE_0 + (S32)slot),
+                        "FLY THIS DESIGN", false, "Fly this design next: " + d.mName, u, true);
+            room = bx1 - bw * 1.6f - 16.f * u - l - 20.f * u;
+            T(l + 16.f * u, mid + 10.f * u, fit(d.mName, 17.f * u, true, room), 17.f * u, C_TEXT, true, LLFontGL::LEFT);
+            T(l + 16.f * u, mid - 12.f * u, fit(sf.classTitle(d.mClass) + llformat(" design, %d prims", d.mPrims), 13.f * u, false, room), 13.f * u, C_DIM, false, LLFontGL::LEFT);
+        }
+        else
+        {
+            const WolfStarfold::Build& it = bs.mItems[rw.idx];
+            const size_t slot = rw.idx;
+            mBuildIds[slot] = it.mId;
+            if (it.mOk)
+            {
+                button(bx1 - bw * 0.6f, mid - bh * 0.5f, bx1, mid + bh * 0.5f, (EHit)(H_BUILD_USE_0 + (S32)slot), "USE", false,
+                       "Use " + it.mName + " as my ship design", u, true);
+                room = bx1 - bw * 0.6f - 8.f * u - l - 20.f * u;
+            }
+            T(l + 16.f * u, mid + 12.f * u, fit(it.mName + " - " + (it.mClass.empty() ? std::string("No class") : sf.classTitle(it.mClass))
+                                                + llformat(", %d prims", it.mPrims), 16.f * u, true, room), 16.f * u, C_TEXT, true, LLFontGL::LEFT);
+            T(l + 16.f * u, mid - 11.f * u, fit(it.mOk ? std::string("Ready") : it.mReason, 13.f * u, !it.mOk, room), 13.f * u, it.mOk ? C_GREEN : C_AMBER,
+              !it.mOk, LLFontGL::LEFT);
+        }
     }
 }

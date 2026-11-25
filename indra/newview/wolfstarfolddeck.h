@@ -106,6 +106,13 @@ public:
         H_SHIP_NO_0, H_SHIP_NO_LAST = H_SHIP_NO_0 + 7,
         H_SHIP_YES_0, H_SHIP_YES_LAST = H_SHIP_YES_0 + 7,
         H_SHIP_PAGE_PREV, H_SHIP_PAGE_NEXT,
+        // [WOLFTREK v11 stage C] the Hangar's own designs (ShipBuilds.MAX_DESIGNS 10, OwnShipsList at most 12 builds)
+        H_HANGAR_SHIPS, H_HANGAR_OWN, H_OWN_LIST, H_FLY_STANDARD, H_OWN_PAGE_PREV, H_OWN_PAGE_NEXT,
+        H_DESIGN_USE_0, H_DESIGN_USE_LAST = H_DESIGN_USE_0 + 9,
+        H_DESIGN_FORGET_0, H_DESIGN_FORGET_LAST = H_DESIGN_FORGET_0 + 9,
+        H_DESIGN_NO_0, H_DESIGN_NO_LAST = H_DESIGN_NO_0 + 9,
+        H_DESIGN_YES_0, H_DESIGN_YES_LAST = H_DESIGN_YES_0 + 9,
+        H_BUILD_USE_0, H_BUILD_USE_LAST = H_BUILD_USE_0 + 11,
     };
 
 private:
@@ -187,6 +194,13 @@ private:
     S32 mShipPage = 0;
     void drawShips(F32 l, F32 b, F32 r, F32 t, F32 u);
     void pressShip(EHit id);
+    // [WOLFTREK v11 stage C] the Hangar's YOUR OWN DESIGNS (design.html#ownships; as WolfStorm 55ef93e _ownDesigns)
+    bool mHangarOwn = false;             // the Hangar shows your own designs (else the ships you own)
+    std::string mForgetAsk;              // the design whose "Forget your design ...?" is showing
+    std::vector<std::string> mDesignIds, mBuildIds;   // what the rows' buttons act on this frame (by slot)
+    std::string mStandardClass;          // FLY THE STANDARD <class>: the class whose design flies next
+    S32 mOwnPage = 0;
+    void drawOwnDesigns(F32 l, F32 b, F32 r, F32 t, F32 u);
 };
 
 #endif // WOLF_STARFOLDDECK_H

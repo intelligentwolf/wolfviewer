@@ -348,6 +348,30 @@ namespace
         return nullptr;
     }
 
+    // [WOLFTREK v11 stage C] Source: SpaceShipDesigns.cs DesignArgs - <id: Guid.ToString(), with hyphens>;<name (ShipBuilds.NameOf: no
+    // ';' or '|')>;<class id>;<prims>;<active 0|1>; exactly five fields (as WolfStorm's parseDesign)
+    bool parseDesign(const std::string& v, WolfStarfold::Design& out)
+    {
+        const std::vector<std::string> f = split(v, ';');
+        if (f.size() != 5) return false;
+        LLUUID id;
+        if (!LLUUID::validate(f[0]) || !id.set(f[0], false) || id.isNull() || !idToken(f[2])) return false;
+        if (f[3].empty() || f[3].size() > 5 || f[3].find_first_not_of("0123456789") != std::string::npos || (f[4] != "0" && f[4] != "1")) return false;
+        out.mId = id.asString();
+        out.mName = clean(f[1]).substr(0, 40);
+        if (out.mName.empty()) out.mName = "My ship";
+        out.mClass = f[2];
+        out.mPrims = atoi(f[3].c_str());
+        out.mActive = f[4] == "1";
+        return true;
+    }
+    bool hex32(const std::string& s)
+    {
+        if (s.size() != 32) return false;
+        for (char c : s) if (!isxdigit((unsigned char)c)) return false;
+        return true;
+    }
+
     // Source: wolfair.cpp WolfAirHandler - the region's GenericMessage. Read on any Wolf region underfoot (what is DRAWN
     // follows the region: WolfGrid::showsWolfRegion, Paul 24 Nov "Hypergrid visitors see the sky").
     class WolfStarfoldHandler : public LLDispatchHandler
@@ -697,6 +721,36 @@ void WolfStarfold::receive(const LLUUID& region_id, const std::vector<std::strin
         }
     }
     else if (kind == "bay") parseBay(kv);
+    else if (kind == "bship")
+    {
+        // [WOLFTREK v11 stage C] Source: SpaceShipDesigns.cs OwnShipsList - up to 12 o=<object N>;<class or ->;<prims>;<ok 1|0>;<name>;
+        // <reason> nearest first (the reason last, taken whole), or t=<plain message>
+        Builds b;
+        b.mAsked = true;
+        for (const auto& p : kv)
+        {
+            if (p.first == "t") b.mText = clean(p.second);
+            else if (p.first == "o" && b.mItems.size() < 12)
+            {
+                const std::vector<std::string> f = split(p.second, ';');
+                if (f.size() < 6 || !hex32(f[0]) || f[2].empty() || f[2].size() > 5 || f[2].find_first_not_of("0123456789") != std::string::npos
+                    || (f[3] != "0" && f[3] != "1")) continue;
+                Build it;
+                it.mId = f[0];
+                LLStringUtil::toLower(it.mId);
+                it.mClass = f[1] != "-" && idToken(f[1]) ? f[1] : std::string();
+                it.mPrims = atoi(f[2].c_str());
+                it.mOk = f[3] == "1";
+                it.mName = clean(f[4]).substr(0, 40);
+                if (it.mName.empty()) it.mName = "My ship";
+                std::string why = f[5];
+                for (size_t i = 6; i < f.size(); ++i) why += ";" + f[i];
+                it.mReason = clean(why);
+                b.mItems.push_back(it);
+            }
+        }
+        mBuilds = b;
+    }
     // [STARBASES 2026-11-24] k=bases, base, bpart, bghost, bown (SpaceBases.cs): wolfstarbase.cpp
     else if (WolfStarbase::instance().receive(kind, kv)) {}
     else if (kind == "end") endShip();
@@ -972,6 +1026,13 @@ void WolfStarfold::parseDocked(const std::vector<std::pair<std::string, std::str
         else if (p.first == "sn") st.mName = clean(p.second).substr(0, 40);
         else if (p.first == "ship") st.mShip.set(p.second, false);
         else if (p.first == "pad") st.mPad = (S32)num(p.second, -1.f);
+        else if (p.first == "design")
+        {
+            Design d;
+            if (parseDesign(p.second, d) && st.mDesigns.size() < 16
+                && std::none_of(st.mDesigns.begin(), st.mDesigns.end(), [&](const Design& x) { return x.mId == d.mId; }))
+                st.mDesigns.push_back(d);
+        }
         else if (p.first == "fleet")
         {
             ShipInfo c;
@@ -1000,6 +1061,7 @@ void WolfStarfold::parseDocked(const std::vector<std::pair<std::string, std::str
     {
         mStationShown = true;
         mStationAnswer.clear();
+        mBuilds = Builds();   // a fresh docking asks again (as WolfStorm: bship = null on docking)
     }
     if (WolfGrid::isOnWolfTerritoriesConfirmed()) claimBottom();
     // [WOLFTREK v11] the pilot's ship stands on its pad (SpaceEngine.SendDocked ship=, pad=): frame it (once per docking)
@@ -1093,6 +1155,7 @@ void WolfStarfold::resetRegion()
     mSetupShown = false;
     mStationAnswer.clear();
     mFleet.clear();
+    mBuilds = Builds();
     mBayPad = -1;
     if (mHangarOn || mHangarWaitUntil > 0.0) endHangar("a new region");
     mHangarDoneFor.setNull();
@@ -1556,6 +1619,51 @@ void WolfStarfold::useShip(const std::string& id)
     mStationAnswer = "Asking the shipyard...";
     mStationAskedAt = now();
     say("ship|use=" + id);
+}
+
+void WolfStarfold::listOwnShips()
+{
+    // SpaceShipDesigns.cs DesignVerb own=1 -> OwnShipsList (k=bship); allowed from anywhere in the region, asked from the Hangar
+    if (!mStation.mDocked) return;
+    mBuilds = Builds();
+    mBuilds.mAsked = mBuilds.mAsking = true;
+    say("ship|own=1");
+}
+
+void WolfStarfold::registerShip(const std::string& object)
+{
+    if (!mStation.mDocked || !hex32(object)) return;
+    mStationAnswer = "Asking the shipyard...";
+    mStationAskedAt = now();
+    say("ship|register=" + object);
+}
+
+void WolfStarfold::useDesign(const std::string& id)
+{
+    LLUUID u;
+    if (!mStation.mDocked || !LLUUID::validate(id) || !u.set(id, false)) return;
+    mStationAnswer = "Asking the shipyard...";
+    mStationAskedAt = now();
+    say("ship|use=design:" + u.asString());
+}
+
+void WolfStarfold::forgetDesign(const std::string& id)
+{
+    LLUUID u;
+    if (!mStation.mDocked || !LLUUID::validate(id) || !u.set(id, false)) return;
+    mStationAnswer = "Asking the shipyard...";
+    mStationAskedAt = now();
+    say("ship|forget=" + u.asString());
+}
+
+std::string WolfStarfold::classTitle(const std::string& id) const
+{
+    for (const ShipInfo& c : mFleet) if (c.mId == id) return c.mTitle;
+    // Source: SpaceRules.cs Fleet titles (SHIP_CUB "Cub", Lurcher, Runner, Haulbear, Warden)
+    static const std::pair<const char*, const char*> T[] = { { "cub", "Cub" }, { "lurcher", "Lurcher" }, { "runner", "Runner" },
+                                                             { "haulbear", "Haulbear" }, { "warden", "Warden" } };
+    for (const auto& t : T) if (id == t.first) return t.second;
+    return id;
 }
 
 // static

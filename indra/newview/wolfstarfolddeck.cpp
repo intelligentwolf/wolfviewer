@@ -1191,7 +1191,7 @@ void WolfStarfoldDeck::drawGround(F32 bottom, F32 W, F32 u)
 
 void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
 {
-    // The Station window (design "Stations": Market, Repairs, Launch in stage 1), centred over the world, drawn as the cockpit is.
+    // The Station window (design "Stations": Market, Repairs, Launch in stage 1), on the left of the world, drawn as the cockpit is.
     WolfStarfold& sf = WolfStarfold::instance();
     const WolfStarfold::Station& st = sf.station();
     // [WOLFTREK v11 stage B] MARKET / SHIPYARD / HANGAR (design.html#fleet: "the Station window's new Hangar tab ... and the Shipyard
@@ -1199,8 +1199,14 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
     const bool tabs = !st.mFleet.empty();
     if (!tabs) mStationTab = 0;
     const bool ships = mStationTab != 0;
-    const F32 w = llmin(W - 32.f, (ships ? 1180.f : 720.f) * u), h = llmin(H - above - 32.f, (ships ? 780.f : (tabs ? 540.f : 460.f)) * u);
-    const F32 l = W * 0.5f - w * 0.5f, r = l + w;
+    // [WOLFTREK v11 2026-11-25] on the left, never over the middle of the view: docked at a bay the hangar view frames the ship
+    // there and turns round it (aimHangarCamera; design.html#bay "The camera frames your ship on its pad ... The Station window
+    // opens"). [rig 25 Nov 10:46:28Z: the window centred hid the ship.] The MARKET window keeps to 38% of the width (it scales
+    // down, not below the panel's 0.8); the wider ship tabs, the pilot's choice, keep the same scale so the words do not change
+    // size between the tabs. The Starbase window opens on the right (drawBase), so both stay in sight.
+    u = llmax(llmin(u, (W * 0.38f - 24.f) / 720.f), 0.8f);
+    const F32 w = llmin(W - 40.f, (ships ? 1180.f : 720.f) * u), h = llmin(H - above - 32.f, (ships ? 780.f : (tabs ? 540.f : 460.f)) * u);
+    const F32 l = 24.f, r = l + w;
     const F32 b = above + (H - above - h) * 0.5f, t = b + h;
     rectG(l, b, r, t, SOLID.hi, SOLID.lo);
     frameW(l, b, r, t, 3.f * u, C_EDGE);

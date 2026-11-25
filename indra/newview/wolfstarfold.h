@@ -334,6 +334,14 @@ public:
     /** The space keys while piloting (llviewerinput.cpp scanKey, after the UI's own keys). True: the key is the cockpit's
      *  and is not passed on to its sitting binding (the arrows and W/S would otherwise swing the camera round the seat). */
     bool noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool key_level, bool repeat);
+    /** [WOLFTREK v11 2026-11-25] A key the cockpit uses while piloting (W S Q E Z M, Space, Tab, the arrows, Page Up / Down,
+     *  no modifier but Shift). llviewerwindow.cpp handleKey: "letter keys start chat" (LetterKeysAffectsMovementNotFocusChatBar
+     *  off, as Firestorm mode sets it) does not take these from the cockpit. */
+    bool cockpitKey(KEY key, MASK mask) const;
+    /** [WOLFTREK v11 2026-11-25] Once a frame, just before the AgentUpdate is sent (llappviewer.cpp idle): the movement the
+     *  user's keys, the joystick or a "go here" autopilot asked for this frame. LLAgent::resetControlFlags clears them right
+     *  after the send, before idle() runs, so the hangar view reads them from here. */
+    void noteAgentControls();
 
 private:
     void say(const std::string& verb_and_args, bool control = false);
@@ -346,10 +354,11 @@ private:
     void startHangar(const LLUUID& ship);
     void beginHangarCamera();
     void hangarIdle();
-    void endHangar(const char* why);
+    void endHangar(const std::string& why, bool walked = false);
     bool hangarFocusIsShip() const;
     void aimHangarCamera();
     static U32 hangarMoveFlags();
+    static std::string flagNames(U32 flags);
     void releaseKeys();
     void makeBelt();
     void addNote(const std::string& text);
@@ -415,7 +424,7 @@ private:
     // the hangar view
     bool    mHangarOn = false;
     LLUUID  mHangarShip;             // the ship framed, or waited for (its object not here yet)
-    LLUUID  mHangarDoneFor;          // framed once per docking: k=docked comes again on every sale
+    LLUUID  mHangarDoneFor;          // framed once per docking: k=docked comes again on every sale (cleared by a launch, the lift, a new region)
     F64     mHangarWaitUntil = -1.0; // waiting for the ship's object until then
     F64     mHangarAt = 0.0;         // the view began
     LLVector3d mHangarFocus;         // the ship's middle, global
@@ -427,6 +436,8 @@ private:
     bool    mHangarAim = false;      // aim at the ship again when the hold ends
     U32     mHangarKeys0 = 0;        // movement keys already down when the view began (from the cockpit): not the user's new input
     F64     mHangarKeysSeenAt = 0.0; // when one of those was last seen down
+    U32     mAgentKeys = 0;          // this frame's movement flags as sent (noteAgentControls): the user's own input
+    bool    mHangarTurnLogged = false;   // the avatar's own body-turn flags were seen (logged once a view: not the user's)
 
     // the jump
     F64     mJumpAt = -100.0;

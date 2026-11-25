@@ -1000,6 +1000,13 @@ void WolfStarfold::parseStatus(const std::vector<std::pair<std::string, std::str
     mLastShip = s.mRoot;
     mLastStatusAt = now();
     if (first && (mHangarOn || mHangarWaitUntil > 0.0)) endHangar("the pilot launched");
+    if (first && mHangarDoneFor.notNull())
+    {
+        // [rig 25 Nov 10:49:15Z] a new flight: the next docking frames the ship again, the same ship too (the once-per-docking
+        // guard is only for k=docked coming again on every sale while docked)
+        mHangarDoneFor.setNull();
+        LL_INFOS("WolfStarfold") << "hangar view: a new flight; the next docking frames the ship again" << LL_ENDL;
+    }
     if (!wasAuto && !mShip.mSeq.empty())
     {
         // the bay's automatic approach or departure began: whatever the pilot held is let go here (the region ignores it anyway:
@@ -1172,6 +1179,7 @@ void WolfStarfold::parseBay(const std::vector<std::pair<std::string, std::string
     {
         // the ship goes down through its pad and is removed (SpaceBay.cs Sink): the view of it ends
         if (ship.notNull() && ship == mHangarShip) endHangar("the ship went down the lift");
+        if (ship.notNull() && ship == mHangarDoneFor) mHangarDoneFor.setNull();   // that docking is over
     }
 }
 
@@ -1399,6 +1407,22 @@ void WolfStarfold::sendControls()
 
 // ── the keys ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+bool WolfStarfold::cockpitKey(KEY key, MASK mask) const
+{
+    // Source: noteScanKey below and design.html "Controls" - every key the cockpit takes, with no modifier or Shift
+    if (!piloting() || (mask != MASK_NONE && mask != MASK_SHIFT)) return false;
+    return key == 'W' || key == 'S' || key == KEY_PAGE_UP || key == KEY_PAGE_DOWN || key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT
+        || key == KEY_RIGHT || key == 'Q' || key == 'E' || key == ' ' || key == KEY_TAB || key == 'Z' || key == 'M';
+}
+
+void WolfStarfold::noteAgentControls()
+{
+    // Source: llappviewer.cpp LLAppViewer::idle - the key bindings (agent_push_forward ... : LLAgent::moveAt etc.), the joystick
+    // and LLAgent::autoPilot set this frame's flags, send_agent_update sends them, then gAgent.resetControlFlags() clears all but
+    // AWAY / FLY / MOUSELOOK - all before WolfStarfold::idle runs. So the hangar view takes the movement asked for here.
+    mAgentKeys = gAgent.getControlFlags() & hangarMoveFlags();
+}
+
 bool WolfStarfold::noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool key_level, bool repeat)
 {
     // [WOLF ONLY] off Wolf, or not piloting a ship here, no key is watched or taken at all
@@ -1407,8 +1431,7 @@ bool WolfStarfold::noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, b
     {
         // [WOLFTREK v11] the automatic approach or departure: the cockpit's keys are still the cockpit's (they would swing the
         // camera round the seat), but they do nothing and send nothing (design.html#bay "The keys do nothing during the approach")
-        return key == 'W' || key == 'S' || key == KEY_PAGE_UP || key == KEY_PAGE_DOWN || key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT
-            || key == KEY_RIGHT || key == 'Q' || key == 'E' || key == ' ' || key == KEY_TAB || key == 'Z' || key == 'M';
+        return cockpitKey(key, mask);
     }
     // Source: design.html "Controls": Page Up / Page Down or W / S the throttle; the arrows pitch and yaw; Q / E roll; Shift +
     // the arrows slide; Space fire; Tab the next target; Z Steady / Drift. Plus M mine (the MINE button's key).
@@ -1840,8 +1863,10 @@ void WolfStarfold::beginHangarCamera()
     // ends the view, and then it is aimed at the ship again (aimHangarCamera), so the view stands whatever the placing did
     mHangarHoldUntil = mHangarAt + HANGAR_HOLD_S;
     mHangarAim = true;
-    mHangarKeys0 = gAgent.getControlFlags() & hangarMoveFlags();
+    mHangarKeys0 = mAgentKeys;   // the movement the last AgentUpdate carried (noteAgentControls): a key held from the cockpit
     mHangarKeysSeenAt = mHangarAt;
+    mHangarTurnLogged = false;
+    LL_INFOS("WolfStarfold") << "hangar view: began for ship " << mHangarShip << " (movement keys already down: " << flagNames(mHangarKeys0) << ")" << LL_ENDL;
     mHangarAvatarAt = gAgent.getPositionGlobal();
     aimHangarCamera();
 }
@@ -1849,10 +1874,32 @@ void WolfStarfold::beginHangarCamera()
 // static
 U32 WolfStarfold::hangarMoveFlags()
 {
-    // the avatar walks, turns, jumps or flies by the user's keys (its own control flags, as LLAgent sets them: indra_constants.h)
+    // the avatar walks, turns, jumps or flies by the user's keys (indra_constants.h; set by llagent.cpp moveAt / moveAtNudge /
+    // moveLeft / moveLeftNudge / moveUp / moveYaw from the key bindings, the joystick and a "go here" autopilot).
+    // [rig 25 Nov 10:45:43Z] NOT AGENT_CONTROL_TURN_LEFT / TURN_RIGHT: llvoavatar.cpp updateCharacter sets those itself while the
+    // body turns to the agent's heading (mTurning) - and the stand-up turns it (llvoavatar.cpp getOffObject: gAgent.resetAxes) -
+    // so they ended the view the frame after it began. A turn by the user's key is moveYaw: YAW_POS / YAW_NEG.
     return AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_LEFT_POS | AGENT_CONTROL_LEFT_NEG | AGENT_CONTROL_UP_POS
         | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG | AGENT_CONTROL_NUDGE_LEFT_POS
-        | AGENT_CONTROL_NUDGE_LEFT_NEG | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_NUDGE_UP_NEG | AGENT_CONTROL_TURN_LEFT | AGENT_CONTROL_TURN_RIGHT;
+        | AGENT_CONTROL_NUDGE_LEFT_NEG | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_NUDGE_UP_NEG | AGENT_CONTROL_YAW_POS | AGENT_CONTROL_YAW_NEG;
+}
+
+// static
+std::string WolfStarfold::flagNames(U32 flags)
+{
+    // for the log: the movement flags by their indra_constants.h names
+    static const std::pair<U32, const char*> NAMES[] = {
+        { AGENT_CONTROL_AT_POS, "AT_POS" }, { AGENT_CONTROL_AT_NEG, "AT_NEG" }, { AGENT_CONTROL_LEFT_POS, "LEFT_POS" },
+        { AGENT_CONTROL_LEFT_NEG, "LEFT_NEG" }, { AGENT_CONTROL_UP_POS, "UP_POS" }, { AGENT_CONTROL_UP_NEG, "UP_NEG" },
+        { AGENT_CONTROL_NUDGE_AT_POS, "NUDGE_AT_POS" }, { AGENT_CONTROL_NUDGE_AT_NEG, "NUDGE_AT_NEG" },
+        { AGENT_CONTROL_NUDGE_LEFT_POS, "NUDGE_LEFT_POS" }, { AGENT_CONTROL_NUDGE_LEFT_NEG, "NUDGE_LEFT_NEG" },
+        { AGENT_CONTROL_NUDGE_UP_POS, "NUDGE_UP_POS" }, { AGENT_CONTROL_NUDGE_UP_NEG, "NUDGE_UP_NEG" },
+        { AGENT_CONTROL_YAW_POS, "YAW_POS" }, { AGENT_CONTROL_YAW_NEG, "YAW_NEG" },
+        { AGENT_CONTROL_TURN_LEFT, "TURN_LEFT" }, { AGENT_CONTROL_TURN_RIGHT, "TURN_RIGHT" } };
+    std::string out;
+    for (const auto& n : NAMES)
+        if (flags & n.first) out += (out.empty() ? "" : " ") + std::string(n.second);
+    return out.empty() ? std::string("none") : out;
 }
 
 void WolfStarfold::aimHangarCamera()
@@ -1916,12 +1963,20 @@ void WolfStarfold::hangarIdle()
     if (!o || o->isDead()) { endHangar("the ship is gone"); return; }
     const F64 t = now();
     // a key the user presses: the view ends (the camera follows the walk as ever). A key already down when the view began (from the
-    // cockpit) does not count until it has been let go.
-    const U32 keys = gAgent.getControlFlags() & hangarMoveFlags();
+    // cockpit) does not count until it has been let go. The flags are this frame's as sent (noteAgentControls): only what the
+    // key bindings, the joystick or a "go here" asked for - never the avatar's own body turn, the stand-up, the region placing
+    // the avatar, a HUD click or typing in chat (none of those sets a movement flag).
+    const U32 keys = mAgentKeys;
     // (a held key's flag may be missing for a frame between agent updates: it counts as let go after 0.3 s without it)
     if (keys & mHangarKeys0) mHangarKeysSeenAt = t;
     else if (mHangarKeys0 && t - mHangarKeysSeenAt > 0.3) mHangarKeys0 = 0;
-    if (keys & ~mHangarKeys0) { endHangar("the avatar moved"); return; }
+    if (keys & ~mHangarKeys0) { endHangar("the avatar moved (the user's movement: " + flagNames(keys & ~mHangarKeys0) + ")", true); return; }
+    if (!mHangarTurnLogged && (gAgent.getControlFlags() & (AGENT_CONTROL_TURN_LEFT | AGENT_CONTROL_TURN_RIGHT)))
+    {
+        mHangarTurnLogged = true;
+        LL_INFOS("WolfStarfold") << "hangar view: the avatar's body turns by itself (" << flagNames(gAgent.getControlFlags() & (AGENT_CONTROL_TURN_LEFT | AGENT_CONTROL_TURN_RIGHT))
+                                 << ", llvoavatar.cpp updateCharacter): not the user's, the view stays" << LL_ENDL;
+    }
     if (gAgentCamera.cameraMouselook()) { mHangarOn = false; LL_INFOS("WolfStarfold") << "hangar view ended: mouselook" << LL_ENDL; return; }
     // a position change by itself is never the user's (the stand-up, the region placing the pilot on the walkway, a teleport within
     // the region): it starts the hold again, and the view is aimed at the ship once more after it
@@ -1992,7 +2047,7 @@ bool WolfStarfold::hangarFocusIsShip() const
     return (root ? root : fo)->getID() == mHangarShip;
 }
 
-void WolfStarfold::endHangar(const char* why)
+void WolfStarfold::endHangar(const std::string& why, bool walked)
 {
     const bool wasOn = mHangarOn;
     mHangarOn = false;
@@ -2005,7 +2060,7 @@ void WolfStarfold::endHangar(const char* why)
         static LLCachedControl<bool> reset_on_move(gSavedSettings, "FSResetCameraOnMovement", true);
         // a walk with "reset the camera on movement" off keeps the camera where it is (the resident's own setting); anything
         // else (the ship gone, a launch, a new region) gives it back
-        if (reset_on_move || strcmp(why, "the avatar moved") != 0) gAgentCamera.setFocusOnAvatar(true, ANIMATE);
+        if (reset_on_move || !walked) gAgentCamera.setFocusOnAvatar(true, ANIMATE);
     }
     LL_INFOS("WolfStarfold") << "hangar view ended: " << why << LL_ENDL;
 }

@@ -34,6 +34,7 @@
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
 #include "wolfviewerkey.h"  // [COPYBOT EXEMPT 2026-10-19/] the per-login key for the regions' copybot guard
+#include "wolfrecordprivacy.h"  // [RECORDING PRIVACY 2026-11-25/] ticket 1060: people who asked not to be in videos
 #include "wolffloaterdob.h"  // [DOB IN THE VIEWER 2026-10-26/] ask for a date of birth after login when the account has none
 #include "wolffloatergreedy.h"  // [GREEDY WINDOW 2026-11-10/] the Greedy table link
 #include "wolffloaterexperiences.h"  // [WolfViewer 2026-10-14/] Experiences: auto-open after a new account's login, arrival notice
@@ -6761,6 +6762,7 @@ void LLAppViewer::idle()
     { WolfVRScreen::SubPart wsp_("WolfFX"); WolfFX::instance().idle(); }
     { WolfVRScreen::SubPart wsp_("WolfInvisible"); WolfInvisible::idle(); }            // <WolfViewer 2026-10-11/> Invisible Mode: the region arrived in, or the switch changed
     { WolfVRScreen::SubPart wsp_("WolfViewerKey"); WolfViewerKey::idle(); }            // [COPYBOT EXEMPT 2026-10-19/] fetch / renew the key, hand it to each Wolf region
+    { WolfVRScreen::SubPart wsp_("WolfRecordPrivacy"); WolfRecordPrivacy::idle(); }   // [RECORDING PRIVACY 2026-11-25/] lookups only while the Video Recorder needs them
     { WolfVRScreen::SubPart wsp_("WolfDob"); WolfDob::idle(); }                  // [DOB IN THE VIEWER 2026-10-26/] once per Wolf login: no date of birth -> the Date of Birth window
     { WolfVRScreen::SubPart wsp_("WolfAurora"); WolfAurora::idle(); }               // [WolfViewer 2026-10-15/] WolfForceAurora: this viewer's sky to Midnight while it is on
     { WolfVRScreen::SubPart wsp_("WolfExperiences"); WolfExperiences::idle(); }          // [WolfViewer 2026-10-14/] Experiences: open after a new account's login; the arrive notice after Go

@@ -45,6 +45,7 @@
 #include "llwindow.h"
 #include "wolfhudkit.h"
 #include "wolfrecorder.h"
+#include "wolfrecordprivacy.h"
 #include "wolfvrstream.h"
 
 // [W111 RECORDER UI 2026-11-24] The transport buttons: a big round button with its word beside it, drawn here (like a
@@ -266,6 +267,10 @@ bool WolfFloaterRecorder::postBuild()
     mWorldNote = getChild<LLTextBox>("world_note");
     mVoiceNote = getChild<LLTextBox>("voice_note");
     mSpaceNote = getChild<LLTextBox>("space_note");
+    mPrivacyNote = getChild<LLTextBox>("privacy_note");
+    mNoRecordingCheck = getChild<LLCheckBoxCtrl>("no_recording_check");
+    mNoRecordingNote = getChild<LLTextBox>("no_recording_note");
+    mNoRecordingDefault = mNoRecordingNote->getText();   // the XUI's own words, shown when there is nothing else to say
     mSize = getChild<LLComboBox>("size_combo");
     mFps = getChild<LLComboBox>("fps_combo");
     mLimitCombo = getChild<LLComboBox>("limit_combo");
@@ -277,6 +282,8 @@ bool WolfFloaterRecorder::postBuild()
     mMeterViews[WolfRecorder::SOURCE_MIC] = getChild<LLView>("mic_meter");
 
     mRecordBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRecord(); });
+    // [RECORDING PRIVACY 2026-11-25] saved on the website at once; refreshPrivacy shows the box as the website has it
+    mNoRecordingCheck->setCommitCallback([](LLUICtrl* ctrl, const LLSD&) { WolfRecordPrivacy::setOwn(ctrl->getValue().asBoolean()); });
     mPauseBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPause(); });
     getChild<LLButton>("open_folder_btn")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfRecorder::openFolder(); });
     mSavedFolderBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfRecorder::openFolder(); });
@@ -368,6 +375,7 @@ void WolfFloaterRecorder::draw()
             tips.hideToolTips();
         }
     }
+    WolfRecordPrivacy::keepLookingUp();   // [RECORDING PRIVACY 2026-11-25/] the answers are in before Record is pressed
     refresh();
     followKeyboardFocus();
     updatePreview();
@@ -844,4 +852,54 @@ void WolfFloaterRecorder::refresh()
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!busy && now >= mNextStatic) refreshStatic();
     if (now >= mNextSpace) refreshSpace(st);
+    refreshPrivacy();
+}
+
+void WolfFloaterRecorder::refreshPrivacy()
+{
+    // [RECORDING PRIVACY 2026-11-25] Ticket 1060. Who is left out of the video (wolfrecordprivacy.h), in words.
+    std::string note;
+    const S32 n = WolfRecordPrivacy::nearbyCount();
+    if (n == 1)
+    {
+        note = getString("privacy_left_out_one");
+    }
+    else if (n > 1)
+    {
+        LLStringUtil::format_map_t args;
+        args["[N]"] = llformat("%d", n);
+        note = getString("privacy_left_out_many", args);
+    }
+    if (WolfRecordPrivacy::lookupTrouble())
+    {
+        note += (note.empty() ? "" : "\n") + getString("privacy_check_failing");
+    }
+    if (note != mPrivacyNoteShown)   // (set only on a change: a text box lays its words out again on every setText)
+    {
+        mPrivacyNoteShown = note;
+        mPrivacyNote->setText(note);
+    }
+
+    // the resident's own choice: the box shows what the website holds; it can be changed while recording too (it is
+    // about other people's videos, not this one)
+    const WolfRecordPrivacy::Own own = WolfRecordPrivacy::ownState();
+    const bool known = own == WolfRecordPrivacy::Own::KNOWN;
+    mNoRecordingCheck->setEnabled(known);
+    if (own != WolfRecordPrivacy::Own::SAVING) mNoRecordingCheck->set(WolfRecordPrivacy::ownOptedOut());
+    std::string own_note;
+    switch (own)
+    {
+    case WolfRecordPrivacy::Own::UNAVAILABLE: own_note = getString("privacy_not_wolf"); break;
+    case WolfRecordPrivacy::Own::LOADING: own_note = getString("privacy_loading"); break;
+    case WolfRecordPrivacy::Own::SAVING: own_note = getString("privacy_saving"); break;
+    case WolfRecordPrivacy::Own::KNOWN: break;
+    }
+    const std::string err = WolfRecordPrivacy::ownError();
+    if (!err.empty() && own != WolfRecordPrivacy::Own::UNAVAILABLE) own_note = "Problem: " + err;
+    if (own_note.empty()) own_note = mNoRecordingDefault;
+    if (own_note != mNoRecordingNoteShown)
+    {
+        mNoRecordingNoteShown = own_note;
+        mNoRecordingNote->setText(own_note);
+    }
 }

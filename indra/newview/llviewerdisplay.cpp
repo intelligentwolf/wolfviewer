@@ -1824,7 +1824,7 @@ void render_ui(F32 zoom_factor, int subfield)
     // [VR NAME TAGS 2026-11-13] a headset view: the name tags, hover text and voice dots into this eye's picture first
     const bool vr_hud_objects_drawn = WolfVRScreen::drawHudObjectsInEye();
     WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
-    WolfRecorder::captureWorld();   // [W111 VIDEO 2026-11-24/] Video Recorder, world only: the same finished world
+    WolfRecorder::captureWorld(vr_hud_objects_drawn);   // [W111 VIDEO 2026-11-24/] Video Recorder, world only: the same finished world ([RECORDING PRIVACY 2026-11-25/] with the name tags in it when a headset view drew them)
     // [VULKAN HUD 2026-11-09] In Vulkan mode the world layer is taken AFTER the HUD attachments (below), so a worn HUD is
     // drawn by OpenGL straight over the world in the default framebuffer, exactly as in OpenGL mode, and only the 2D/3D UI
     // goes onto the cleared UI layer. Taken before them, the HUD landed on that cleared (0,0,0,0) layer with alpha writes

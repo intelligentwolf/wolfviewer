@@ -59,6 +59,7 @@ private:
     void drawMonitor();
     void drawMeter(int source, const LLRect& rect);
     void followKeyboardFocus();
+    void refreshPrivacy();     // [RECORDING PRIVACY 2026-11-25] the left-out note and the resident's own box
 
     LLButton* mRecordBtn = nullptr;
     LLButton* mPauseBtn = nullptr;
@@ -72,6 +73,11 @@ private:
     LLTextBox* mWorldNote = nullptr;
     LLTextBox* mVoiceNote = nullptr;
     LLTextBox* mSpaceNote = nullptr;
+    LLTextBox* mPrivacyNote = nullptr;        // [RECORDING PRIVACY 2026-11-25] "N people nearby have asked..."
+    LLCheckBoxCtrl* mNoRecordingCheck = nullptr;   // [RECORDING PRIVACY 2026-11-25] the resident's own choice
+    LLTextBox* mNoRecordingNote = nullptr;
+    std::string mNoRecordingDefault;
+    std::string mPrivacyNoteShown, mNoRecordingNoteShown;   // what the two texts show now (set only on a change)
     LLComboBox* mSize = nullptr;
     LLComboBox* mFps = nullptr;
     LLComboBox* mLimitCombo = nullptr;

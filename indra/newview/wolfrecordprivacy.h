@@ -26,7 +26,7 @@
 // me... That should be up to each person."); Paul approved.
 //
 // Who and why: a resident who does not want to appear in other people's videos ticks one box, once, and every WolfViewer
-// and WolfStorm video recorder around them leaves them out. Someone recording sees everyone as usual on their screen;
+// video recorder around them leaves them out (WolfStorm has no video recorder). Someone recording sees everyone as usual on their screen;
 // only the video shows a soft grey shape where that person is (so it is clear someone is there), and their name tag is
 // covered too.
 //

@@ -1048,7 +1048,9 @@ bool WolfFarProxy::allHidden(const LLSpatialGroup* group, bool subtree)
     {
         return false;
     }
-    const LLViewerOctreePartition* part = group->LLOcclusionCullingGroup::getSpatialPartition();
+    // Firestorm 7.2.5 (6f806fb9cc9) removed the const LLOcclusionCullingGroup::getSpatialPartition(); LLSpatialGroup's own
+    // accessor returns the same mSpatialPartition (llspatialpartition.h:326), read-only here
+    const LLViewerOctreePartition* part = const_cast<LLSpatialGroup*>(group)->getSpatialPartition();
     if (!part || part->mPartitionType != LLViewerRegion::PARTITION_VOLUME || !part->mRegionp)
     {
         return false;   // only a region's static volumes are in a model

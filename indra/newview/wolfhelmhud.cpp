@@ -562,7 +562,6 @@ bool WolfHelmHud::onPanel(S32 x, S32 y) const
 void WolfHelmHud::refuse(const std::string& why)
 {
     mRefused = why;
-    mRefusedAt = now();
 }
 
 void WolfHelmHud::draw()
@@ -746,7 +745,7 @@ void WolfHelmHud::draw()
             status = "No answer from the ship: is her helm script running? Shout /7 status to ask her.";
             status_col = C_RED;
         }
-        else if (!mRefused.empty() && t - mRefusedAt < 4.0)
+        else if (!mRefused.empty())
         {
             status = mRefused;
             status_col = C_AMBER;
@@ -896,7 +895,7 @@ void WolfHelmHud::draw()
         if (!s.mNaval)
         {
             T(X((bl + br) * 0.5f), YM(730.f), "No guns fitted yet", 13.f, C_GREY, true);
-            T(X((bl + br) * 0.5f), YM(752.f), "Battle mode comes with the naval script.", 9.f, C_DIM);
+            T(X((bl + br) * 0.5f), YM(752.f), "Battle mode comes with the naval script.", 9.f, C_GREY);
         }
         else
         {
@@ -977,7 +976,7 @@ void WolfHelmHud::draw()
                 }
                 else
                 {
-                    T(X(bl + 2.f), YM(844.f), "doubloons won in battle", 9.f, C_DIM, false, false, LLFontGL::LEFT);
+                    T(X(bl + 2.f), YM(844.f), "doubloons won in battle", 9.f, C_GREY, false, false, LLFontGL::LEFT);
                 }
             }
         }
@@ -1208,6 +1207,9 @@ bool WolfHelmHud::handleMouseDown(S32 x, S32 y, MASK mask)
     }
     mPressed = hit->mId;
     gFocusMgr.setMouseCapture(this);
+    // [WOLF HUD LOOKS 2026-11-25] a refusal stays on the status line until the next press (it went after 4 s): older residents
+    // need time to read it (ui-ux-design: "error messages do not auto-dismiss"); this press may set a new one
+    mRefused.clear();
     if (hit->mId == H_WHEEL)
     {
         if (!WolfHelm::instance().isCaptain())

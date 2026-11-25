@@ -65,7 +65,10 @@ namespace
     const LLColor4 BTN_MAIN_HI(0.20f, 0.42f, 0.66f, 0.97f), BTN_MAIN_LO(0.08f, 0.18f, 0.32f, 0.97f);
     const LLColor4 BTN_HI(0.16f, 0.26f, 0.38f, 0.97f), BTN_LO(0.06f, 0.11f, 0.18f, 0.97f);
     const LLColor4 BTN_GO_HI(0.16f, 0.52f, 0.30f, 0.97f), BTN_GO_LO(0.05f, 0.24f, 0.12f, 0.97f);
-    const LLColor4 BTN_GOLD_HI(0.80f, 0.58f, 0.12f, 0.97f), BTN_GOLD_LO(0.45f, 0.30f, 0.04f, 0.97f);
+    // [WOLF HUD LOOKS 2026-11-25] BANK's gold, lighter at its foot, with dark words (GOLD_INK): 7.0:1 at the top, 5.4:1 at the
+    // foot. SNOW on the old gold was 2.5:1 at the top (white on (0.80,0.58,0.12)), under even the 3:1 for large text.
+    const LLColor4 BTN_GOLD_HI(0.80f, 0.58f, 0.12f, 0.97f), BTN_GOLD_LO(0.70f, 0.50f, 0.10f, 0.97f);
+    const LLColor4 GOLD_INK(0.10f, 0.06f, 0.01f, 1.f);
     const LLColor4 BTN_OFF_HI(0.12f, 0.16f, 0.21f, 0.80f), BTN_OFF_LO(0.05f, 0.07f, 0.10f, 0.80f);
     // the moment's banner: as the window's (wolffloatergreedy.cpp BANNER_PULSE_SECS)
     const F32 BANNER_PULSE_SECS = 0.6f;
@@ -308,7 +311,8 @@ namespace
         const bool down = c.pressed == id;
         roundRectF(l, b, r, t, (t - b) * 0.25f, down ? face_lo : face_hi, down ? face_hi : face_lo);
         frameW(l, b, r, t, 1.2f, alpha(SNOW, 0.55f));
-        fitT((l + r) * 0.5f, (b + t) * 0.5f, label, px, 8.f, (r - l) - S(10.f), SNOW, true);
+        const bool gold = face_hi == BTN_GOLD_HI;   // the light face takes dark words
+        fitT((l + r) * 0.5f, (b + t) * 0.5f, label, px, 8.f, (r - l) - S(10.f), gold ? GOLD_INK : SNOW, true);
         c.hit(l, b, r, t, id, tip);
     }
 

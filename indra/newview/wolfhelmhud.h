@@ -82,8 +82,7 @@ private:
     F32 mWheelR = 1.f;                  // the wheel's radius this frame, picture units
     F32 mWheelShown = 0.f;              // the wheel's drawn angle, eased toward the helm
     bool mShowHelp = false;
-    std::string mRefused;               // why the last press did nothing (shown on the status line)
-    F64 mRefusedAt = 0.0;
+    std::string mRefused;               // why the last press did nothing (shown on the status line until the next press)
 
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;

@@ -212,7 +212,7 @@ private:
     void airButton(F32 x0, F32 x1, F32 bb, F32 bt, F32 w, EHit id, const std::string& label, const LLColor4& lit_col, bool lit,
                    const std::string& tip);
     std::vector<std::string> mCrewHitSeats;    // the seat each crew row's hit stands for, as drawn this frame
-    F64 mBailAskAt = -100.0;        // BAIL pressed once: CONFIRM within BAIL_CONFIRM_S jumps
+    bool mBailArmed = false;        // BAIL OUT pressed once: the button reads CONFIRM until pressed again or another button
     // [/WOLF AIR]
     void drawPFD(F32 l, F32 b, F32 r, F32 t);
     void drawND(F32 l, F32 b, F32 r, F32 t);

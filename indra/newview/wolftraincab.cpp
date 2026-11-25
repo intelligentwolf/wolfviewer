@@ -842,7 +842,9 @@ namespace
     const LLColor4 C_AMBER(1.00f, 0.66f, 0.00f, 1.f);
     const LLColor4 C_GREEN(0.20f, 0.95f, 0.30f, 1.f);
     const LLColor4 C_WHITE(0.96f, 0.96f, 0.96f, 1.f);
-    const LLColor4 C_GREY(0.66f, 0.64f, 0.60f, 1.f);
+    // [WOLF HUD LOOKS 2026-11-25] lighter, so words in it keep 4.5:1 on every cab's lightest face (the tram's 0.36,0.21,0.10:
+    // 5.3:1; it was 4.2:1); C_DIM stays for marks that are off, never for words that say something
+    const LLColor4 C_GREY(0.74f, 0.72f, 0.68f, 1.f);
     const LLColor4 C_DIM(0.36f, 0.33f, 0.30f, 1.f);
 
     /** Each kind's cab (design): a steam footplate in brass and Brunswick green, a diesel desk in charcoal and amber,
@@ -1368,7 +1370,7 @@ void WolfTrainCabView::draw()
     const bool canPts = tr.canChangePoints();
     rectF(X(536.f), Y(14.f), X(680.f), Y(118.f), canPts ? LLColor4(0.f, 0.f, 0.f, 0.55f) : LLColor4(0.f, 0.f, 0.f, 0.3f));
     frameW(X(536.f), Y(14.f), X(680.f), Y(118.f), S(2.f), canPts ? th.accent : th.accentLo);
-    T(X(608.f), Y(102.f), "POINTS", 14.f, canPts ? th.accent : C_DIM, true);
+    T(X(608.f), Y(102.f), "POINTS", 14.f, canPts ? th.accent : C_GREY, true);
     if (c.mPts.empty())
     {
         // the same words as the signal's (and WolfStorm's): "None in sight"
@@ -1380,7 +1382,7 @@ void WolfTrainCabView::draw()
         T(X(608.f), Y(82.f), fitW(c.mPts, 11.f, true, S(136.f)), 11.f, C_WHITE, true);
         T(X(608.f), Y(64.f), fitW(settingWords(c.mPtsSet), 10.f, true, S(136.f)), 10.f, C_WHITE, true);
         T(X(608.f), Y(46.f), "in " + distance(c.mPtsM), 9.f, C_GREY);
-        T(X(608.f), Y(27.f), canPts ? "Press to change" : c.mPtsDriver ? "Too far to change" : "Set by the line", 9.f, canPts ? th.accent : C_DIM, true);
+        T(X(608.f), Y(27.f), canPts ? "Press to change" : c.mPtsDriver ? "Too far to change" : "Set by the line", 9.f, canPts ? th.accent : C_GREY, true);
     }
     addHit(X(536.f), Y(14.f), X(680.f), Y(118.f), H_POINTS, canPts ? std::string("Change the points ahead - one press (F9)")
            : c.mPts.empty() ? std::string("No points ahead on the line")
@@ -1530,8 +1532,8 @@ void WolfTrainCabView::draw()
     // the protection lamp: lit while the line makes the train brake
     const LLColor4 lamp = c.mProtect ? C_RED : LLColor4(0.25f, 0.05f, 0.04f, 1.f);
     circleF(X(1420.f), Y(124.f), S(14.f), lamp);
-    T(X(1500.f), Y(132.f), "LINE", 9.f, c.mProtect ? C_RED : C_DIM, true);
-    T(X(1500.f), Y(116.f), "BRAKING", 9.f, c.mProtect ? C_RED : C_DIM, true);
+    T(X(1500.f), Y(132.f), "LINE", 9.f, c.mProtect ? C_RED : C_GREY, true);
+    T(X(1500.f), Y(116.f), "BRAKING", 9.f, c.mProtect ? C_RED : C_GREY, true);
     // [wolf-rail 1.3.7] the region's note (where to go at the end of the line, the turntable's progress, a points setting...):
     // drawn below, over the panel, so it cannot be missed. (A refusal is shown once, in the red strip that stays until OK.)
     // the horn (held while pressed) and the mode switch

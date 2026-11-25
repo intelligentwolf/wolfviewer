@@ -78,6 +78,9 @@ namespace
     const LLColor4 C_WHITE(0.95f, 0.95f, 0.95f, 1.f);
     const LLColor4 C_GREY(0.62f, 0.64f, 0.66f, 1.f);
     const LLColor4 C_DIM(0.35f, 0.37f, 0.40f, 1.f);
+    // [WOLF HUD LOOKS 2026-11-25] MASTER WARNING / CAUTION's words while the lamp is out: 5.7:1 on the warning lens's lightest
+    // red (0.22,0.05,0.03), 5.0:1 on the caution's (0.20,0.14,0.03); they were (0.45,0.30,0.20), 2.3:1
+    const LLColor4 C_MASTER_UNLIT(0.74f, 0.54f, 0.38f, 1.f);
     const LLColor4 C_GREEN(0.20f, 1.00f, 0.25f, 1.f);
     const LLColor4 C_MAGENTA(1.00f, 0.35f, 1.00f, 1.f);
     const LLColor4 C_CYAN(0.25f, 0.90f, 1.00f, 1.f);
@@ -1085,8 +1088,8 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
             roundRectF(bl, bb, br, bt, u * 0.06f,
                        on ? lens_on : LLColor4(warn ? 0.22f : 0.20f, warn ? 0.05f : 0.14f, 0.03f, 1.f),
                        on ? lerp(lens_on, C_BLACK, 0.35f) : LLColor4(0.10f, 0.03f, 0.02f, 1.f));
-            text(master, warn ? "MASTER" : "MASTER", cx, (bb + bt) * 0.5f + u * 0.02f, on ? C_BLACK : LLColor4(0.45f, 0.3f, 0.2f, 1.f), LLFontGL::HCENTER, LLFontGL::BOTTOM);
-            text(master, it.label, cx, (bb + bt) * 0.5f - u * 0.02f, on ? C_BLACK : LLColor4(0.45f, 0.3f, 0.2f, 1.f), LLFontGL::HCENTER, LLFontGL::TOP);
+            text(master, warn ? "MASTER" : "MASTER", cx, (bb + bt) * 0.5f + u * 0.02f, on ? C_BLACK : C_MASTER_UNLIT, LLFontGL::HCENTER, LLFontGL::BOTTOM);
+            text(master, it.label, cx, (bb + bt) * 0.5f - u * 0.02f, on ? C_BLACK : C_MASTER_UNLIT, LLFontGL::HCENTER, LLFontGL::TOP);
             addHit(bl, bb, br, bt, it.id, it.tip);
             break;
         }
@@ -3096,7 +3099,7 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
         text(big, sp, sl + pad, spy, spc, LLFontGL::LEFT, LLFontGL::VCENTER);
         if (!hasFocus() && mScratch.empty() && mScratchMsg.empty() && !mDelete)
         {
-            text(small, "CLICK HERE TO TYPE", (sl + sr) * 0.5f, spy, C_DIM, LLFontGL::HCENTER, LLFontGL::VCENTER);
+            text(small, "CLICK HERE TO TYPE", (sl + sr) * 0.5f, spy, C_GREY, LLFontGL::HCENTER, LLFontGL::VCENTER);
         }
     }
 
@@ -3276,7 +3279,6 @@ namespace
     // [S51]) -> atan(44.704 / 744) = 3.44 degrees, a ring of 120 mils across, which agrees with the 118 mils given for the
     // Barr & Stroud GM2's ring by DCS (forum.dcs.world/topic/328194, an estimate, not a drawing).
     const F32 SIGHT_RING_RAD = atanf(44.704f / 744.f);
-    const F32 BAIL_CONFIRM_S = 4.f;
     const LLColor4 C_SIGHT(1.00f, 0.55f, 0.20f, 0.85f);   // the GM2's lamp through its orange-tinted glass (as the deck's HUD green)
 
     std::string upper(std::string s)
@@ -3329,7 +3331,7 @@ void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
     text(mF.mSmall, word, sr - w * 0.04f, top, wcol, LLFontGL::RIGHT, LLFontGL::TOP);
     if (!s.mWolfAir)
     {
-        text(mF.mTiny, "NO DOGFIGHTS ON THIS REGION", sr - w * 0.04f, top - h * 0.07f, C_DIM, LLFontGL::RIGHT, LLFontGL::TOP);
+        text(mF.mTiny, "NO DOGFIGHTS ON THIS REGION", sr - w * 0.04f, top - h * 0.07f, C_GREY, LLFontGL::RIGHT, LLFontGL::TOP);
     }
 
     // [WOLF AIR JETS 2026-11-02] a jet or a missile-carrier gets the stores rows and a second row of buttons (FLARE, CHAFF)
@@ -3390,7 +3392,7 @@ void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
         const F32 f = llclamp((F32)heat / 100.f, 0.f, 1.f);
         const LLColor4 hc = heat >= 100 ? (blink(0.5f) ? C_RED : C_DIM) : heat >= 80 ? C_RED : heat >= 55 ? C_AMBER : C_BAR_ON;
         rectF(gl, by, gl + (gr - gl) * f, by + bh, hc);
-        text(mF.mTiny, heat >= 100 ? "JAMMED - LET IT COOL" : fmt("HEAT %d%%", heat), gl, by - 2.f, heat >= 80 ? C_RED : C_DIM, LLFontGL::LEFT, LLFontGL::TOP);
+        text(mF.mTiny, heat >= 100 ? "JAMMED - LET IT COOL" : fmt("HEAT %d%%", heat), gl, by - 2.f, heat >= 80 ? C_RED : C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
     };
     F32 gy = pt;
     if (s.mGuns > 0)
@@ -3444,7 +3446,7 @@ void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
     button(sl + gap * 2.f + bw, H_AIR_FIRE, wpn == WolfAir::WPN_IR ? "FOX 2" : wpn == WolfAir::WPN_RADAR ? "FOX 3" : "FIRE", C_RED, a.firing(),
            wpn == WolfAir::WPN_GUN ? "Hold to fire (short bursts: the guns overheat and jam). In mouselook the left mouse button fires too; set an extra fire key on the CDU CONTROLS page"
                                    : "Press to launch one missile at the target in the seeker circle (the fire key does the same)");
-    const bool ask = now() - mBailAskAt < BAIL_CONFIRM_S;
+    const bool ask = mBailArmed;
     button(sl + gap * 3.f + bw * 2.f, H_AIR_BAIL, ask ? "CONFIRM" : "BAIL OUT", C_AMBER, ask || down,
            "Jump with the parachute. Press again to confirm");
     F32 say_y = bt + h * 0.02f;
@@ -4395,7 +4397,7 @@ void WolfFlightDeck::drawCrew(F32 l, F32 b, F32 r, F32 t)
         y -= lh;
     }
     const F32 gap = w * 0.03f;
-    const bool ask = now() - mBailAskAt < 4.0;
+    const bool ask = mBailArmed;
     airButton(sl + gap, sr - gap, sb + h * 0.04f, sb + h * 0.18f, w, H_AIR_BAIL, ask ? "CONFIRM BAIL OUT" : "BAIL OUT", C_AMBER, ask,
               a.isCrew() ? "Jump with your parachute; the aircraft flies on. Press again to confirm"
                          : "Jump with the parachute. Press again to confirm");
@@ -4483,7 +4485,7 @@ void WolfFlightDeck::drawTurret(F32 l, F32 b, F32 r, F32 t)
     const F32 gap = w * 0.03f, bw = (w - gap * 3.f) * 0.5f;
     airButton(sl + gap, sl + gap + bw, sb + h * 0.04f, sb + h * 0.18f, w, H_AIR_FIRE, "FIRE", C_RED, a.firing() || tu.mFire,
               "Hold to fire the turret's guns (in mouselook the left mouse button fires too)");
-    const bool ask = now() - mBailAskAt < 4.0;
+    const bool ask = mBailArmed;
     airButton(sl + gap * 2.f + bw, sr - gap, sb + h * 0.04f, sb + h * 0.18f, w, H_AIR_BAIL, ask ? "CONFIRM" : "BAIL OUT", C_AMBER, ask,
               "Jump with your parachute; the aircraft flies on. Press again to confirm");
 }
@@ -5318,6 +5320,9 @@ void WolfFlightDeck::knob(EHit id, S32 step)
 void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
 {
     WolfFlight& f = WolfFlight::instance();
+    // [WOLF HUD LOOKS 2026-11-25] BAIL OUT's CONFIRM waits for the pilot (it lapsed after 4 s, a timed demand: older residents
+    // need the time, ui-ux-design / WCAG 2.2.1); any other button takes it back to BAIL OUT
+    if (id != H_AIR_BAIL) mBailArmed = false;
     // [WOLF AIR BOMBERS] the ranges: a crew seat to move to (s9 "hud seat"), an engine's switch (s10)
     if (id >= H_CREW_SEAT_FIRST && id <= H_CREW_SEAT_LAST)
     {
@@ -5349,7 +5354,7 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
     case H_MASTER_WARN:
     case H_MASTER_CAUT: f.cancelMasters(); break;
     // [WOLF AIR 2026-11-01] DOGFIGHT switches the plane's dogfight mode (the plugin takes 30 s to let her out, DESIGN.md
-    // s3.1); BAIL asks first: a second press within BAIL_CONFIRM_S is the jump (drawCombat shows CONFIRM)
+    // s3.1); BAIL asks first: the button turns to CONFIRM and a second press is the jump (drawCombat shows CONFIRM)
     case H_AIR_DOGFIGHT: WolfAir::instance().dogfight(!WolfAir::instance().inDogfight()); break;
     // [WOLF AIR RADAR 2026-11-02] the scope's buttons: the range 1/2/5/10 km, the next target, the target key (END / none)
     case H_AIR_RADAR_RANGE: WolfAir::cycleRadarRange(); break;
@@ -5365,14 +5370,14 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
         break;
     }
     case H_AIR_BAIL:
-        if (now() - mBailAskAt < BAIL_CONFIRM_S)
+        if (mBailArmed)
         {
-            mBailAskAt = -100.0;
+            mBailArmed = false;
             WolfAir::instance().bail();
         }
         else
         {
-            mBailAskAt = now();
+            mBailArmed = true;
         }
         break;
     // [WOLF AIR JETS 2026-11-02] the stores, the decoys and the jet's switches

@@ -1109,7 +1109,20 @@ void main()
             vec2 pgrad = vec2(eXp.a - eXm.a, eYp.a - eYm.a);
             float pl = length(pgrad);
             havePath = havePath && pl > 1.0;
-            vec2 ograd = vec2(eXp.b - eXm.b, eYp.b - eYm.b);
+            // [T1042 SURF PHASE 2026-11-25] The open-sea coordinate runs ON over the open sea: B (distance from the open sea)
+            // is 0 there, so add OPEN_SEA_M minus the distance to land wherever that is negative - continuous where they meet
+            // (B is 0 and the distance to land 150 m on the same line), level lines parallel to the coast offshore. It was
+            // B alone, flat offshore, and the surf switched to -distance-to-land there, a phase k0 x 150 m (+ up to 80 m of
+            // tap reach) away: crests cut off on a line. The baked path (A) is seeded the same way (wolfwaterfield.cpp), so
+            // both coordinates are one field from the open sea to the beach. Land is in reach within 3000 m, as below.
+            // KEEP IN STEP with wolfwaterfield.h OPEN_SEA_M / SURF_PATH_LAND_REACH_M and wolfboatrock.cpp.
+            const float WOLF_OPEN_SEA_M = 150.0;
+            float cC = eC.b + min(WOLF_OPEN_SEA_M - min(eC.g, 3000.0), 0.0);
+            float cXp = eXp.b + min(WOLF_OPEN_SEA_M - min(eXp.g, 3000.0), 0.0);
+            float cXm = eXm.b + min(WOLF_OPEN_SEA_M - min(eXm.g, 3000.0), 0.0);
+            float cYp = eYp.b + min(WOLF_OPEN_SEA_M - min(eYp.g, 3000.0), 0.0);
+            float cYm = eYm.b + min(WOLF_OPEN_SEA_M - min(eYm.g, 3000.0), 0.0);
+            vec2 ograd = vec2(cXp - cXm, cYp - cYm);
             float ol = length(ograd);
             bool haveOpen = eC.b < 3000.0 && ol > 1.0;
             float dist = eC.g;
@@ -1119,7 +1132,7 @@ void main()
             vec2 dir = havePath ? pgrad / pl
                      : (haveOpen ? ograd / ol
                      : (haveLand ? -grad / gl : normalize(depthOrigin + depthRegionSize * 0.5 - regionXY + vec2(0.001, 0.0))));
-            float openS = (eC.b + eXp.b + eXm.b + eYp.b + eYm.b) * 0.2;   // smoothed contours
+            float openS = (cC + cXp + cXm + cYp + cYm) * 0.2;   // smoothed contours ([T1042 SURF PHASE/] the continuous coordinate)
             float distS = (dist + eXp.g + eXm.g + eYp.g + eYm.g) * 0.2;
             // Fallbacks (a landlocked lake with surf painted on it, or a field baked before
             // the region's record arrived) travel on the plain geometric distance at the

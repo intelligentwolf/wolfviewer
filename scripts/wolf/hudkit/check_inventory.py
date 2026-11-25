@@ -38,8 +38,8 @@ def load(hud):
 
 
 # the XUI widgets a resident presses (llui: LLButton, LLCheckBoxCtrl, LLComboBox, LLSliderCtrl, LLSpinCtrl, LLFlyoutButton,
-# the recorder's transport button)
-XUI_PRESS = ('button', 'check_box', 'combo_box', 'slider', 'spinner', 'flyout_button', 'wolf_recorder_transport_button')
+# LLRadioGroup, the recorder's transport button)
+XUI_PRESS = ('button', 'check_box', 'combo_box', 'slider', 'spinner', 'flyout_button', 'radio_group', 'wolf_recorder_transport_button')
 XUI_TAG = re.compile(r'<(%s)\b([^>]*)>' % '|'.join(XUI_PRESS))
 
 

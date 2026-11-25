@@ -7,14 +7,18 @@
      maker's plate - is drawn in code behind these controls (WolfFloaterRadio::drawRadio()), and
      WolfFloaterRadio::layoutRadio() places every control below on every resize, so the positions here are only
      a starting point. The buttons draw no skin image (image_color 0 alpha): the radio paints them as ivory keys
-     and bakelite push-buttons underneath; their labels, keyboard focus border and tooltips are the buttons' own. -->
+     and bakelite push-buttons underneath; their labels, keyboard focus border and tooltips are the buttons' own.
+     [HUD KIT 2026-11-25] Paul: "every target 44 px or more"; Shadow 25 Nov: keep Paul's walnut radio, every control 44 px, the
+     minimum height grows to 620 (default 700). layoutRadio() makes the genre keys, Listen / Set on land / Add to my presets and
+     Add your station... 44 high and the knobs 44 or more across; the heights below are only the starting point, as before. Paul: "the radio
+     is lovely as it is" - same walnut and ivory look, only the sizes changed. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="true"
- height="640"
+ height="700"
  layout="topleft"
- min_height="540"
+ min_height="620"
  min_width="540"
  name="wolf_radio"
  help_topic="wolf_radio"
@@ -61,21 +65,21 @@
         <scroll_list.columns label="Country" name="country" width="140" />
         <scroll_list.columns label="kbps" name="kbps" width="50" />
     </scroll_list>
-    <button follows="left|top" height="26" is_toggle="true" label="Listen" label_selected="Stop" layout="topleft" left="120" name="listen_btn" top="540" width="96"
+    <button follows="left|top" height="44" is_toggle="true" label="Listen" label_selected="Stop" layout="topleft" left="120" name="listen_btn" top="540" width="96"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
      label_color="0.95 0.89 0.74 1" label_color_selected="0.95 0.89 0.74 1" label_color_disabled="0.62 0.54 0.42 1" label_color_disabled_selected="0.62 0.54 0.42 1"
      tool_tip="Listen to the station yourself (only you hear it). Press again to stop and get the land's music back." />
-    <button follows="left|top" height="26" label="Set on land" layout="topleft" left_pad="8" name="set_land_btn" top_delta="0" width="120"
+    <button follows="left|top" height="44" label="Set on land" layout="topleft" left_pad="8" name="set_land_btn" top_delta="0" width="120"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
      label_color="0.95 0.89 0.74 1" label_color_selected="0.95 0.89 0.74 1" label_color_disabled="0.62 0.54 0.42 1" label_color_disabled_selected="0.62 0.54 0.42 1"
      tool_tip="Make this station the music on this land, for everyone here" />
-    <button follows="left|top" height="26" label="Add to my presets" layout="topleft" left_pad="8" name="add_preset_btn" top_delta="0" width="150"
+    <button follows="left|top" height="44" label="Add to my presets" layout="topleft" left_pad="8" name="add_preset_btn" top_delta="0" width="150"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
      label_color="0.95 0.89 0.74 1" label_color_selected="0.95 0.89 0.74 1" label_color_disabled="0.62 0.54 0.42 1" label_color_disabled_selected="0.62 0.54 0.42 1"
      tool_tip="Keep this station in My presets on the Sound tab" />
     <!-- [WOLF STATIONS 2026-10-25] at the right of the station log card's heading (layoutRadio() places it); Wolf
          Territories logins only, as the page needs one (wolffloaterradio.cpp postBuild) -->
-    <button follows="left|top" height="20" label="Add your station..." layout="topleft" left="470" name="add_station_btn" top="290" width="140"
+    <button follows="left|top" height="44" label="Add your station..." layout="topleft" left="470" name="add_station_btn" top="290" width="140"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
      label_color="0.95 0.89 0.74 1" label_color_selected="0.95 0.89 0.74 1" label_color_disabled="0.62 0.54 0.42 1" label_color_disabled_selected="0.62 0.54 0.42 1"
      tool_tip="Run an internet radio station? Add it to this radio at wolf-grid.com/wolf-stations (opens your web browser; sign in with your Wolf Territories name). It is listed once it passes the checks, and shows here within the hour, from your next login." />

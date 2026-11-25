@@ -49,6 +49,7 @@
 #include "llui.h"
 #include "llviewercontrol.h"
 #include "llviewerinventory.h"
+#include "llviewerwindow.h"   // [HUD KIT 2026-11-25/] gViewerWindow->getDisplayScale (logHits)
 #include "llwindow.h"
 #include "llapp.h"
 #include "llnotificationsutil.h"
@@ -59,6 +60,7 @@
 #include "wolffloatergreedy.h"   // [W104 MERGE 2026-11-11/] Greedy and Fishing one at a time
 #include "wolfgame.h"
 #include "wolfgrid.h"
+#include "wolfhudkit.h"   // [HUD KIT 2026-11-25/] Paul's Gunmetal Console look
 #include "wolfhelm.h"
 #include "wolfskis.h"
 
@@ -1414,6 +1416,20 @@ namespace
     void button(Ctx& c, F32 l, F32 b, F32 r, F32 t, const std::string& label, WolfFishingHud::EHit id, const std::string& tip,
                 F32 px, const LLColor4& face_hi, const LLColor4& face_lo, bool enabled = true)
     {
+        // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): a backlit key in its well, pressed while held, words in the
+        // kit's key colour (wolftraincab.cpp: 7.9:1 on the cap); a key not usable now keeps its dim words and no target. The old
+        // rounded button until the kit's sheet has loaded.
+        // REEL IN at a bite (its green face, BTN_GO_LO) is a lit key under a green glow that breathes with its face (go_hi).
+        static const LLColor4 C_KEYTEXT(0.949f, 0.957f, 0.969f, 1.f);
+        const bool bite = enabled && face_lo == BTN_GO_LO;
+        if (bite && WolfHudKit::ready()) WolfHudKit::part(WolfHudKitMap::P_GLOW_RECT, l - S(14.f), b - S(14.f), r + S(14.f), t + S(14.f), alpha(face_hi, 0.8f));
+        if (WolfHudKit::key(l, b, r, t, enabled && c.pressed == id ? WolfHudKit::CAP_DOWN : bite ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP, S(0.4f)))
+        {
+            fitT((l + r) * 0.5f, (b + t) * 0.5f - (enabled && c.pressed == id ? S(1.f) : 0.f), label, px, 8.f, (r - l) - S(10.f),
+                 enabled ? C_KEYTEXT : alpha(GREY, 0.75f), true);
+            if (enabled) c.hit(l, b, r, t, id, tip);
+            return;
+        }
         if (!enabled)
         {
             roundRectF(l, b, r, t, (t - b) * 0.25f, BTN_OFF_HI, BTN_OFF_LO);
@@ -1447,8 +1463,66 @@ namespace
     }
 }
 
-WolfFishingHud::WolfFishingHud(const Params& p) : LLUICtrl(p) {}
-WolfFishingHud::~WolfFishingHud() {}
+namespace
+{
+    WolfFishingHud* sWolfFishingHudView = nullptr;   // [HUD KIT 2026-11-25] for logHits; the one view (main_view.xml)
+}
+
+WolfFishingHud::WolfFishingHud(const Params& p)
+:   LLUICtrl(p)
+{
+    sWolfFishingHudView = this;
+}
+
+WolfFishingHud::~WolfFishingHud()
+{
+    if (sWolfFishingHudView == this) sWolfFishingHudView = nullptr;
+}
+
+// [HUD KIT 2026-11-25] the hit ids by name, for logHits (as in the header's EHit); a ranged id is its first with the offset
+const char* WolfFishingHud::hitName(EHit id, S32& offset)
+{
+    offset = 0;
+
+    switch (id)
+    {
+    case H_NONE: return "H_NONE";
+    case H_CAST: return "H_CAST";
+    case H_REEL: return "H_REEL";
+    case H_STOP: return "H_STOP";
+    case H_BOARD: return "H_BOARD";
+    case H_CHALLENGE: return "H_CHALLENGE";
+    case H_PANEL: return "H_PANEL";
+    case H_CLOSE: return "H_CLOSE";
+    case H_TIP: return "H_TIP";
+    case H_SCROLL_UP: return "H_SCROLL_UP";
+    case H_SCROLL_DOWN: return "H_SCROLL_DOWN";
+    case H_SCROLL_TRACK: return "H_SCROLL_TRACK";
+    case H_SCROLL_THUMB: return "H_SCROLL_THUMB";
+    default: return "H_UNKNOWN";
+    }
+}
+
+void WolfFishingHud::logHits()
+{
+    if (!sWolfFishingHudView) { LL_INFOS("WolfHudKit") << "hits fishing: not shown" << LL_ENDL; return; }
+    // Source: wolftraincab.cpp WolfTrainCabView::logHits - view-local UI units to window GL pixels (localPointToScreen, then the
+    // display scale). The hits are in picture units: x mHitScale (hitAt).
+    const WolfFishingHud* v = sWolfFishingHudView;
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    const F32 k = v->mHitScale;
+    LL_INFOS("WolfHudKit") << "hits fishing: " << v->mHits.size() << " (display scale " << scale.mV[VX] << ", zoom " << k << ")" << LL_ENDL;
+    for (const Hit& h : v->mHits)
+    {
+        S32 sx = 0, sy = 0, off = 0;
+        const char* name = hitName(h.mId, off);
+        v->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f * k), ll_round((h.mB + h.mT) * 0.5f * k), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit fishing " << name << (off ? llformat("+%d", off) : std::string()) << " gl "
+                               << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY]) << " size "
+                               << ll_round((h.mR - h.mL) * k * scale.mV[VX]) << "," << ll_round((h.mT - h.mB) * k * scale.mV[VY])
+                               << " tip " << h.mTip << LL_ENDL;
+    }
+}
 
 void WolfFishingHud::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip)
 {
@@ -1911,7 +1985,7 @@ void WolfFishingHud::drawPile(F32 band_top)
     T(left, ly, label, 13.f, GOLD, true, false, LLFontGL::LEFT);
     Ctx c{ [this](F32 a, F32 bb, F32 r, F32 tt, EHit id, const std::string& tip) { addHit(a, bb, r, tt, id, tip); }, mPressed };
     const F32 bl = left + S(290.f);
-    button(c, bl, ly - S(18.f), bl + S(200.f), ly + S(18.f), "TIP THEM BACK", H_TIP,
+    button(c, bl, ly - S(21.f), bl + S(200.f), ly + S(21.f), "TIP THEM BACK", H_TIP,   // [HUD KIT 2026-11-25] 42 tall (was 36)
            "Tip today's catch back into the water (the pile starts again; your week's score stays)", 11.f, BTN_HI, BTN_LO);
 }
 

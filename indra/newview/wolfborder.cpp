@@ -40,6 +40,7 @@
 #include "llworld.h"
 #include "llworldmap.h"
 #include "wolfgrid.h"
+#include "wolfhudkit.h"   // [HUD KIT 2026-11-25/] Paul's Gunmetal Console look
 #include "wolfspeech.h"
 #include "xform.h"
 
@@ -867,7 +868,17 @@ void WolfBorderBanner::draw()
     const S32 top = view_h - 72;   // under the top toolbar and the navigation bar
     mPanel.setLeftTopAndSize(left, top, width, height);
 
-    gl_rect_2d(mPanel, C_PANEL, true);
+    // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): the banner dark glass in a chrome frame, the level's bar
+    // and word as before; the flat panel until the kit's sheet has loaded
+    if (WolfHudKit::part(WolfHudKitMap::P_SCREEN, (F32)left, (F32)(top - height), (F32)(left + width), (F32)top, LLColor4::white, 0.4f))
+    {
+        WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, (F32)left - 4.f, (F32)(top - height) - 4.f, (F32)(left + width) + 4.f, (F32)top + 4.f,
+                         LLColor4::white, 0.3f);
+    }
+    else
+    {
+        gl_rect_2d(mPanel, C_PANEL, true);
+    }
     LLRect accent(left, top, left + bar, top - height);
     gl_rect_2d(accent, levelColour(b.mLevel), true);
 
@@ -912,7 +923,14 @@ void WolfBorderBanner::draw()
         mButton.setLeftTopAndSize(tx, y, bw, button_h);
         S32 mx = 0, my = 0;
         LLUI::getInstance()->getMousePositionLocal(this, &mx, &my);
-        gl_rect_2d(mButton, mButton.pointInRect(mx, my) ? C_BUTTON_HI : C_BUTTON, true);
+        // [HUD KIT 2026-11-25] a backlit key (a warm glow under the pointer); the flat button until the kit's sheet has loaded
+        const bool over = mButton.pointInRect(mx, my);
+        if (over) WolfHudKit::part(WolfHudKitMap::P_GLOW_RECT, (F32)mButton.mLeft - 8.f, (F32)mButton.mBottom - 8.f, (F32)mButton.mRight + 8.f,
+                                   (F32)mButton.mTop + 8.f, LLColor4(1.f, 0.66f, 0.27f, 0.45f));
+        if (!WolfHudKit::key((F32)mButton.mLeft, (F32)mButton.mBottom, (F32)mButton.mRight, (F32)mButton.mTop, WolfHudKit::CAP_UP, 0.4f))
+        {
+            gl_rect_2d(mButton, over ? C_BUTTON_HI : C_BUTTON, true);
+        }
         med->renderUTF8(b.mTeleportLabel, 0, (F32)mButton.getCenterX(), (F32)mButton.getCenterY(), C_TEXT,
                         LLFontGL::HCENTER, LLFontGL::VCENTER, LLFontGL::BOLD, LLFontGL::NO_SHADOW);
     }

@@ -42,6 +42,11 @@
 #include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolftraincab.h"   // [TRAIN CAB 2026-11-13] the Train Cab (Wolf Rail)
 #include "wolfflightdeck.h"   // [HUD KIT 2026-11-25/] WolfFlightDeck::logHits (WolfHudKit.Hits)
+#include "wolfdashboard.h"   // [HUD KIT 2026-11-25/] WolfDashboard::logHits (WolfHudKit.Hits)
+#include "wolfhelmhud.h"   // [HUD KIT 2026-11-25/] WolfHelmHud::logHits
+#include "wolfspeed.h"   // [HUD KIT 2026-11-25/] WolfFloaterSpeed::logHits
+#include "wolfskihud.h"   // [HUD KIT 2026-11-25/] WolfSkiHud::logHits
+#include "wolffishingoverlay.h"   // [HUD KIT 2026-11-25/] WolfFishingHud::logHits
 #include "wolffloatertunnels.h"   // [T934 2026-11-19/] a taken or returned tunnel rock takes its holes with it
 #include "wolftunnelgone.h"
 // <WolfViewer 2026-09-06> Wolf Territories-only features
@@ -13300,6 +13305,11 @@ void initialize_menus()
         const std::string hud = param.asString();
         if (hud == "traincab") WolfTrainCabView::logHits();
         else if (hud == "flightdeck") WolfFlightDeck::logHits();   // [HUD KIT 2026-11-25/]
+        else if (hud == "dashboard") WolfDashboard::logHits();     // [HUD KIT 2026-11-25/]
+        else if (hud == "helm") WolfHelmHud::logHits();            // [HUD KIT 2026-11-25/]
+        else if (hud == "speed") WolfFloaterSpeed::logHits();      // [HUD KIT 2026-11-25/]
+        else if (hud == "ski") WolfSkiHud::logHits();              // [HUD KIT 2026-11-25/]
+        else if (hud == "fishing") WolfFishingHud::logHits();      // [HUD KIT 2026-11-25/]
         else LL_INFOS("WolfHudKit") << "hits: no HUD called \"" << hud << "\"" << LL_ENDL;
     });
     enable.add("WolfTrain.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfTrain::instance().shown(); });

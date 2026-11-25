@@ -429,7 +429,8 @@ void WolfFloaterRecorder::drawMeter(int source, const LLRect& rect)
 {
     // the bar (12 px, centred) with room for the word "Loud" on its right
     const LLFontGL* font = LLFontGL::getFontSansSerifSmallBold();
-    const S32 word_w = font->getWidth(getString("meter_loud")) + 6;
+    // [HUD KIT 2026-11-25] the amber zone has its word too ("High"; it was colour alone, WCAG 1.4.1): room for the longer word
+    const S32 word_w = std::max(font->getWidth(getString("meter_loud")), font->getWidth(getString("meter_high"))) + 6;
     const S32 left = rect.mLeft, right = rect.mRight - word_w, mid = rect.mBottom + rect.getHeight() / 2;
     const S32 top = mid + 6, bottom = mid - 6, width = right - left;
     if (width < 20) return;
@@ -457,12 +458,12 @@ void WolfFloaterRecorder::drawMeter(int source, const LLRect& rect)
         gl_rect_2d(x - 1, top, x + 1, bottom, LLColor4(1.f, 1.f, 1.f, 0.9f), true);
     }
     gl_rect_2d(left, top, right, bottom, LLColor4(0.f, 0.f, 0.f, 0.6f), false);
-    // too loud in words as well as in red (WCAG 1.4.1)
-    if (mHoldDb[source] >= kRedDb)
+    // too loud in words as well as in red, and getting loud as well as in amber (WCAG 1.4.1)
+    if (mHoldDb[source] >= kAmberDb)
     {
-        font->renderUTF8(getString("meter_loud"), 0, (F32)(right + 6), (F32)mid,
-                         LLUIColorTable::instance().getColor("AlertCautionTextColor"), LLFontGL::LEFT, LLFontGL::VCENTER,
-                         LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
+        font->renderUTF8(getString(mHoldDb[source] >= kRedDb ? "meter_loud" : "meter_high"), 0, (F32)(right + 6), (F32)mid,
+                         LLUIColorTable::instance().getColor(mHoldDb[source] >= kRedDb ? "AlertCautionTextColor" : "LabelTextColor"),
+                         LLFontGL::LEFT, LLFontGL::VCENTER, LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
     }
 }
 

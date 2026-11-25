@@ -32,8 +32,10 @@
 #include "lltooltip.h"
 #include "llui.h"
 #include "llviewercontrol.h"
+#include "llviewerwindow.h"   // [HUD KIT 2026-11-25/] gViewerWindow->getDisplayScale (logHits)
 #include "llwindow.h"
 #include "wolfhelm.h"
+#include "wolfhudkit.h"   // [HUD KIT 2026-11-25/] Paul's Gunmetal Console look
 
 static LLDefaultChildRegistry::Register<WolfHelmHud> r_wolf_helm_hud("wolf_helm_hud");
 
@@ -53,6 +55,9 @@ namespace
     const LLColor4 OAK_HI(0.20f, 0.13f, 0.08f, 1.f), OAK_LO(0.055f, 0.033f, 0.02f, 1.f);
     const LLColor4 OAK_INSET(0.035f, 0.022f, 0.014f, 1.f);
     const LLColor4 BRASS(0.86f, 0.69f, 0.34f, 1.f);
+    // [HUD KIT 2026-11-25] words on a key cap (wolftraincab.cpp's; WCAG 2 on the cap's lightest middle): 7.9:1 and lit 5.3:1
+    const LLColor4 C_KEYTEXT(0.949f, 0.957f, 0.969f, 1.f);
+    const LLColor4 C_KEYLIT(1.f, 0.753f, 0.38f, 1.f);
     const LLColor4 BRASS_HI(1.00f, 0.89f, 0.58f, 1.f), BRASS_LO(0.40f, 0.28f, 0.11f, 1.f);
     const LLColor4 PARCH_HI(0.96f, 0.92f, 0.79f, 1.f), PARCH_LO(0.78f, 0.69f, 0.51f, 1.f);
     const LLColor4 INK(0.17f, 0.11f, 0.06f, 1.f);
@@ -341,6 +346,15 @@ namespace
                 const std::string& tip, F32 px = 12.f, bool enabled = true, const LLColor4& lit_col = C_AMBER)
     {
         const bool down = c.pressed == id;
+        // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): a backlit key in its well on the oak (the helm keeps its
+        // wood, as the Sailing Deck kept its walnut) - lit with its lamp while on, pressed while held; a key that is not the
+        // resident's to press (crew) keeps its dim words. The old flat key until the kit's sheet has loaded.
+        if (WolfHudKit::key(l, b, r, t, down ? WolfHudKit::CAP_DOWN : lit ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP, S(0.4f)))
+        {
+            T((l + r) * 0.5f, (b + t) * 0.5f - (down ? S(1.f) : 0.f), label, px, !enabled ? C_DIM : lit ? C_KEYLIT : C_KEYTEXT, true);
+            c.hit(l, b, r, t, id, tip);
+            return;
+        }
         roundRectF(l, b, r, t, (t - b) * 0.22f,
                    down ? LLColor4(0.09f, 0.06f, 0.04f, 0.97f) : LLColor4(0.30f, 0.21f, 0.13f, 0.97f),
                    down ? LLColor4(0.16f, 0.11f, 0.07f, 0.97f) : LLColor4(0.11f, 0.07f, 0.045f, 0.97f));
@@ -523,13 +537,75 @@ namespace
     struct HelpLine { S32 kind; const char* s; };   // 0 heading, 1 line, 2 more of it, 3 gap
 }
 
+namespace
+{
+    WolfHelmHud* sWolfHelmHudView = nullptr;   // [HUD KIT 2026-11-25] for logHits; the one view (main_view.xml)
+}
+
 WolfHelmHud::WolfHelmHud(const Params& p)
 :   LLUICtrl(p)
 {
+    sWolfHelmHudView = this;
 }
 
 WolfHelmHud::~WolfHelmHud()
 {
+    if (sWolfHelmHudView == this) sWolfHelmHudView = nullptr;
+}
+
+// [HUD KIT 2026-11-25] the hit ids by name, for logHits (as in the header's EHit); a ranged id is its first with the offset
+const char* WolfHelmHud::hitName(EHit id, S32& offset)
+{
+    offset = 0;
+
+    switch (id)
+    {
+    case H_NONE: return "H_NONE";
+    case H_WHEEL: return "H_WHEEL";
+    case H_FURL: return "H_FURL";
+    case H_BATTLE_SAILS: return "H_BATTLE_SAILS";
+    case H_PLAIN: return "H_PLAIN";
+    case H_ALL: return "H_ALL";
+    case H_ANCHOR: return "H_ANCHOR";
+    case H_ASTERN: return "H_ASTERN";
+    case H_WIND_WEATHER: return "H_WIND_WEATHER";
+    case H_WIND_REGION: return "H_WIND_REGION";
+    case H_WIND_FIXED: return "H_WIND_FIXED";
+    case H_LIGHT_AIRS: return "H_LIGHT_AIRS";
+    case H_KN_DOWN: return "H_KN_DOWN";
+    case H_KN_UP: return "H_KN_UP";
+    case H_FROM_DOWN: return "H_FROM_DOWN";
+    case H_FROM_UP: return "H_FROM_UP";
+    case H_BATTLE_MODE: return "H_BATTLE_MODE";
+    case H_FIRE_PORT: return "H_FIRE_PORT";
+    case H_FIRE_STBD: return "H_FIRE_STBD";
+    case H_CLOSE: return "H_CLOSE";
+    case H_HELP: return "H_HELP";
+    case H_PANEL: return "H_PANEL";
+    case H_AUTO: return "H_AUTO";
+    default: return "H_UNKNOWN";
+    }
+}
+
+void WolfHelmHud::logHits()
+{
+    if (!sWolfHelmHudView) { LL_INFOS("WolfHudKit") << "hits helm: not shown" << LL_ENDL; return; }
+    // Source: wolftraincab.cpp WolfTrainCabView::logHits - view-local UI units to window GL pixels (localPointToScreen, then the
+    // display scale). The hits are in picture units: x mHitScale (hitAt).
+    const WolfHelmHud* v = sWolfHelmHudView;
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    const F32 k = v->mHitScale;
+    LL_INFOS("WolfHudKit") << "hits helm: " << v->mHits.size() << " (display scale " << scale.mV[VX] << ", zoom " << k << ")" << LL_ENDL;
+    for (const Hit& h : v->mHits)
+    {
+        S32 sx = 0, sy = 0, off = 0;
+        const char* name = hitName(h.mId, off);
+        v->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f * k), ll_round((h.mB + h.mT) * 0.5f * k), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit helm " << name << (off ? llformat("+%d", off) : std::string()) << " gl "
+                               << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY]) << " size "
+                               << ll_round((h.mR - h.mL) * k * scale.mV[VX]) << "," << ll_round((h.mT - h.mB) * k * scale.mV[VY])
+                               << " tip " << h.mTip << LL_ENDL;
+    }
 }
 
 void WolfHelmHud::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip)
@@ -727,13 +803,14 @@ void WolfHelmHud::draw()
         static const char* const SETTINGS[4] = { "Furled", "Battle sails", "Plain sail", "All sail" };
         T(X(596.f), YM(618.f), SETTINGS[llclamp(s.mSail, 0, 3)], 10.f, BRASS, true, false, LLFontGL::RIGHT);
         const std::string capt_only = orders ? "" : " (the captain's order)";
-        button(c, X(326.f), YM(838.f), X(392.f), YM(806.f), "FURL", s.mSail == 0, H_FURL, "Furl every sail" + capt_only, 11.f, orders);
-        button(c, X(396.f), YM(838.f), X(462.f), YM(806.f), "BATTLE", s.mSail == 1, H_BATTLE_SAILS, "Battle sails: topsails, jib and spanker" + capt_only, 11.f, orders);
-        button(c, X(466.f), YM(838.f), X(532.f), YM(806.f), "PLAIN", s.mSail == 2, H_PLAIN, "Plain sail: and the courses, topgallants and staysails" + capt_only, 11.f, orders);
-        button(c, X(536.f), YM(838.f), X(604.f), YM(806.f), "ALL", s.mSail == 3, H_ALL, "All sail: and the royals and flying jib" + capt_only, 11.f, orders);
-        button(c, X(326.f), YM(880.f), X(462.f), YM(846.f), s.mAnchor ? "WEIGH ANCHOR" : "DROP ANCHOR", s.mAnchor, H_ANCHOR,
+        // [HUD KIT 2026-11-25] the sail and anchor keys 42 tall (were 32 and 34): 44 px or more at full size (wolfhudkit.h)
+        button(c, X(326.f), YM(846.f), X(392.f), YM(804.f), "FURL", s.mSail == 0, H_FURL, "Furl every sail" + capt_only, 11.f, orders);
+        button(c, X(396.f), YM(846.f), X(462.f), YM(804.f), "BATTLE", s.mSail == 1, H_BATTLE_SAILS, "Battle sails: topsails, jib and spanker" + capt_only, 11.f, orders);
+        button(c, X(466.f), YM(846.f), X(532.f), YM(804.f), "PLAIN", s.mSail == 2, H_PLAIN, "Plain sail: and the courses, topgallants and staysails" + capt_only, 11.f, orders);
+        button(c, X(536.f), YM(846.f), X(604.f), YM(804.f), "ALL", s.mSail == 3, H_ALL, "All sail: and the royals and flying jib" + capt_only, 11.f, orders);
+        button(c, X(326.f), YM(894.f), X(462.f), YM(852.f), s.mAnchor ? "WEIGH ANCHOR" : "DROP ANCHOR", s.mAnchor, H_ANCHOR,
                (s.mAnchor ? std::string("At anchor: weigh anchor to sail") : std::string("Let go the anchor: she is brought up short")) + capt_only, 10.f, orders);
-        button(c, X(466.f), YM(880.f), X(604.f), YM(846.f), s.mAstern ? "STOP ASTERN" : "ASTERN", s.mAstern, H_ASTERN,
+        button(c, X(466.f), YM(894.f), X(604.f), YM(852.f), s.mAstern ? "STOP ASTERN" : "ASTERN", s.mAstern, H_ASTERN,
                (s.mAstern ? std::string("The boats stop towing") : std::string("The ship's boats tow her astern (sails furled first): to back her off a shoal or the edge")) + capt_only, 10.f, orders);
 
         // ── CENTRE: the status line, the compass, the speed log ────────────────────────────────
@@ -766,7 +843,8 @@ void WolfHelmHud::draw()
         // the compass: heading-up, a parchment card in a brass ring
         const F32 hdg = h.heading();
         const F32 ccx = X(764.f), ccy = YM(768.f), cr = S(98.f);
-        circleShaded(ccx, ccy, cr * 1.1f, BRASS_HI, BRASS_LO, 64);
+        const bool kit = WolfHudKit::ready();   // [HUD KIT 2026-11-25] the kit's brass bezel and the glass's glare over the card (below)
+        if (!kit) circleShaded(ccx, ccy, cr * 1.1f, BRASS_HI, BRASS_LO, 64);
         circleShaded(ccx, ccy, cr, PARCH_HI, PARCH_LO, 64);
         // the no-go wedge either side of the true wind: red, brighter while her bow is in it
         const F32 wind_rel = s.mTwf - hdg;
@@ -798,6 +876,7 @@ void WolfHelmHud::draw()
             pt(ccx, ccy, cr * 0.42f, wind_rel, x1, y1);
             arrow(x0, y0, x1, y1, S(5.f), S(16.f), LLColor4(0.10f, 0.20f, 0.42f, 1.f));
         }
+        if (kit) WolfHudKit::gaugeBezel(ccx, ccy, cr, true);   // [HUD KIT 2026-11-25/] an instrument behind glass in brass
         // the apparent wind: what she feels, the true wind less her own way (thin, teal), when she is moving
         if (std::abs(s.mKn) > 0.3f && s.mTws > 0.1f)
         {
@@ -824,7 +903,7 @@ void WolfHelmHud::draw()
         // the speed log: 0..20 knots (more if her hull speed is higher), the hull speed in red
         const F32 lcx = X(966.f), lcy = YM(756.f), lr = S(74.f);
         const F32 full = llmax(20.f, std::ceil((s.mHullKn + 2.f) / 5.f) * 5.f);
-        circleShaded(lcx, lcy, lr * 1.1f, BRASS_HI, BRASS_LO, 48);
+        if (!kit) circleShaded(lcx, lcy, lr * 1.1f, BRASS_HI, BRASS_LO, 48);   // [HUD KIT 2026-11-25/] the kit's bezel after the needle
         circleShaded(lcx, lcy, lr, LLColor4(0.10f, 0.08f, 0.06f, 1.f), LLColor4(0.02f, 0.015f, 0.01f, 1.f), 48);
         auto ang = [&](F32 v) { return -135.f + 270.f * llclamp(v / full, 0.f, 1.02f); };
         if (s.mHullKn > 0.f) clockArc(lcx, lcy, lr * 0.86f, S(5.f), ang(s.mHullKn), 135.f, C_RED);
@@ -848,6 +927,7 @@ void WolfHelmHud::draw()
             lineW(lcx, lcy, nx, ny, S(3.f), BRASS_HI);
             circleShaded(lcx, lcy, S(8.f), BRASS_HI, BRASS_LO, 16);
         }
+        if (kit) WolfHudKit::gaugeBezel(lcx, lcy, lr, true);   // [HUD KIT 2026-11-25/]
         T(lcx, lcy - S(32.f), llformat("%.1f", std::abs(s.mKn)), 16.f, C_WHITE, true, true);
         T(lcx, lcy - S(50.f), s.mKn < -0.05f ? "ASTERN" : "KNOTS", 9.f, s.mKn < -0.05f ? C_AMBER : C_GREY, true);
         T(lcx, YM(860.f), s.mHeel >= 0.5f || s.mHeel <= -0.5f ? llformat("HEEL %d\xC2\xB0 %s", (S32)llround(std::abs(s.mHeel)), s.mHeel > 0.f ? "STBD" : "PORT") : std::string("UPRIGHT"),
@@ -856,32 +936,34 @@ void WolfHelmHud::draw()
 
         // ── RIGHT: the wind source, then the battle section ──────────────────────────────────────
         use(g.R);
-        T(X(R_L + 10.f), YM(612.f), "WIND SHE SAILS ON", 9.f, C_GREY, false, false, LLFontGL::LEFT);
-        button(c, X(R_L + 10.f), YM(654.f), X(R_L + 86.f), YM(624.f), "WOLF WX", s.mWind == 0, H_WIND_WEATHER,
+        // [HUD KIT 2026-11-25] the wind keys 42 tall (were 30) and the fixed wind's steppers 42 x 42 (were 26 x 26), knots and
+        // bearing on rows of their own: 44 px or more at full size (wolfhudkit.h)
+        T(X(R_L + 10.f), YM(606.f), "WIND SHE SAILS ON", 9.f, C_GREY, false, false, LLFontGL::LEFT);
+        button(c, X(R_L + 10.f), YM(656.f), X(R_L + 86.f), YM(614.f), "WOLF WX", s.mWind == 0, H_WIND_WEATHER,
                "Wolf weather: the real weather of this region's place" + capt_only, 10.f, orders);
-        button(c, X(R_L + 90.f), YM(654.f), X(R_L + 162.f), YM(624.f), "REGION", s.mWind == 1, H_WIND_REGION,
+        button(c, X(R_L + 90.f), YM(656.f), X(R_L + 162.f), YM(614.f), "REGION", s.mWind == 1, H_WIND_REGION,
                "The region's own wind (the one Sailing Mode's dial shows)" + capt_only, 10.f, orders);
-        button(c, X(R_L + 166.f), YM(654.f), X(R_L + 236.f), YM(624.f), "FIXED", s.mWind == 2, H_WIND_FIXED,
+        button(c, X(R_L + 166.f), YM(656.f), X(R_L + 236.f), YM(614.f), "FIXED", s.mWind == 2, H_WIND_FIXED,
                "A wind you set: knots and the bearing it blows from (the steppers below)" + capt_only, 10.f, orders);
-        button(c, X(R_L + 10.f), YM(692.f), X(R_L + 120.f), YM(662.f), "LIGHT AIRS", s.mLight, H_LIGHT_AIRS,
+        button(c, X(R_L + 10.f), YM(702.f), X(R_L + 120.f), YM(660.f), "LIGHT AIRS", s.mLight, H_LIGHT_AIRS,
                (s.mLight ? std::string("Light airs help on: under 8 knots of wind she sails as if it blew 8. Click for the real wind only")
                          : std::string("Light airs help off: she sails on the real wind only. Click to help her in light airs")) + capt_only, 10.f, orders, C_GREEN);
-        T(X(R_L + 128.f), YM(670.f), llformat("%.0f kn from %03d\xC2\xB0", s.mTws, ((S32)llround(s.mTwf)) % 360), 11.f, C_WHITE, true, false, LLFontGL::LEFT);
-        T(X(R_L + 128.f), YM(686.f), s.mEff > s.mTws + 0.2f ? llformat("sails as in %.0f kn", s.mEff) : std::string(), 9.f, C_GREEN, false, false, LLFontGL::LEFT);
+        T(X(R_L + 128.f), YM(672.f), llformat("%.0f kn from %03d\xC2\xB0", s.mTws, ((S32)llround(s.mTwf)) % 360), 11.f, C_WHITE, true, false, LLFontGL::LEFT);
+        T(X(R_L + 128.f), YM(690.f), s.mEff > s.mTws + 0.2f ? llformat("sails as in %.0f kn", s.mEff) : std::string(), 9.f, C_GREEN, false, false, LLFontGL::LEFT);
         {
             std::string src = s.mSrc;
             if (src.size() > 44) src = src.substr(0, 44) + "...";
-            T(X(R_L + 10.f), YM(706.f), src, 9.f, C_GREY, false, false, LLFontGL::LEFT);
+            T(X(R_L + 10.f), YM(714.f), src, 9.f, C_GREY, false, false, LLFontGL::LEFT);
         }
         if (s.mWind == 2)
         {
             // the fixed wind's steppers: knots 0..60 by 1, the bearing by 10 degrees
-            button(c, X(R_L + 10.f), YM(744.f), X(R_L + 36.f), YM(718.f), "-", false, H_KN_DOWN, "One knot less" + capt_only, 13.f, orders);
-            T(X(R_L + 64.f), YM(731.f), llformat("%.0f KN", s.mTws), 11.f, C_WHITE, true, true);
-            button(c, X(R_L + 92.f), YM(744.f), X(R_L + 118.f), YM(718.f), "+", false, H_KN_UP, "One knot more" + capt_only, 13.f, orders);
-            button(c, X(R_L + 126.f), YM(744.f), X(R_L + 152.f), YM(718.f), "-", false, H_FROM_DOWN, "Back the wind 10 degrees" + capt_only, 13.f, orders);
-            T(X(R_L + 180.f), YM(731.f), llformat("%03d\xC2\xB0", ((S32)llround(s.mTwf)) % 360), 11.f, C_WHITE, true, true);
-            button(c, X(R_L + 208.f), YM(744.f), X(R_L + 234.f), YM(718.f), "+", false, H_FROM_UP, "Veer the wind 10 degrees" + capt_only, 13.f, orders);
+            button(c, X(R_L + 10.f), YM(764.f), X(R_L + 52.f), YM(722.f), "-", false, H_KN_DOWN, "One knot less" + capt_only, 13.f, orders);
+            T(X(R_L + 94.f), YM(743.f), llformat("%.0f KN", s.mTws), 11.f, C_WHITE, true, true);
+            button(c, X(R_L + 136.f), YM(764.f), X(R_L + 178.f), YM(722.f), "+", false, H_KN_UP, "One knot more" + capt_only, 13.f, orders);
+            button(c, X(R_L + 10.f), YM(812.f), X(R_L + 52.f), YM(770.f), "-", false, H_FROM_DOWN, "Back the wind 10 degrees" + capt_only, 13.f, orders);
+            T(X(R_L + 94.f), YM(791.f), llformat("%03d\xC2\xB0", ((S32)llround(s.mTwf)) % 360), 11.f, C_WHITE, true, true);
+            button(c, X(R_L + 136.f), YM(812.f), X(R_L + 178.f), YM(770.f), "+", false, H_FROM_UP, "Veer the wind 10 degrees" + capt_only, 13.f, orders);
         }
         // crew / captain, and what the keys do
         T(X(R_L + 10.f), YM(872.f), captain ? "YOU HAVE THE HELM" : "CREW: THE CAPTAIN GIVES THE ORDERS", 10.f, captain ? C_GREEN : C_AMBER, true, false, LLFontGL::LEFT);
@@ -906,7 +988,7 @@ void WolfHelmHud::draw()
             if (s.mMode == "silenced") label = "SILENCED";
             if (s.mMode == "sinking") label = "SINKING";
             if (s.mMode == "sunk") label = "SUNK";
-            button(c, X(bl + 2.f), YM(662.f), X(bl + 126.f), YM(626.f), label, on, H_BATTLE_MODE,
+            button(c, X(bl + 2.f), YM(666.f), X(bl + 126.f), YM(624.f), label, on, H_BATTLE_MODE,   // [HUD KIT 2026-11-25] 42 tall (was 36)
                    on ? "Battle mode is on: she can fire on, and be hit by, any other ship in battle mode. Click to switch it off "
                         "(it stays on for 60 s after, so no one can dodge a fight)"
                       : "Switch battle mode on: she can fire on, and be hit and sunk by, other ships in battle mode, on any region. "
@@ -991,13 +1073,13 @@ void WolfHelmHud::draw()
         struct B { F32 w; std::string label; bool lit; EHit id; std::string tip; };
         const std::vector<B> bs =
         {
-            { 30.f, "X", false, H_CLOSE, "Close the Captain's Helm. Wolf World > Vehicles & Travel > Captain's Helm (Ships), the ship icon or its toolbar button bring it back." },
+            { 42.f, "X", false, H_CLOSE, "Close the Captain's Helm. Wolf World > Vehicles & Travel > Captain's Helm (Ships), the ship icon or its toolbar button bring it back." },
             { 70.f, "HELP", mShowHelp, H_HELP, "How the Captain's Helm works" },
             { 92.f, "PANEL", bg, H_PANEL, bg ? "Background on: click to float the instruments over the world" : "Background off: click to put the panel back" },
             { 92.f, "AUTO", autoopen, H_AUTO, autoopen ? "Opens by itself when you take a ship's helm: click to open it only by hand"
                                                          : "Opens only by hand: click to have it open by itself when you take a ship's helm" },
         };
-        const F32 margin = S(14.f), gap = S(8.f), bh = S(30.f);
+        const F32 margin = S(14.f), gap = S(8.f), bh = S(42.f);   // [HUD KIT 2026-11-25] 42 (X 42 wide; were 30): 44 px or more
         F32 x = g.W - margin;
         const F32 bot = g.panelTop + S(8.f);
         for (const B& b : bs)

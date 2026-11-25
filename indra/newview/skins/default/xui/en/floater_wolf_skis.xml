@@ -15,7 +15,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="548"
+ height="558"
  layout="topleft"
  name="wolf_skis"
  save_rect="true"
@@ -32,11 +32,11 @@
     <text follows="left|top" font="SansSerif" height="120" layout="topleft" left="16" name="how_text" top="214" width="428" wrap="true" />
     <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="go_heading" top="340" width="428">2. Go</text>
     <button follows="left|top" font="SansSerifLarge" height="48" label="Put them on" layout="topleft" left="16" name="put_on_btn" top="364" width="428" tool_tip="It appears at your feet and you are on it. Your free ones are in your inventory, under Objects." />
-    <button follows="left|top" font="SansSerif" height="34" label="Get off" layout="topleft" left="16" name="take_off_btn" top="422" width="208" tool_tip="Stand up. It goes back to your inventory, ready for next time." />
-    <button follows="left|top" font="SansSerif" height="34" label="Show the Ski HUD" layout="topleft" left="236" name="show_hud_btn" top="422" width="208" tool_tip="Bring back the HUD across the bottom of the screen." visible="false" />
-    <text follows="left|top" font="SansSerif" height="38" layout="topleft" left="16" name="status" top="464" width="428" wrap="true" />
-    <check_box control_name="WolfSkiHudAuto" follows="left|top" height="22" label="Show the Ski HUD while I ride" layout="topleft" left="16" name="hud_auto" top="500" width="428" tool_tip="Speed, steepness, your run time, jumps and style points across the bottom of the screen." />
-    <check_box control_name="WolfSkiHudMph" follows="left|top" height="22" label="Speeds in miles an hour" layout="topleft" left="16" name="hud_mph" top="524" width="428" tool_tip="Unticked: kilometres an hour." />
+    <button follows="left|top" font="SansSerif" height="44" label="Get off" layout="topleft" left="16" name="take_off_btn" top="422" width="208" tool_tip="Stand up. It goes back to your inventory, ready for next time." />
+    <button follows="left|top" font="SansSerif" height="44" label="Show the Ski HUD" layout="topleft" left="236" name="show_hud_btn" top="422" width="208" tool_tip="Bring back the HUD across the bottom of the screen." visible="false" />
+    <text follows="left|top" font="SansSerif" height="38" layout="topleft" left="16" name="status" top="474" width="428" wrap="true" />
+    <check_box control_name="WolfSkiHudAuto" follows="left|top" height="22" label="Show the Ski HUD while I ride" layout="topleft" left="16" name="hud_auto" top="510" width="428" tool_tip="Speed, steepness, your run time, jumps and style points across the bottom of the screen." />
+    <check_box control_name="WolfSkiHudMph" follows="left|top" height="22" label="Speeds in miles an hour" layout="topleft" left="16" name="hud_mph" top="534" width="428" tool_tip="Unticked: kilometres an hour." />
     <string name="put_on_skis">Put my skis on</string>
     <string name="put_on_board">Put my snowboard on</string>
     <string name="put_on_sledge">Get on my sledge</string>

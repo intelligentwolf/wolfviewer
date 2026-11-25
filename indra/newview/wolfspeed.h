@@ -130,6 +130,9 @@ public:
     bool handleToolTip(S32 x, S32 y, MASK mask) override;
     bool handleKeyHere(KEY key, MASK mask) override;
     void onMouseCaptureLost() override;
+    /** [HUD KIT 2026-11-25] For LEAP rigs (UI call WolfHudKit.Hits "speed"): the open window's press targets in window GL pixels
+     *  with their names and sizes, in the form scripts/wolf/hudkit/check_inventory.py --log reads (as WolfTrainCabView). */
+    static void logHits();
 
 private:
     enum EHit { H_NONE = 0, H_DIAL, H_WALK, H_RUN, H_FAST, H_SUPER, H_OFF, H_THEME, H_DISMISS,

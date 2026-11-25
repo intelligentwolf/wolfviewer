@@ -59,6 +59,8 @@ public:
      *  and its middle in window GL pixels (LLWindow listener mouseDown x/y) - so a rig clicks the real buttons and the radar
      *  through the window's own mouse path, never by calling the orders itself. */
     static void logHits();
+    /** The hit id's name as the HUD kit's inventories list it (H_..._0 for a numbered run). */
+    static const char* hitName(S32 id);
 
     void draw() override;
     bool handleMouseDown(S32 x, S32 y, MASK mask) override;
@@ -113,6 +115,8 @@ public:
         H_DESIGN_NO_0, H_DESIGN_NO_LAST = H_DESIGN_NO_0 + 9,
         H_DESIGN_YES_0, H_DESIGN_YES_LAST = H_DESIGN_YES_0 + 9,
         H_BUILD_USE_0, H_BUILD_USE_LAST = H_BUILD_USE_0 + 11,
+        // [WOLFTREK v11 stage D] SCAN and the wandering wormhole on the radar
+        H_SCAN, H_RADAR_SIG,
     };
 
 private:

@@ -1,6 +1,6 @@
 /**
  * @file wolfStarfoldLensF.glsl
- * @brief WolfViewer: Starfold's wormhole - the light behind it bent round it, its turning ring, and the jump's tunnel.
+ * @brief WolfViewer: WolfTrek's wormholes - the light behind them bent round them, their gas, sparks and ring, and the jump's tunnel.
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer — Wolf Territories Grid
@@ -22,67 +22,102 @@
 // The bending: a point mass deflects light by an angle proportional to 1 / b (b the impact parameter; Einstein 1936, "Lens-like
 // action of a star by the deviation of light in the gravitational field", Science 84:506), so an image point at screen
 // distance r from the centre shows what lies at r - E^2 / r (the thin-lens point-mass equation beta = theta - thetaE^2 / theta,
-// e.g. Schneider, Ehlers & Falco, "Gravitational Lenses" 1992, eq. 2.9). E (the Einstein radius) is uRadius here: the ring
-// where the light from straight behind the centre lands. Inside 0.6 E the throat: a dark core with the other side's glimpse.
+// e.g. Schneider, Ehlers & Falco, "Gravitational Lenses" 1992, eq. 2.9). E (the Einstein radius) is uLensA[i].z here: the ring
+// where the light from straight behind the centre lands. Inside 0.6 E the throat: the other side's glimpse.
+
+// [WOLFTREK v11 stage D 2026-11-25] design.html#wormholes2 "How they look": "A swirling lens: the stars behind it bend round the mouth
+// (the real Einstein-ring look from Thorne and Double Negative's paper). A slow spiral of glowing gas circles into it, sparks drift
+// inwards, and through the middle you glimpse the other side's sky, tinted by its seed. Colour shows its state, always in words too ...
+// It visibly shrinks as it is used." Up to two mouths (the region's own and a found wandering wormhole); several point lenses in one
+// plane deflect by the sum of their deflections (Schneider, Ehlers & Falco 1992, the multiple-lens equation in one lens plane), so
+// each pixel's source point is the pixel minus every mouth's E^2 / r towards it. The gas, the sparks and the ring are added light; the
+// throat is the far side. Closing (red) mouths pulse. All the looks are GAME TUNING.
 
 out vec4 frag_color;
 
 uniform sampler2D diffuseRect;
 in vec2 vary_fragcoord;
 
-uniform vec2  uCentre;       // the wormhole's centre, 0..1 of the frame
-uniform float uRadius;       // its Einstein radius, as a fraction of the frame's height
+uniform vec4  uLensA[2];     // per mouth: centre x, y (0..1 of the frame), Einstein radius (frame heights), strength (0 = none)
+uniform vec4  uLensB[2];     // per mouth: the ring and gas colour (state: cyan / amber / red), closing (1 = pulse)
+uniform vec4  uLensC[2];     // per mouth: the far side's tint, a seed for its sparks
 uniform float uAspect;       // width / height
-uniform float uTime;         // seconds, for the ring's turn
-uniform float uLens;         // 0..1: the wormhole's strength (0 = not drawn: only the tunnel)
+uniform float uTime;         // seconds
 uniform float uTunnel;       // 0..1: the jump's tunnel over the whole screen
-uniform vec3  uRingColor;    // the ring (linear, display)
-uniform vec3  uThroatColor;  // the glimpse of the other side
+uniform vec3  uRingColor;    // the tunnel's streaks (linear, display)
+uniform vec3  uThroatColor;  // the tunnel's middle
 
-vec2 sfToUv(vec2 p)
+float sfHash(float n)
 {
-    return vec2(p.x / uAspect, p.y) + uCentre;
+    return fract(sin(n) * 43758.5453);
 }
 
 void main()
 {
     vec2 uv = vary_fragcoord;
-    vec3 col = texture(diffuseRect, uv).rgb;
+    vec2 q = vec2(uv.x * uAspect, uv.y);          // frame-height units, so a mouth is round on any aspect
+    vec3 col;
 
-    if (uLens > 0.0)
+    // 1. the bend: every mouth pulls the source point towards itself by E^2 / r (inside 0.6 E the throat hides it anyway)
+    vec2 srcq = q;
+    for (int i = 0; i < 2; ++i)
     {
-        // the pixel's place round the centre, in frame heights (so the ring is round on any aspect)
-        vec2 p = vec2((uv.x - uCentre.x) * uAspect, uv.y - uCentre.y);
+        vec4 A = uLensA[i];
+        if (A.w <= 0.0) continue;
+        vec2 c = vec2(A.x * uAspect, A.y);
+        float E = max(A.z, 1e-5);
+        vec2 p = q - c;
         float r = length(p);
-        float E = max(uRadius, 1e-5);
-        float influence = 1.0 - smoothstep(2.5 * E, 4.0 * E, r);   // the bend dies away so the frame's edge never jumps
-        if (influence > 0.0)
-        {
-            vec3 lensed;
-            if (r > 0.6 * E)
-            {
-                // beta = theta - E^2 / theta: the source point this pixel sees
-                vec2 dir = p / max(r, 1e-6);
-                float beta = r - E * E / r;
-                vec2 src = sfToUv(dir * beta);
-                lensed = texture(diffuseRect, clamp(src, vec2(0.001), vec2(0.999))).rgb;
-            }
-            else
-            {
-                // the throat: a slow swirl of the other side's light round a dark centre
-                float a = atan(p.y, p.x) + uTime * 0.4 + 3.0 / max(r / E, 0.05);
-                float swirl = 0.5 + 0.5 * sin(a * 3.0);
-                float depth = smoothstep(0.0, 0.6, r / E);
-                lensed = uThroatColor * (0.25 + 0.75 * swirl) * depth;
-            }
-            col = mix(col, lensed, influence * clamp(uLens, 0.0, 1.0));
+        float influence = (1.0 - smoothstep(2.5 * E, 4.0 * E, r)) * clamp(A.w, 0.0, 1.0);   // dies away: the frame's edge never jumps
+        if (r > 1e-6) srcq -= (p / r) * (E * E / max(r, 0.6 * E)) * influence;
+    }
+    col = texture(diffuseRect, clamp(vec2(srcq.x / uAspect, srcq.y), vec2(0.001), vec2(0.999))).rgb;
 
-            // the ring: a thin cyan band at E with a brighter arc that turns once a minute or so
-            float band = exp(-pow((r - E) / (0.06 * E), 2.0));
-            float ang = atan(p.y, p.x);
-            float arc = 0.55 + 0.45 * sin(ang * 2.0 - uTime * 0.12);
-            col += uRingColor * band * arc * clamp(uLens, 0.0, 1.0);
+    // 2. per mouth: the far side in the throat, the inspiralling gas, the sparks, the ring
+    for (int i = 0; i < 2; ++i)
+    {
+        vec4 A = uLensA[i];
+        if (A.w <= 0.0) continue;
+        vec2 c = vec2(A.x * uAspect, A.y);
+        float E = max(A.z, 1e-5);
+        vec2 p = q - c;
+        float r = length(p);
+        if (r > 3.0 * E) continue;
+        float s = clamp(A.w, 0.0, 1.0);
+        vec3 glowCol = uLensB[i].rgb;
+        float pulse = uLensB[i].a > 0.5 ? 0.55 + 0.45 * sin(uTime * 6.0) : 1.0;   // a closing mouth beats
+        float ang = atan(p.y, p.x);
+        float rn = r / E;
+
+        // the throat: the other side's sky, tinted, slowly turning, with a few stars, darker towards its middle
+        float a = ang + uTime * 0.25 + 2.0 / max(rn, 0.08);
+        vec2 cell = floor(vec2(a * 6.0, rn * 14.0));
+        float star = step(0.93, sfHash(cell.x * 17.0 + cell.y * 131.0 + uLensC[i].a)) * (0.6 + 0.4 * sin(uTime * 3.0 + cell.x));
+        vec3 far = uLensC[i].rgb * (0.30 + 0.25 * sin(a * 3.0)) * smoothstep(0.0, 0.6, rn) + vec3(star) * 0.8;
+        col = mix(col, far, (1.0 - smoothstep(0.48, 0.62, rn)) * s);
+
+        // the gas: two arms whose lines of equal phase move inwards as time goes on (2 ang - 6 ln r - 1.2 t constant: ln r falls)
+        float arms = pow(0.5 + 0.5 * sin(2.0 * ang - 6.0 * log(max(rn, 1e-3)) - uTime * 1.2), 6.0);
+        float disc = smoothstep(0.6, 0.75, rn) * (1.0 - smoothstep(1.3, 2.2, rn));
+        vec3 gas = mix(glowCol, vec3(1.0), 0.35 * (1.0 - smoothstep(0.7, 1.2, rn))) * (arms * 0.9 + 0.22) * disc;
+
+        // the sparks: each falls from 2.4 E to 0.65 E, faster round as it nears, fading in and out
+        float spark = 0.0;
+        for (int k = 0; k < 16; ++k)
+        {
+            float sd = uLensC[i].a * 7.13 + float(k) * 3.71;
+            float f = fract(sfHash(sd) * 7.0 + uTime * 0.18 * (0.6 + 0.8 * sfHash(sd + 1.0)));
+            float rs = E * (2.4 - 1.75 * f);
+            float as = sfHash(sd + 2.0) * 6.2832 + uTime * 0.9 / (rs / E);
+            vec2 sp = c + rs * vec2(cos(as), sin(as));
+            float dd = length(q - sp) / (0.035 * E);
+            spark += exp(-dd * dd) * sin(3.14159 * f);
         }
+
+        // the ring at E, a brighter arc turning slowly
+        float band = exp(-pow((r - E) / (0.06 * E), 2.0)) * (0.55 + 0.45 * sin(ang * 2.0 - uTime * 0.12));
+
+        col += (gas + glowCol * band + mix(glowCol, vec3(1.0), 0.5) * spark) * s * pulse;
     }
 
     if (uTunnel > 0.0)

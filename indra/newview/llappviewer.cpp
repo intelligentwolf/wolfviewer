@@ -31,6 +31,8 @@
 #include <chrono>
 #include <thread>              // [/T943]
 #include <cstdio>              // [T1063 QUIT WATCHDOG 2026-11-25] fileno/_fileno, snprintf
+#include <cstdlib>             // [T1063] _exit (MSVC declares it in stdlib.h; unistd.h elsewhere)
+#include <cstring>             // [T1063] strlen
 #if LL_WINDOWS
 #include <io.h>                // [T1063] _write
 #else

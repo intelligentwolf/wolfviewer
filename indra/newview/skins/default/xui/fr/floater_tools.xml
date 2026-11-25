@@ -40,7 +40,7 @@
 		Cliquez et faites glisser pour sélectionner le terrain.
 	</floater.string>
 	<floater.string name="status_selectcount">
-		[OBJ_COUNT] objets sélectionnés, impact sur le terrain [LAND_IMPACT]
+		[OBJ_COUNT] objets sélectionnés, impact sur le terrain [LAND_IMPACT], prims [PRIM_COUNT]
 	</floater.string>
 	<floater.string name="status_remaining_capacity">
 		Capacité restante [LAND_CAPACITY].
@@ -503,6 +503,7 @@ Bas ↔ + bas
 		</panel>
 		<panel label="Contenu" name="Contents">
 			<button label="Nouveau script" label_selected="Nouveau script" name="button new script"/>
+			<button label="Nouvelle notice" label_selected="Nouvelle notice" name="button new notecard"/>
 			<button label="Droits" name="button permissions"/>
 			<button label="Rafraîchir" name="button refresh"/>
 			<button label="Réinit. scripts" name="btn_reset_scripts"/>

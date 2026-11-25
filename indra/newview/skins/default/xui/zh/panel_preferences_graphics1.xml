@@ -66,7 +66,6 @@
 				<combo_box.item label="減少" name="2" />
 				<combo_box.item label="僅太陽/月亮" name="1" />
 			</combo_box>
-			<!-- Mirror settings. -->
 			<text name="MirrorResolutionText">
 				鏡像解析度:
 			</text>
@@ -79,8 +78,6 @@
 				<combo_box.item label="高" name="1" />
 				<combo_box.item label="超高" name="0" />
 			</combo_box>
-			<!-- 映象設定結束 -->
-			<!--General選項卡第二列頂部-->
 			<check_box label="全螢幕模式" name="Fullscreen Mode" tool_tip="以全螢幕模式運行WolfViewer。更改模式需要重新啟動。" />
 			<slider label="顯示距離" name="DrawDistance" />
 			<text name="DrawDistanceMeterText2">米</text>
@@ -145,23 +142,6 @@
 			</text>
 			<check_box label="覆蓋視訊記憶體檢測" name="FSOverrideVRAMDetection" tool_tip="允許使用者覆蓋視訊記憶體檢測（極度謹慎使用）" />
 			<slider label="覆蓋GPU專用視訊記憶體（GB）：" name="FSForcedVideoMemory" tool_tip="重要：極度謹慎使用。 覆蓋GPU上檢測到的視訊記憶體。 這不應包括作為系統RAM一部分的「共享」視訊記憶體。 如果您不理解這個區別，請不要使用此控制項。" />
-			<text name="automatic_texture_downscale_settings">
-				自動纹理縮減：
-			</text>
-			<text name="TextureDiscardBackgroundedTime_label" tool_tip="非活動視窗時，在選定秒數後縮減纹理。">
-				在背景中（0 為停用）
-			</text>
-			<spinner name="TextureDiscardBackgroundedTime" tool_tip="非活動視窗時，在選定秒數後縮減纹理。"/>
-			<text name="TextureDiscardBackgroundedTime_seconds">
-				秒
-			</text>
-			<text name="TextureDiscardMinimizedTime_label" tool_tip="最小化時，在選定秒數後縮減纹理。">
-				最小化（0 為停用）
-			</text>
-			<spinner name="TextureDiscardMinimizedTime" tool_tip="最小化時，在選定秒數後縮減纹理。"/>
-			<text name="TextureDiscardMinimizedTime_seconds">
-				秒
-			</text>
 		</panel>
 		<panel label="彩現" name="Rendering">
 			<text name="World Updating">世界更新：</text>

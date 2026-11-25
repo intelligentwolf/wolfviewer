@@ -26,6 +26,9 @@
 
 #include "llwebrtc_impl.h"
 #include <algorithm>
+#include <chrono>
+#include <future>
+#include <thread>
 #include <string.h>
 // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
 // Needed for accessing the inline timed mutex for accessing audio hardware.
@@ -33,6 +36,7 @@
 #include <chrono>
 // </FS:minerjr> [FIRE-36022]
 
+#include "api/audio/create_audio_device_module.h"
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
@@ -43,7 +47,7 @@
 #include "modules/audio_processing/audio_buffer.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
 #include "api/environment/environment_factory.h"
-#include "api/audio/create_audio_device_module.h"   // <WolfViewer 2026-09-26/> m144 CreateAudioDeviceModule
+// [W113 2026-11-25] api/audio/create_audio_device_module.h (ours 2026-09-26, m144 CreateAudioDeviceModule) is included above by upstream
 
 // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
 // Audio device mutex to be shared between audio engine and Voice systems to 
@@ -77,25 +81,16 @@ static int16_t PLAYOUT_DEVICE_DEFAULT = 0;
 static int16_t RECORD_DEVICE_DEFAULT  = 0;
 #endif
 
+#if WEBRTC_WIN
 // <WolfViewer 2026-11-03/> ticket 502: the saved value meaning "the system default" (llpanelvoicedevicesettings.cpp
 // DEFAULT_DEVICE); an empty value (nothing saved yet) also ends up on the default in workerDeployDevices().
+// [W113 2026-11-25] now Windows-only: its other user (ours' updateDevices() redeploy check) gave way to upstream's
+// deploy on every enumeration, and an unused static function would warn on Linux/macOS.
 static bool isDefaultDeviceSelection(const std::string& id)
 {
     return id.empty() || id == "Default";
 }
 
-// <WolfViewer 2026-11-03/> ticket 502: whether the selected device would be found by workerDeployDevices() in
-// this list. "Default" is always available.
-static bool isDeviceSelectionPresent(const LLWebRTCVoiceDeviceList& list, const std::string& id)
-{
-    if (isDefaultDeviceSelection(id))
-    {
-        return true;
-    }
-    return std::any_of(list.begin(), list.end(), [&id](const LLWebRTCVoiceDevice& device) { return device.mID == id; });
-}
-
-#if WEBRTC_WIN
 // <WolfViewer 2026-11-03> ticket 502: follow Windows' default communications device while the viewer runs.
 // The ADM registers its own IMMNotificationClient, but its OnDefaultDeviceChanged only logs, and only
 // OnDeviceStateChanged reaches AudioDeviceObserver::OnDevicesUpdated (Source: webrtc-sdk m144_release
@@ -284,12 +279,12 @@ int32_t LLWebRTCAudioTransport::DeliverCapture(const void* audio_data,
             {
                 audio_data = mSpeechBuf.data();   // the microphone is held: only the AI's voice goes on
             }
-            else if (LLWebRTCPlayoutTap* tap = mCaptureTap.load(std::memory_order_acquire))
+            else if (LLWebRTCPlayoutTap* tap = captureTapIfOpen())
             {
                 tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
             }
         }
-        else if (LLWebRTCPlayoutTap* tap = mCaptureTap.load(std::memory_order_acquire))
+        else if (LLWebRTCPlayoutTap* tap = captureTapIfOpen())
         {
             tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
         }
@@ -352,7 +347,9 @@ int32_t LLWebRTCAudioTransport::NeedMorePlayData(size_t   number_of_frames,
     if (!engine)
     {
         // No engine sink; output silence to be safe.
-        const size_t bytes = number_of_frames * bytes_per_frame * number_of_channels;
+        // bytes_per_frame already accounts for all channels, so do not multiply
+        // by number_of_channels again (that would overrun the playout buffer).
+        const size_t bytes = number_of_frames * bytes_per_frame;
         memset(audio_data, 0, bytes);
         number_of_samples_out = bytes_per_frame;
         return 0;
@@ -505,18 +502,52 @@ void LLCustomProcessor::Process(webrtc::AudioBuffer *audio)
     mState->setMicrophoneEnergy(std::sqrt(totalSum / (audio->num_channels() * audio->num_frames() * buffer_size)));
 }
 
+
+//
+// LLWebRTCImpl implementation
+//
+
+void LLWebRTCAudioDeviceModule::SetTuning(bool tuning, bool mute)
+{
+    tuning_ = tuning;
+    if (tuning)
+    {
+        // [W113 2026-11-25] ours ([VR AUDIO] 2026-11-04, in the inline SetTuning upstream moved here): tuning wants the
+        // microphone, so the headset-mic clock (micClock) delivers too. Upstream starts recording on inner_ directly,
+        // bypassing ForceStartRecording() which sets this flag. On exit upstream leaves capture running (session-long,
+        // 4124f969ee7), so the flag is left as it is then too (ours set it to !mute when exit stopped a muted mic).
+        recording_wanted_ = true;
+        // Ensure capture is running (it's normally already running -- capture is
+        // session-long) so the mic-level meter works, and stop rendering the
+        // call while tuning.  The recording calls are no-ops if capture is
+        // already active, so this won't cold-start it.
+        inner_->InitMicrophone();
+        inner_->InitRecording();
+        inner_->StartRecording();
+        inner_->StopPlayout();
+    }
+    // On exit, capture is deliberately left running (mute is handled by gain,
+    // not by stopping the device, so there's no AEC cold-start hiss).  Playout
+    // is restored by the caller via workerOpenPlayout(), keeping it gated on
+    // there being a connection to render.
+}
+
 //
 // LLWebRTCImpl implementation
 //
 
 LLWebRTCImpl::LLWebRTCImpl(LLWebRTCLogCallback* logCallback) :
-    mEnv(webrtc::CreateEnvironment(webrtc::CreateDefaultTaskQueueFactory())),   // <WolfViewer 2026-09-26/> m144, as secondlife/viewer develop
+    mEnv(webrtc::CreateEnvironment(webrtc::CreateDefaultTaskQueueFactory())),   // <WolfViewer 2026-09-26/> m144, as secondlife/viewer develop [W113 2026-11-25: upstream added the same line; one kept]
     mLogSink(new LLWebRTCLogSink(logCallback)),
     mPeerCustomProcessor(nullptr),
     mMute(true),
+    mVoiceEnabled(false),
     mTuningMode(false),
     mDevicesDeploying(0),
-    mGain(0.0f)
+    mGain(0.0f),
+    mBuiltinNS(false),
+    mBuiltinAGC(false),
+    mBuiltinAEC(false)
 {
 }
 
@@ -555,6 +586,15 @@ void LLWebRTCImpl::init()
 #if WEBRTC_WIN
             mDefaultDeviceWatcher = LLWebRTCDefaultDeviceWatcher::start(this);   // <WolfViewer 2026-11-03/> ticket 502
 #endif
+            updateCaptureTapGate();   // [W113 2026-11-25] the AI Mode capture tap follows mMute from the start
+            mDeviceModule->Init();
+
+            mBuiltinNS = mDeviceModule->BuiltInNSIsAvailable();
+            mBuiltinAEC = mDeviceModule->BuiltInAECIsAvailable();
+            mBuiltinAGC = mDeviceModule->BuiltInAGCIsAvailable();
+            // All audio processing is done by WebRTC's software APM (configured
+            // below); make sure the hardware processors stay off.
+            workerDisableBuiltInAudioProcessing();
         });
 
     // The custom processor allows us to retrieve audio data (and levels)
@@ -564,17 +604,22 @@ void LLWebRTCImpl::init()
     apb.SetCapturePostProcessing(std::make_unique<LLCustomProcessor>(mPeerCustomProcessor));
     mAudioProcessingModule = apb.Build(webrtc::CreateEnvironment());
 
+    // Initial software-APM state, matching setAudioConfig() so there's no
+    // window where processing differs before the viewer's first config call.
+    // All processing is done here in software (the hardware AEC/AGC/NS is kept
+    // disabled), so enable echo cancellation from the very first frame.
     webrtc::AudioProcessing::Config apm_config;
-    apm_config.echo_canceller.enabled         = false;
-    apm_config.echo_canceller.mobile_mode     = false;
-    apm_config.gain_controller1.enabled       = false;
-    apm_config.gain_controller2.enabled       = true;
-    apm_config.high_pass_filter.enabled       = true;
-    apm_config.noise_suppression.enabled      = true;
-    apm_config.noise_suppression.level        = webrtc::AudioProcessing::Config::NoiseSuppression::kVeryHigh;
-    apm_config.transient_suppression.enabled  = true;
-    apm_config.pipeline.multi_channel_render  = true;
-    apm_config.pipeline.multi_channel_capture = false;
+    apm_config.echo_canceller.enabled                    = true;
+    apm_config.echo_canceller.mobile_mode                = false;
+    apm_config.gain_controller1.enabled                  = false;
+    apm_config.gain_controller2.enabled                  = true;
+    apm_config.gain_controller2.adaptive_digital.enabled = true; // auto-level speech
+    apm_config.high_pass_filter.enabled                  = true;
+    apm_config.noise_suppression.enabled                 = true;
+    apm_config.noise_suppression.level                   = webrtc::AudioProcessing::Config::NoiseSuppression::kVeryHigh;
+    apm_config.transient_suppression.enabled             = true;
+    apm_config.pipeline.multi_channel_render             = true;
+    apm_config.pipeline.multi_channel_capture            = true;
 
     mAudioProcessingModule->ApplyConfig(apm_config);
 
@@ -606,112 +651,245 @@ void LLWebRTCImpl::init()
         {
             if (mDeviceModule)
             {
-                mDeviceModule->EnableBuiltInAEC(false);
-                // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
-                // It seems that this code is also called by one of the other callback functions
-                // and ends up creating a 2nd observer,which when there was a hardware change,
-                // would cause multiple messages to be dumped to the queue at the same time and
-                // cause a possible race condition/spin lock issue.
-                //updateDevices();
+                updateDevices();
             }
         });
 
 }
 
-void LLWebRTCImpl::terminate()
+bool LLWebRTCImpl::terminate()
 {
-    mWorkerThread->BlockingCall(
-        [this]()
+    // Run all blocking WebRTC shutdown calls on a separate thread so that a
+    // hung BlockingCall cannot block the viewer shutdown indefinitely.
+    // Webrtc is not mission critical, we need to save personal data.
+    auto done_promise = std::make_shared<std::promise<void> >();
+    std::future<void> done_future = done_promise->get_future();
+
+    // Hand ownership of the connections to the shutdown thread.  Nothing on
+    // this thread may touch them afterwards -- in the timeout case below the
+    // shutdown thread is detached and may still be working through them.
+    std::vector<webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl>> connections;
+    connections.swap(mPeerConnections);
+
+    // Explicitely unregister observers before shutting down the threads.
+    // shutdown_thread, if detached, can outlive observer.
+    mWorkerThread->BlockingCall([this]()
+    {
+#if WEBRTC_WIN
+        // [W113 2026-11-25] ours (ticket 502, was in the old terminate()'s worker block) moved here: upstream's
+        // shutdown thread (73648f3bace / 0686467f42a / 8c5ec43ebc5) moves mWorkerThread out of this object below,
+        // and the watcher's callback posts to mWorkerThread through `this`, so it must be stopped before that, on
+        // the worker thread where it was started (its CoInitializeEx is balanced in stop()).
+        if (mDefaultDeviceWatcher)
         {
-            if (mDeviceModule)
+            mDefaultDeviceWatcher->stop();
+            mDefaultDeviceWatcher = nullptr;
+        }
+#endif
+        if (mDeviceModule)
+        {
+            mDeviceModule->SetObserver(nullptr);
+        }
+    });
+    mVoiceDevicesObserverList.clear();
+
+    // shutdown_thread can be detached, then LLWebRTCImpl will be nulled out.
+    // Capture what's needed in lambda, don't rely on [this].
+    std::thread shutdown_thread(
+        [networkThread = std::move(mNetworkThread),
+        workerThread = std::move(mWorkerThread),
+        signalingThread = std::move(mSignalingThread),
+        deviceModule = std::move(mDeviceModule),
+        factory = std::move(mPeerConnectionFactory),
+        connections = std::move(connections),
+        done_promise]() mutable
+    {
+        // Stop the capture/render devices alongside the connection teardown
+        // below rather than ahead of it.  Both of these calls end in a
+        // WaitForSingleObject on a WASAPI thread with a 2s timeout apiece
+        // (AudioDeviceWindowsCore::StopRecording / StopPlayout), so blocking on
+        // them here can spend most of the shutdown budget before the
+        // connections have been touched at all -- and after an OS sleep they
+        // tend to hit the full timeout.
+        //
+        // This work has to stay on the worker thread: the device module was
+        // created there and its AudioDeviceBuffer is guarded by a sequence
+        // checker bound to that thread.  Posting instead of blocking lets the
+        // signaling close below get on with its network-thread work (data
+        // channel close, transport teardown) while the device stop is still
+        // waiting on WASAPI.
+        //
+        // No explicit join is needed: Thread's task queue is FIFO and
+        // BlockingCall posts through it, so the ForceTerminate call at the end
+        // of this lambda can't run until this task has finished.  Any
+        // worker-thread work the signaling close does is likewise ordered
+        // after it, so nothing sees the device module half torn down.
+        workerThread->PostTask(
+            [&deviceModule]()
+        {
+            if (deviceModule)
             {
-                mDeviceModule->ForceStopRecording();
-                mDeviceModule->StopPlayout();
+                deviceModule->ForceStopRecording();
+                deviceModule->StopPlayout();
             }
         });
 
-    for (auto &connection : mPeerConnections)
+        // Close the connections inline on the signaling thread.  This can't be
+        // connection->terminate(), which only *posts* the close: that queues the
+        // real work behind everything below, so the connections would be closed
+        // after the factory and the device module are gone -- or not at all, if
+        // the thread is destroyed with the task still queued.
+        //
+        // It matters that the close completes here because closing a peer
+        // connection flushes any in-flight GetStats request and runs its
+        // callback inline, and that callback calls back into the viewer's
+        // signaling observers.  Those observers are only valid until
+        // llwebrtc::terminate() returns.
+        signalingThread->BlockingCall(
+            [&connections]()
+            {
+                for (auto& connection : connections)
+                {
+                    connection->closeOnSignalingThread(true);
+                }
+                // Destroy the connections here, on the signaling thread, while
+                // it's still running.
+                connections.clear();
+            });
+
+        // Drain anything the closes posted before dropping the factory.
+        signalingThread->BlockingCall([]() {});
+
+        signalingThread->BlockingCall([&factory]() {
+            factory = nullptr;
+        });
+
+        workerThread->BlockingCall(
+            [&deviceModule]()
+        {
+            if (deviceModule)
+            {
+                deviceModule->ForceTerminate();
+            }
+            deviceModule = nullptr;
+        });
+
+        // Explicitly clean WebRTC threads in dependency order before signalling completion.
+        // The connections were closed and destroyed on the signaling thread, so it's safe
+        // to clean.
+        signalingThread.reset();
+        workerThread.reset();
+        networkThread.reset();
+
+        done_promise->set_value();
+    });
+
+    constexpr auto WEBRTC_TERMINATE_TIMEOUT = std::chrono::seconds(10);
+    if (done_future.wait_for(WEBRTC_TERMINATE_TIMEOUT) == std::future_status::timeout)
     {
-        connection->terminate();
+        RTC_LOG(LS_WARNING) << __FUNCTION__
+            << ": timed out waiting for WebRTC thread shutdown."
+            " Detaching — some WebRTC resources will be leaked.";
+        shutdown_thread.detach();
+
+        // Leave every member exactly as it is.  The detached thread is still
+        // running the lambda above, which reads mSignalingThread, mWorkerThread,
+        // mDeviceModule and mPeerConnectionFactory through `this` -- clearing or
+        // releasing them here would pull them out from under it mid-shutdown
+        // (a null mSignalingThread is an immediate segfault at the next
+        // BlockingCall).  Instead we report the failure so the caller leaks this
+        // object rather than deleting it; the process is exiting anyway and our
+        // priority is saving cache and personal data.
+        //
+        // mPeerConnections is already empty -- the detached thread owns the
+        // connections now and must be left to finish with them.
+        //
+        // The log sink is unhooked here (and deliberately not deleted, since the
+        // detached thread may still log) because the viewer-side log callback
+        // behind it doesn't outlive this call.
+        webrtc::LogMessage::RemoveLogToStream(mLogSink);
+        return false;
     }
 
-    // connection->terminate() above spawns a number of Signaling thread calls to
-    // shut down the connection.  The following Blocking Call will wait
-    // until they're done before it's executed, allowing time to clean up.
+    shutdown_thread.join();
 
-    mSignalingThread->BlockingCall([this]() { mPeerConnectionFactory = nullptr; });
-
-    mWorkerThread->BlockingCall(
-        [this]()
-        {
-#if WEBRTC_WIN
-            // <WolfViewer 2026-11-03/> ticket 502: no default-device callbacks once the threads are going.
-            if (mDefaultDeviceWatcher)
-            {
-                mDefaultDeviceWatcher->stop();
-                mDefaultDeviceWatcher = nullptr;
-            }
-#endif
-            if (mDeviceModule)
-            {
-                // <WolfViewer 2026-11-03/> ticket 502: OnDevicesUpdated() posts to mWorkerThread, which goes below.
-                mDeviceModule->SetObserver(nullptr);
-                mDeviceModule->Terminate();
-            }
-            mDeviceModule     = nullptr;
-        });
-
-    // In case peer connections still somehow have jobs in workers,
-    // only clear connections up after clearing workers.
-    mNetworkThread = nullptr;
-    mWorkerThread = nullptr;
-    mSignalingThread = nullptr;
-
-    mPeerConnections.clear();
     webrtc::LogMessage::RemoveLogToStream(mLogSink);
+    return true;
 }
+
 
 void LLWebRTCImpl::setAudioConfig(LLWebRTCDeviceInterface::AudioConfig config)
 {
+    // All audio processing is handled by WebRTC's software APM here.  The
+    // platform/hardware AEC/AGC/NS is always disabled (see
+    // workerDisableBuiltInAudioProcessing), so these are enabled purely on the
+    // requested config without deferring to any built-in processor.
     webrtc::AudioProcessing::Config apm_config;
-    apm_config.echo_canceller.enabled         = config.mEchoCancellation;
-    apm_config.echo_canceller.mobile_mode     = false;
-    apm_config.gain_controller1.enabled       = false;
-    apm_config.gain_controller2.enabled       = config.mAGC;
+    apm_config.echo_canceller.enabled                    = config.mEchoCancellation;
+    apm_config.echo_canceller.mobile_mode                = false;
+    apm_config.gain_controller1.enabled                  = false;
+    apm_config.gain_controller2.enabled                  = config.mAGC;
     apm_config.gain_controller2.adaptive_digital.enabled = true; // auto-level speech
-    apm_config.high_pass_filter.enabled       = true;
-    apm_config.transient_suppression.enabled  = true;
-    apm_config.pipeline.multi_channel_render  = true;
-    apm_config.pipeline.multi_channel_capture = true;
-    apm_config.pipeline.multi_channel_capture = true;
+    apm_config.high_pass_filter.enabled                  = true;
+    apm_config.transient_suppression.enabled             = true;
+    apm_config.pipeline.multi_channel_render             = true;
+    apm_config.pipeline.multi_channel_capture            = true;
 
     switch (config.mNoiseSuppressionLevel)
     {
         case LLWebRTCDeviceInterface::AudioConfig::NOISE_SUPPRESSION_LEVEL_NONE:
             apm_config.noise_suppression.enabled = false;
-            apm_config.noise_suppression.level = webrtc::AudioProcessing::Config::NoiseSuppression::kLow;
+            apm_config.noise_suppression.level   = webrtc::AudioProcessing::Config::NoiseSuppression::kLow;
             break;
         case LLWebRTCDeviceInterface::AudioConfig::NOISE_SUPPRESSION_LEVEL_LOW:
             apm_config.noise_suppression.enabled = true;
-            apm_config.noise_suppression.level = webrtc::AudioProcessing::Config::NoiseSuppression::kLow;
+            apm_config.noise_suppression.level   = webrtc::AudioProcessing::Config::NoiseSuppression::kLow;
             break;
         case LLWebRTCDeviceInterface::AudioConfig::NOISE_SUPPRESSION_LEVEL_MODERATE:
             apm_config.noise_suppression.enabled = true;
-            apm_config.noise_suppression.level = webrtc::AudioProcessing::Config::NoiseSuppression::kModerate;
+            apm_config.noise_suppression.level   = webrtc::AudioProcessing::Config::NoiseSuppression::kModerate;
             break;
         case LLWebRTCDeviceInterface::AudioConfig::NOISE_SUPPRESSION_LEVEL_HIGH:
             apm_config.noise_suppression.enabled = true;
-            apm_config.noise_suppression.level = webrtc::AudioProcessing::Config::NoiseSuppression::kHigh;
+            apm_config.noise_suppression.level   = webrtc::AudioProcessing::Config::NoiseSuppression::kHigh;
             break;
         case LLWebRTCDeviceInterface::AudioConfig::NOISE_SUPPRESSION_LEVEL_VERY_HIGH:
             apm_config.noise_suppression.enabled = true;
-            apm_config.noise_suppression.level = webrtc::AudioProcessing::Config::NoiseSuppression::kVeryHigh;
+            apm_config.noise_suppression.level   = webrtc::AudioProcessing::Config::NoiseSuppression::kVeryHigh;
             break;
         default:
             apm_config.noise_suppression.enabled = false;
-            apm_config.noise_suppression.level = webrtc::AudioProcessing::Config::NoiseSuppression::kLow;
+            apm_config.noise_suppression.level   = webrtc::AudioProcessing::Config::NoiseSuppression::kLow;
     }
     mAudioProcessingModule->ApplyConfig(apm_config);
+
+    // Keep the hardware processors off; the APM above is the only processing.
+    PostWorkerTask([this]() { workerDisableBuiltInAudioProcessing(); });
+}
+
+void LLWebRTCImpl::workerDisableBuiltInAudioProcessing()
+{
+    if (!mDeviceModule)
+    {
+        return;
+    }
+
+    // We always use WebRTC's internal (software APM) audio processing.  Running
+    // the platform/hardware AEC, AGC, or NS alongside it causes the two to
+    // fight -- pumping levels, double noise suppression, and mismatched AEC
+    // references -- so disable any that the device exposes.
+    if (mBuiltinNS)
+    {
+        mDeviceModule->EnableBuiltInNS(false);
+    }
+    if (mBuiltinAGC)
+    {
+        mDeviceModule->EnableBuiltInAGC(false);
+    }
+    if (mBuiltinAEC)
+    {
+        mDeviceModule->EnableBuiltInAEC(false);
+    }
 }
 
 void LLWebRTCImpl::refreshDevices()
@@ -734,51 +912,47 @@ void LLWebRTCImpl::unsetDevicesObserver(LLWebRTCDevicesObserver *observer)
 // <WolfViewer 2026-11-03> ticket 502: ends a workerDeployDevices() turn that did not reach the signalling-thread
 // task at its end (which does the same fetch_sub), so a failed pass no longer blocks every later deployDevices().
 // Worker thread.
+// [W113 2026-11-25] ours, with the queued turn run the way upstream's own turn hand-off does it (68f78d1e2d2 #6109:
+// workerDeployDevices(bool reset_module) picks up a module reset another caller asked for meanwhile).
 void LLWebRTCImpl::workerFinishDeployTurn()
 {
     if (1 < mDevicesDeploying.fetch_sub(1, std::memory_order_relaxed))
     {
-        mWorkerThread->PostTask([this] { workerDeployDevices(); });
+        mWorkerThread->PostTask([this]
+        {
+            bool reset = mDevicesDeployingNeedsReset.exchange(false, std::memory_order_relaxed);
+            workerDeployDevices(reset);
+        });
     }
 }
 // </WolfViewer>
 
-// must be run in the worker thread.
-void LLWebRTCImpl::workerDeployDevices()
+// must be run in the worker thread.  Selects the configured capture device and
+// starts recording.  Capture runs the whole time voice is enabled (it's never
+// stopped for mute or between calls, so the AEC never cold-starts -- there's no
+// hiss on unmute), so this is a no-op when already recording.  Device changes
+// go through workerDeployDevices(), which stops recording first to force a
+// clean re-select; voice off goes through setVoiceEnabled(false).
+void LLWebRTCImpl::workerStartRecording()
 {
-    bool turnHandedOn = false;   // <WolfViewer 2026-11-03/> ticket 502: see workerFinishDeployTurn()
-    // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
-    try // Try catch needed for uniquie lock as will throw an exception if a second lock is attempted or the mutex is invalid
-    {
-    // Attempt to lock the access to the audio device, wait up to 1 second for other threads to unlock.
-    std::unique_lock lock(gAudioDeviceMutex, 1s);
-    // If the lock could not be accessed, return as we don't have hardware access and will need to try again another pass.
-    // Prevents threads from interacting with the hardware at the same time as other audio/voice threads.
-    if (!lock.owns_lock())
-    {
-        // <WolfViewer 2026-11-03> ticket 502: "try again another pass" never happened - this turn kept
-        // mDevicesDeploying above zero, so deployDevices() dropped every later device choice. Retry, keeping the turn.
-        mWorkerThread->PostDelayedTask([this] { workerDeployDevices(); }, webrtc::TimeDelta::Millis(250));
-        // </WolfViewer>
-        return;
-    }
-    // </FS:minerjr> [FIRE-36022]
-    if (!mDeviceModule)
+    // Only run capture while voice is enabled, and never cold-start it when
+    // it's already running (that would cause the unmute hiss).
+    if (!mDeviceModule || !mVoiceEnabled || mDeviceModule->Recording())
     {
         // <FS:minerjr> [FIRE-36022]
         // If the device is not avaiable, then make sure the flag for the WebRTC updated devices flag is turned off for the co-routine
-        gWebRTCUpdateDevices = false;
+        if (!mDeviceModule)
+        {
+            gWebRTCUpdateDevices = false;
+        }
         // </FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
-        workerFinishDeployTurn();   // <WolfViewer 2026-11-03/> ticket 502: give the turn back
         return;
     }
 
     int16_t recordingDevice = RECORD_DEVICE_DEFAULT;
-    int16_t recording_device_start = 0;
-
     if (mRecordingDevice != "Default")
     {
-        for (int16_t i = recording_device_start; i < mRecordingDeviceList.size(); i++)
+        for (int16_t i = 0; i < mRecordingDeviceList.size(); i++)
         {
             if (mRecordingDeviceList[i].mID == mRecordingDevice)
             {
@@ -798,29 +972,67 @@ void LLWebRTCImpl::workerDeployDevices()
     // Flag the device is being interacted with for the Co-routine in case something goes wrong.
     gWebRTCUpdateDevices = true;
     // </FS:minerjr> [FIRE-36022]
-    mDeviceModule->StopPlayout();
-    mDeviceModule->ForceStopRecording();
+    int32_t result = 0;
 #if WEBRTC_WIN
     if (recordingDevice < 0)
     {
-        mDeviceModule->SetRecordingDevice((webrtc::AudioDeviceModule::WindowsDeviceType)recordingDevice);
+        result = mDeviceModule->SetRecordingDevice((webrtc::AudioDeviceModule::WindowsDeviceType)recordingDevice);
     }
     else
     {
-        mDeviceModule->SetRecordingDevice(recordingDevice);
+        result = mDeviceModule->SetRecordingDevice(recordingDevice);
     }
 #else
-    mDeviceModule->SetRecordingDevice(recordingDevice);
+    result = mDeviceModule->SetRecordingDevice(recordingDevice);
 #endif
-    mDeviceModule->InitMicrophone();
+    if (result != 0)
+    {
+        RTC_LOG(LS_WARNING) << "workerStartRecording: SetRecordingDevice(" << recordingDevice << ") failed " << result;
+    }
+
+    result = mDeviceModule->InitMicrophone();
+    if (result != 0)
+    {
+        RTC_LOG(LS_WARNING) << "workerStartRecording: InitMicrophone failed " << result;
+    }
+
     mDeviceModule->SetStereoRecording(false);
+    // A newly-selected capture device may default its hardware AEC/AGC/NS on;
+    // disable before InitRecording so the recording stream is configured to
+    // use only WebRTC's software APM.
+    workerDisableBuiltInAudioProcessing();
     mDeviceModule->InitRecording();
+    mDeviceModule->ForceStartRecording();
+}
+
+// must be run in the worker thread.  Selects the configured playout device and
+// starts playout.  Playout only runs while there's a connection to render
+// (running the output device with no engine data is heard as a buzz), so this
+// is a no-op when there are no connections or when already playing.  Device
+// changes go through workerDeployDevices(), which stops playout first.
+void LLWebRTCImpl::workerStartPlayout()
+{
+    // Only run playout while voice is enabled and there's a connection to
+    // render (running the output device otherwise is heard as a buzz).
+    // <FS:TJ> Fix default voice output device always being used instead of the chosen device
+    //if (!mDeviceModule || !mVoiceEnabled || mTuningMode || mDeviceModule->Playing() || mPeerConnections.empty())
+    if (!mDeviceModule || !mVoiceEnabled || mTuningMode || mPeerConnections.empty())
+    // </FS:TJ>
+    {
+        // <FS:minerjr> [FIRE-36022]
+        // If the device is not avaiable, then make sure the flag for the WebRTC updated devices flag is turned off for the co-routine
+        if (!mDeviceModule)
+        {
+            gWebRTCUpdateDevices = false;
+        }
+        // </FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
+        return;
+    }
 
     int16_t playoutDevice = PLAYOUT_DEVICE_DEFAULT;
-    int16_t playout_device_start = 0;
     if (mPlayoutDevice != "Default")
     {
-        for (int16_t i = playout_device_start; i < mPlayoutDeviceList.size(); i++)
+        for (int16_t i = 0; i < mPlayoutDeviceList.size(); i++)
         {
             if (mPlayoutDeviceList[i].mID == mPlayoutDevice)
             {
@@ -836,6 +1048,22 @@ void LLWebRTCImpl::workerDeployDevices()
         }
     }
 
+    // <FS:TJ> Fix default voice output device always being used instead of the chosen device
+    if (mDeviceModule->Playing())
+    {
+        if (mDeviceModule->GetPlayoutDevice() == playoutDevice)
+        {
+            return;
+        }
+
+        mDeviceModule->StopPlayout();
+    }
+    // </FS:TJ>
+
+    // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
+    // Flag the device is being interacted with for the Co-routine in case something goes wrong.
+    gWebRTCUpdateDevices = true;
+    // </FS:minerjr> [FIRE-36022]
 #if WEBRTC_WIN
     if (playoutDevice < 0)
     {
@@ -851,16 +1079,108 @@ void LLWebRTCImpl::workerDeployDevices()
     mDeviceModule->InitSpeaker();
     mDeviceModule->SetStereoPlayout(true);
     mDeviceModule->InitPlayout();
+    mDeviceModule->StartPlayout();
+}
 
-    if ((!mMute && mPeerConnections.size()) || mTuningMode)
+// must be run in the worker thread.  Used for device changes and tuning: forces
+// a clean re-select of both devices, then re-applies per-connection mute/track
+// state.  To merely bring playout up when a connection is established (without
+// disturbing the connection's own mute/track management) call
+// workerOpenPlayout() directly -- see startPlayout().
+// [W113 2026-11-25] upstream's split of this function (4124f969ee7 capture for the whole session; #6109 module
+// reinit 7e99751c86e / 68f78d1e2d2 / 82c2cfcff1d; Mac back-off fc2481e6dbd) with ours (ticket 502) re-applied to it:
+// the turn accounting (turnHandedOn / workerFinishDeployTurn) and the retry when the device lock is busy, which
+// upstream still drops (its "try again another pass" never happens and the turn stays counted).
+void LLWebRTCImpl::workerDeployDevices(bool reset_module)
+{
+    bool turnHandedOn = false;   // <WolfViewer 2026-11-03/> ticket 502: see workerFinishDeployTurn()
+    // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
+    try // Try catch needed for uniquie lock as will throw an exception if a second lock is attempted or the mutex is invalid
     {
-        mDeviceModule->ForceStartRecording();
+    // Attempt to lock the access to the audio device, wait up to 1 second for other threads to unlock.
+    std::unique_lock lock(gAudioDeviceMutex, 1s);
+    // If the lock could not be accessed, return as we don't have hardware access and will need to try again another pass.
+    // Prevents threads from interacting with the hardware at the same time as other audio/voice threads.
+    if (!lock.owns_lock())
+    {
+        // <WolfViewer 2026-11-03> ticket 502: "try again another pass" never happened - this turn kept
+        // mDevicesDeploying above zero, so deployDevices() dropped every later device choice. Retry, keeping the turn.
+        // [W113 2026-11-25] passing reset_module on, as upstream's Mac back-off below does.
+        mWorkerThread->PostDelayedTask([this, reset_module]
+        {
+            workerDeployDevices(reset_module || mDevicesDeployingNeedsReset.exchange(false, std::memory_order_relaxed));
+        }, webrtc::TimeDelta::Millis(250));
+        // </WolfViewer>
+        return;
+    }
+    // </FS:minerjr> [FIRE-36022]
+    if (!mDeviceModule)
+    {
+        // <FS:minerjr> [FIRE-36022]
+        // If the device is not avaiable, then make sure the flag for the WebRTC updated devices flag is turned off for the co-routine
+        gWebRTCUpdateDevices = false;
+        // </FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
+        workerFinishDeployTurn();   // <WolfViewer 2026-11-03/> ticket 502: give the turn back
+        return;
     }
 
-    if (!mTuningMode)
+    // <FS:TJ> Try and help crash on Mac with device changes
+    // If the ADM is mid-transition, back off and keep trying for ~5s total
+#if WEBRTC_MAC
+    const bool adm_mid_transition =
+        (mDeviceModule->PlayoutIsInitialized() && !mDeviceModule->Playing()) ||
+        (mDeviceModule->RecordingIsInitialized() && !mDeviceModule->Recording());
+    if (adm_mid_transition)
     {
-        mDeviceModule->StartPlayout();
+        if (mDeployBackoffs++ < 20)
+        {
+            RTC_LOG(LS_WARNING) << "workerDeployDevices: ADM mid-transition, backing off (" << mDeployBackoffs << ")";
+            mWorkerThread->PostDelayedTask([this, reset_module]
+            {
+                workerDeployDevices(reset_module || mDevicesDeployingNeedsReset.exchange(false, std::memory_order_relaxed));
+            }, webrtc::TimeDelta::Millis(250));
+            return;
+        }
+        if (mDeviceModule->PlayoutIsInitialized() && !mDeviceModule->Playing())
+        {
+            mDeviceModule->StopPlayout();
+        }
+        if (mDeviceModule->RecordingIsInitialized() && !mDeviceModule->Recording())
+        {
+            mDeviceModule->ForceStopRecording();
+        }
     }
+    mDeployBackoffs = 0;
+#endif
+    // </FS:TJ>
+
+    // Stop first so the start helpers (which no-op when already running) will
+    // re-select the now-current device.
+    if (mDeviceModule->Playing())
+    {
+        mDeviceModule->StopPlayout();
+    }
+    if (mDeviceModule->Recording())
+    {
+        mDeviceModule->ForceStopRecording();
+    }
+    if (reset_module && (mDeviceModule->RecordingIsInitialized() || mDeviceModule->PlayoutIsInitialized()))
+    {
+        int32_t result = mDeviceModule->ForceTerminate();
+        if (result != 0)
+        {
+            RTC_LOG(LS_WARNING) << "workerDeployDevices: ForceTerminate failed: " << result;
+        }
+        result = mDeviceModule->Init();
+        if (result != 0)
+        {
+            RTC_LOG(LS_WARNING) << "workerDeployDevices: Init failed: " << result;
+        }
+    }
+
+    workerStartRecording();
+    workerStartPlayout();
+
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     // Finally signal to the co-routine everyting is OK.
     gWebRTCUpdateDevices = false;
@@ -883,7 +1203,11 @@ void LLWebRTCImpl::workerDeployDevices()
             }
             if (1 < mDevicesDeploying.fetch_sub(1, std::memory_order_relaxed))
             {
-                mWorkerThread->PostTask([this] { workerDeployDevices(); });
+                mWorkerThread->PostTask([this]
+                {
+                    bool reset = mDevicesDeployingNeedsReset.exchange(false, std::memory_order_relaxed);
+                    workerDeployDevices(reset);
+                });
             }
         });
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
@@ -928,7 +1252,7 @@ void LLWebRTCImpl::setCaptureDevice(const std::string &id)
     if (mRecordingDevice != id)
     {
         mRecordingDevice = id;
-        deployDevices();
+        deployDevices(false);
     }
 }
 
@@ -937,14 +1261,48 @@ void LLWebRTCImpl::setRenderDevice(const std::string &id)
     if (mPlayoutDevice != id)
     {
         mPlayoutDevice = id;
-        deployDevices();
+        deployDevices(false);
     }
+}
+
+void LLWebRTCImpl::setVoiceEnabled(bool enable)
+{
+    mVoiceEnabled = enable;
+    mWorkerThread->PostTask(
+        [this, enable]()
+        {
+            if (!mDeviceModule)
+            {
+                return;
+            }
+            if (enable)
+            {
+                // Voice on: start the capture device (it then stays running
+                // across calls and mute/unmute), and start playout if there's
+                // already a connection to render.
+                mDeviceModule->Init();
+                // [W113 2026-11-25] ours (ticket 502) counts every workerDeployDevices() run as a turn of
+                // mDevicesDeploying and every run ends one (workerFinishDeployTurn / the signalling task); upstream
+                // calls it directly here without taking one, which would leave the count one lower on each voice-on.
+                mDevicesDeploying.fetch_add(1, std::memory_order_relaxed);
+                workerDeployDevices(false);
+            }
+            else
+            {
+                // Voice off: release both devices so the OS mic/speaker aren't
+                // held open.
+                mDeviceModule->ForceStopRecording();
+                mDeviceModule->StopPlayout();
+                mDeviceModule->ForceTerminate();
+            }
+        });
 }
 
 // updateDevices needs to happen on the worker thread.
 void LLWebRTCImpl::updateDevices()
 {
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
+    bool reset_module = false;
     try // Try catch needed for uniquie lock as will throw an exception if a second lock is attempted or the mutex is invalid
     {
     // Attempt to lock the access to the audio device, wait up to 1 second for other threads to unlock.
@@ -963,13 +1321,42 @@ void LLWebRTCImpl::updateDevices()
         return;
     }
 
-    // <WolfViewer 2026-11-03> ticket 502: whether the chosen devices were in the old lists, so a chosen device that
-    // was missing when it was applied (headset switched on after log-in, or applied before the first enumeration)
-    // is applied once it appears, and one that goes away falls back to the default. Before this the device was
-    // never re-applied: setRenderDevice()/setCaptureDevice() skip an unchanged id, and nothing else redeployed.
-    const bool playoutWasPresent   = isDeviceSelectionPresent(mPlayoutDeviceList, mPlayoutDevice);
-    const bool recordingWasPresent = isDeviceSelectionPresent(mRecordingDeviceList, mRecordingDevice);
-    // </WolfViewer>
+    // Snapshot the previous lists so we can diff them against the freshly
+    // enumerated ones below -- both to detect whether the currently-selected
+    // playout/recording device disappeared (which forces a module reset)
+    // and to report any devices that are newly present (for diagnostics).
+    LLWebRTCVoiceDeviceList previousPlayoutDeviceList = mPlayoutDeviceList;
+    LLWebRTCVoiceDeviceList previousRecordingDeviceList = mRecordingDeviceList;
+
+    auto deviceStillPresent = [](const LLWebRTCVoiceDeviceList& list, const std::string& id) -> bool
+    {
+        if (id.empty() || id == "Default")
+        {
+            return true;
+        }
+        return std::any_of(list.begin(), list.end(),
+            [&id](const LLWebRTCVoiceDevice& device) { return device.mID == id; });
+    };
+
+    // Logs any device present in newList that wasn't present in oldList.
+    auto logNewlyAddedDevices = [](const LLWebRTCVoiceDeviceList& oldList,
+        const LLWebRTCVoiceDeviceList& newList,
+        const char* label)
+    {
+        for (const auto& device : newList)
+        {
+            bool wasPresent = std::any_of(oldList.begin(), oldList.end(),
+                [&device](const LLWebRTCVoiceDevice& old_device) { return old_device.mID == device.mID; });
+            if (!wasPresent)
+            {
+                RTC_LOG(LS_INFO) << "updateDevices: " << label << " device added: name='" << device.mDisplayName
+                    << "' id='" << device.mID << "'";
+            }
+        }
+    };
+
+    bool hadPlayoutDevice = deviceStillPresent(mPlayoutDeviceList, mPlayoutDevice);
+    bool hadRecordingDevice = deviceStillPresent(mRecordingDeviceList, mRecordingDevice);
 
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     // Flag the device is being interacted with for the Co-routine in case something goes wrong.
@@ -978,77 +1365,70 @@ void LLWebRTCImpl::updateDevices()
     int16_t renderDeviceCount  = mDeviceModule->PlayoutDevices();
 
     mPlayoutDeviceList.clear();
+    std::string newDefaultPlayoutDeviceGuid;
 #if WEBRTC_WIN
     int16_t index = 0;
 #else
     // index zero is always "Default" for darwin/linux,
     // which is a special case, so skip it.
     int16_t index = 1;
+    {
+        char name[webrtc::kAdmMaxDeviceNameSize];
+        char guid[webrtc::kAdmMaxGuidSize];
+        if (renderDeviceCount > 0 && mDeviceModule->PlayoutDeviceName(0, name, guid) == 0)
+        {
+            newDefaultPlayoutDeviceGuid = guid;
+        }
+    }
 #endif
     for (; index < renderDeviceCount; index++)
     {
         char name[webrtc::kAdmMaxDeviceNameSize];
         char guid[webrtc::kAdmMaxGuidSize];
         mDeviceModule->PlayoutDeviceName(index, name, guid);
+        RTC_LOG(LS_VERBOSE) << "updateDevices: playout device [" << index << "] name='" << name << "' guid='" << guid << "'";
         mPlayoutDeviceList.emplace_back(name, guid);
     }
 
     int16_t captureDeviceCount        = mDeviceModule->RecordingDevices();
 
     mRecordingDeviceList.clear();
+    std::string newDefaultRecordingDeviceGuid;
 #if WEBRTC_WIN
     index = 0;
 #else
     // index zero is always "Default" for darwin/linux,
     // which is a special case, so skip it.
     index = 1;
+    {
+        char name[webrtc::kAdmMaxDeviceNameSize];
+        char guid[webrtc::kAdmMaxGuidSize];
+        if (captureDeviceCount > 0 && mDeviceModule->RecordingDeviceName(0, name, guid) == 0)
+        {
+            newDefaultRecordingDeviceGuid = guid;
+        }
+    }
 #endif
     for (; index < captureDeviceCount; index++)
     {
         char name[webrtc::kAdmMaxDeviceNameSize];
         char guid[webrtc::kAdmMaxGuidSize];
         mDeviceModule->RecordingDeviceName(index, name, guid);
+        RTC_LOG(LS_VERBOSE) << "updateDevices: recording device [" << index << "] name='" << name << "' guid='" << guid << "'";
         mRecordingDeviceList.emplace_back(name, guid);
     }
 
-    // <WolfViewer 2026-11-03> ticket 502: on Linux "Default" opens PulseAudio's default at InitPlayout /
-    // InitRecording time (a null device name: audio_device_pulse_linux.cc:2105-2147), and the ADM reports no device
-    // changes, so a new server default is picked up here, when the list is refreshed. macOS needs nothing: its ADM
-    // restarts a running index-0 stream itself (audio_device_mac.cc HandleDefaultOutputDeviceChange /
-    // HandleDefaultInputDeviceChange); Windows: LLWebRTCDefaultDeviceWatcher.
-    bool defaultChanged = false;
-#if WEBRTC_LINUX
-    {
-        char name[webrtc::kAdmMaxDeviceNameSize];
-        char guid[webrtc::kAdmMaxGuidSize];
-        std::string playoutDefault;
-        std::string recordingDefault;
-        if (renderDeviceCount > 0 && mDeviceModule->PlayoutDeviceName(0, name, guid) == 0)
-        {
-            playoutDefault = name;
-        }
-        if (captureDeviceCount > 0 && mDeviceModule->RecordingDeviceName(0, name, guid) == 0)
-        {
-            recordingDefault = name;
-        }
-        defaultChanged = (isDefaultDeviceSelection(mPlayoutDevice) && !mDefaultPlayoutName.empty()
-                          && !playoutDefault.empty() && playoutDefault != mDefaultPlayoutName)
-                      || (isDefaultDeviceSelection(mRecordingDevice) && !mDefaultRecordingName.empty()
-                          && !recordingDefault.empty() && recordingDefault != mDefaultRecordingName);
-        if (!playoutDefault.empty())
-        {
-            mDefaultPlayoutName = playoutDefault;
-        }
-        if (!recordingDefault.empty())
-        {
-            mDefaultRecordingName = recordingDefault;
-        }
-    }
-#endif
-    const bool redeploy = defaultChanged
-                       || playoutWasPresent != isDeviceSelectionPresent(mPlayoutDeviceList, mPlayoutDevice)
-                       || recordingWasPresent != isDeviceSelectionPresent(mRecordingDeviceList, mRecordingDevice);
-    // </WolfViewer>
+    // [W113 2026-11-25] ours (ticket 502) redeployed here only when a chosen device appeared or went away, or (Linux)
+    // when PulseAudio's index-0 "default: <name>" changed. Upstream (#6109 7e99751c86e / 68f78d1e2d2) now ends every
+    // updateDevices() with deployDevices(reset_module), which stops and re-selects both devices on every enumeration,
+    // a superset of ours' cases (a Linux "Default" re-opens the server's current default at InitPlayout/InitRecording,
+    // audio_device_pulse_linux.cc:2105-2147), so ours' check and its mDefaultPlayoutName/mDefaultRecordingName were
+    // dropped rather than deploy twice. Windows' default device still follows LLWebRTCDefaultDeviceWatcher.
+
+    RTC_LOG(LS_INFO) << "updateDevices, playout count: " << renderDeviceCount << "; capture count: " << captureDeviceCount;
+
+    logNewlyAddedDevices(previousPlayoutDeviceList, mPlayoutDeviceList, "playout");
+    logNewlyAddedDevices(previousRecordingDeviceList, mRecordingDeviceList, "recording");
 
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     // Flag the device is no longer being interacted with for the Co-routine in case something goes wrong.
@@ -1058,11 +1438,39 @@ void LLWebRTCImpl::updateDevices()
     {
         observer->OnDevicesChanged(mPlayoutDeviceList, mRecordingDeviceList);
     }
-    if (redeploy)
+
+    // Force a reinit if a device in use disappeared from the list.
+    bool lostPlayoutDevice = hadPlayoutDevice && !deviceStillPresent(mPlayoutDeviceList, mPlayoutDevice);
+    bool lostRecordingDevice = hadRecordingDevice && !deviceStillPresent(mRecordingDeviceList, mRecordingDevice);
+
+    // Force a reinit if the OS-resolved default device changed
+    // On windows this is going to be unused.
+    bool defaultPlayoutChanged = mPlayoutDevice == "Default"
+        && mHaveDefaultPlayoutDeviceGuid
+        && !newDefaultPlayoutDeviceGuid.empty()
+        && mDefaultPlayoutDeviceGuid != newDefaultPlayoutDeviceGuid;
+    bool defaultRecordingChanged = mRecordingDevice == "Default"
+        && mHaveDefaultRecordingDeviceGuid
+        && !newDefaultRecordingDeviceGuid.empty()
+        && mDefaultRecordingDeviceGuid != newDefaultRecordingDeviceGuid;
+
+    if (defaultPlayoutChanged)
     {
-        deployDevices();   // <WolfViewer 2026-11-03/> ticket 502 (posts workerDeployDevices, which takes the lock itself)
+        RTC_LOG(LS_INFO) << "updateDevices: default playout device changed";
     }
+    if (defaultRecordingChanged)
+    {
+        RTC_LOG(LS_INFO) << "updateDevices: default recording device changed";
+    }
+
+    mDefaultPlayoutDeviceGuid = newDefaultPlayoutDeviceGuid;
+    mDefaultRecordingDeviceGuid = newDefaultRecordingDeviceGuid;
+    mHaveDefaultPlayoutDeviceGuid = true;
+    mHaveDefaultRecordingDeviceGuid = true;
+
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
+    //bool reset_module = lostPlayoutDevice || lostRecordingDevice || defaultPlayoutChanged || defaultRecordingChanged;
+    reset_module = lostPlayoutDevice || lostRecordingDevice || defaultPlayoutChanged || defaultRecordingChanged;
     }
     // There are two exceptions that unique_lock can trigger, operation_not_permitted or resource_deadlock_would_occur
     catch (const std::system_error& e)
@@ -1094,16 +1502,31 @@ void LLWebRTCImpl::updateDevices()
         return;
     }
     // </FS:minerjr> [FIRE-36022]
+
+    deployDevices(reset_module);
 }
 
 void LLWebRTCImpl::OnDevicesUpdated()
 {
-    // <WolfViewer 2026-11-03> ticket 502: the ADM calls this on its own notification thread (Windows MMDevAPI:
-    // audio_device_core_win.cc:3903; macOS CoreAudio listener: audio_device_mac.cc:1945), where updateDevices()
-    // raced the worker thread over mPlayoutDeviceList / mRecordingDeviceList. Run it on the worker thread, as
-    // secondlife/viewer develop llwebrtc.cpp OnDevicesUpdated() does.
+    // [W113 2026-11-25] upstream's body (FS:TJ fc2481e6dbd: Mac batches device-change events and delays the update); the
+    // non-Mac branch is the same worker-thread post ours (ticket 502) made.
+    // OnDevicesUpdated() is called on macOS CoreAudio's device-change callback
+    // thread.  Calling updateDevices() on that thread causes a deadlock.
+    // <FS:TJ> Try and help crash on Mac with device changes
+    // Batch device change events and delay the update to avoid racing stream restarts
+#if WEBRTC_MAC
+    if (!mDevicesUpdatePending.exchange(true))
+    {
+        mWorkerThread->PostDelayedTask([this]
+        {
+            mDevicesUpdatePending.store(false);
+            updateDevices();
+        }, webrtc::TimeDelta::Millis(1500));
+    }
+#else
     mWorkerThread->PostTask([this] { updateDevices(); });
-    // </WolfViewer>
+#endif
+    // </FS:TJ>
 }
 
 #if WEBRTC_WIN
@@ -1116,7 +1539,7 @@ void LLWebRTCImpl::onSystemDefaultDeviceChanged(bool render)
         {
             if (isDefaultDeviceSelection(render ? mPlayoutDevice : mRecordingDevice))
             {
-                deployDevices();
+                deployDevices(false);   // [W113 2026-11-25] upstream's signature; no module reset, as ours
             }
         });
 }
@@ -1127,6 +1550,7 @@ void LLWebRTCImpl::onSystemDefaultDeviceChanged(bool render)
 void LLWebRTCImpl::setTuningMode(bool enable)
 {
     mTuningMode = enable;
+    updateCaptureTapGate();   // [W113 2026-11-25] see updateCaptureTapGate()
     if (!mTuningMode
         && !mMute
         && mPeerCustomProcessor
@@ -1138,6 +1562,13 @@ void LLWebRTCImpl::setTuningMode(bool enable)
         [this]
         {
             mDeviceModule->SetTuning(mTuningMode, mMute);
+            if (!mTuningMode)
+            {
+                // Restore playout after tuning, gated on there being a
+                // connection to render (so the output device isn't left
+                // spinning with no engine data).
+                workerStartPlayout();
+            }
             mSignalingThread->PostTask(
                 [this]
                 {
@@ -1157,15 +1588,22 @@ void LLWebRTCImpl::setTuningMode(bool enable)
         });
 }
 
-void LLWebRTCImpl::deployDevices()
+void LLWebRTCImpl::deployDevices(bool reset_module)
 {
     if (0 < mDevicesDeploying.fetch_add(1, std::memory_order_relaxed))
     {
+        if (reset_module)
+        {
+            mDevicesDeployingNeedsReset.store(true, std::memory_order_relaxed);
+        }
         return;
     }
     mWorkerThread->PostTask(
-        [this] {
-            workerDeployDevices();
+        [this, reset_module] {
+
+            bool reset = mDevicesDeployingNeedsReset.exchange(false, std::memory_order_relaxed);
+            reset |= reset_module;
+            workerDeployDevices(reset);
         });
 }
 
@@ -1343,136 +1781,30 @@ void LLWebRTCImpl::setMute(bool mute, int delay_ms)
 
 void LLWebRTCImpl::intSetMute(bool mute, int delay_ms)
 {
+    // Mute by zeroing the captured (post-APM) gain; the sender track is also
+    // disabled per connection (see LLWebRTCPeerConnectionImpl::setMute).  The
+    // capture device deliberately stays running for the whole session, so
+    // muting/unmuting never stops or starts it -- that's what avoids the AEC
+    // cold-start hiss on unmute.  Capture start/stop is tied to device
+    // selection (workerStartRecording) and shutdown, not to mute.
     if (mPeerCustomProcessor)
     {
         mPeerCustomProcessor->setGain(mMute ? 0.0f : mGain);
     }
+    updateCaptureTapGate();   // [W113 2026-11-25] see updateCaptureTapGate()
+}
 
-    // Sequence counter to prevent race conditions from rapid requests to mute/unmute
-    static std::atomic<uint32_t> mute_sequence(0);
-    uint32_t current_sequence = ++mute_sequence;
-
-    if (mMute)
+// [W113 2026-11-25] ours ([AI MODE] 2026-11-05 capture tap) kept as it was: before upstream's 4124f969ee7 a mute
+// stopped the capture device (ForceStopRecording in intSetMute) and tuning started it, so AI Mode's capture tap
+// (newview wolfaimode.cpp setCaptureTap; its ear ends an utterance when "the tap stops when the resident mutes")
+// heard the resident only while unmuted or tuning. Upstream now keeps capture running through mute (the gain stage
+// above silences what is sent), so the tap is closed here instead whenever the device would have been stopped.
+// One difference: ours stopped the device delay_ms after a mute (the fade); the tap closes at once.
+void LLWebRTCImpl::updateCaptureTapGate()
+{
+    if (mDeviceModule)
     {
-        mWorkerThread->PostDelayedTask(
-            [this, current_sequence]
-            {
-                if (mDeviceModule && (current_sequence == mute_sequence.load()))
-                {
-                    // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
-                    try // Try catch needed for uniquie lock as will throw an exception if a second lock is attempted or the mutex is
-                        // invalid
-                    {
-                    // Attempt to lock the access to the audio device, wait up to 1 second for other threads to unlock.
-                    std::unique_lock lock(gAudioDeviceMutex, 1s);
-                    // If the lock could not be accessed, return as we don't have hardware access and will need to try again another pass.
-                    // Prevents threads from interacting with the hardware at the same time as other audio/voice threads.
-                    if (!lock.owns_lock())
-                    {
-                        return;
-                    }
-                    // Flag the device is being interacted with for the Co-routine in case something goes wrong.
-                    gWebRTCUpdateDevices = true;
-                    // </FS:minerjr> [FIRE-36022]
-                    mDeviceModule->ForceStopRecording();
-                    // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
-                    // Finally signal to the co-routine everyting is OK.
-                    gWebRTCUpdateDevices = false;
-                    }
-                    // There are two exceptions that unique_lock can trigger, operation_not_permitted or resource_deadlock_would_occur
-                    catch (const std::system_error& e)
-                    {
-                        if (e.code() == std::errc::resource_deadlock_would_occur)
-                        {
-                            // Another thead may have alreayd called this method
-                            mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
-                        }
-                        else if (e.code() == std::errc::operation_not_permitted)
-                        {
-                            // This should not be reached
-                            mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
-                        }
-                        else
-                        {
-                            // Log any other message
-                            mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
-                        }
-                        // Device no longer being interacted with
-                        gWebRTCUpdateDevices = false;
-                        return;
-                    }
-                    catch (const std::exception& e)
-                    {
-                        mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
-                        // Device no longer being interacted with
-                        gWebRTCUpdateDevices = false;
-                        return;
-                    }
-                    // </FS:minerjr> [FIRE-36022]
-                }
-            },
-            webrtc::TimeDelta::Millis(delay_ms));
-    }
-    else
-    {
-        mWorkerThread->PostTask(
-            [this, current_sequence]
-            {
-                if (mDeviceModule && (current_sequence == mute_sequence.load()))
-                {
-                    // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
-                    try // Try catch needed for uniquie lock as will throw an exception if a second lock is attempted or the mutex is
-                        // invalid
-                    {
-                    // Attempt to lock the access to the audio device, wait up to 1 second for other threads to unlock.
-                    std::unique_lock lock(gAudioDeviceMutex, 1s);
-                    // If the lock could not be accessed, return as we don't have hardware access and will need to try again another pass.
-                    // Prevents threads from interacting with the hardware at the same time as other audio/voice threads.
-                    if (!lock.owns_lock())
-                    {
-                        return;
-                    }
-                    // Flag the device is being interacted with for the Co-routine in case something goes wrong.
-                    gWebRTCUpdateDevices = true;
-                    // </FS:minerjr> [FIRE-36022]
-                    mDeviceModule->InitRecording();
-                    mDeviceModule->ForceStartRecording();
-                    // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
-                    // Finally signal to the co-routine everyting is OK.
-                    gWebRTCUpdateDevices = false;
-                    }
-                    // There are two exceptions that unique_lock can trigger, operation_not_permitted or resource_deadlock_would_occur
-                    catch (const std::system_error& e)
-                    {
-                        if (e.code() == std::errc::resource_deadlock_would_occur)
-                        {
-                            // Another thead may have alreayd called this method
-                            mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
-                        }
-                        else if (e.code() == std::errc::operation_not_permitted)
-                        {
-                            // This should not be reached
-                            mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
-                        }
-                        else
-                        {
-                            // Log any other message
-                            mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
-                        }
-                        // Device no longer being interacted with
-                        gWebRTCUpdateDevices = false;
-                        return;
-                    }
-                    catch (const std::exception& e)
-                    {
-                        mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
-                        // Device no longer being interacted with
-                        gWebRTCUpdateDevices = false;
-                        return;
-                    }
-                    // </FS:minerjr> [FIRE-36022]
-                }
-            });
+        mDeviceModule->SetCaptureTapOpen(!mMute || mTuningMode);
     }
 }
 
@@ -1482,14 +1814,20 @@ void LLWebRTCImpl::intSetMute(bool mute, int delay_ms)
 
 LLWebRTCPeerConnectionInterface *LLWebRTCImpl::newPeerConnection()
 {
-    bool empty = mPeerConnections.empty();
-    webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl> peerConnection = webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl>(new webrtc::RefCountedObject<LLWebRTCPeerConnectionImpl>());
+    webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl> peerConnection = webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl>(new webrtc::RefCountedObject<LLWebRTCPeerConnectionImpl>(mEnv));
     peerConnection->init(this);
     if (mPeerConnections.empty())
     {
         intSetMute(mMute);
     }
     mPeerConnections.emplace_back(peerConnection);
+
+    // Playout is intentionally NOT started here.  This runs when the connection
+    // is created/connecting; starting the output device now leaves it spinning
+    // with no decoded audio during the handshake, which is heard as a buzz.
+    // Playout is started from OnConnectionChange(kConnected) instead, once audio
+    // is actually established (see startPlayout()).  Capture follows
+    // voice-enabled state, so it's not touched here either.
 
     peerConnection->enableSenderTracks(false);
     peerConnection->resetMute();
@@ -1507,8 +1845,46 @@ void LLWebRTCImpl::freePeerConnection(LLWebRTCPeerConnectionInterface* peer_conn
         if (mPeerConnections.empty())
         {
             intSetMute(true);
+            // Last connection gone: stop playout (there's nothing to render).
+            // Capture stays running while voice is enabled so it's ready -- with
+            // no cold-start hiss -- when the next call comes up.  But if voice
+            // has been disabled, stop capture now: setVoiceEnabled(false) tried
+            // to, but the engine's send stream was still active then (and the
+            // engine's own StopRecording is intentionally a no-op), so the stop
+            // only sticks once the connection -- and its stream -- is gone.
+            mWorkerThread->PostTask(
+                [this]()
+                {
+                    if (mDeviceModule)
+                    {
+                        if (mDeviceModule->Playing())
+                        {
+                            mDeviceModule->StopPlayout();
+                        }
+                        if (!mVoiceEnabled)
+                        {
+                            mDeviceModule->ForceStopRecording();
+                        }
+                    }
+                });
         }
     }
+}
+
+void LLWebRTCImpl::startPlayout()
+{
+    // Called when a connection's audio is established.  Only playout is started
+    // here: it's gated on there being a connection to render, because running
+    // the output device with no engine data is heard as a buzz.  Capture is
+    // NOT touched here -- it follows voice-enabled state (setVoiceEnabled), so
+    // it's already running if voice is on and must stay off if voice is off.
+    // Starting it here would also let a stray kConnected during voice-disable
+    // teardown re-open the mic.
+    mWorkerThread->PostTask(
+        [this]()
+        {
+            workerStartPlayout();
+        });
 }
 
 
@@ -1518,13 +1894,16 @@ void LLWebRTCImpl::freePeerConnection(LLWebRTCPeerConnectionInterface* peer_conn
 // Most peer connection (signaling) happens on
 // the signaling thread.
 
-LLWebRTCPeerConnectionImpl::LLWebRTCPeerConnectionImpl() :
+LLWebRTCPeerConnectionImpl::LLWebRTCPeerConnectionImpl(const webrtc::Environment& env) :
+    mEnv(env),
     mWebRTCImpl(nullptr),
     mPeerConnection(nullptr),
     mMute(MUTE_INITIAL),
     mAnswerReceived(false),
     mPeerConnectionState(webrtc::PeerConnectionInterface::PeerConnectionState::kNew),
     mDisconnectCount(0),
+    mStatsRequestPending(false),
+    mShuttingDown(false),
     mPendingJobs(0)
 {
 }
@@ -1553,50 +1932,77 @@ void LLWebRTCPeerConnectionImpl::init(LLWebRTCImpl * webrtc_impl)
 void LLWebRTCPeerConnectionImpl::terminate()
 {
     mPendingJobs++;
+    webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl> self(this);
     mWebRTCImpl->PostSignalingTask(
-        [this]()
+        [self]()
         {
-            if (mPeerConnection)
-            {
-                if (mDataChannel)
-                {
-                    {
-                        mDataChannel->Close();
-                        mDataChannel = nullptr;
-                    }
-                }
-
-                // to remove 'Secondlife is recording' icon from taskbar
-                // if user was speaking
-                auto senders = mPeerConnection->GetSenders();
-                for (auto& sender : senders)
-                {
-                    auto track = sender->track();
-                    if (track)
-                    {
-                        track->set_enabled(false);
-                    }
-                }
-
-                mPeerConnection->Close();
-                if (mLocalStream)
-                {
-                    auto tracks = mLocalStream->GetAudioTracks();
-                    for (auto& track : tracks)
-                    {
-                        mLocalStream->RemoveTrack(track);
-                    }
-                    mLocalStream = nullptr;
-                }
-                mPeerConnection = nullptr;
-
-                for (auto &observer : mSignalingObserverList)
-                {
-                    observer->OnPeerConnectionClosed();
-                }
-            }
-            mPendingJobs--;
+            self->closeOnSignalingThread(false);
+            self->mPendingJobs--;
         });
+}
+
+// Signaling thread only.
+void LLWebRTCPeerConnectionImpl::closeOnSignalingThread(bool webrtc_terminate)
+{
+    // Stop issuing stats requests; one may already be in flight, and
+    // Close() below will flush it.
+    mShuttingDown = true;
+
+    if (mPeerConnection)
+    {
+        if (mDataChannel)
+        {
+            mDataChannel->Close();
+            mDataChannel = nullptr;
+        }
+
+        // to remove 'Secondlife is recording' icon from taskbar
+        // if user was speaking
+        auto senders = mPeerConnection->GetSenders();
+        for (auto& sender : senders)
+        {
+            auto track = sender->track();
+            if (track)
+            {
+                track->set_enabled(false);
+            }
+        }
+
+        // NOTE: Close() delivers any pending GetStats report inline, before it
+        // returns, so the observer list below must still be valid here.
+        mPeerConnection->Close();
+        if (mLocalStream)
+        {
+            auto tracks = mLocalStream->GetAudioTracks();
+            for (auto& track : tracks)
+            {
+                mLocalStream->RemoveTrack(track);
+            }
+            mLocalStream = nullptr;
+        }
+        mPeerConnection = nullptr;
+    }
+
+    // Notify unconditionally, even if there was no peer connection to close --
+    // a connection can be shut down before it ever finished initializing, and
+    // the caller is still waiting to hear that the close is done.  Withholding
+    // this leaves the viewer's connection state machine parked in
+    // VOICE_STATE_WAIT_FOR_CLOSE, which has no timeout of its own.
+    for (auto &observer : mSignalingObserverList)
+    {
+        observer->OnPeerConnectionClosed();
+    }
+
+    if (webrtc_terminate)
+    {
+        // Nothing may call back into the viewer past this point.  Connections
+        // closed while the viewer is still running unset themselves as observers
+        // when they're destroyed, but any that are left for llwebrtc::terminate()
+        // to close deliberately don't -- they're torn down as soon as it returns,
+        // so a late callback would be reaching into freed memory.
+        mSignalingObserverList.clear();
+        mDataObserverList.clear();
+    }
 }
 
 void LLWebRTCPeerConnectionImpl::setSignalingObserver(LLWebRTCSignalingObserver *observer) { mSignalingObserverList.emplace_back(observer); }
@@ -1618,8 +2024,9 @@ bool LLWebRTCPeerConnectionImpl::initializeConnection(const LLWebRTCPeerConnecti
     mAnswerReceived = false;
 
     mPendingJobs++;
+    webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl> self(this);
     mWebRTCImpl->PostSignalingTask(
-        [this,options]()
+        [self,options]()
         {
             webrtc::PeerConnectionInterface::RTCConfiguration config;
             for (auto server : options.mServers)
@@ -1638,42 +2045,42 @@ bool LLWebRTCPeerConnectionImpl::initializeConnection(const LLWebRTCPeerConnecti
             config.set_min_port(60000);
             config.set_max_port(60100);
 
-            webrtc::PeerConnectionDependencies pc_dependencies(this);
+            webrtc::PeerConnectionDependencies pc_dependencies(self.get());
             // Other thread manages mPeerConnectionFactory's lifetime and it can be reset
             // at any momment, create own scoped_refptr (atomic).
-            webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> peer_connection_factory = mPeerConnectionFactory;
+            webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> peer_connection_factory = self->mPeerConnectionFactory;
             if (peer_connection_factory == nullptr)
             {
                 RTC_LOG(LS_ERROR) << __FUNCTION__ << "Error creating peer connection, factory doesn't exist";
                 // Too early?
-                mPendingJobs--;
+                self->mPendingJobs--;
                 return;
             }
             auto error_or_peer_connection = peer_connection_factory->CreatePeerConnectionOrError(config, std::move(pc_dependencies));
             if (error_or_peer_connection.ok())
             {
-                mPeerConnection = std::move(error_or_peer_connection.value());
+                self->mPeerConnection = std::move(error_or_peer_connection.value());
             }
             else
             {
                 RTC_LOG(LS_ERROR) << __FUNCTION__ << "Error creating peer connection: " << error_or_peer_connection.error().message();
-                for (auto &observer : mSignalingObserverList)
+                for (auto &observer : self->mSignalingObserverList)
                 {
                     observer->OnRenegotiationNeeded();
                 }
-                mPendingJobs--;
+                self->mPendingJobs--;
                 return;
             }
 
             webrtc::DataChannelInit init;
             init.ordered = true;
 
-            auto data_channel_or_error = mPeerConnection->CreateDataChannelOrError("SLData", &init);
+            auto data_channel_or_error = self->mPeerConnection->CreateDataChannelOrError("SLData", &init);
             if (data_channel_or_error.ok())
             {
-                mDataChannel = std::move(data_channel_or_error.value());
+                self->mDataChannel = std::move(data_channel_or_error.value());
 
-                mDataChannel->RegisterObserver(this);
+                self->mDataChannel->RegisterObserver(self.get());
             }
 
             webrtc::AudioOptions audioOptions;
@@ -1682,16 +2089,16 @@ bool LLWebRTCPeerConnectionImpl::initializeConnection(const LLWebRTCPeerConnecti
             audioOptions.noise_suppression = true;
             audioOptions.init_recording_on_send = false;
 
-            mLocalStream = peer_connection_factory->CreateLocalMediaStream("SLStream");
+            self->mLocalStream = peer_connection_factory->CreateLocalMediaStream("SLStream");
 
             webrtc::scoped_refptr<webrtc::AudioTrackInterface> audio_track(
                 peer_connection_factory->CreateAudioTrack("SLAudio", peer_connection_factory->CreateAudioSource(audioOptions).get()));
             audio_track->set_enabled(false);
-            mLocalStream->AddTrack(audio_track);
+            self->mLocalStream->AddTrack(audio_track);
 
-            mPeerConnection->AddTrack(audio_track, {"SLStream"});
+            self->mPeerConnection->AddTrack(audio_track, {"SLStream"});
 
-            auto senders = mPeerConnection->GetSenders();
+            auto senders = self->mPeerConnection->GetSenders();
 
             for (auto &sender : senders)
             {
@@ -1707,7 +2114,7 @@ bool LLWebRTCPeerConnectionImpl::initializeConnection(const LLWebRTCPeerConnecti
                 sender->SetParameters(params);
             }
 
-            auto receivers = mPeerConnection->GetReceivers();
+            auto receivers = self->mPeerConnection->GetReceivers();
             for (auto &receiver : receivers)
             {
                 webrtc::RtpParameters      params;
@@ -1723,9 +2130,9 @@ bool LLWebRTCPeerConnectionImpl::initializeConnection(const LLWebRTCPeerConnecti
             }
 
             webrtc::PeerConnectionInterface::RTCOfferAnswerOptions offerOptions;
-            this->AddRef(); // CreateOffer will deref this when it's done.  Without this, the callbacks never get called.
-            mPeerConnection->CreateOffer(this, offerOptions);
-            mPendingJobs--;
+            self->AddRef(); // CreateOffer will deref this when it's done.  Without this, the callbacks never get called.
+            self->mPeerConnection->CreateOffer(self.get(), offerOptions);
+            self->mPendingJobs--;
         });
 
     return true;
@@ -1802,14 +2209,15 @@ void LLWebRTCPeerConnectionImpl::setMute(bool mute)
 
 
     mPendingJobs++;
+    webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl> self(this);
     mWebRTCImpl->PostSignalingTask(
-        [this, force_reset, enable]()
+        [self, force_reset, enable]()
         {
-        if (mPeerConnection)
+        if (self->mPeerConnection)
         {
-            auto senders = mPeerConnection->GetSenders();
+            auto senders = self->mPeerConnection->GetSenders();
 
-            RTC_LOG(LS_INFO) << __FUNCTION__ << (mMute ? "disabling" : "enabling") << " streams count " << senders.size();
+            RTC_LOG(LS_INFO) << __FUNCTION__ << (self->mMute ? "disabling" : "enabling") << " streams count " << senders.size();
             for (auto &sender : senders)
             {
                 auto track = sender->track();
@@ -1825,7 +2233,7 @@ void LLWebRTCPeerConnectionImpl::setMute(bool mute)
                     track->set_enabled(enable);
                 }
             }
-            mPendingJobs--;
+            self->mPendingJobs--;
         }
     });
 }
@@ -1964,16 +2372,25 @@ void LLWebRTCPeerConnectionImpl::OnConnectionChange(webrtc::PeerConnectionInterf
     {
         case webrtc::PeerConnectionInterface::PeerConnectionState::kConnected:
         {
+            // Audio is established now -- start playout for this connection.
+            // (Capture follows voice-enabled state, so it's already running and
+            // isn't touched here.)  Doing playout here rather than at connection
+            // creation avoids running the output device with no decoded audio
+            // during the handshake (heard as a buzz).
+            mWebRTCImpl->startPlayout();
             mPendingJobs++;
-            mWebRTCImpl->PostWorkerTask([this]() {
-                for (auto &observer : mSignalingObserverList)
+            webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl> self(this);
+            mWebRTCImpl->PostWorkerTask([self]()
+            {
+                for (auto &observer : self->mSignalingObserverList)
                 {
-                    observer->OnAudioEstablished(this);
+                    observer->OnAudioEstablished(self.get());
                 }
-                mPendingJobs--;
+                self->mPendingJobs--;
             });
             break;
         }
+
         case webrtc::PeerConnectionInterface::PeerConnectionState::kFailed:
         {
             for (auto &observer : mSignalingObserverList)
@@ -2208,20 +2625,20 @@ void LLWebRTCPeerConnectionImpl::OnStateChange()
     switch (mDataChannel->state())
     {
         case webrtc::DataChannelInterface::kOpen:
-            RTC_LOG(LS_INFO) << __FUNCTION__ << " Data Channel State Open";
+            RTC_LOG(LS_VERBOSE) << __FUNCTION__ << " Data Channel State Open";
             for (auto &observer : mSignalingObserverList)
             {
                 observer->OnDataChannelReady(this);
             }
             break;
         case webrtc::DataChannelInterface::kConnecting:
-            RTC_LOG(LS_INFO) << __FUNCTION__ << " Data Channel State Connecting";
+            RTC_LOG(LS_VERBOSE) << __FUNCTION__ << " Data Channel State Connecting";
             break;
         case webrtc::DataChannelInterface::kClosing:
-            RTC_LOG(LS_INFO) << __FUNCTION__ << " Data Channel State closing";
+            RTC_LOG(LS_VERBOSE) << __FUNCTION__ << " Data Channel State closing";
             break;
         case webrtc::DataChannelInterface::kClosed:
-            RTC_LOG(LS_INFO) << __FUNCTION__ << " Data Channel State closed";
+            RTC_LOG(LS_VERBOSE) << __FUNCTION__ << " Data Channel State closed";
             break;
         default:
             break;
@@ -2273,6 +2690,82 @@ void LLWebRTCPeerConnectionImpl::unsetDataObserver(LLWebRTCDataObserver* observe
     }
 }
 
+class LLStatsCollectorCallback : public webrtc::RTCStatsCollectorCallback
+{
+public:
+    typedef std::function<void(const LLWebRTCStatsMap&)> StatsCallback;
+
+    LLStatsCollectorCallback(StatsCallback callback) : callback_(callback) {}
+
+    void OnStatsDelivered(const webrtc::scoped_refptr<const webrtc::RTCStatsReport>& report) override
+    {
+        if (callback_)
+        {
+            // Transform RTCStatsReport stats to simple map
+            LLWebRTCStatsMap stats_map;
+            for (const auto& stats : *report)
+            {
+                std::map<std::string, std::string> stat_attributes;
+
+                // Convert each attribute to string format
+                for (const auto& attribute : stats.Attributes())
+                {
+                    stat_attributes[attribute.name()] = attribute.ToString();
+                }
+                stats_map[stats.id()] = stat_attributes;
+            }
+            callback_(stats_map);
+        }
+    }
+
+private:
+    StatsCallback callback_;
+};
+
+void LLWebRTCPeerConnectionImpl::gatherConnectionStats()
+{
+    if (!mPeerConnection)
+    {
+        return;
+    }
+
+    webrtc::scoped_refptr<LLWebRTCPeerConnectionImpl> self(this);
+    mWebRTCImpl->PostSignalingTask(
+        [self]()
+    {
+        if (!self->mPeerConnection
+            || self->mShuttingDown
+            || self->mPeerConnectionState != webrtc::PeerConnectionInterface::PeerConnectionState::kConnected
+            || self->mStatsRequestPending) // signaling thread only
+        {
+            return;
+        }
+
+        self->mStatsRequestPending = true;
+
+        auto stats_callback = webrtc::make_ref_counted<LLStatsCollectorCallback>(
+            [self](const LLWebRTCStatsMap& generic_stats)
+        {
+            self->mStatsRequestPending = false;
+
+            // This can be delivered inline from PeerConnection::Close(), which
+            // flushes pending stats requests as it tears down.  Don't call out
+            // to the observers in that case -- we're on our way out.
+            if (!self->mPeerConnection || self->mShuttingDown)
+            {
+                return;
+            }
+
+            for (auto& observer : self->mSignalingObserverList)
+            {
+                observer->OnStatsDelivered(generic_stats);
+            }
+        });
+
+        self->mPeerConnection->GetStats(stats_callback.get());
+    });
+}
+
 LLWebRTCImpl * gWebRTCImpl = nullptr;
 LLWebRTCDeviceInterface * getDeviceInterface()
 {
@@ -2304,8 +2797,14 @@ void terminate()
 {
     if (gWebRTCImpl)
     {
-        gWebRTCImpl->terminate();
-        delete gWebRTCImpl;
+        if (gWebRTCImpl->terminate())
+        {
+            delete gWebRTCImpl;
+        }
+        // Otherwise shutdown timed out and was left to a detached thread that is
+        // still using this object -- and the webrtc threads it owns -- so it's
+        // intentionally leaked.  Deleting it would hand that thread a freed
+        // object to finish shutting down with.
         gWebRTCImpl = nullptr;
     }
 }

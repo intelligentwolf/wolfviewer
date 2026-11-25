@@ -1297,6 +1297,20 @@ do
 			<button name="Cancel" text="Anuluj"/>
 		</form>
 	</notification>
+	<notification label="Zmień nazwę zakładki filtra" name="FSInventoryCustomTabRename">
+		Nowa nazwa zakładki:
+		<form name="form">
+			<input name="new_name">
+				[NAME]
+			</input>
+			<button name="OK" text="OK"/>
+			<button name="Cancel" text="Anuluj"/>
+		</form>
+	</notification>
+	<notification label="Zamknij zakładkę filtra" name="FSInventoryCustomTabClose">
+		Zamknąć zakładkę filtra &quot;[NAME]&quot;? Jej zapisane filtry zostaną usunięte.
+		<usetemplate name="okcancelignore" notext="Anuluj" yestext="Tak, zamknij" ignoretext="Potwierdzaj przed zamknięciem niestandardowej zakładki filtra szafy" />
+	</notification>
 	<notification label="Zmień nazwę gestu" name="RenameGesture">
 		Nowa nazwa gestu:
 		<form name="form">
@@ -3452,9 +3466,10 @@ Czy wyrażasz na to zgodę?
 		</form>
 	</notification>
 	<notification name="ScriptQuestionCaution">
-		Obiekt &apos;&lt;nolink&gt;[OBJECTNAME]&lt;/nolink&gt;&apos; chciałby uzyskać zgodę na pobieranie Linden Dolarów (L$) z Twojego konta. Jeśli zezwolisz, to będzie on mógł brać z niego wszystkie lub część środków, w dowolnej chwili, bez dodatkowych ostrzeżeń.
+Uwaga:
+[WARNINGS]
 
-Zanim zezwolisz na dostęp upewnij się, że wiesz jaki to obiekt i dlaczego pyta o zgodę - oraz że ufasz jego twórcy. Jeśli nie masz pewności kliknij na Odmów.
+Nie zezwalaj na dostęp, jeśli nie rozumiesz, dlaczego chce uzyskać dostęp do Twojego konta.
 		<form name="form">
 			<button name="Grant" text="Zezwól na dostęp"/>
 			<button name="Deny" text="Odmów"/>
@@ -3641,6 +3656,12 @@ Zostaną zablokowane na kilka sekund dla bezpieczeństwa.
 	<notification name="SnapshotToLocalDirNotExist">
 		Nie można zapisać zrzutu ekranu do [PATH]: Katalog nie istnieje.
 	</notification>
+	<notification name="SnapshotSavedToComputer">
+		Zrzut ekranu zapisany do:
+[FILEPATH]
+
+Kliknij, aby otworzyć folder.
+	</notification>
 	<notification name="PresetNotSaved">
 		Błąd podczas zapisywania ustawienia [NAME].
 	</notification>
@@ -3666,6 +3687,13 @@ to ustawienie lub wybrać inną nazwę.
 	</notification>
 	<notification name="VoiceIsMutedByModerator">
 		Twoja rozmowa głosowa została wyciszona przez moderatora.
+	</notification>
+	<notification name="NearbyVoiceMutedByModerator">
+		Moderator wyciszył Twój czat głosowy.
+Osoby w tej lokalizacji nie usłyszą Cię, jeśli będziesz mówić.
+	</notification>
+	<notification name="NearbyVoiceUnmutedByModerator">
+		Twój czat głosowy mogą teraz usłyszeć osoby w tym miejscu.
 	</notification>
 	<notification name="FailedToGetBenefits">
 		Niestety nie udało nam się uzyskać informacji o korzyściach dla tej sesji. Nie powinno się to zdarzyć w normalnym środowisku produkcyjnym. Skontaktuj się z pomocą techniczną. Ta sesja nie będzie działać normalnie i zalecamy restart.
@@ -3875,6 +3903,10 @@ Wstępnie przetworzone tekstury [RESOLUTION] zostały lokalnie zaktualizowane dl
 	<notification name="ConfirmLeaveCall">
 		Czy jesteś pewien/pewna, że chcesz zakończyć rozmowę?
 		<usetemplate ignoretext="Potwierdź zanim rozmowa głosowa zostanie zakończona" name="okcancelignore" notext="Nie" yestext="Tak"/>
+	</notification>
+	<notification name="ConfirmLeaveAdhoc">
+		Czy na pewno chcesz opuścić tę konferencję?
+		<usetemplate ignoretext="Potwierdzaj przed opuszczeniem konferencji" name="okcancelignore" notext="Nie" yestext="Tak" />
 	</notification>
 	<notification name="ConfirmMuteAll">
 		Wybrano wyciszenie wszystkich uczestników rozmowy głosowej w grupie.
@@ -4138,6 +4170,23 @@ Nazwa może zawierać tylko znaki ASCII, za wyjątkiem ":" oraz "|".
 	<notification name="RenameAOMustBeASCII">
 		Nie można zmienić nazwy zestawu AO "[AO_SET_NAME]".
 Nazwa może zawierać tylko znaki ASCII, za wyjątkiem ":" oraz "|".
+	</notification>
+	<notification name="RenameAOGroup">
+		Wpisz nazwę nowej grupy animacji:
+(Nazwa może zawierać każdy znak ASCII, za wyjątkiem ":" oraz "|")
+		<form name="form">
+			<input name="message">
+				[AO_GROUP_NAME]
+			</input>
+			<button name="Cancel" text="Anuluj"/>
+		</form>
+	</notification>
+	<notification name="RenameAOEntryMustBeASCII">
+		Nie można zmienić nazwy na "[AO_SET_NAME]".
+Nazwa może zawierać tylko znaki ASCII, za wyjątkiem ":" oraz "|".
+	</notification>
+	<notification name="AOFolderDropNoAnimations">
+		Folder "[NAME]" nie zawiera żadnych animacji do dodania.
 	</notification>
 	<notification name="NewAONameCantExist">
 		Zestaw animacji o tej nazwie już istnieje.
@@ -4798,9 +4847,9 @@ Spróbuj ponownie za minutę.
 	<notification name="CantAttachObjectBeingRemoved">
 		Nie możesz odłączyć dodatku, ponieważ jest on już odłączony.
 	</notification>
-	<!-- <notification name="IllegalAttachment">
+	<notification name="IllegalAttachment">
 		Dodatek chciał się doczepić do punktu, jaki nie istnieje na awatarze. Został on zamiast tego dołączony do klatki piersiowej.
-	</notification> -->
+	</notification>
 	<notification name="CantDropItemTrialUser">
 		Nie możesz tutaj upuszczać obiektów; spróbuj w strefie Darmowej Próby.
 	</notification>
@@ -5420,14 +5469,14 @@ Wynik testu kompresji pliku dla gzip na poziomie 6 z [FILE] o rozmiarze [SIZE] K
 Pakowanie: [PACK_TIME]s [PSIZE]KB
 Rozpakowywanie: [UNPACK_TIME]s [USIZE]KB
 	</notification>
-	<notification name="PromptMFAToken">
+	<notification name="PromptMFAToken" label="Monit o token MFA">
 		[MESSAGE]
 		<form name="form">
 			<button name="continue" text="Kontynuuj" />
 			<button name="cancel" text="Anuluj" />
 		</form>
 	</notification>
-	<notification name="PromptMFATokenWithSave">
+	<notification name="PromptMFATokenWithSave" label="Monit o token MFA">
 		[MESSAGE]
 		<form name="form">
 			<ignore name="ignore" text="Pamiętaj ten komputer przez 30 dni" />
@@ -5560,6 +5609,14 @@ Aby uzyskać szczegółowe instrukcje dotyczące umieszczania [APP_NAME]a na bia
 
 https://www.wolf-grid.com/blog/faq.php
 	</notification>
+	<notification name="ViewerProcessRunningAsAdmin">
+		Jeden lub więcej procesów przeglądarki działa obecnie z uprawnieniami administratora. Jest to znana przyczyna wielu problemów oraz zakłóceń w działaniu multimediów i stron internetowych.
+
+Upewnij się, że żaden z procesów przeglądarki nie jest skonfigurowany do uruchamiania z uprawnieniami administratora. Więcej informacji znajdziesz tutaj:
+
+https://wiki.firestormviewer.org/fs_media#one_or_more_viewer_processes_are_currently_running_as_administrator_error_message
+		<usetemplate ignoretext="Ostrzegaj mnie, gdy przeglądarka działa z uprawnieniami administratora" name="okignore" />
+	</notification>
 	<notification label="Potwierdź nadpisanie pozy" name="ConfirmPoserOverwrite">
 		Nadpisać istniejącą pozę “[POSE_NAME]”?
 		<usetemplate name="okcancelbuttons" notext="Anuluj" yestext="OK" />
@@ -5647,5 +5704,108 @@ Nazwa zostanie zweryfikowana przed zapisaniem przypisania.
 	<notification name="FSSetTitleRegionNotFound">
 		Region '[REGION]' nie został znaleziony. Sprawdź nazwę i spróbuj ponownie.
 	</notification>
+	<notification name="OmniFilterNewRuleSet">
+		Wprowadź nazwę dla nowego zestawu reguł:
+		<form name="form">
+			<button name="Cancel" text="Anuluj" />
+		</form>
+	</notification>
+	<notification name="OmniFilterrNewRuleSetBlank">
+		Puste nazwy są niedozwolone. Spróbuj ponownie, wpisując nazwę.
+	</notification>
+	<notification name="OmniFilterNewRuleSetDuplicate">
+		Zduplikowane nazwy są niedozwolone. Spróbuj ponownie z inną nazwą.
+	</notification>
+	<notification name="OmniFilterCloneRuleSet">
+		Wprowadź nazwę dla sklonowanego zestawu reguł:
+		<form name="form">
+			<button name="Cancel" text="Anuluj" />
+		</form>
+	</notification>
+	<notification name="OmniFilterCloneRuleSetBlank">
+		Puste nazwy są niedozwolone. Spróbuj ponownie, wpisując nazwę.
+	</notification>
+	<notification name="OmniFilterCloneRuleSetDuplicate">
+		Zduplikowane nazwy są niedozwolone. Spróbuj ponownie z inną nazwą.
+	</notification>
+	<notification name="OmniFilterRemoveRuleSet">
+		Czy na pewno chcesz usunąć [RULESETNAME]?
+		<usetemplate ignoretext="Wymagaj potwierdzenia przed usunięciem zestawu reguł." name="okcancelignore" notext="Anuluj" />
+	</notification>
+	<notification name="OmniFilterRemoveRuleSetDefault">
+		Nie można usunąć domyślnego zestawu reguł.
+	</notification>
+	<notification name="OmniFilterRemoveRuleSetOutofBounds">
+		Nie można usunąć zestawu reguł, ponieważ indeks znajduje się poza zakresem.
+	</notification>
+	<notification name="OmniFilterRemoveRuleSetInvalidName">
+		Nie można usunąć zestawu reguł, ponieważ nie znaleziono podanej nazwy.
+	</notification>
+	<notification name="OmniFilterExportRuleSet">
+		Wpisz nazwę notki, aby wyeksportować zestaw reguł [RULESETNAME]:
+		<form name="form">
+			<button name="Cancel" text="Anuluj" />
+		</form>
+	</notification>
+	<notification name="OmniFilterMissingCategory">
+		W szafie brakuje kategorii Notki. Nie można utworzyć notki.
+	</notification>
+	<notification name="OmniFilterImportRuleSet">
+		Wpisz nazwę dla zaimportowanego zestawu reguł '[IMPORTNAME]':
+		<form name="form">
+			<button name="Cancel" text="Anuluj" />
+		</form>
+	</notification>
+	<notification name="OmniFilterInvalidImport">
+		Błąd: Notka [IMPORTNAME] nie jest prawidłowym zestawem reguł, importowanie niemożliwe.
+	</notification>
+	<notification name="OmniFilterNotANotecard">
+		Błąd: Obiekt nie jest notką.
+	</notification>
+	<notification name="OmnifilterImportInstructions" label="Instrukcja importu Wszystkofiltra">
+		Aby zaimportować notkę, kliknij lewym przyciskiem myszy na notkę z zestawem reguł w szafie, która się pojawiła, i przytrzymaj go. Następnie przeciągnij mysz nad to okno i puść przycisk, aby rozpocząć proces importu.
+		<form name="form">
+			<ignore name="ignore" text="Pokazuj instrukcję importu dla Wszystkofiltra po naciśnięciu przycisku Importuj"/>
+		</form>
+	</notification>
+	<notification name="OmniFilterNonAscii">
+		Nazwa notki '[INPUTNAME]' nie jest obsługiwana ze względu na znaki niełacińskie.
+		<form name="form">
+			<button name="Cancel" text="Anuluj" />
+		</form>
+	</notification>
 
+
+
+	<notification name="FSWearableFavoritesNewFolder">
+		Wprowadź nazwę nowego folderu ulubionych rzeczy:
+		<form name="form">
+			<input name="message">
+				Nowy folder
+			</input>
+			<button name="Cancel" text="Anuluj"/>
+		</form>
+	</notification>
+	<notification name="FSWearableFavoritesRenameFolder">
+		Wprowadź nową nazwę dla folderu ulubionych rzeczy [FOLDER_NAME]:
+		<form name="form">
+			<input name="message">
+				[FOLDER_NAME]
+			</input>
+			<button name="Cancel" text="Anuluj"/>
+		</form>
+	</notification>
+	<notification name="FSWearableFavoritesDeleteFolder">
+		Usunąć folder ulubionych rzeczy "[FOLDER_NAME]"?
+
+Spowoduje to usunięcie folderu oraz znajdujących się w nim linków. Oryginalne przedmioty w szafie nie zostaną usunięte. 
+		<form name="form">
+			<button name="Delete" text="Usuń" />
+			<button name="Cancel" text="Anuluj" />
+		</form>
+	</notification>
+	<notification name="FSWearableFavoritesFolderInvalidName">
+		Nie udało się utworzyć folderu ulubionych rzeczy "[FOLDER_NAME]".
+Nazwy folderów nie mogą zawierać znaków / ani \. 
+	</notification>
 </notifications>

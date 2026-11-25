@@ -288,10 +288,6 @@
 	<color
 		name="ParcelHoverColor"
 		reference="White" />
-  <color
-      name="Phototools_Header"
-      reference="EmphasisColor" />
-
   <!-- Script Editor Colors -->
   <color
       name="ScriptBackground"
@@ -347,4 +343,7 @@
 	<color
 	 name="WolfBuildAccent"
 	 value="0.560 0.360 0.250 1.000" />
+  <color
+    name="HighlightPanelBackground"
+    reference="EmphasisColor" />
 </colors>

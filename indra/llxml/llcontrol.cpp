@@ -166,9 +166,12 @@ LLControlVariable::LLControlVariable(const std::string& name, eControlType type,
 {
     if ((persist != PERSIST_NO) && mComment.empty())
     {
-        // File isn't actually missing, but something is wrong with it
-        // so the main point is to warn user to reinstall
-        LLError::LLUserWarningMsg::showMissingFiles();
+        std::string error_string =
+            "Second Life failed to initialize settings. Setting " + mName + " is invalid. "
+            "Either settings' files were supplied incorrectly or default files were corrupted."
+            "\n\nPlease reinstall viewer from https://secondlife.com/support/downloads/ and "
+            "contact https://support.secondlife.com if issue persists after reinstall.";
+        LLError::LLUserWarningMsg::show(error_string);
         LL_ERRS() << "Must supply a comment for control " << mName << LL_ENDL;
     }
     //Push back versus setValue'ing here, since we don't want to call a signal yet
@@ -199,20 +202,6 @@ LLSD LLControlVariable::getComparableValue(const LLSD& value)
         else
         {
             storable_value = false;
-        }
-    }
-    else if (TYPE_LLSD == type() && value.isString())
-    {
-        LLPointer<LLSDNotationParser> parser = new LLSDNotationParser;
-        LLSD result;
-        std::stringstream value_stream(value.asString());
-        if (parser->parse(value_stream, result, LLSDSerialize::SIZE_UNLIMITED) != LLSDParser::PARSE_FAILURE)
-        {
-            storable_value = result;
-        }
-        else
-        {
-            storable_value = value;
         }
     }
     else
@@ -834,6 +823,30 @@ void LLControlGroup::setLLSD(std::string_view name, const LLSD& val)
     set(name, val);
 }
 
+bool LLControlVariable::setValueFromNotation(const std::string& notation, bool saved_value)
+{
+    if (mType == TYPE_LLSD)
+    {
+        LLPointer<LLSDNotationParser> parser = new LLSDNotationParser;
+        LLSD result;
+        std::stringstream value_stream(notation);
+        S32 parse_count = parser->parse(value_stream, result, LLSDSerialize::SIZE_UNLIMITED);
+        if (parse_count != LLSDParser::PARSE_FAILURE)
+        {
+            setValue(result, saved_value);
+            return true;
+        }
+        LL_WARNS("Controls") << "Failed to parse LLSD notation for control '"
+            << mName << "': " << notation << LL_ENDL;
+    }
+    else
+    {
+        LL_WARNS("Controls") << "setValueFromNotation() called on non-LLSD control '"
+            << mName << "' (type " << LLControlGroup::typeEnumToString(mType) << "); ignoring." << LL_ENDL;
+    }
+    return false;
+}
+
 void LLControlGroup::setUntypedValue(std::string_view name, const LLSD& val)
 {
     if (name.empty())
@@ -861,6 +874,7 @@ void LLControlGroup::setUntypedValue(std::string_view name, const LLSD& val)
 // Returns number of controls loaded, so 0 if failure
 U32 LLControlGroup::loadFromFileLegacy(const std::string& filename, bool require_declaration, eControlType declare_as)
 {
+    LL_PROFILE_ZONE_SCOPED;
     std::string name;
 
     LLXmlTree xml_controls;
@@ -1097,8 +1111,9 @@ U32 LLControlGroup::saveToFile(const std::string& filename, bool nondefault_only
     return num_saved;
 }
 
-U32 LLControlGroup::loadFromFile(const std::string& filename, bool set_default_values, bool save_values)
+U32 LLControlGroup::loadFromFile(const std::string& filename, bool set_default_values, bool save_values, bool error_when_no_comment)
 {
+    LL_PROFILE_ZONE_SCOPED;
     LLSD settings;
     llifstream infile;
     infile.open(filename.c_str());
@@ -1221,10 +1236,26 @@ U32 LLControlGroup::loadFromFile(const std::string& filename, bool set_default_v
                 }
             }
 
+            std::string comment = control_map["Comment"].asString();
+            if (!error_when_no_comment
+                && !set_default_values
+                && comment.empty())
+            {
+                // Only error for default settings that should remind the developer to provide comments
+                // and otherwise indicate a problem with viewer's files.
+                // But permit this minor transgression in user's files.
+                // Otherwise user might have a hard time figuring out source of the error or how to fix it.
+                // Instead make setting to not persist so that unrecognized invalid settings won't be saved
+                // for the next run.
+                persist = LLControlVariable::PERSIST_NO;
+                comment = "Comment not provided, setting won't persist";
+                LL_WARNS() << "Control " << name << " is missing a comment value. Setting will be marked as PERSIST_NO" << LL_ENDL;
+            }
+
             declareControl(name,
                            typeStringToEnum(control_map["Type"].asString()),
                            control_map["Value"],
-                           control_map["Comment"].asString(),
+                           comment,
                            sanityTypeStringToEnum(control_map["SanityCheckType"].asString()),
                            control_map["SanityValue"],
                            control_map["SanityComment"].asString(),

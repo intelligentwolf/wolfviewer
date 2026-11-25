@@ -60,7 +60,7 @@ Unicode true                # Enable unicode support
 !include "%%SOURCE%%\installers\windows\lang_ja.nsi"
 !include "%%SOURCE%%\installers\windows\lang_it.nsi"
 !include "%%SOURCE%%\installers\windows\lang_pl.nsi" ;<FS:Ansariel> Polish is supported
-##!include "%%SOURCE%%\installers\windows\lang_pt-br.nsi"
+!include "%%SOURCE%%\installers\windows\lang_pt-br.nsi"
 !include "%%SOURCE%%\installers\windows\lang_ru.nsi"
 ##!include "%%SOURCE%%\installers\windows\lang_tr.nsi"
 !include "%%SOURCE%%\installers\windows\lang_zh.nsi"
@@ -74,7 +74,7 @@ LangString LanguageCode ${LANG_FRENCH}   "fr"
 LangString LanguageCode ${LANG_JAPANESE} "ja"
 LangString LanguageCode ${LANG_ITALIAN}  "it"
 LangString LanguageCode ${LANG_POLISH}   "pl"
-##LangString LanguageCode ${LANG_PORTUGUESEBR} "pt"
+LangString LanguageCode ${LANG_PORTUGUESEBR} "pt"
 LangString LanguageCode ${LANG_RUSSIAN}  "ru"
 ##LangString LanguageCode ${LANG_TURKISH}  "tr"
 LangString LanguageCode ${LANG_TRADCHINESE}  "zh"
@@ -139,7 +139,11 @@ SetOverwrite on							# Overwrite files by default
 
 UninstallText $(UninstallTextMsg)
 DirText $(DirectoryChooseTitle) $(DirectoryChooseSetup)
+# <FS:TJ> Keep Vivox only for OpenSim viewers
+!if ${ISOPENSIM} == "1"
 !insertmacro MUI_PAGE_LICENSE "VivoxAUP.txt"
+!endif
+# </FS:TJ>
 ##!insertmacro MULTIUSER_PAGE_INSTALLMODE
 !define MUI_PAGE_CUSTOMFUNCTION_PRE dirPre
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE dirLeave # <FS:Ansariel> Optional start menu entry
@@ -1359,8 +1363,8 @@ RMDir "$INSTDIR"
 IfFileExists "$INSTDIR" FOLDERFOUND NOFOLDER
 
 FOLDERFOUND:
+ifSilent NOFOLDER 0
 # Silent uninstall always removes all files (/SD IDYES)
-ifSilent +2 0
   MessageBox MB_YESNO $(DeleteProgramFilesMB) /SD IDYES IDNO NOFOLDER
   RMDir /r "$INSTDIR"
 

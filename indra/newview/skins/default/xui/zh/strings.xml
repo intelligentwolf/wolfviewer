@@ -1808,6 +1808,12 @@ support@secondlife.com.
 	<string name="InventoryNoMatchingFavorites">
 		您尚未將任何物件標記為收藏。
 	</string>
+	<string name="FSInventoryCustomTabDefaultName">
+		自訂
+	</string>
+	<string name="FSInventoryCustomTabShowHidden">
+		顯示隱藏分頁
+	</string>
 	<string name="PlacesNoMatchingItems">
 		要將地點添加到您的地標，請點擊地點名稱右側的星形圖標。
 	</string>
@@ -1828,6 +1834,9 @@ support@secondlife.com.
 	</string>
 	<string name="InventoryNoTexture">
 		你的庫存中沒有這個紋理的副本。
+	</string>
+	<string name="InventoryNoMaterial">
+		你的庫存中沒有這個材質的副本。
 	</string>
 	<string name="InventoryInboxNoItems">
 		你在第二人生市場中購買的物件將會出現在這裡。你可以將其拖入庫存區使用。
@@ -3348,7 +3357,7 @@ support@secondlife.com.
 		播放/暫停媒體
 	</string>
 	<string name="StreamtitleNowPlaying">
-		正在播放：
+		正在播放： [TITLE]
 	</string>
 	<!-- Drivers support/update pages -->
 	<string name="IntelDriverPage">
@@ -6294,7 +6303,7 @@ support@secondlife.com.
 		直接發佈到您的Primfeed賬戶。
 	</string>
 	<string name="Command_Omnifilter_Label">
-		全方位過濾器
+		萬能過濾器
 	</string>
 	<string name="Command_AvatarAlign_Label">
 		化身對齊
@@ -6502,7 +6511,7 @@ support@secondlife.com.
 		顯示信標
 	</string>
 	<string name="Command_Omnifilter_Tooltip">
-		編輯全方位過濾器規則
+		編輯萬能過濾器規則
 	</string>
 	<string name="Toolbar_Bottom_Tooltip">
 		位於你的底部工具列
@@ -6911,6 +6920,36 @@ SecondLife.com網站的「支援」部分
 	<string name="FSCameraPositionCopied">
 		相機位置 [POS] 已複製到剪貼簿。
 	</string>
+	<string name="FSCameraPositionPasted">
+		攝影機已恢復至 [POS]。
+	</string>
+	<string name="FSCameraPositionParseError">
+		無效的攝影機位置。格式應為：&lt;x, y, z&gt; 或 &lt;x, y, z&gt;|&lt;fx, fy, fz&gt;|roll（本地座標）。
+	</string>
+	<string name="FSCmdLineZOffsetUsage">
+		設定化身懸浮高度（用法：/zoffset value 或 +delta）。
+	</string>
+	<string name="FSCmdLineNoValidRegion">
+		無法取得有效的區域指標。
+	</string>
+	<string name="FSCmdLineTrackPosUsage">
+		在世界地圖上追蹤位置或化身（用法：cmd &lt;x, y, z&gt; 或 cmd 名稱）。
+	</string>
+	<string name="FSCmdLineTrackPosParseError">
+		無效位置。請使用 cpcampos 格式：&lt;x, y, z&gt; 或 &lt;x, y, z&gt;|&lt;fx, fy, fz&gt;|roll。
+	</string>
+	<string name="FSCmdLineTrackPosLocation">
+		正在追蹤 [REGION] ([POS])。
+	</string>
+	<string name="FSCmdLineTrackPosAvatar">
+		正在追蹤 [NAME]。
+	</string>
+	<string name="FSCmdLineTrackPosNotFound">
+		無法在雷達中找到符合「[NAME]」的化身。
+	</string>
+	<string name="FSCmdLineTrackPosMapError">
+		無法開啟世界地圖。
+	</string>
 	<string name="FSCmdLineDrawDistanceSet">
 		繪製距離設定為 [DISTANCE] 米。
 	</string>
@@ -6936,7 +6975,7 @@ SecondLife.com網站的「支援」部分
 		重新投擲
 	</string>
 	<string name="FSCmdLineRollDiceFreezeGuard">
-		此操作無法完成，因為檢視器在無限捲動迴圈中停止。請更改條件。
+		此操作無法完成，因為檢視器在無限捲動循環中停止。請更改條件。
 	</string>
 	<string name="FSCmdLineCalcRandError">
 		'[RAND]' RAND不是正確的表達式(min,max). MAX 必須大於 MIN, 且兩者應處於 -10000 與 10000 之間。
@@ -7461,38 +7500,11 @@ SecondLife.com網站的「支援」部分
 	<string name="font_unknown">
 		未知字型
 	</string>
-	<string name="font_fonts.xml">
-		Deja Vu
-	</string>
 	<string name="font_fonts_ubuntu.xml">
 		Ubuntu 字型家族
 	</string>
-	<string name="font_fonts_liberation.xml">
-		Liberation
-	</string>
-	<string name="font_fonts_droid.xml">
-		Droid Sans
-	</string>
-	<string name="font_fonts_mobi.xml">
-		Mobi Sans
-	</string>
-	<string name="font_fonts_roboto.xml">
-		Roboto
-	</string>
-	<string name="font_fonts_dyslexia.xml">
-		OpenDyslexic
-	</string>
 	<string name="font_fonts_deja_vu_all_caps.xml">
 		Deja Vu 全大寫
-	</string>
-	<string name="font_fonts_noto.xml">
-		Noto Sans
-	</string>
-	<string name="font_fonts_celestia_medium_redux.xml">
-		Celestia Medium Redux
-	</string>
-	<string name="font_fonts_cascadia_code.xml">
-		Cascadia Code
 	</string>
 	<string name="mode_unknown">
 		未知模式
@@ -7584,6 +7596,12 @@ SecondLife.com網站的「支援」部分
 		最大值
 	</string>
 	<string name="OmnifilterReplacement">
-		全方位過濾器替換：[REPLACEMENT]
+		萬能過濾器替換：[REPLACEMENT]
+	</string>
+	<string name="OmnifilterDefaultName">
+		預設
+	</string>
+	<string name="FSMacOSNewViewerInstance">
+		新查看器執行個體
 	</string>
 </strings>

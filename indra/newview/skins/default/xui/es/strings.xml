@@ -1506,6 +1506,9 @@ pueden adjuntarse a las notas.
 	<string name="InventoryNoMatchingRecentItems">
 		¿No encuentras lo que buscas? Intenta [secondlife:///app/inventory/filters Show filters].
 	</string>
+	<string name="FSInventoryCustomTabDefaultName">
+		Filtro
+	</string>
 	<string name="PlacesNoMatchingItems">
 		¿No encuentras lo que buscas? Prueba con la [secondlife:///app/search/places/[SEARCH_TERM] Búsqueda].
 	</string>
@@ -2611,10 +2614,6 @@ Si sigues recibiendo el mismo mensaje, solicita ayuda al personal de asistencia 
 	<string name="PicksClassifiedsLoadingText">
 		Cargando...
 	</string>
-	<string name="NoPicksText">No has creado ningún destacado.</string>
-	<string name="NoAvatarPicksText">El usuario no tiene destacados</string>
-	<string name="NoClassifiedsText">No has creado ningún clasificado. Pulsa el botón '+' para crear uno.</string>
-	<string name="NoAvatarClassifiedsText">El usuario no tiene clasificados</string>
 	<string name="MultiPreviewTitle">
 		Vista previa
 	</string>
@@ -2871,7 +2870,7 @@ Se esperaba .wav, .tga, .bmp, .jpg, .jpeg, o .anim
 		Reproduce/Pausa los medios
 	</string>
 	<string name="StreamtitleNowPlaying">
-		Reproduciendo:
+		Reproduciendo: [TITLE]
 	</string>
 	<string name="IntelDriverPage">
 		http://www.intel.com/p/en_US/support/detect/graphics
@@ -4593,9 +4592,6 @@ Más información en https://second.life/scripted-agents.
 	</string>
 	<string name="share_alert">
 		Arrastra aquí items del inventario
-	</string>
-	<string name="facebook_post_success">
-		Has publicado en Facebook.
 	</string>
 	<string name="flickr_post_success">
 		Has publicado en Flickr.

@@ -754,13 +754,16 @@ class Windows_x86_64_Manifest(ViewerManifest):
             self.path_optional("vcruntime140_1.dll")
             self.path_optional("vcruntime140_threads.dll")
 
-            # SLVoice executable
-            with self.prefix(src=os.path.join(pkgdir, 'bin', 'release')):
-                self.path("SLVoice.exe")
+            # <FS:TJ> Keep Vivox only for OpenSim viewers
+            if self.fs_is_opensim():
+                # SLVoice executable
+                with self.prefix(src=os.path.join(pkgdir, 'bin', 'release')):
+                    self.path("SLVoice.exe")
 
-            # Vivox libraries
-            self.path("vivoxsdk_x64.dll")
-            self.path("ortp_x64.dll")
+                # Vivox libraries
+                self.path("vivoxsdk_x64.dll")
+                self.path("ortp_x64.dll")
+            # </FS:TJ>
 
             # BugSplat
             if self.args.get('bugsplat'):
@@ -791,7 +794,10 @@ class Windows_x86_64_Manifest(ViewerManifest):
 
         with self.prefix(src=pkgdir):
             self.path("ca-bundle.crt")
-        self.path("VivoxAUP.txt")
+        # <FS:TJ> Keep Vivox only for OpenSim viewers
+        if self.fs_is_opensim():
+            self.path("VivoxAUP.txt")
+        # </FS:TJ>
 
         # Media plugins - CEF
         with self.prefix(dst="llplugin"):
@@ -1034,7 +1040,7 @@ class Windows_x86_64_Manifest(ViewerManifest):
         pack_version = '.'.join(self.args['version'][:3])
         if len(self.args['version']) > 3 and self.args['version'][3]:
             pack_version += '-' + self.args['version'][3]
-        pack_title = self.app_name()  # Display name with spaces
+        pack_title = pack_id  #Wrapper exe, don't use spaces
         pack_dir = self.get_dst_prefix()
         main_exe = self.final_exe()
         # <FS:TJ> Make sure to use Firestorm naming
@@ -1090,6 +1096,7 @@ class Windows_x86_64_Manifest(ViewerManifest):
             '--mainExe', main_exe,
             '--packTitle', pack_title,
             '--exclude', exclude_pattern,
+            '-xy', # <FS:TJ/> Overwrite any existing velopack package of the same Id instead of erroring
             # Suppress Velopack's built-in shortcut creation; we create our own
             # shortcuts in llvelopack.cpp on_after_install hook instead.
             '--shortcuts', '',
@@ -1638,7 +1645,10 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                 self.path("featuretable_mac.txt")
                 self.path("cube.dae")
 
-                self.path("VivoxAUP.txt")
+                # <FS:TJ> Keep Vivox only for OpenSim viewers
+                if self.fs_is_opensim():
+                    self.path("VivoxAUP.txt")
+                # </FS:TJ>
                 self.path("LGPL-license.txt")
                 with self.prefix(src=pkgdir,dst=""):
                     self.path("ca-bundle.crt")
@@ -1709,16 +1719,19 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                                 ):
                     dylibs += path_optional(os.path.join(relpkgdir, libfile), libfile)
 
-                # SLVoice executable
-                with self.prefix(src=os.path.join(pkgdir, 'bin', 'release')):
-                    self.path("SLVoice")
+                # <FS:TJ> Keep Vivox only for OpenSim viewers
+                if self.fs_is_opensim():
+                    # SLVoice executable
+                    with self.prefix(src=os.path.join(pkgdir, 'bin', 'release')):
+                        self.path("SLVoice")
 
-                # Vivox libraries
-                for libfile in (
-                                'libortp.dylib',
-                                'libvivoxsdk.dylib',
-                                ):
-                    self.path2basename(relpkgdir, libfile)
+                    # Vivox libraries
+                    for libfile in (
+                                    'libortp.dylib',
+                                    'libvivoxsdk.dylib',
+                                    ):
+                        self.path2basename(relpkgdir, libfile)
+                # </FS:TJ>
 
                 # Discord social SDK
                 if self.args['discord'] == 'ON':
@@ -1983,9 +1996,12 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                             # <FS:ND> Firestorm does not ship SLVersionChecker
                             #resources + "updater/SLVersionChecker",
                             resources + "SLPlugin.app/Contents/MacOS/SLPlugin",
-                            resources + "SLVoice",
                             tmp_app_path,
                             ]
+                        # <FS:TJ> Keep Vivox only for OpenSim viewers
+                        if self.fs_is_opensim():
+                            deep_sign.insert(-1, resources + "SLVoice")
+                        # </FS:TJ>
                         for attempt in range(3):
                             if attempt: # second or subsequent iteration
                                 print("codesign failed, waiting {:d} seconds before retrying".format(sign_retry_wait),
@@ -2089,12 +2105,6 @@ class Darwin_x86_64_Manifest(ViewerManifest):
         if self.args.get('velopack', 'OFF') == 'ON':
             self.velopack_package_finish()
 
-        # Generate Velopack update packages if enabled
-        # This creates the nupkg and RELEASES files needed for auto-updates
-        # Distribution is still via DMG, but updates use Velopack
-        if self.args.get('velopack', 'OFF') == 'ON':
-            self.velopack_package_finish()
-
     def velopack_package_finish(self):
         """Generate Velopack update packages for macOS.
 
@@ -2161,6 +2171,7 @@ class Darwin_x86_64_Manifest(ViewerManifest):
             '--outputDir', releases_dir,
             '--noInst',  # Don't generate .pkg installer - we use DMG for distribution
             '--verbose',  # Show detailed output
+            '-xy', # <FS:TJ/> Overwrite any existing velopack package of the same Id instead of erroring
         ]
 
         # Add icon if exists
@@ -2230,7 +2241,10 @@ class LinuxManifest(ViewerManifest):
         debpkgdir = os.path.join(pkgdir, "lib", "debug")
 
         self.path("licenses-linux.txt","licenses.txt")
-        self.path("VivoxAUP.txt")
+        # <FS:TJ> Keep Vivox only for OpenSim viewers
+        if self.fs_is_opensim():
+            self.path("VivoxAUP.txt")
+        # </FS:TJ>
         self.path("LGPL-license.txt")
         self.path("res/firestorm_icon.png","wolfviewer_icon.png")
         with self.prefix("linux_tools"):
@@ -2380,19 +2394,22 @@ class LinuxManifest(ViewerManifest):
             ):
                 self.path(libfile)
 
+        # <FS:TJ> Keep Vivox only for OpenSim viewers
+        if self.fs_is_opensim():
             # Vivox runtimes
             # Currentelly, the 32-bit ones will work with a 64-bit client.
-        with self.prefix(src=os.path.join(pkgdir, 'bin32' ), dst="bin"):
-            self.path("SLVoice")
-        with self.prefix(src=os.path.join(pkgdir ), dst="bin"):
-            self.path("win32")
-            self.path("win64")
+            with self.prefix(src=os.path.join(pkgdir, 'bin32' ), dst="bin"):
+                self.path("SLVoice")
+            with self.prefix(src=os.path.join(pkgdir ), dst="bin"):
+                self.path("win32")
+                self.path("win64")
 
-        with self.prefix(src=os.path.join(pkgdir, 'lib32' ), dst="lib32"):
-            self.path("libvivox*")
-            self.path("libortp*")
-            self.path("libsndfile*")
-            self.path("*.crt")
+            with self.prefix(src=os.path.join(pkgdir, 'lib32' ), dst="lib32"):
+                self.path("libvivox*")
+                self.path("libortp*")
+                self.path("libsndfile*")
+                self.path("*.crt")
+        # </FS:TJ>
 
     def package_finish(self):
         # a standard map of strings for replacing in the templates
@@ -2516,14 +2533,17 @@ class Linux_i686_Manifest(LinuxManifest):
                     print("Skipping libfmod.so - not found")
                     pass
 
-        # Vivox runtimes
-        with self.prefix(src=relpkgdir, dst="bin"):
-            self.path("SLVoice")
-        with self.prefix(src=relpkgdir, dst="lib"):
-            self.path("libortp.so")
-            self.path("libsndfile.so.1")
-            #self.path("libvivoxoal.so.1") # no - we'll re-use the viewer's own OpenAL lib
-            self.path("libvivoxsdk.so")
+        # <FS:TJ> Keep Vivox only for OpenSim viewers
+        if self.fs_is_opensim():
+            # Vivox runtimes
+            with self.prefix(src=relpkgdir, dst="bin"):
+                self.path("SLVoice")
+            with self.prefix(src=relpkgdir, dst="lib"):
+                self.path("libortp.so")
+                self.path("libsndfile.so.1")
+                #self.path("libvivoxoal.so.1") # no - we'll re-use the viewer's own OpenAL lib
+                self.path("libvivoxsdk.so")
+        # </FS:TJ>
 
         self.fs_delete_linux_symbols() # <FS:ND/> Delete old syms
         self.strip_binaries()

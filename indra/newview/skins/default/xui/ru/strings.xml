@@ -1715,6 +1715,9 @@ https://www.wolf-grid.com/blog/faq.php за помощь в решении эт�
 	<string name="InventoryNoMatchingFavorites">
 		Вы не отметили ни один элемент как избранный.
 	</string>
+	<string name="FSInventoryCustomTabDefaultName">
+		Свой
+	</string>
 	<string name="PlacesNoMatchingItems">
 		Чтобы добавить место в список достопримечательностей, нажмите на звездочку справа от названия местоположения.
 	</string>
@@ -3154,7 +3157,7 @@ https://www.wolf-grid.com/blog/faq.php за помощь в решении эт�
 		Воспроизведение/Пауза медиа
 	</string>
 	<string name="StreamtitleNowPlaying">
-		Сейчас играет:
+		Сейчас играет: [TITLE]
 	</string>
 	<string name="IntelDriverPage">
 		http://www.intel.com/p/ru_RU/support/detect/graphics

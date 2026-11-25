@@ -27,10 +27,22 @@
 			<slider name="manual_environment_change_transition_period" label="Durée de transition de l'environnement :" tool_tip="Intervalle de transition en secondes entre des environnements. Zéro veut dire instantané."/>
 			<check_box name="EnvironmentPersistAcrossLogin" label="Persistance des réglages d'environnement entre deux sessions" tool_tip="Reprend les réglages actuels d'environnement lors de la prochaine connexion."/>
 			<check_box name="FSRepeatedEnvTogglesShared" label="La répétition des raccourcis clavier de l'environnement rétablit l'environnement partagé" tool_tip="Permet à des combinaisons de touches répétées (par exemple ctrl+shift+y) d'alterner entre le préréglage demandé &amp; l'environnement partagé"/>
+			<text name="FSCloudColorLabel">
+				Couleur du nuage chargement avatar / Échec :
+			</text>
+			<text name="FSCloudColorStartLabel">
+				Début :
+			</text>
+			<text name="FSCloudColorEndLabel">
+				Fin :
+			</text>
+			<color_swatch name="FSCloudColorStart" tool_tip="Couleur initiale du nuage de particules affiché pendant le chargement d'un avatar ou en cas d'échec de son affichage. S'applique immédiatement, aucun redémarrage n'est nécessaire."/>
+			<color_swatch name="FSCloudColorEnd" tool_tip="Couleur finale du nuage de particules affiché pendant le chargement d'un avatar ou en cas d'échec de son affichage. S'applique immédiatement, aucun redémarrage n'est nécessaire."/>
 		</panel>
 		<panel label="Protection" name="ProtectionTab">
 			<check_box label="Empêcher de s'asseoir sur les objets par clic simple" name="FSBlockClickSit"/>
-			<check_box label="Désactiver les liens entre crochets dans le chat (l'URL reste visible)" name="FSDisableLabeledChatLinks" tool_tip="Lorsqu'activé, les liens entre crochets reçus dans le chat, IM, notices de groupe et textes d'objets venant d'autres résidents ne sont pas réduits en une seule étiquette. L'URL réelle est affichée et cliquable. Aide à limiter le phishing où le texte visible masque une destination différente. Les textes intégrés au viewer (notifications, préférences, etc.) ne sont pas affectés."/>
+			<check_box label="Aperçu de l'URL réelle des liens dans IM et chat de groupe (au survol)" name="FSDisableLabeledChatLinks" tool_tip="Une fois activé, les liens entre crochets dans les IM, le chat de groupe, les conférences ad-hoc et les notices de groupe conservent leur texte, mais le survol affiche instantanément l'URL de destination réelle dans une grande bulle. Aide à repérer le phishing où l'étiquette masque une autre destination. Le chat à proximité utilise l'option ci-dessous. Le texte intégré au client n'est pas affecté."/>
+			<check_box label="Aperçu de l'URL réelle des liens dans le chat de proximité et le chat d'objet (au survol)" name="FSDisableLabeledChatLinksNearbyChat" tool_tip="Lorsque cette option est activée, les liens entre crochets (étiquetés) dans le chat local et le texte des objets conservent leur libellé, mais un survol de la souris affiche instantanément l'URL de destination réelle dans une grande info-bulle. Désactivée par défaut."/>
 			<check_box label="Permettre aux scripts d'afficher la carte (llMapDestination)" name="ScriptsCanShowUI"/>
 			<text name="revokepermissions_txt">Révoquer les permissions :</text>
 			<radio_group name="FSRevokePerms">
@@ -146,6 +158,15 @@
 			<check_box label="Active les informations détaillées pour les script" tool_tip="Activée, ajoute aux informations de base sur les scripts des détails utiles aux créateurs" name="FSScriptInfoExtended"/>
 			<check_box label="Points d'attachement alphabétiques dans les menus &quot;Attacher à&quot; (redémarrage requis)" tool_tip="Si cette option est activée, la liste des points d'attachement dans les menus 'Attacher à' sera triée par ordre alphabétique." name="FSSortAttachmentSpotsAlphabetically"/>
 			<check_box label="Nouveau module de texture WolfViewer dans la fenêtre d'outils (nécessite un redémarrage)" tool_tip="Si cette option est activée, les outils d'édition de textures utiliseront le flux de travail amélioré de FS et permettront l'édition de textures Blinn-Phong et PBR." name="FSUseNewTexturePanel"/>
+			<text name="buildaxiscolors_label">
+				Apparence des axes de construction X/Y/Z :
+			</text>
+			<color_swatch label="Axe X" name="colorswatchXaxis" tool_tip="Cliquez ici pour ouvrir la palette de couleurs"/>
+			<color_swatch label="Axe Y" name="colorswatchYaxis" tool_tip="Cliquez ici pour ouvrir la palette de couleurs"/>
+			<color_swatch label="Axe Z" name="colorswatchZaxis" tool_tip="Cliquez ici pour ouvrir la palette de couleurs"/>
+			<color_swatch label="Fond texte" name="colorswatchEditTextBackgroundColor" tool_tip="Cliquez ici pour ouvrir la palette de couleurs"/>
+			<spinner label="Échelle" name="editWidgetScaling" tool_tip="Adapte la taille des commandes utilisées pour modifier la rotation, l'échelle et la position."/>
+			<check_box label="Ombre du texte" tool_tip="Si cette option est activée, le texte d'aide affiché pendant la modification est doté d'une ombre portée.." name="editTextDropShadow"/>
 		</panel>
 		<panel label="Éditeur de script" name="BuildTabScriptEditor">
 			<text name="text_box_scripting_font" width="155">Police de l'éditeur de script :</text>

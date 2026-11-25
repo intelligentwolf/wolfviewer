@@ -476,6 +476,9 @@
      name="HTMLLinkColor"
      reference="AccentColor" />
     <color
+     name="HTMLLinkColorHovertips"
+     reference="AccentColor" />
+    <color
      name="HealthTextColor"
      reference="White" />
     <color
@@ -836,10 +839,6 @@
     <color
      name="CurrencyColor"
      reference="LabelTextColor" />
-
-  <color
-      name="Phototools_Header"
-      reference="EmphasisColor" />
   <color
     name="OutfitGalleryItemSelected"
     reference="EmphasisColor" />
@@ -881,4 +880,7 @@
 	<color
 	 name="WolfBuildAccent"
 	 value="0.560 0.360 0.250 1.000" />
+  <color
+    name="HighlightPanelBackground"
+    reference="EmphasisColor" />
 </colors>

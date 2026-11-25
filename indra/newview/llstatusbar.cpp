@@ -211,7 +211,8 @@ LLStatusBar::LLStatusBar(const LLRect& rect)
     mMouseEnterPresetsCameraConnection(),
     mMouseEnterVolumeConnection(),
     mMouseEnterNearbyMediaConnection(),
-    mCurrentLocationString()
+    mCurrentLocationString(),
+    mOmnifilterPanel(nullptr)
 {
     setRect(rect);
 
@@ -300,6 +301,7 @@ bool LLStatusBar::postBuild()
     gMenuBarView->setRightMouseDownCallback(boost::bind(&show_navbar_context_menu, _1, _2, _3));
 
     mTextTime = getChild<LLTextBox>("TimeText" );
+    mTextTime->setClickedCallback(std::bind(&LLUrlAction::executeSLURL, "secondlife:///app/openfloater/preferences?search=StatusBarTimeFormat", true)); // <FS:PP> Open preferences page after clicking on the clock
 
     getChild<LLUICtrl>("buyL")->setCommitCallback(
         boost::bind(&LLStatusBar::onClickBuyCurrency, this));
@@ -471,6 +473,7 @@ bool LLStatusBar::postBuild()
     // Hook up and init for filtering
     mFilterEdit = getChild<LLSearchEditor>( "search_menu_edit" );
     mSearchPanel = getChild<LLPanel>( "menu_search_panel" );
+    mBalancePanel = getChild<LLPanel>("balance_bg");
 
     bool search_panel_visible = gSavedSettings.getBOOL("MenuSearch");
     mSearchPanel->setVisible(search_panel_visible);
@@ -483,6 +486,10 @@ bool LLStatusBar::postBuild()
     {
         updateMenuSearchPosition();
     }
+
+    mOmnifilterPanel = getChild<LLPanel>("omnifilter_controls_panel");
+    gSavedSettings.getControl("OmnifilterControls")->getCommitSignal()->connect(boost::bind(&LLStatusBar::updateOmnifilterPanelPosition, this));
+    updateOmnifilterPanelPosition();
 
     // <FS:Ansariel> Script debug
     mScriptOut = getChild<LLIconCtrl>("scriptout");
@@ -506,7 +513,6 @@ bool LLStatusBar::postBuild()
     mBuyParcelBtn = getChild<LLButton>("buy_land_btn");
     mBuyParcelBtn->setClickedCallback(boost::bind(&LLStatusBar::onBuyLandClicked, this));
 
-    mBalancePanel = getChild<LLPanel>("balance_bg");
     // [WOLF AI CREDITS 2026-10-24] findChild: a skin without it simply shows no AI figure. Paul: "click on ai credits ->
     // takes you to purchase page"; coming back to the viewer re-reads the balance (LLViewerWindow::handleFocus).
     mWolfAICredits = mBalancePanel->findChild<LLTextBox>("wolf_ai_credits");
@@ -520,7 +526,7 @@ bool LLStatusBar::postBuild()
     // <FS:Beq> Make FPS a clickable button with contextual colour
     // mFPSText = getChild<LLButton>("FPSText");
     mFPSText = getChild<LLTextBox>("FPSText");
-    mFPSText->setClickedCallback(std::bind(&LLUrlAction::executeSLURL, "secondlife:///app/openfloater/preferences?search=limitframerate", true));
+    mFPSText->setClickedCallback(std::bind(&LLUrlAction::executeSLURL, "secondlife:///app/openfloater/preferences?search=LimitFramerate", true));
     // </FS:Beq>
     mVolumeIconsWidth = mBtnVolume->getRect().mRight - mStreamToggle->getRect().mLeft;
 
@@ -885,6 +891,11 @@ void LLStatusBar::setBalance(S32 balance)
     if (mSearchPanel && mSearchPanel->getVisible())
     {
         updateMenuSearchPosition();
+    }
+
+    if (mOmnifilterPanel && mOmnifilterPanel->getVisible())
+    {
+        updateOmnifilterPanelPosition();
     }
 
     if (mBalance && (fabs((F32)(mBalance - balance)) > gSavedSettings.getF32("UISndMoneyChangeThreshold")))
@@ -1328,12 +1339,14 @@ void LLStatusBar::updateMenuSearchVisibility(const LLSD& data)
         updateMenuSearchPosition();
     }
     updateWolfGridButtonPosition();   // <WolfViewer 2026-10-05/>
+
+    updateOmnifilterPanelPosition();
 }
 
 void LLStatusBar::updateMenuSearchPosition()
 {
-    const S32 HPAD = 12;
-    LLRect balanceRect = getChildView("balance_bg")->getRect();
+    constexpr S32 HPAD = 12;
+    LLRect balanceRect = mBalancePanel->getRect();
     LLRect searchRect = mSearchPanel->getRect();
     S32 w = searchRect.getWidth();
     searchRect.mLeft = balanceRect.mLeft - w - HPAD;
@@ -1448,6 +1461,17 @@ void LLStatusBar::updateWolfBugButton()
     updateWolfGridButtonPosition();
 }
 // [/WOLF BUG REPORT]
+
+void LLStatusBar::updateOmnifilterPanelPosition()
+{
+    LLRect balanceRect = mBalancePanel->getRect();
+    LLRect searchRect = mSearchPanel->getRect();
+    LLRect omnifilterRect = mOmnifilterPanel->getRect();
+    S32 w = omnifilterRect.getWidth();
+    omnifilterRect.mLeft = (gSavedSettings.getBOOL("MenuSearch") ? searchRect.mLeft : balanceRect.mLeft) - w;
+    omnifilterRect.mRight = omnifilterRect.mLeft + w;
+    mOmnifilterPanel->setShape(omnifilterRect);
+}
 
 void LLStatusBar::updateBalancePanelPosition()
 {
@@ -1661,6 +1685,9 @@ void LLStatusBar::setParcelInfoText(const std::string& new_text)
     // [WOLF BUG REPORT 2026-10-24] and the bug icon left of that
     if (mWolfBugBtn && mWolfBugBtn->getVisible())
         panelBalanceRect = mWolfBugBtn->getRect();
+
+    if (mOmnifilterPanel && mOmnifilterPanel->getVisible())
+        panelBalanceRect = mOmnifilterPanel->getRect();
 
     panelParcelInfoRect.mRight = panelParcelInfoRect.mLeft + rect.mRight;
     S32 borderRight = panelBalanceRect.mLeft - ParcelInfoSpacing;
@@ -1965,6 +1992,7 @@ void LLStatusBar::setBackgroundColor( const LLColor4& color )
     LLPanel::setBackgroundColor(color);
     mBalancePanel->setBackgroundColor(color);
     mTimeMediaPanel->setBackgroundColor(color);
+    mOmnifilterPanel->setBackgroundColor(color);
 }
 
 void LLStatusBar::updateNetstatVisibility(const LLSD& data)
@@ -1986,6 +2014,7 @@ void LLStatusBar::updateNetstatVisibility(const LLSD& data)
     mBalancePanel->setRect(rect);
 
     updateMenuSearchPosition();
+    updateOmnifilterPanelPosition();
     update();
 }
 
@@ -2011,6 +2040,7 @@ void LLStatusBar::updateVolumeControlsVisibility(const LLSD& data)
     mBalancePanel->setRect(rect);
 
     updateMenuSearchPosition();
+    updateOmnifilterPanelPosition();
     update();
 }
 
@@ -2032,6 +2062,7 @@ void LLStatusBar::onShowFPSChanged(const LLSD& newvalue)
     mBalancePanel->setRect(rect);
 
     updateMenuSearchPosition();
+    updateOmnifilterPanelPosition();
     update();
 }
 

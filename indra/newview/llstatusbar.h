@@ -205,6 +205,7 @@ private:
     void updateWolfAICredits();
     LLTextBox* mWolfAICredits = nullptr;
     std::string mWolfAIShown;          // the label last put in mWolfAICredits ("" = hidden)
+    void updateOmnifilterPanelPosition();
 
     class LLParcelChangeObserver;
 
@@ -379,6 +380,7 @@ private:
     LLPanel*                mBalancePanel = nullptr;   // <WolfViewer 2026-10-05/> read before postBuild sets it (updateWolfGridButtonPosition)
     LLButton*               mBuyParcelBtn;
     LLPanel*                mTimeMediaPanel;
+    LLPanel*                mOmnifilterPanel;
 
     boost::signals2::connection mParcelPropsCtrlConnection;
     boost::signals2::connection mShowCoordsCtrlConnection;

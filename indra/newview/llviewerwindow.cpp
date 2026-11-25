@@ -38,7 +38,6 @@
 #include <fstream>
 #include <algorithm>
 #include <boost/filesystem.hpp>
-#include <boost/lambda/core.hpp>
 #include <boost/regex.hpp>
 
 #include "llagent.h"
@@ -221,6 +220,7 @@
 // </FS:Ansariel> [FS communication UI]
 #include "llwindowlistener.h"
 #include "llviewerwindowlistener.h"
+#include "llstatslistener.h"
 #include "llcleanup.h"
 #include "llimview.h"
 
@@ -1890,25 +1890,17 @@ bool LLViewerWindow::handleTimerEvent(LLWindow *window)
     return false;
 }
 
-// <FS:Dax> [FIRE-10419] Added deviceRemoved bool to prevent reinitialize on disconnect.
-// bool LLViewerWindow::handleDeviceChange(LLWindow* window)
-// {
-//     if (!LLViewerJoystick::getInstance()->isJoystickInitialized())
-//     {
-//         LLViewerJoystick::getInstance()->init(true);
-//         return true;
-//     }
-//     return false;
-// }
-// </FS>
-
-bool LLViewerWindow::handleDeviceChange(LLWindow *window, bool deviceRemoved) 
+bool LLViewerWindow::handleDeviceChange(LLWindow *window, const std::string& change_type, bool deviceIsJoystick, bool deviceRemoved) // <FS:Dax> [FIRE-10419] Added deviceRemoved bool to prevent reinitialize on disconnect.
 {
     // give a chance to use a joystick after startup (hot-plugging)
-    if (!deviceRemoved && !LLViewerJoystick::getInstance()->isJoystickInitialized())
+    if (deviceIsJoystick && !deviceRemoved && !LLViewerJoystick::getInstance()->isJoystickInitialized()) // <FS:Dax> [FIRE-10419] Added deviceRemoved bool to prevent reinitialize on disconnect.
     {
         LLViewerJoystick::getInstance()->init(true);
         return true;
+    }
+    else
+    {
+        LL_INFOS("Window") << "Device change event: " << change_type << LL_ENDL;
     }
     return false;
 }
@@ -1931,6 +1923,7 @@ bool LLViewerWindow::handleDPIChanged(LLWindow *window, F32 ui_scale_factor, S32
 
 bool LLViewerWindow::handleDisplayChanged()
 {
+    LL_INFOS("Window") << "Display change event" << LL_ENDL;
     LLFontGL::sResolutionGeneration++;
     return false;
 }
@@ -2013,6 +2006,7 @@ LLViewerWindow::LLViewerWindow(const Params& p)
     LLWindowListener::KeyboardGetter getter = [](){ return gKeyboard; };
     mWindowListener = std::make_unique<LLWindowListener>(this, getter);
     mViewerWindowListener = std::make_unique<LLViewerWindowListener>(this);
+    mStatsListener = std::make_unique<LLStatsListener>();
 
     mSystemChannel.reset(new LLNotificationChannel("System", "Visible", LLNotificationFilters::includeEverything));
     mCommunicationChannel.reset(new LLCommunicationChannel("Communication", "Visible"));
@@ -2223,10 +2217,6 @@ void LLViewerWindow::initGLDefaults()
     gBox.prerender();
 }
 
-struct MainPanel : public LLPanel
-{
-};
-
 void LLViewerWindow::initBase()
 {
     S32 height = getWindowHeightScaled();
@@ -2286,6 +2276,8 @@ void LLViewerWindow::initBase()
     }
     main_view->setShape(full_window);
     getRootView()->addChild(main_view);
+
+    mMainView = main_view;
 
     // <FS:Zi> Moved this from the end of this function up here, so all context menus
     //         created right after this get the correct parent assigned.
@@ -2568,24 +2560,35 @@ void LLViewerWindow::initWorldUI()
         physical_mem = LLMemory::getMaxMemKB();
     }
 
-    if (!gNonInteractive && physical_mem > MIN_PHYSICAL_MEMORY)
+    if (!gNonInteractive)
     {
-        LL_INFOS() << "Preloading cef instances" << LL_ENDL;
+        if (physical_mem > MIN_PHYSICAL_MEMORY)
+        {
+            LL_INFOS() << "Preloading cef instances" << LL_ENDL;
 
-        LLFloaterReg::getInstance("destinations");
-        LLFloaterReg::getInstance("avatar_welcome_pack");
-        // <FS:TJ> Preload the CEF instance of the currently used legacy search floater
-        //LLFloaterReg::getInstance("search");
-        if (gSavedSettings.getBOOL("FSUseFSLegacySearch"))
-        {
-            LLFloaterReg::getInstance("search");
+            LLFloaterReg::getInstance("destinations");
+            LLFloaterReg::getInstance("avatar_welcome_pack");
+            // <FS:TJ> Preload the CEF instance of the currently used legacy search floater
+            //LLFloaterReg::getInstance("search");
+            if (gSavedSettings.getBOOL("FSUseFSLegacySearch"))
+            {
+                LLFloaterReg::getInstance("search");
+            }
+            else
+            {
+                LLFloaterReg::getInstance("legacy_search");
+            }
+            // </FS:TJ>
+            LLFloaterReg::getInstance("marketplace");
         }
-        else
+        // <FS:Ansariel> OpenSim support
+        //else if (gSavedSettings.getBOOL("FirstLoginThisInstall"))
+        else if (LLGridManager::instance().isInSecondLife() && gSavedSettings.getBOOL("FirstLoginThisInstall"))
+        // </FS:Ansariel>
         {
-            LLFloaterReg::getInstance("legacy_search");
+            // Preload the welcome pack for first-time login even on low end hardware
+            LLFloaterReg::getInstance("avatar_welcome_pack");
         }
-        // </FS:TJ>
-        LLFloaterReg::getInstance("marketplace");
     }
 
     // <FS:Zi> Autohide main chat bar if applicable
@@ -4338,7 +4341,10 @@ void LLViewerWindow::updateLayout()
         && tool != gToolNull
         && tool != LLToolCompInspect::getInstance()
         && tool != LLToolDragAndDrop::getInstance()
-        && !gSavedSettings.getBOOL("FreezeTime"))
+        // <FS:PP> Speed optimisation
+        // && !gSavedSettings.getBOOL("FreezeTime"))
+        && !LLPipeline::FreezeTime)
+        // </FS:PP>
     {
         // Suppress the toolbox view if our source tool was the pie tool,
         // and we've overridden to something else.
@@ -6075,11 +6081,26 @@ void LLViewerWindow::saveImageLocal(LLImageFormatted *image, const snapshot_save
     if (image->save(filepath))
     {
         playSnapshotAnimAndSound();
+
+        // Show clickable notification with filepath
+        LLSD args;
+        args["FILEPATH"] = filepath;
+
+        LLSD payload;
+        payload["filepath"] = filepath;
+
+// <FS:PP> We don't need forced SnapshotSavedToComputer notiification, since we have SnapshotSavedToDisk string already in place
+//         LLNotificationsUtil::add("SnapshotSavedToComputer",
+//                                  args,
+//                                  payload.with("respond_on_mousedown", true),
+//                                  boost::bind(&LLViewerWindow::onSnapshotNotificationClick, _1, _2));
+// </FS:PP>
+
         if (gSavedSettings.getBOOL("FSLogSnapshotsToLocal"))
         {
-            LLStringUtil::format_map_t args;
-            args["FILENAME"] = filepath;
-            FSCommon::report_to_nearby_chat(LLTrans::getString("SnapshotSavedToDisk", args));
+            LLStringUtil::format_map_t chatlog_args;
+            chatlog_args["FILENAME"] = filepath;
+            FSCommon::report_to_nearby_chat(LLTrans::getString("SnapshotSavedToDisk", chatlog_args));
         }
         success_cb();
     }
@@ -6092,6 +6113,16 @@ void LLViewerWindow::saveImageLocal(LLImageFormatted *image, const snapshot_save
 void LLViewerWindow::resetSnapshotLoc()
 {
     gSavedPerAccountSettings.setString("SnapshotBaseDir", std::string());
+}
+
+// static
+void LLViewerWindow::onSnapshotNotificationClick(const LLSD& notification, const LLSD& response)
+{
+    std::string filepath = notification["payload"]["filepath"].asString();
+    if (!filepath.empty())
+    {
+        gDirUtilp->openDir(filepath);
+    }
 }
 
 // static
@@ -6260,8 +6291,24 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
     S32 original_width = 0;
     S32 original_height = 0;
     bool reset_deferred = false;
+    F32 original_fov = LLViewerCamera::getInstance()->getView();
 
     LLRenderTarget scratch_space;
+
+    // Lambda to restore deferred if needed when finished or in the case of early return
+    auto restore_deferred = [&]()
+    {
+        if (reset_deferred)
+        {
+            mWorldViewRectRaw = window_rect;
+            LLViewerCamera::getInstance()->setViewNoBroadcast(original_fov);
+            LLViewerCamera::getInstance()->setViewHeightInPixels(mWorldViewRectRaw.getHeight());
+            LLViewerCamera::getInstance()->setAspect(getWorldViewAspectRatio());
+            scratch_space.flush();
+            scratch_space.release();
+            gPipeline.allocateScreenBuffer(original_width, original_height);
+        }
+    };
 
     F32 scale_factor = 1.0f ;
     if (!keep_window_aspect || (image_width > window_width) || (image_height > window_height))
@@ -6285,6 +6332,14 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
                     snapshot_width = image_width;
                     snapshot_height = image_height;
                     reset_deferred = true;
+
+                    F32 window_aspect = (F32)window_rect.getWidth() / (F32)window_rect.getHeight();
+                    F32 image_aspect  = (F32)image_width / (F32)image_height;
+                    if (image_aspect > window_aspect)
+                    {
+                        F32 crop = window_aspect / image_aspect;
+                        LLViewerCamera::getInstance()->setViewNoBroadcast(2.f * atanf(tanf(original_fov * 0.5f) * crop));
+                    }
                     mWorldViewRectRaw.set(0, image_height, image_width, 0);
                     LLViewerCamera::getInstance()->setViewHeightInPixels( mWorldViewRectRaw.getHeight() );
                     LLViewerCamera::getInstance()->setAspect( getWorldViewAspectRatio() );
@@ -6335,12 +6390,14 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
     }
     else
     {
+        restore_deferred();
         setBalanceVisible(true);
         return false;
     }
 
     if (raw->isBufferInvalid())
     {
+        restore_deferred();
         setBalanceVisible(true);
         return false;
     }
@@ -6537,16 +6594,7 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
         gPipeline.resetDrawOrders();
     }
 
-    if (reset_deferred)
-    {
-        mWorldViewRectRaw = window_rect;
-        LLViewerCamera::getInstance()->setViewHeightInPixels( mWorldViewRectRaw.getHeight() );
-        LLViewerCamera::getInstance()->setAspect( getWorldViewAspectRatio() );
-        scratch_space.flush();
-        scratch_space.release();
-        gPipeline.allocateScreenBuffer(original_width, original_height);
-
-    }
+    restore_deferred();
 
     if (high_res)
     {
@@ -6993,30 +7041,39 @@ void LLViewerWindow::initTextures(S32 location_id)
     }
 }
 
+// <FS:Zi> Fade teleport screens
+//void LLViewerWindow::setShowProgress(const bool show)
+//{
+//    if (mProgressView)
+//    {
+//        mProgressView->setVisible(show);
+//    }
+//}
 void LLViewerWindow::setShowProgress(const bool show, bool fullscreen)
 {
-    if(show)
+    if (show)
     {
-        if(fullscreen)
+        if (mProgressViewMini && !fullscreen)
+            mProgressViewMini->setVisible(true);
+
+        if (mProgressView)
         {
-            if(mProgressView)
+            if (LLAppViewer::instance()->quitRequested())
+                mProgressView->setVisible(true); // Fix pink screen when quitting the viewer
+            else if (fullscreen)
                 mProgressView->fade(true);
-        }
-        else
-        {
-            if(mProgressViewMini)
-                mProgressViewMini->setVisible(true);
         }
     }
     else
     {
-        if(mProgressView && mProgressView->getVisible())
+        if (mProgressView && mProgressView->getVisible())
             mProgressView->fade(false);
 
-        if(mProgressViewMini)
+        if (mProgressViewMini)
             mProgressViewMini->setVisible(false);
     }
 }
+// </FS:Zi>
 
 void LLViewerWindow::setStartupComplete()
 {
@@ -7464,11 +7521,15 @@ void LLViewerWindow::setUIVisibility(bool visible)
     }
 
     // <FS:Ansariel> Notification not showing if hiding the UI
-    FSNearbyChat::instance().showDefaultChatBar(visible && !gSavedSettings.getBOOL("AutohideChatBar"));
-    gSavedSettings.setBOOL("FSInternalShowNavbarNavigationPanel", visible && gSavedSettings.getBOOL("ShowNavbarNavigationPanel"));
-    gSavedSettings.setBOOL("FSInternalShowNavbarFavoritesPanel", visible && gSavedSettings.getBOOL("ShowNavbarFavoritesPanel"));
-    mRootView->getChildView("chiclet_container")->setVisible(visible && gSavedSettings.getBOOL("InternalShowGroupNoticesTopRight"));
-    mRootView->getChildView("chiclet_container_bottom")->setVisible(visible && !gSavedSettings.getBOOL("InternalShowGroupNoticesTopRight"));
+    static LLCachedControl<bool> autohide_chat_bar(gSavedSettings, "AutohideChatBar");
+    static LLCachedControl<bool> show_navbar_navigation_panel(gSavedSettings, "ShowNavbarNavigationPanel");
+    static LLCachedControl<bool> show_navbar_favorites_panel(gSavedSettings, "ShowNavbarFavoritesPanel");
+    static LLCachedControl<bool> internal_show_group_notices_top_right(gSavedSettings, "InternalShowGroupNoticesTopRight");
+    FSNearbyChat::instance().showDefaultChatBar(visible && !autohide_chat_bar());
+    gSavedSettings.setBOOL("FSInternalShowNavbarNavigationPanel", visible && show_navbar_navigation_panel());
+    gSavedSettings.setBOOL("FSInternalShowNavbarFavoritesPanel", visible && show_navbar_favorites_panel());
+    mRootView->getChildView("chiclet_container")->setVisible(visible && internal_show_group_notices_top_right());
+    mRootView->getChildView("chiclet_container_bottom")->setVisible(visible && !internal_show_group_notices_top_right());
     // </FS:Ansariel>
 
     // <FS:Zi> Is done inside XUI now, using visibility_control

@@ -47,6 +47,7 @@ const std::string MAINGRID = "grid.wolfterritories.org:8002";
 const std::string MAINGRID = "util.agni.lindenlab.com";
 #endif
 // </FS:WolfViewer>
+#define BETAGRID "util.aditi.lindenlab.com"
 
 // <FS:AW optional opensim support>
 #ifdef OPENSIM

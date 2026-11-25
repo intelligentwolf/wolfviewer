@@ -52,6 +52,7 @@
 #include "llinventorydefines.h"
 #include "lllslconstants.h"
 #include "llmaterialtable.h"
+#include "llmemory.h"
 #include "llregionhandle.h"
 #include "llsd.h"
 #include "llsdserialize.h"
@@ -3922,6 +3923,14 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
 
     LL_DEBUGS("CrossingCaps") << "Calling setSeedCapability(). Seed cap == "
             << seedCap << LL_ENDL;
+
+    // <FS:TJ> Fixes OpenSim race condition on grid change not having updated Grid Info yet
+    if (!LLGridManager::getInstance()->isInSecondLife())
+    {
+        regionp->setCapabilitiesReceivedCallback([](const LLUUID& region_id, LLViewerRegion* regionp)
+            { LLAppViewer::instance()->updateNameLookupUrl(regionp); });
+    }
+    // </FS:TJ>
     regionp->setSeedCapability(seedCap);
 
     // Don't send camera updates to the new region until we're
@@ -4518,11 +4527,16 @@ void send_agent_update(bool force_send, bool send_reliable)
 
     static F32 last_draw_disatance_step = 1024;
     F32 memory_limited_draw_distance = gAgentCamera.mDrawDistance;
-
-    if (LLViewerTexture::isSystemMemoryCritical())
+    const F32 mem_factor = LLMemory::getSystemMemoryBudgetFactor();
+    // <FS:TJ> [FIRE-35748] Only enable the LL Draw Distance VRAM optimization when the setting is enabled
+    static LLCachedControl<bool> use_vram_optimization(gSavedSettings, "FSDrawDistanceVRAMOptimization", false);
+    //if (mem_factor > 1.f)
+    if (use_vram_optimization && mem_factor > 1.f)
+    // </FS:TJ>
     {
-        // If we are low on memory, reduce requested draw distance
-        memory_limited_draw_distance = llmax(gAgentCamera.mDrawDistance / LLViewerTexture::getSystemMemoryBudgetFactor(), gAgentCamera.mDrawDistance / 2.f);
+        // We are critically low on memory or recovering,
+        // limit requested draw distance
+        memory_limited_draw_distance = llmax(gAgentCamera.mDrawDistance / mem_factor, gAgentCamera.mDrawDistance / 2.f);
     }
 
     if (tp_state == LLAgent::TELEPORT_ARRIVING || LLStartUp::getStartupState() < STATE_MISC)
@@ -4701,6 +4715,7 @@ extern U32Bits gObjectData;
 
 void process_object_update(LLMessageSystem *mesgsys, void **user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     // Update the data counters
     if (mesgsys->getReceiveCompressedSize())
     {
@@ -4722,6 +4737,7 @@ void process_object_update(LLMessageSystem *mesgsys, void **user_data)
 
 void process_compressed_object_update(LLMessageSystem *mesgsys, void **user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     // Update the data counters
     if (mesgsys->getReceiveCompressedSize())
     {
@@ -4743,6 +4759,7 @@ void process_compressed_object_update(LLMessageSystem *mesgsys, void **user_data
 
 void process_cached_object_update(LLMessageSystem *mesgsys, void **user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     // Update the data counters
     if (mesgsys->getReceiveCompressedSize())
     {
@@ -4760,6 +4777,7 @@ void process_cached_object_update(LLMessageSystem *mesgsys, void **user_data)
 
 void process_terse_object_update_improved(LLMessageSystem *mesgsys, void **user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     if (mesgsys->getReceiveCompressedSize())
     {
         gObjectData += (U32Bytes)mesgsys->getReceiveCompressedSize();
@@ -5356,6 +5374,7 @@ void process_sim_stats(LLMessageSystem *msg, void **user_data)
 
 void process_avatar_animation(LLMessageSystem *mesgsys, void **user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     LLUUID  animation_id;
     LLUUID  uuid;
     S32     anim_sequence_id;
@@ -5484,6 +5503,7 @@ void process_avatar_animation(LLMessageSystem *mesgsys, void **user_data)
 
 void process_object_animation(LLMessageSystem *mesgsys, void **user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     LLUUID  animation_id;
     LLUUID  uuid;
     S32     anim_sequence_id;
@@ -5549,6 +5569,7 @@ void process_object_animation(LLMessageSystem *mesgsys, void **user_data)
 
 void process_avatar_appearance(LLMessageSystem *mesgsys, void **user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     LLUUID uuid;
     mesgsys->getUUIDFast(_PREHASH_Sender, _PREHASH_ID, uuid);
 
@@ -7547,6 +7568,7 @@ void process_script_experience_details(const LLSD& experience_details, LLSD args
 
 void process_script_question(LLMessageSystem *msg, void **user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     // *TODO: Translate owner name -> [FIRST] [LAST]
 
     LLHost sender = msg->getSender();
@@ -7619,28 +7641,39 @@ void process_script_question(LLMessageSystem *msg, void **user_data)
         args["NAME"] = clean_owner_name;
         S32 known_questions = 0;
         bool has_not_only_debit = questions ^ SCRIPT_PERMISSIONS[SCRIPT_PERMISSION_DEBIT].permbit;
+        bool caution_enabled    = gSavedSettings.getBOOL("PermissionsCautionEnabled");
         // check the received permission flags against each permission
+        std::string warning_msg;
         for (const script_perm_t& script_perm : SCRIPT_PERMISSIONS)
         {
             if (questions & script_perm.permbit)
             {
-                count++;
                 known_questions |= script_perm.permbit;
                 // check whether permission question should cause special caution dialog
                 caution |= (script_perm.caution);
 
-                if (("ScriptTakeMoney" == script_perm.question) && has_not_only_debit)
+                // Cautions go into top part of the dialog, questions go into the footer
+                if (caution_enabled && script_perm.caution)
+                {
+                    warning_msg += "\n" + LLTrans::getString(script_perm.question + "Caution") + "\n";
                     continue;
+                }
 
                 if (LLTrans::getString(script_perm.question).empty())
                 {
                     continue;
                 }
 
-                script_question += "    " + LLTrans::getString(script_perm.question) + "\n";
+                count++;
+                script_question += "\n    " + LLTrans::getString(script_perm.question);
             }
         }
 
+        if (!warning_msg.empty())
+        {
+            LLStringUtil::format(warning_msg, args);
+            args["WARNINGS"] = warning_msg;
+        }
 
         args["QUESTIONS"] = script_question;
 
@@ -7723,12 +7756,12 @@ void process_script_question(LLMessageSystem *msg, void **user_data)
             // check whether cautions are even enabled or not
             const char* notification = "ScriptQuestion";
 
-            if(caution && gSavedSettings.getBOOL("PermissionsCautionEnabled"))
+            if(caution && caution_enabled)
             {
-                args["FOOTERTEXT"] = (count > 1) ? LLTrans::getString("AdditionalPermissionsRequestHeader") + "\n\n" + script_question : "";
+                args["FOOTERTEXT"] = (count > 0) ? LLTrans::getString("AdditionalPermissionsRequestHeader") + "\n" + script_question : "";
                 notification = "ScriptQuestionCaution";
             }
-            else if(experienceid.notNull())
+            else if (experienceid.notNull())
             {
                 payload["experience"]=experienceid;
                 LLExperienceCache::instance().get(experienceid, boost::bind(process_script_experience_details, _1, args, payload));
@@ -8034,6 +8067,16 @@ void process_teleport_failed(LLMessageSystem *msg, void**)
                              << ". Setting state to TELEPORT_NONE" << LL_ENDL;
         gAgent.setTeleportState( LLAgent::TELEPORT_NONE );
     }
+
+    // <FS:TJ> Fixes OpenSim race condition on grid change not having updated Grid Info yet
+    if (!LLGridManager::getInstance()->isInSecondLife())
+    {
+        if (LLViewerRegion* region = gAgent.getRegion())
+        {
+            LLAppViewer::instance()->updateNameLookupUrl(region);
+        }
+    }
+    // </FS:TJ>
 }
 
 void process_teleport_local(LLMessageSystem *msg,void**)

@@ -73,6 +73,41 @@ public:
     /*virtual*/ bool compare(const LLAccordionCtrlTab* tab1, const LLAccordionCtrlTab* tab2) const;
 };
 
+// <FS:TP> [FIRE-36105] Add date-based outfit sort comparators
+/**
+ * @class LLOutfitTabDateComparator
+ *
+ * Comparator of outfit tabs sorting newest-created outfit first.
+ */
+class LLOutfitTabDateComparator : public LLAccordionCtrl::LLTabComparator
+{
+    LOG_CLASS(LLOutfitTabDateComparator);
+
+public:
+    LLOutfitTabDateComparator() = default;
+    virtual ~LLOutfitTabDateComparator() = default;
+
+    /*virtual*/ bool compare(const LLAccordionCtrlTab* tab1, const LLAccordionCtrlTab* tab2) const;
+};
+
+/**
+ * @class LLOutfitTabFavDateComparator
+ *
+ * Comparator of outfit tabs: favorites first, newest-created first within
+ * each group.
+ */
+class LLOutfitTabFavDateComparator : public LLAccordionCtrl::LLTabComparator
+{
+    LOG_CLASS(LLOutfitTabFavDateComparator);
+
+public:
+    LLOutfitTabFavDateComparator() = default;
+    virtual ~LLOutfitTabFavDateComparator() = default;
+
+    /*virtual*/ bool compare(const LLAccordionCtrlTab* tab1, const LLAccordionCtrlTab* tab2) const;
+};
+// </FS:TP>
+
 class LLOutfitListBase : public LLPanelAppearanceTab
 {
 public:
@@ -96,6 +131,17 @@ public:
     virtual void updateAddedCategory(LLUUID cat_id) = 0;
     virtual void updateRemovedCategory(LLUUID cat_id) = 0;
     virtual void updateChangedCategoryName(LLViewerInventoryCategory *cat, std::string name) = 0;
+
+    /*
+     * Optional hook for derived classes to perform additional processing.
+     * This is called by the outfit list update logic after the core
+     * bookkeeping for an outfit has been handled.
+     *
+     * @return true if update processing should continue,
+     *         false if no additional work is required.
+     *         The base implementation returns false.
+     */
+    virtual bool updateOneOutfit() { return false; };
     virtual void sortOutfits();
     virtual void arrange() {} // <FS:Ansariel> Arrange accordions after all have been added
 
@@ -143,6 +189,7 @@ protected:
 
     bool isOutfitFolder(LLViewerInventoryCategory* cat) const;
 
+    void startIdleLoop(const LLUUID cat_id);
     static void onIdle(void* userdata);
     void onIdleRefreshList();
 
@@ -155,6 +202,7 @@ protected:
         uuid_vec_t::const_iterator  RemovedIterator;
     } mRefreshListState;
     std::set<LLUUID>                mChangedItems;
+    std::set<LLUUID>                mPendingOutfitRefreshes;
 
     bool                            mIsInitialized;
     LLInventoryCategoriesObserver*  mCategoriesObserver;
@@ -374,6 +422,12 @@ private:
 
     /*virtual*/ void sortOutfits();
     /*virtual*/ void arrange(); // <FS:Ansariel> Arrange accordions after all have been added
+
+    // <FS:TP> [FIRE-36105] Resort the accordion when a tracked outfit's
+    // contents change, not just when the outfit tab is first added (see
+    // updateAddedCategory() / onOutfitItemsChanged() in the .cpp)
+    void onOutfitItemsChanged(const LLUUID& cat_id);
+    // </FS:TP>
 
     /*virtual*/ void onSetSelectedOutfitByUUID(const LLUUID& outfit_uuid);
 

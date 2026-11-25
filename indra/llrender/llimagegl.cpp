@@ -1876,7 +1876,7 @@ bool LLImageGL::readBackRaw(S32 discard_level, LLImageRaw* imageraw, bool compre
     LLGLint is_compressed = 0;
     if (compressed_ok)
     {
-        glGetTexLevelParameteriv(mTarget, is_compressed, GL_TEXTURE_COMPRESSED, (GLint*)&is_compressed);
+        glGetTexLevelParameteriv(mTarget, gl_discard, GL_TEXTURE_COMPRESSED, (GLint*)&is_compressed);
     }
 
     //-----------------------------------------------------------------------------------------------
@@ -2287,7 +2287,7 @@ void LLImageGL::calcAlphaChannelOffsetAndStride()
 
 void LLImageGL::analyzeAlpha(const void* data_in, U32 w, U32 h)
 {
-    if(sSkipAnalyzeAlpha || !mNeedsAlphaAndPickMask)
+    if(!data_in || sSkipAnalyzeAlpha || !mNeedsAlphaAndPickMask)
     {
         return ;
     }
@@ -2589,6 +2589,12 @@ bool LLImageGL::scaleDown(S32 desired_discard)
         if (gGL.getTexUnit(0)->bind(this, true, true))
         {
             glDrawArrays(GL_TRIANGLES, 0, 3);
+
+#if LL_DARWIN
+            // On mac OS, flush before freeing, otherwise the texture may be
+            // freed before Metal's 'lazy' evaluation/restoration behavior triggers.
+            glFlush();
+#endif
 
             free_tex_image(mTexName);
             glTexImage2D(mTarget, 0, mFormatInternal, desired_width, desired_height, 0, mFormatPrimary, mFormatType, nullptr);

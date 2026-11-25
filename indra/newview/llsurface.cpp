@@ -90,10 +90,12 @@ LLSurface::LLSurface(U32 type, LLViewerRegion *regionp) :
     // In here temporarily.
     mSurfacePatchUpdateCount = 0;
 
-    for (S32 i = 0; i < 8; i++)
-    {
-        mNeighbors[i] = nullptr;
-    }
+    // <FS:TJ> [FIRE-36100] Fix crash in OpenSim disconnecting neighboring var regions
+    //for (S32 i = 0; i < 8; i++)
+    //{
+    //    mNeighbors[i] = nullptr;
+    //}
+    // </FS:TJ>
 }
 
 
@@ -363,10 +365,16 @@ void LLSurface::getNeighboringRegions( std::vector<LLViewerRegion*>& uniqueRegio
     S32 i;
     for (i = 0; i < 8; i++)
     {
-        if (mNeighbors[i] != nullptr)
+        // <FS:TJ> [FIRE-36100] Fix crash in OpenSim disconnecting neighboring var regions
+        //if (mNeighbors[i] != nullptr)
+        //{
+        //    uniqueRegions.push_back( mNeighbors[i]->getRegion() );
+        //}
+        for (LLSurface* neighborp : mNeighbors[i])
         {
-            uniqueRegions.push_back( mNeighbors[i]->getRegion() );
+            uniqueRegions.push_back(neighborp->getRegion());
         }
+        // </FS:TJ>
     }
 }
 
@@ -376,7 +384,10 @@ void LLSurface::getNeighboringRegionsStatus( std::vector<S32>& regions )
     S32 i;
     for (i = 0; i < 8; i++)
     {
-        if (mNeighbors[i] != nullptr)
+        // <FS:TJ> [FIRE-36100] Fix crash in OpenSim disconnecting neighboring var regions
+        //if (mNeighbors[i] != nullptr)
+        for (size_t n = 0; n < mNeighbors[i].size(); n++)
+        // </FS:TJ>
         {
             regions.push_back( i );
         }
@@ -385,8 +396,19 @@ void LLSurface::getNeighboringRegionsStatus( std::vector<S32>& regions )
 
 void LLSurface::connectNeighbor(LLSurface *neighborp, U32 direction)
 {
-    mNeighbors[direction] = neighborp;
-    neighborp->mNeighbors[gDirOpposite[direction]] = this;
+    // <FS:TJ> [FIRE-36100] Fix crash in OpenSim disconnecting neighboring var regions
+    //mNeighbors[direction] = neighborp;
+    //neighborp->mNeighbors[gDirOpposite[direction]] = this;
+    U32 opposite = gDirOpposite[direction];
+    if (std::find(mNeighbors[direction].begin(), mNeighbors[direction].end(), neighborp) == mNeighbors[direction].end())
+    {
+        mNeighbors[direction].push_back(neighborp);
+    }
+    if (std::find(neighborp->mNeighbors[opposite].begin(), neighborp->mNeighbors[opposite].end(), this) == neighborp->mNeighbors[opposite].end())
+    {
+        neighborp->mNeighbors[opposite].push_back(this);
+    }
+    // </FS:TJ>
 
     // <WolfViewer 2026-09-23> Link the patches along the shared edge that exist now; any made
     // later link themselves as they are made (createPatch -> linkPatch). This used to walk the
@@ -426,22 +448,27 @@ LLSurface *LLSurface::neighborSurfaceAt(const S64 gx, const S64 gy, S32 &nx, S32
     const F32 patch_m = mMetersPerGrid * mGridsPerPatchEdge;
     for (S32 d = 0; d < 8; d++)
     {
-        LLSurface* other = mNeighbors[d];
-        if (!other || other->mPatchesPerEdge <= 0)
+        // [W113 2026-11-25] Firestorm 7.2.5 FIRE-36100 (c898e30869): a varregion can have several neighbours on one side,
+        // so mNeighbors[d] is a list; every one of them is searched (a single pointer kept only the last one connected,
+        // and the others were left pointing at this surface after it was deleted).
+        for (LLSurface* other : mNeighbors[d])
         {
-            continue;
-        }
-        // Patches can only pair up if they are the same size (always 16 m today).
-        if (other->mMetersPerGrid * other->mGridsPerPatchEdge != patch_m)
-        {
-            continue;
-        }
-        const S64 ox = other->globalPatchX(), oy = other->globalPatchY();
-        if (gx >= ox && gx < ox + other->mPatchesPerEdge && gy >= oy && gy < oy + other->mPatchesPerEdge)
-        {
-            nx = (S32)(gx - ox);
-            ny = (S32)(gy - oy);
-            return other;
+            if (!other || other->mPatchesPerEdge <= 0)
+            {
+                continue;
+            }
+            // Patches can only pair up if they are the same size (always 16 m today).
+            if (other->mMetersPerGrid * other->mGridsPerPatchEdge != patch_m)
+            {
+                continue;
+            }
+            const S64 ox = other->globalPatchX(), oy = other->globalPatchY();
+            if (gx >= ox && gx < ox + other->mPatchesPerEdge && gy >= oy && gy < oy + other->mPatchesPerEdge)
+            {
+                nx = (S32)(gx - ox);
+                ny = (S32)(gy - oy);
+                return other;
+            }
         }
     }
     return nullptr;
@@ -582,10 +609,14 @@ void LLSurface::disconnectNeighbor(LLSurface *surfacep)
     S32 i;
     for (i = 0; i < 8; i++)
     {
-        if (surfacep == mNeighbors[i])
-        {
-            mNeighbors[i] = nullptr;
-        }
+        // <FS:TJ> [FIRE-36100] Fix crash in OpenSim disconnecting neighboring var regions
+        //if (surfacep == mNeighbors[i])
+        //{
+        //    mNeighbors[i] = nullptr;
+        //}
+        std::vector<LLSurface*>& neighbors = mNeighbors[i];
+        neighbors.erase(std::remove(neighbors.begin(), neighbors.end(), surfacep), neighbors.end());
+        // </FS:TJ>
     }
 
     // Iterate through surface patches, removing any connectivity to removed surface.
@@ -601,11 +632,21 @@ void LLSurface::disconnectAllNeighbors()
     S32 i;
     for (i = 0; i < 8; i++)
     {
-        if (mNeighbors[i])
+        // <FS:TJ> [FIRE-36100] Fix crash in OpenSim disconnecting neighboring var regions
+        //if (mNeighbors[i])
+        //{
+        //    mNeighbors[i]->disconnectNeighbor(this);
+        //    mNeighbors[i] = nullptr;
+        //}
+        for (LLSurface* neighborp : mNeighbors[i])
         {
-            mNeighbors[i]->disconnectNeighbor(this);
-            mNeighbors[i] = nullptr;
+            if (neighborp)
+            {
+                neighborp->disconnectNeighbor(this);
+            }
         }
+        mNeighbors[i].clear();
+        // </FS:TJ>
     }
 }
 

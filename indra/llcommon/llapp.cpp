@@ -124,6 +124,7 @@ int LLApp::takeQuitSignal()
 }
 LLAppErrorHandler LLApp::sErrorHandler = NULL;
 
+bool gDisconnected = false;
 
 LLApp::LLApp()
 {

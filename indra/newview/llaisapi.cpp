@@ -1044,6 +1044,9 @@ void AISAPI::InvokeAISCommandCoro(LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t ht
 }
 
 //-------------------------------------------------------------------------
+U32 AISUpdate::sBatchFrameCount = 0;
+LLTimer AISUpdate::sBatchTimer;
+
 AISUpdate::AISUpdate(const LLSD& update, AISAPI::COMMAND_TYPE type, const LLSD& request_body)
 : mType(type)
 {
@@ -1061,8 +1064,16 @@ AISUpdate::AISUpdate(const LLSD& update, AISAPI::COMMAND_TYPE type, const LLSD& 
         mFetchDepth = request_body["depth"].asInteger();
     }
 
-    mTimer.setTimerExpirySec(AIS_EXPIRY_SECONDS);
-    mTimer.start();
+    mTaskTimer.setTimerExpirySec(AIS_TASK_EXPIRY_SECONDS);
+    mTaskTimer.start();
+
+    U32 current_frame = LLFrameTimer::getFrameCount();
+    if (sBatchFrameCount != current_frame)
+    {
+        sBatchTimer.setTimerExpirySec(AIS_BATCH_EXPIRY_SECONDS);
+        sBatchTimer.start();
+        sBatchFrameCount = current_frame;
+    }
     parseUpdate(update);
 }
 
@@ -1083,7 +1094,7 @@ void AISUpdate::clearParseResults()
 
 void AISUpdate::checkTimeout()
 {
-    if (mTimer.hasExpired())
+    if (mTaskTimer.hasExpired() || sBatchTimer.hasExpired())
     {
         // If we are taking too long, don't starve other tasks,
         // yield to mainloop.
@@ -1092,7 +1103,16 @@ void AISUpdate::checkTimeout()
         // a chance, so wait for a frame tick instead.
         llcoro::suspendUntilNextFrame();
         LLCoros::checkStop();
-        mTimer.setTimerExpirySec(AIS_EXPIRY_SECONDS);
+        mTaskTimer.setTimerExpirySec(AIS_TASK_EXPIRY_SECONDS);
+
+        U32 current_frame = LLFrameTimer::getFrameCount();
+        if (sBatchFrameCount != current_frame)
+        {
+            // To give other tasks a chance batch timer
+            // has a longer delay.
+            sBatchTimer.setTimerExpirySec(AIS_BATCH_EXPIRY_SECONDS);
+            sBatchFrameCount = current_frame;
+        }
     }
 }
 
@@ -1652,7 +1672,12 @@ void AISUpdate::doUpdate()
                                    << cat->getName() << " " << cat_id
                                    << " with delta " << descendent_delta << " from "
                                    << old_count << " to " << (old_count+descendent_delta) << LL_ENDL;
-            LLInventoryModel::LLCategoryUpdate up(cat_id, descendent_delta);
+            // <FS> FIRE-33455: AIS reported the new absolute version of this category (checked above) and it gets
+            //      applied further down; only account for the descendent count here. Bumping the version relative to
+            //      our local one as well double counts once two responses for the same folder are processed out of order.
+            //LLInventoryModel::LLCategoryUpdate up(cat_id, descendent_delta);
+            LLInventoryModel::LLCategoryUpdate up(cat_id, descendent_delta, false);
+            // </FS>
             gInventory.accountForUpdate(up);
         }
         else
@@ -1772,6 +1797,13 @@ void AISUpdate::doUpdate()
         const LLUUID id = ucv_it->first;
         S32 version = static_cast<S32>(ucv_it->second);
         LLViewerInventoryCategory *cat = gInventory.getCategory(id);
+        // <FS> FIRE-33455: don't dereference a category we don't know about
+        if (!cat)
+        {
+            LL_DEBUGS("Inventory") << "Skipping version update for unknown category " << id << LL_ENDL;
+            continue;
+        }
+        // </FS>
         LL_DEBUGS("Inventory") << "cat version update " << cat->getName() << " to version " << cat->getVersion() << LL_ENDL;
         if (cat->getVersion() != version)
         {
@@ -1784,10 +1816,27 @@ void AISUpdate::doUpdate()
             // is performed.  This occasionally gets out of sync however.
             if (version != LLViewerInventoryCategory::VERSION_UNKNOWN)
             {
-                LL_WARNS() << "Possible version mismatch for category " << cat->getName()
-                    << ", viewer version " << cat->getVersion()
-                    << " AIS version " << version << " !!!Adjusting local version!!!" << LL_ENDL;
-                cat->setVersion(version);
+                // <FS> FIRE-33455: category versions only ever go up on the server. With several AIS requests in flight
+                //      (PoolSizeAIS is 20, and doUpdate() can yield to the next frame) an older response can be processed
+                //      after a newer one; adopting its version rolls the viewer back below the server. For the COF that
+                //      wedges server-side baking ("Cof Version Mismatch") until relog because every retry resends the
+                //      same stale version.
+                //LL_WARNS() << "Possible version mismatch for category " << cat->getName()
+                //    << ", viewer version " << cat->getVersion()
+                //    << " AIS version " << version << " !!!Adjusting local version!!!" << LL_ENDL;
+                //cat->setVersion(version);
+                if ( (LLViewerInventoryCategory::VERSION_UNKNOWN == cat->getVersion()) || (version > cat->getVersion()) )
+                {
+                    LL_DEBUGS("Inventory") << "Updating version for category " << cat->getName()
+                        << " from " << cat->getVersion() << " to AIS version " << version << LL_ENDL;
+                    cat->setVersion(version);
+                }
+                else
+                {
+                    LL_WARNS("Inventory") << "Ignoring stale AIS version " << version << " for category " << cat->getName()
+                        << " (viewer version " << cat->getVersion() << ")" << LL_ENDL;
+                }
+                // </FS>
             }
             else
             {

@@ -68,10 +68,10 @@ public:
     virtual LLTextSegmentPtr clone(LLTextBase& terget) const { return new LLTextSegment(mStart, mEnd); }
     static LLStyleSP cloneStyle(LLTextBase& target, const LLStyle* source);
 
-    bool                        getDimensions(S32 first_char, S32 num_chars, S32& width, S32& height) const;
+    bool                        getDimensions(S32 first_char, S32 num_chars, S32& width, S32& height);
     bool                        getPermitsEmoji() const { return mPermitsEmoji; };
 
-    virtual bool                getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height) const;
+    virtual bool                getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height);
     virtual S32                 getOffset(S32 segment_local_x_coord, S32 start_offset, S32 num_chars, bool round) const;
 
     /**
@@ -99,6 +99,7 @@ public:
     virtual void                setToken( LLKeywordToken* token );
     virtual LLKeywordToken*     getToken() const;
     virtual void                setToolTip(const std::string& tooltip);
+    virtual void                setProminentUrlTooltip(const std::string& label, bool trusted) { } // <FS:PP> Preview real URLs of bracket links
     virtual void                dump() const;
 
     // LLMouseHandler interface
@@ -139,7 +140,7 @@ public:
     virtual ~LLNormalTextSegment();
     /*virtual*/ LLTextSegmentPtr clone(LLTextBase& target) const;
 
-    /*virtual*/ bool                getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height) const;
+    /*virtual*/ bool                getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height);
     /*virtual*/ S32                 getOffset(S32 segment_local_x_coord, S32 start_offset, S32 num_chars, bool round) const;
     /*virtual*/ S32                 getNumChars(S32 num_pixels, S32 segment_offset, S32 line_offset, S32 max_chars, S32 line_ind) const;
     /*virtual*/ void                updateLayout(const class LLTextBase& editor);
@@ -147,10 +148,11 @@ public:
     /*virtual*/ bool                canEdit() const { return mCanEdit; }
     /*virtual*/ const LLUIColor&     getColor() const                    { return mStyle->getColor(); }
     /*virtual*/ LLStyleConstSP      getStyle() const                    { return mStyle; }
-    /*virtual*/ void                setStyle(LLStyleConstSP style)  { mStyle = style; }
+    /*virtual*/ void                setStyle(LLStyleConstSP style) { mStyle = style; refreshFromStyle(); }
     /*virtual*/ void                setToken( LLKeywordToken* token )   { mToken = token; }
     /*virtual*/ LLKeywordToken*     getToken() const                    { return mToken; }
     /*virtual*/ void                setToolTip(const std::string& tooltip);
+    /*virtual*/ void                setProminentUrlTooltip(const std::string& label, bool trusted); // <FS:PP> Preview real URLs of bracket links
     /*virtual*/ void                dump() const;
 
     /*virtual*/ bool                handleHover(S32 x, S32 y, MASK mask);
@@ -167,6 +169,7 @@ protected:
     virtual     const S32           getLength() const;
 
     void setAllowEdit(bool can_edit) { mCanEdit = can_edit; }
+    void refreshFromStyle();
 
 protected:
     class LLTextBase&   mEditor;
@@ -174,6 +177,11 @@ protected:
     S32                 mFontHeight;
     LLKeywordToken*     mToken;
     std::string         mTooltip;
+    // <FS:PP> Preview real URLs of bracket links
+    bool                mForceProminentUrlTooltip { false };
+    bool                mProminentUrlTrusted { false };
+    std::string         mProminentUrlLabel;
+    // </FS:PP>
     boost::signals2::connection mImageLoadedConnection;
 
     bool mCanEdit { true };
@@ -182,6 +190,7 @@ protected:
     LLFontVertexBuffer  mFontBufferPreSelection;
     LLFontVertexBuffer  mFontBufferSelection;
     LLFontVertexBuffer  mFontBufferPostSelection;
+    LLFontWidthBuffer   mFontWidthBuffer;
     S32                 mLastGeneration = -1;
 };
 
@@ -254,7 +263,7 @@ public:
     ~LLInlineViewSegment();
     /*virtual*/ LLTextSegmentPtr clone(LLTextBase& target) const;
 
-    /*virtual*/ bool        getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height) const;
+    /*virtual*/ bool        getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height);
     /*virtual*/ S32         getNumChars(S32 num_pixels, S32 segment_offset, S32 line_offset, S32 max_chars, S32 line_ind) const;
     /*virtual*/ void        updateLayout(const class LLTextBase& editor);
     /*virtual*/ F32         draw(S32 start, S32 end, S32 selection_start, S32 selection_end, const LLRectf& draw_rect);
@@ -279,7 +288,7 @@ public:
     LLLineBreakTextSegment(S32 pos);
     ~LLLineBreakTextSegment();
     /*virtual*/ LLTextSegmentPtr clone(LLTextBase& target) const;
-    /*virtual*/ bool        getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height) const;
+    /*virtual*/ bool        getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height);
     S32         getNumChars(S32 num_pixels, S32 segment_offset, S32 line_offset, S32 max_chars, S32 line_ind) const;
     F32         draw(S32 start, S32 end, S32 selection_start, S32 selection_end, const LLRectf& draw_rect);
 
@@ -294,7 +303,7 @@ public:
     ~LLImageTextSegment();
     /*virtual*/ LLTextSegmentPtr clone(LLTextBase& target) const;
 
-    /*virtual*/ bool        getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height) const;
+    /*virtual*/ bool        getDimensionsF32(S32 first_char, S32 num_chars, F32& width, S32& height);
     S32         getNumChars(S32 num_pixels, S32 segment_offset, S32 char_offset, S32 max_chars, S32 line_ind) const;
     F32         draw(S32 start, S32 end, S32 selection_start, S32 selection_end, const LLRectf& draw_rect);
 
@@ -434,6 +443,7 @@ public:
     /*virtual*/ void        setColor(const LLUIColor& c) override;
     virtual     void        setReadOnlyColor(const LLUIColor& c);
     /*virtual*/ void        onVisibilityChange(bool new_visibility) override;
+    void                    setBgReadOnlyColor(const LLUIColor& c) { mReadOnlyBgColor = c; }
 
     /*virtual*/ void        setValue(const LLSD& value) override;
     /*virtual*/ LLTextViewModel* getViewModel() const override;
@@ -478,6 +488,10 @@ public:
     bool                    isContentTrusted() const { return mTrustedContent; }
     void                    setContentTrusted(bool trusted_content) { mTrustedContent = trusted_content; }
 
+    // <FS:PP> Selects the nearby-chat labeled-link setting (FSDisableLabeledChatLinksNearbyChat) for this editor's content
+    void                    setNearbyChatContent(bool nearby_chat_content) { mNearbyChatContent = nearby_chat_content; }
+    // </FS:PP>
+
     // TODO: move into LLTextSegment?
     void                    createUrlContextMenu(S32 x, S32 y, const std::string &url); // create a popup context menu for the given Url
 
@@ -502,6 +516,7 @@ public:
     const   LLWString&      getWlabel() { return mLabel.getWString();}
 
     void                    setLastSegmentToolTip(const std::string &tooltip);
+    void                    setLastSegmentProminentUrlTooltip(const std::string &label, bool trusted); // <FS:PP> Preview real URLs of bracket links
 
     /**
      * If label is set, draws text label (which is LLLabelTextSegment)
@@ -821,11 +836,13 @@ protected:
     bool                        mUseEmoji;
     bool                        mUseColor;
     bool                        mTrackEnd;          // if true, keeps scroll position at end of document during resize
+    bool                        mTrackValueChange;  // if true, send out onValueChange() from low level text modification methods
     bool                        mReadOnly;
     bool                        mBGVisible;         // render background?
     bool                        mClip;              // clip text to widget rect
     bool                        mClipPartial;       // false if we show lines that are partially inside bounding rect
     bool                        mTrustedContent;    // if false, does not allow to execute SURL links from this editor
+    bool                        mNearbyChatContent { false }; // <FS:PP> if true, labeled-link masking uses the nearby chat setting
     bool                        mPlainText;         // didn't use Image or Icon segments
     bool                        mAutoIndent;
     S32                         mMaxTextByteLength; // Maximum length mText is allowed to be in bytes

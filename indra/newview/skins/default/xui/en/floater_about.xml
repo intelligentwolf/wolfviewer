@@ -87,7 +87,7 @@ With open source contributions from:
        max_length="65536"
        name="contrib_names"
        top_pad="5"
-       width="476"
+       width="489"
        word_wrap="true">
 Dummy Name replaced at run time
       </text_editor>
@@ -107,7 +107,7 @@ Dummy Name replaced at run time
        max_length="65536"
        name="licenses_editor"
        top="16"
-       width="474"
+       width="489"
        word_wrap="true">
 WolfViewer is based on the Firestorm viewer, Copyright (C) 2010-2026 The Phoenix Firestorm Project, Inc., used under the GNU Lesser General Public License version 2.1.
 

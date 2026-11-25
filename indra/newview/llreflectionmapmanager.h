@@ -105,6 +105,7 @@ public:
 
     // release any GL state
     void cleanup();
+    void cleanupQueryPool();
 
     // maintain reflection probes
     void update();
@@ -166,6 +167,10 @@ public:
     // [WOLF ENV TAKRAM 2026-10-12] the default probe (cube index 0) has been rendered: the native sky's sea mirrors it
     bool defaultProbeReady() const;
 
+    // glDeleteQueries is expensive, so we maintain a pool of queries
+    GLuint allocateQuery();
+    void recycleQuery(GLuint query);
+
 private:
     friend class LLPipeline;
     friend class LLHeroProbeManager;
@@ -191,6 +196,8 @@ private:
 
     // bind UBO used for rendering
     void setUniforms();
+
+    std::deque<GLuint>                                    mQueryPool;
 
     // render target for cube snapshots
     // used to generate mipmaps without doing a copy-to-texture

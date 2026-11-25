@@ -107,7 +107,7 @@ void gridDownloadError(const LLSD& aData, LLGridManager* mOwner, GridEntry* mDat
         // [WolfViewer 2026-10-28] Ticket 316: only alert when the resident asked for this grid. A lookup the viewer
         // made by itself (background_fetch_key set) is logged only - Chad got "Could not add gridmania.net:8002"
         // because an old teleport-history item pointed at a grid that is down.
-        if (mData->background_fetch_key.empty())
+        if (mData->background_fetch_key.empty() && !mData->grid.has("FLAG_TEMPORARY"))   // + Firestorm 7.2.5: never for a temporary (FETCHTEMP) grid
         {
             //[REASON] contact support of [GRID].
             LLNotificationsUtil::add("CantAddGrid", args);

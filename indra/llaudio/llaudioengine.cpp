@@ -238,6 +238,7 @@ void LLAudioEngine::updateChannels()
 
 void LLAudioEngine::idle()
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_MEDIA;
     // "Update" all of our audio sources, clean up dead ones.
     // Primarily does position updating, cleanup of unused audio sources.
     // Also does regeneration of the current priority of each audio source.
@@ -1478,6 +1479,13 @@ bool LLAudioSource::setupChannel()
 {
     LLAudioData *adp = getCurrentData();
 
+    // <FS:TJ> [FIRE-35798] Fix crash when blacklisting sounds
+    if (!adp)
+    {
+        return false;
+    }
+    // </FS:TJ>
+
     if (!adp->getBuffer())
     {
         // We're not ready to play back the sound yet, so don't try and allocate a channel for it.
@@ -2044,10 +2052,23 @@ void LLAudioEngine::removeAudioData(const LLUUID& audio_uuid)
         for (iter2 = mAllSources.begin(); iter2 != mAllSources.end(); ++iter2)
         {
             LLAudioSource* sourcep = iter2->second;
-            if (sourcep && sourcep->getCurrentData() && sourcep->getCurrentData()->getID() == audio_uuid)
+            if (!sourcep)
+            {
+                continue;
+            }
+
+            if (sourcep->getCurrentData() && sourcep->getCurrentData()->getID() == audio_uuid)
             {
                 delete_list.push_back(iter2->first);
             }
+
+            // <FS:TJ> [FIRE-35798] Fix crash when blacklisting sounds
+            if (sourcep->mQueuedDatap && sourcep->mQueuedDatap->getID() == audio_uuid)
+            {
+                sourcep->mQueuedDatap = nullptr;
+            }
+            sourcep->mPreloadMap.erase(audio_uuid);
+            // </FS:TJ>
         }
 
         uuid_vec_t::iterator delete_list_end = delete_list.end();

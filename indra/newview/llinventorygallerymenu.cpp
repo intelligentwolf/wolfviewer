@@ -186,6 +186,16 @@ void LLInventoryGalleryContextMenu::doToSelected(const LLSD& userdata)
             gViewerWindow->getWindow()->copyTextToClipboard(utf8str_to_wstring(buffer));
         }
     }
+    // <FS:MJR> [FIRE-36793] - Inventory Context Menu - Add "Copy Name"
+    else if ("copy_name" == action)
+    {
+        LLViewerInventoryItem* item = gInventory.getItem(mUUIDs.front());
+        if (item)
+        {
+            gViewerWindow->getWindow()->copyTextToClipboard(utf8str_to_wstring(item->getName()));
+        }
+    }
+    // </FS:MJR> [FIRE-36793]
     else if ("purge" == action)
     {
         for (LLUUID& selected_id : mUUIDs)
@@ -868,6 +878,7 @@ void LLInventoryGalleryContextMenu::updateMenuItemsVisibility(LLContextMenu* men
             {
                 items.push_back(std::string("Copy"));
             }
+            items.push_back(std::string("Copy Name")); // <FS:MJR> [FIRE-36793] - Inventory Context Menu - Add "Copy Name"
         }
         else if(!is_folder)
         {
@@ -919,6 +930,7 @@ void LLInventoryGalleryContextMenu::updateMenuItemsVisibility(LLContextMenu* men
             {
                 disabled_items.push_back(std::string("Copy"));
             }
+            items.push_back(std::string("Copy Name")); // <FS:MJR> [FIRE-36793] - Inventory Context Menu - Add "Copy Name"
         }
         if((obj->getType() == LLAssetType::AT_SETTINGS)
            || ((obj->getType() <= LLAssetType::AT_GESTURE)
@@ -1071,9 +1083,13 @@ void LLInventoryGalleryContextMenu::updateMenuItemsVisibility(LLContextMenu* men
 
         if (can_list)
         {
-            items.push_back(std::string("Marketplace Separator"));
-            items.push_back(std::string("Marketplace Copy"));
-            items.push_back(std::string("Marketplace Move"));
+            // <FS:PP> Submenus grouping
+            // items.push_back(std::string("Marketplace Separator"));
+            // items.push_back(std::string("Marketplace Copy"));
+            // items.push_back(std::string("Marketplace Move"));
+            add_context_submenu_entry(items, INVENTORY_SUBMENU_MARKETPLACE, "Marketplace Copy");
+            add_context_submenu_entry(items, INVENTORY_SUBMENU_MARKETPLACE, "Marketplace Move");
+            // </FS:PP>
 
             if (!can_list_on_marketplace(selected_id))
             {

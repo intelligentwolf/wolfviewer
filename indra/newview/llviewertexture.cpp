@@ -528,6 +528,7 @@ void LLViewerTexture::updateClass()
     F32 used = (F32)ll_round(texture_bytes_alloc + vertex_bytes_alloc);
 
     // <FS:Ansariel> Expose max texture VRAM setting
+    // For debugging purposes, it's useful to be able to set the VRAM budget manually.
     // But when manual control is not enabled, use the VRAM divisor.
     // While we're at it, assume we have 1024 to play with at minimum when the divisor is in use.  Works more elegantly with the logic below this.
     // -Geenz 2025-03-21
@@ -554,7 +555,7 @@ void LLViewerTexture::updateClass()
         if (is_sys_low)
         {
             // Not having system memory is more serious, so discard harder
-            sDesiredDiscardBias = llmax(sDesiredDiscardBias, 1.5f * getSystemMemoryBudgetFactor());
+            sDesiredDiscardBias = llmax(sDesiredDiscardBias, 1.5f * LLMemory::getSystemMemoryBudgetFactor());
         }
         else
         {
@@ -577,7 +578,6 @@ void LLViewerTexture::updateClass()
     if (is_low)
     {
         // ramp up discard bias over time to free memory
-        LL_DEBUGS("TextureMemory") << "System memory is low, use more aggressive discard bias." << LL_ENDL;
         if (sEvaluationTimer.getElapsedTimeF32() > MEMORY_CHECK_WAIT_TIME)
         {
             static LLCachedControl<F32> low_mem_min_discard_increment(gSavedSettings, "RenderLowMemMinDiscardIncrement", .1f);
@@ -588,19 +588,23 @@ void LLViewerTexture::updateClass()
     }
     else
     {
-        LL_DEBUGS("TextureMemory") << "System memory is plentiful, act normally." << LL_ENDL;
-
         // don't execute above until the slam to 1.5 has a chance to take effect
         sEvaluationTimer.reset();
 
-        // lower discard bias over time when at least 10% of budget is free
+        // <FS:Beq> Improve windows memory recovery detection
+        // Lower discard bias when VRAM has room and system memory has recovered.
+        // // lower discard bias over time when at least 10% of budget is free
         constexpr F32 FREE_PERCENTAGE_TRESHOLD = -0.1f;
-        constexpr U32 FREE_SYS_MEM_TRESHOLD = 100;
-        static LLCachedControl<U32> min_free_main_memory(gSavedSettings, "RenderMinFreeMainMemoryThreshold", 512);
-        const S32Megabytes MIN_FREE_MAIN_MEMORY(min_free_main_memory() + FREE_SYS_MEM_TRESHOLD);
+        // constexpr U32 FREE_SYS_MEM_TRESHOLD = 100;
+        // static LLCachedControl<U32> min_free_main_memory(gSavedSettings, "RenderMinFreeMainMemoryThreshold", 512);
+        // const S32Megabytes MIN_FREE_MAIN_MEMORY(min_free_main_memory() + FREE_SYS_MEM_TRESHOLD);
+        // </FS:Beq>
         if (sDesiredDiscardBias > 1.f
             && over_pct < FREE_PERCENTAGE_TRESHOLD
-            && getFreeSystemMemory() > MIN_FREE_MAIN_MEMORY)
+            // <FS:Beq> Improve windows memory recovery detection
+            // && getFreeSystemMemory() > MIN_FREE_MAIN_MEMORY)
+            && isSystemMemoryRecovered())
+            // </FS:Beq>
         {
             static LLCachedControl<F32> high_mem_discard_decrement(gSavedSettings, "RenderHighMemMinDiscardDecrement", .1f);
 
@@ -689,6 +693,33 @@ U32Megabytes LLViewerTexture::getFreeSystemMemory()
     return physical_res;
 }
 
+// <FS:Beq> [FIRE-36494] Track Windows commit pressure independently of physical memory.
+#if LL_WINDOWS
+U32Megabytes getFreeCommitMemory()
+{
+    static LLFrameTimer timer;
+    static U32Megabytes commit_res = U32Megabytes(U32_MAX);
+
+    if (timer.getElapsedTimeF32() < MEMORY_CHECK_WAIT_TIME) //call this once per second.
+    {
+        return commit_res;
+    }
+
+    timer.reset();
+
+    MEMORYSTATUSEX state = {};
+    state.dwLength = sizeof(state);
+    if (GlobalMemoryStatusEx(&state))
+    {
+        // ullAvailPageFile is available commit for this process, not just free pagefile.sys space.
+        commit_res = U32Megabytes::convert(U64Bytes(state.ullAvailPageFile));
+    }
+
+    return commit_res;
+}
+#endif
+// </FS:Beq>
+
 S32Megabytes get_render_free_main_memory_treshold()
 {
     static LLCachedControl<U32> min_free_main_memory(gSavedSettings, "RenderMinFreeMainMemoryThreshold", 512);
@@ -696,31 +727,66 @@ S32Megabytes get_render_free_main_memory_treshold()
     return MIN_FREE_MAIN_MEMORY;
 }
 
+// <FS:Beq> [FIRE-36494] Small memory allocation fail bugsplat reporting improvement
+#if LL_WINDOWS
+S32Megabytes get_render_free_commit_memory_threshold()
+{
+    static LLCachedControl<U32> min_free_commit_memory(gSavedSettings, "RenderMinFreeCommitMemoryThresholdMB", 512);
+    const U32Megabytes MIN_FREE_COMMIT_MEMORY(min_free_commit_memory);
+    return MIN_FREE_COMMIT_MEMORY;
+}
+#endif
+// </FS:Beq>
+
 //static
 bool LLViewerTexture::isSystemMemoryLow()
 {
-    return getFreeSystemMemory() < get_render_free_main_memory_treshold();
+    // <FS:Beq> [FIRE-36494] Include Windows commit pressure.
+    // return getFreeSystemMemory() < get_render_free_main_memory_treshold();
+    const bool physical_low = getFreeSystemMemory() < get_render_free_main_memory_treshold();
+
+#if LL_WINDOWS
+    const bool commit_low = getFreeCommitMemory() < get_render_free_commit_memory_threshold();
+    return physical_low || commit_low;
+#else
+    return physical_low;
+#endif
+    // </FS:Beq>
 }
 
 //static
 bool LLViewerTexture::isSystemMemoryCritical()
 {
-    return getFreeSystemMemory() < get_render_free_main_memory_treshold() / 2;
+    // <FS:Beq> [FIRE-36494] Include Windows commit pressure.
+    // return getFreeSystemMemory() < get_render_free_main_memory_treshold() / 2;
+    const bool physical_critical = getFreeSystemMemory() < get_render_free_main_memory_treshold() / 2;
+
+#if LL_WINDOWS
+    const bool commit_critical = getFreeCommitMemory() < get_render_free_commit_memory_threshold() / 2;
+    return physical_critical || commit_critical;
+#else
+    return physical_critical;
+#endif
+    // </FS:Beq>
 }
 
-F32 LLViewerTexture::getSystemMemoryBudgetFactor()
+// <FS:Beq> [FIRE-36494] Require physical and commit memory to recover on Windows.
+//static
+bool LLViewerTexture::isSystemMemoryRecovered()
 {
-    const S32Megabytes MIN_FREE_MAIN_MEMORY(get_render_free_main_memory_treshold() / 2);
-    S32 free_budget = (S32Megabytes)getFreeSystemMemory() - MIN_FREE_MAIN_MEMORY;
-    if (free_budget < 0)
-    {
-        // Leave some padding, otherwise we will crash out of memory before hitting factor 2.
-        const S32Megabytes PAD_BUFFER(32);
-        // Result should range from 1 at 0 free budget to 2 at -224 free budget, 2.14 at -256MB
-        return 1.f - free_budget / (MIN_FREE_MAIN_MEMORY - PAD_BUFFER);
-    }
-    return 1.f;
+    // Leave breathing room above the low-memory thresholds before restoring texture quality.
+    const S32Megabytes margin(100);
+    const bool physical_recovered =
+        getFreeSystemMemory() > get_render_free_main_memory_treshold() + margin;
+
+#if LL_WINDOWS
+    return physical_recovered &&
+        getFreeCommitMemory() > get_render_free_commit_memory_threshold() + margin;
+#else
+    return physical_recovered;
+#endif
 }
+// </FS:Beq>
 
 //end of static functions
 //-------------------------------------------------------------------------------------------
@@ -1976,12 +2042,10 @@ bool LLViewerFetchedTexture::processFetchResults(S32& desired_discard, S32 curre
                 mRawDiscardLevel = INVALID_DISCARD_LEVEL;
                 mIsFetching = false;
                 mLastPacketTimer.reset();
+                return false;
             }
-            else
-            {
-                mIsRawImageValid = true;
-                addToCreateTexture();
-            }
+
+            mIsRawImageValid = true;
 
             if (mBoostLevel == LLGLTexture::BOOST_ICON)
             {
@@ -1994,7 +2058,11 @@ bool LLViewerFetchedTexture::processFetchResults(S32& desired_discard, S32 curre
                     //
                     // BOOST_ICON gets scaling because profile icons can have a bunch of different formats, not just j2c
                     // Might need another pass to use discard for j2c and scaling for everything else.
-                    mRawImage = mRawImage->scaled(expected_width, expected_height);
+                    LLPointer<LLImageRaw> scaled = mRawImage->scaled(expected_width, expected_height);
+                    if (scaled.notNull())
+                    {
+                        mRawImage = scaled;
+                    }
                 }
             }
 
@@ -2009,9 +2077,15 @@ bool LLViewerFetchedTexture::processFetchResults(S32& desired_discard, S32 curre
                     //
                     // Todo: probably needs to be remade to use discard, all thumbnails are supposed to be j2c,
                     // so no need to scale, should be posible to use discard to scale image down.
-                    mRawImage = mRawImage->scaled(expected_width, expected_height);
+                    LLPointer<LLImageRaw> scaled = mRawImage->scaled(expected_width, expected_height);
+                    if (scaled.notNull())
+                    {
+                        mRawImage = scaled;
+                    }
                 }
             }
+
+            addToCreateTexture();
 
             return true;
         }
@@ -2081,9 +2155,9 @@ bool LLViewerFetchedTexture::processFetchResults(S32& desired_discard, S32 curre
 bool LLViewerFetchedTexture::updateFetch()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_TEXTURE;
-    static LLCachedControl<bool> textures_decode_disabled(gSavedSettings,"TextureDecodeDisabled", false);
+    static LLCachedControl<bool> textures_decode_disabled(gSavedSettings, "TextureDecodeDisabled", false);
 
-    if(textures_decode_disabled) // don't fetch the surface textures in wireframe mode
+    if (textures_decode_disabled) // don't fetch the surface textures in wireframe mode
     {
         return false;
     }
@@ -2118,7 +2192,7 @@ bool LLViewerFetchedTexture::updateFetch()
         LL_PROFILE_ZONE_NAMED_CATEGORY_TEXTURE("vftuf - callback pending");
         return false; // process any raw image data in callbacks before replacing
     }
-    if(mInFastCacheList)
+    if (mInFastCacheList)
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_TEXTURE("vftuf - in fast cache");
         return false;
@@ -2143,7 +2217,7 @@ bool LLViewerFetchedTexture::updateFetch()
         if (mAuxRawImage.notNull()) sAuxCount--;
         // keep in mind that fetcher still might need raw image, don't modify original
         bool finished = LLAppViewer::getTextureFetch()->getRequestFinished(getID(), fetch_discard, mFetchState, mRawImage, mAuxRawImage,
-                                                                           mLastHttpGetStatus);
+            mLastHttpGetStatus);
         if (mRawImage.notNull()) sRawCount++;
         if (mAuxRawImage.notNull())
         {
@@ -2159,7 +2233,7 @@ bool LLViewerFetchedTexture::updateFetch()
         else
         {
             mFetchState = LLAppViewer::getTextureFetch()->getFetchState(mID, mDownloadProgress, mRequestedDownloadPriority,
-                                                                        mFetchPriority, mFetchDeltaTime, mRequestDeltaTime, mCanUseHTTP);
+                mFetchPriority, mFetchDeltaTime, mRequestDeltaTime, mCanUseHTTP);
         }
 
         if (!processFetchResults(desired_discard, current_discard, fetch_discard, decode_priority))
@@ -2170,7 +2244,7 @@ bool LLViewerFetchedTexture::updateFetch()
         if (mIsFetching)
         {
             static const F32 MAX_HOLD_TIME = 5.0f; //seconds to wait before canceling fecthing if decode_priority is 0.f.
-            if(decode_priority > 0.0f || mStopFetchingTimer.getElapsedTimeF32() > MAX_HOLD_TIME)
+            if (decode_priority > 0.0f || mStopFetchingTimer.getElapsedTimeF32() > MAX_HOLD_TIME)
             {
                 mStopFetchingTimer.reset();
                 LLAppViewer::getTextureFetch()->updateRequestPriority(mID, decode_priority);
@@ -2186,7 +2260,7 @@ bool LLViewerFetchedTexture::updateFetch()
         LL_PROFILE_ZONE_NAMED_CATEGORY_TEXTURE("vftuf - priority <= 0");
         make_request = false;
     }
-    else if(mDesiredDiscardLevel > getMaxDiscardLevel())
+    else if (mDesiredDiscardLevel > getMaxDiscardLevel())
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_TEXTURE("vftuf - desired > max");
         make_request = false;
@@ -2227,7 +2301,7 @@ bool LLViewerFetchedTexture::updateFetch()
     if (make_request)
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_TEXTURE("vftuf - make request");
-        S32 w=0, h=0, c=0;
+        S32 w = 0, h = 0, c = 0;
         if (getDiscardLevel() >= 0)
         {
             w = mGLTexturep->getWidth(0);
@@ -2249,7 +2323,7 @@ bool LLViewerFetchedTexture::updateFetch()
         S32 fetch_request_response = -1;
         S32 worker_discard = -1;
         fetch_request_response = LLAppViewer::getTextureFetch()->createRequest(mFTType, mUrl, getID(), getTargetHost(), decode_priority,
-                                                                              w, h, c, desired_discard, needsAux(), mCanUseHTTP);
+            w, h, c, desired_discard, needsAux(), mCanUseHTTP);
 
         if (fetch_request_response >= 0) // positive values and 0 are discard values
         {
@@ -2261,7 +2335,7 @@ bool LLViewerFetchedTexture::updateFetch()
             // bake textures are always at discard 0
             mRequestedDiscardLevel = llmin(desired_discard, fetch_request_response);
             mFetchState = LLAppViewer::getTextureFetch()->getFetchState(mID, mDownloadProgress, mRequestedDownloadPriority,
-                                                       mFetchPriority, mFetchDeltaTime, mRequestDeltaTime, mCanUseHTTP);
+                mFetchPriority, mFetchDeltaTime, mRequestDeltaTime, mCanUseHTTP);
         }
         else if (fetch_request_response == LLTextureFetch::CREATE_REQUEST_ERROR_TRANSITION)
         {
@@ -2275,7 +2349,7 @@ bool LLViewerFetchedTexture::updateFetch()
             S32 decoded_discard;
             bool decoded;
             S32 fetch_state = LLAppViewer::getTextureFetch()->getLastFetchState(mID, desired_discard, decoded_discard, decoded);
-            if (fetch_state > 1 && decoded && decoded_discard >=0 && decoded_discard <= desired_discard)
+            if (fetch_state > 1 && decoded && decoded_discard >= 0 && decoded_discard <= desired_discard)
             {
                 // worker actually has the image
                 if (mRawImage.notNull()) sRawCount--;
@@ -4248,4 +4322,3 @@ void LLTexturePipelineTester::LLTextureTestSession::reset()
 //----------------------------------------------------------------------------------------------
 //end of LLTexturePipelineTester
 //----------------------------------------------------------------------------------------------
-

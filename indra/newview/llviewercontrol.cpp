@@ -1353,6 +1353,7 @@ void setting_setup_signal_listener(LLControlGroup& group, const std::string& set
 
 void settings_setup_listeners()
 {
+    LL_PROFILE_ZONE_SCOPED;
     setting_setup_signal_listener(gSavedSettings, "FirstPersonAvatarVisible", handleRenderAvatarMouselookChanged);
     setting_setup_signal_listener(gSavedSettings, "RenderFarClip", handleRenderFarClipChanged);
     setting_setup_signal_listener(gSavedSettings, "RenderTerrainScale", handleTerrainScaleChanged);
@@ -1586,10 +1587,10 @@ void settings_setup_listeners()
     setting_setup_signal_listener(gSavedSettings, "FSTrimLegacyNames", handleLegacyTrimOptionChanged);
 
     // <FS:Ansariel> [FS communication UI]
-    setting_setup_signal_listener(gSavedSettings, "PlainTextChatHistory", FSFloaterIM::processChatHistoryStyleUpdate);
-    setting_setup_signal_listener(gSavedSettings, "PlainTextChatHistory", FSFloaterNearbyChat::processChatHistoryStyleUpdate);
-    setting_setup_signal_listener(gSavedSettings, "ChatFontSize", FSFloaterIM::processChatHistoryStyleUpdate);
-    setting_setup_signal_listener(gSavedSettings, "ChatFontSize", FSFloaterNearbyChat::processChatHistoryStyleUpdate);
+    setting_setup_signal_listener(gSavedSettings, "PlainTextChatHistory", FSFloaterIM::handleChatHistoryStyleChanged);
+    setting_setup_signal_listener(gSavedSettings, "PlainTextChatHistory", FSFloaterNearbyChat::handleChatHistoryStyleChanged);
+    setting_setup_signal_listener(gSavedSettings, "ChatFontSize", FSFloaterIM::handleChatHistoryStyleChanged);
+    setting_setup_signal_listener(gSavedSettings, "ChatFontSize", FSFloaterNearbyChat::handleChatHistoryStyleChanged);
     setting_setup_signal_listener(gSavedSettings, "ChatFontSize", LLViewerChat::signalChatFontChanged);
     // </FS:Ansariel> [FS communication UI]
 

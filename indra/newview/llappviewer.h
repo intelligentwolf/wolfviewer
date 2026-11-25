@@ -172,6 +172,7 @@ public:
     virtual void forceErrorLLErrorMsg();
     virtual void forceErrorBreakpoint();
     virtual void forceErrorBadMemoryAccess();
+    virtual void forceErrorImageAllocationFailure(); // <FS:Beq/> [FIRE-36494] Small memory allocation fail bugsplat reporting improvement
     virtual void forceErrorInfiniteLoop();
     virtual void forceErrorSoftwareException();
     virtual void forceErrorOSSpecificException();
@@ -254,6 +255,9 @@ public:
     // Writes an error code into the error_marker file for use on next startup.
     void createErrorMarker(eLastExecEvent error_code) const;
     bool errorMarkerExists() const;
+
+    void createWatchdogMarker() const;
+    void removeWatchdogMarker() const;
 
     // Attempt a 'soft' quit with disconnect and saving of settings/cache.
     // Intended to be thread safe.
@@ -404,7 +408,7 @@ private:
     // </FS:Zi>
 
     // <FS:ND> For Windows, purging the cache can take an extraordinary amount of time. Rename the cache dir and purge it using another thread.
-    virtual void startCachePurge() {}
+    virtual void startCachePurge(const std::string& strCacheDir) {}
     void startCefCachePurge(); // <FS:TJ/> Purge this in another thread to prevent very slow startup times
 };
 
@@ -445,8 +449,6 @@ extern S32 gPendingMetricsUploads;
 
 extern F32 gSimLastTime;
 extern F32 gSimFrames;
-
-extern bool     gDisconnected;
 
 extern LLFrameTimer gRestoreGLTimer;
 extern bool         gRestoreGL;

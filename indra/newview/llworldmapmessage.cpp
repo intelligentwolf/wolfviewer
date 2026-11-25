@@ -39,7 +39,6 @@
 #include "fsworldmapmessage.h" // <FS:humbletim/> FIRE-31368: [OPENSIM] ... Search returns more than one result
 
 constexpr U32 LAYER_FLAG = 2;
-constexpr S32 MAP_SIM_RETURN_NULL_SIMS = 0x00010000;
 
 //---------------------------------------------------------------------------
 // World Map Message Handling
@@ -168,6 +167,7 @@ void LLWorldMapMessage::sendMapBlockRequest(U16 min_x, U16 min_y, U16 max_x, U16
 // public static
 void LLWorldMapMessage::processMapBlockReply(LLMessageSystem* msg, void**)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     if (gNonInteractive)
     {
         return;
@@ -299,6 +299,7 @@ void LLWorldMapMessage::processMapBlockReply(LLMessageSystem* msg, void**)
 // public static
 void LLWorldMapMessage::processMapItemReply(LLMessageSystem* msg, void**)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     //LL_INFOS("WorldMap") << LL_ENDL;
     U32 type;
     msg->getU32Fast(_PREHASH_RequestData, _PREHASH_ItemType, type);

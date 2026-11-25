@@ -2815,18 +2815,6 @@ Bu mesaj yenidən baş verərsə, kömək üçün http://support.secondlife.com 
 	<string name="PicksClassifiedsLoadingText">
 		Yüklənir...
 	</string>
-	<string name="NoPicksText">
-		Seçilmiş yarartmamızınız.
-	</string>
-	<string name="NoAvatarPicksText">
-		İstifadəçinin seçilmişləri yoxdur
-	</string>
-	<string name="NoClassifiedsText">
-		Heç bir elan yaartmamızınız. Elan etmək üçün Yarat düyməsini basın.
-	</string>
-	<string name="NoAvatarClassifiedsText">
-		İstifadəçinin elanları yoxdur
-	</string>
 	<string name="MultiPreviewTitle">
 		Önizləmə
 	</string>
@@ -3065,7 +3053,7 @@ Gözlənilən uzantılar: WAV, TGA, BMP, JPG, JPEG və ya BVH
 		Multimedia – oynat/fasilə   
 	</string>
 	<string name="StreamtitleNowPlaying">
-		İndi oynadılır:
+		İndi oynadılır: [TITLE]
 	</string>
 	<string name="IntelDriverPage">
 		http://www.intel.com/p/en_US/support/detect/graphics

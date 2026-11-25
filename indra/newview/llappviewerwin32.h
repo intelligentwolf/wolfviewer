@@ -44,6 +44,7 @@ public:
     bool cleanup() override;
 
     bool reportCrashToBugsplat(void* pExcepInfo) override;
+    bool reportCustomToBugsplat(const std::string& description) override;
 
 protected:
     bool initWindow() override; // Override to initialize the viewer's window.
@@ -62,11 +63,13 @@ protected:
 private:
     void disableWinErrorReporting();
     void bugsplatAddStaticAttributes(const LLSD& info) override; // <FS:Beq> override for windows attributes
+    void detectRunningAsAdmin(); // <FS:TJ/> Detect and notify if the viewer is trying to run as admin on Windows
+
     std::string mCmdLine;
     bool mIsConsoleAllocated;
 
 // <FS:ND> For Windows, purging the cache can take an extraordinary amount of time. Rename the cache dir and purge it using another thread.
-    virtual void startCachePurge();
+    virtual void startCachePurge(const std::string& strCacheDir);
 // </FS:ND>
 
 };

@@ -112,7 +112,7 @@ S32  LLViewerRegion::sLastCameraUpdated = 0;
 S32  LLViewerRegion::sNewObjectCreationThrottle = -1;
 LLViewerRegion::vocache_entry_map_t LLViewerRegion::sRegionCacheCleanup;
 
-typedef std::map<std::string, std::string> CapabilityMap;
+typedef std::unordered_map<std::string, std::string, ll::string_hash, std::equal_to<>> CapabilityMap;
 
 static void log_capabilities(const CapabilityMap &capmap);
 
@@ -1921,6 +1921,11 @@ void LLViewerRegion::killInvisibleObjects(F32 max_time)
         if(iter == mImpl->mActiveSet.end())
         {
             iter = mImpl->mActiveSet.begin();
+            if (iter == mImpl->mActiveSet.end())
+            {
+                // Set became empty
+                break;
+            }
         }
         if((*iter)->getParentID() > 0)
         {
@@ -2125,6 +2130,8 @@ void LLViewerRegion::disconnectAllNeighbors()
     // others still points back at it. The slot walk above never reaches those, and once this
     // surface was freed the next of them to go crashed in LLSurface::disconnectNeighbor
     // (llsurface.cpp:577). So every other region's land lets go of this one too.
+    // [W113 2026-11-25] Firestorm 7.2.5 (FIRE-36100, c898e30869) made the slots lists, so the walk above now reaches
+    // every neighbour; this pass is kept as a second guard (erasing a surface a list does not hold does nothing).
     // LLWorld::removeRegion (llworld.cpp:719-732) takes this region out of the list before
     // deleting it, so the list holds only live regions here.
     LLSurface* land = mImpl->mLandp;
@@ -3646,6 +3653,7 @@ void LLViewerRegionImpl::buildCapabilityNames(LLSD& capabilityNames)
     capabilityNames.append("SetDisplayName");
     capabilityNames.append("SimConsoleAsync");
     capabilityNames.append("SimulatorFeatures");
+    capabilityNames.append("SpatialVoiceModerationRequest");
     capabilityNames.append("StartGroupProposal");
     capabilityNames.append("TerrainNavMeshProperties");
     capabilityNames.append("TextureStats");
@@ -3799,7 +3807,7 @@ void LLViewerRegion::setCapabilityDebug(const std::string& name, const std::stri
     }
 }
 
-std::string LLViewerRegion::getCapabilityDebug(const std::string& name) const
+std::string LLViewerRegion::getCapabilityDebug(std::string_view name) const
 {
     CapabilityMap::const_iterator iter = mImpl->mSecondCapabilitiesTracker.find(name);
     if (iter == mImpl->mSecondCapabilitiesTracker.end())
@@ -3810,15 +3818,14 @@ std::string LLViewerRegion::getCapabilityDebug(const std::string& name) const
     return iter->second;
 }
 
-
-bool LLViewerRegion::isSpecialCapabilityName(const std::string &name)
+bool LLViewerRegion::isSpecialCapabilityName(std::string_view name)
 {
     return name == "EventQueueGet" || name == "UntrustedSimulatorMessage";
 }
 
-std::string LLViewerRegion::getCapability(const std::string& name) const
+std::string LLViewerRegion::getCapability(std::string_view name) const
 {
-    if (!capabilitiesReceived() && (name!=std::string("Seed")) && (name!=std::string("ObjectMedia")))
+    if (!capabilitiesReceived() && (name != "Seed") && (name != "ObjectMedia"))
     {
         LL_WARNS() << "getCapability called before caps received for " << name << LL_ENDL;
     }
@@ -3826,21 +3833,20 @@ std::string LLViewerRegion::getCapability(const std::string& name) const
     CapabilityMap::const_iterator iter = mImpl->mCapabilities.find(name);
     if(iter == mImpl->mCapabilities.end())
     {
-        return "";
+        return {};
     }
 
     return iter->second;
 }
 
-bool LLViewerRegion::isCapabilityAvailable(const std::string& name) const
+bool LLViewerRegion::isCapabilityAvailable(std::string_view name) const
 {
-    if (!capabilitiesReceived() && (name!=std::string("Seed")) && (name!=std::string("ObjectMedia")))
+    if (!capabilitiesReceived() && (name != "Seed") && (name != "ObjectMedia"))
     {
         LL_WARNS() << "isCapabilityAvailable called before caps received for " << name << LL_ENDL;
     }
 
-    CapabilityMap::const_iterator iter = mImpl->mCapabilities.find(name);
-    if(iter == mImpl->mCapabilities.end())
+    if (!mImpl->mCapabilities.contains(name))
     {
         return false;
     }
@@ -4112,9 +4118,14 @@ bool LLViewerRegion::avatarHoverHeightEnabled() const
 
 void log_capabilities(const CapabilityMap &capmap)
 {
+    // Copy into sorted map for ordered output
+    using SortedCapabilityMap = std::map<std::string, std::string>;
+    SortedCapabilityMap sorted_capmap;
+    sorted_capmap.insert(capmap.begin(), capmap.end());
+
     S32 count = 0;
-    CapabilityMap::const_iterator iter;
-    for (iter = capmap.begin(); iter != capmap.end(); ++iter, ++count)
+    SortedCapabilityMap::const_iterator iter;
+    for (iter = sorted_capmap.begin(); iter != sorted_capmap.end(); ++iter, ++count)
     {
         if (!iter->second.empty())
         {
@@ -4173,6 +4184,16 @@ std::string LLViewerRegion::getSimHostName()
         return mSimulatorFeatures.has("HostName") ? mSimulatorFeatures["HostName"].asString() : getHost().getHostName();
     }
     return std::string("...");
+}
+
+
+bool LLViewerRegion::isRegionWebRTCEnabled()
+{
+    if (mSimulatorFeaturesReceived && mSimulatorFeatures.has("VoiceServerType"))
+    {
+        return mSimulatorFeatures["VoiceServerType"].asString() == "webrtc";
+    }
+    return false;
 }
 
 void LLViewerRegion::applyCacheMiscExtras(LLViewerObject* obj)

@@ -263,6 +263,8 @@ private:
     S32  mClassifiedFee;
     S32  mDirectoryFee;
 
+    std::unordered_set<std::string> mFetchedGridInfo;
+
 protected:
     void updateIsInProductionGrid();
 

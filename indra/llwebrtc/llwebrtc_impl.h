@@ -88,19 +88,28 @@ public:
     {
         if (mCallback)
         {
+            // RTC_LOG prefixes each message with its "(file:line): " origin. Use it to demote
+            // libwebrtc's own chatty INFO/WARNING logging to verbose, keeping ours as-is.
+            static const std::string file_prefix("(llwebrtc.cpp:");
             switch (severity)
             {
                 case webrtc::LS_VERBOSE:
                     mCallback->LogMessage(LLWebRTCLogCallback::LOG_LEVEL_VERBOSE, msg);
                     break;
                 case webrtc::LS_INFO:
-                    mCallback->LogMessage(LLWebRTCLogCallback::LOG_LEVEL_VERBOSE, msg);
+                    mCallback->LogMessage(msg.rfind(file_prefix, 0) == 0
+                                               ? LLWebRTCLogCallback::LOG_LEVEL_INFO
+                                               : LLWebRTCLogCallback::LOG_LEVEL_VERBOSE,
+                                           msg);
                     break;
                 case webrtc::LS_WARNING:
-                    mCallback->LogMessage(LLWebRTCLogCallback::LOG_LEVEL_VERBOSE, msg);
+                    mCallback->LogMessage(msg.rfind(file_prefix, 0) == 0
+                                               ? LLWebRTCLogCallback::LOG_LEVEL_WARNING
+                                               : LLWebRTCLogCallback::LOG_LEVEL_VERBOSE,
+                                           msg);
                     break;
                 case webrtc::LS_ERROR:
-                    mCallback->LogMessage(LLWebRTCLogCallback::LOG_LEVEL_VERBOSE, msg);
+                    mCallback->LogMessage(LLWebRTCLogCallback::LOG_LEVEL_ERROR, msg);
                     break;
                 default:
                     break;
@@ -179,12 +188,20 @@ public:
     void  SetCaptureTap(LLWebRTCPlayoutTap* tap) { mCaptureTap.store(tap, std::memory_order_release); }
     void  SetListenTap(LLWebRTCPlayoutTap* tap) { mListenTap.store(tap, std::memory_order_release); }
     void  SetRecorderTap(LLWebRTCPlayoutTap* tap) { mRecorderTap.store(tap, std::memory_order_release); }   // [W111 VIDEO 2026-11-24/]
+    // [W113 2026-11-25] the AI Mode capture tap is fed only while this is open (LLWebRTCImpl::updateCaptureTapGate)
+    void  SetCaptureTapOpen(bool open) { mCaptureTapOpen.store(open, std::memory_order_release); }
     // One 10 ms buffer from the headset microphone into the engine, as RecordedDataIsAvailable would deliver it.
     int32_t DeliverCapture(const void* audio_data, size_t number_of_frames, size_t bytes_per_frame,
                            size_t number_of_channels, uint32_t samples_per_sec, uint32_t total_delay_ms,
                            int32_t clock_drift, uint32_t current_mic_level, bool key_pressed, uint32_t& new_mic_level);
 
 private:
+    // [W113 2026-11-25] mCaptureTap while the gate is open, else nullptr
+    LLWebRTCPlayoutTap* captureTapIfOpen() const
+    {
+        return mCaptureTapOpen.load(std::memory_order_acquire) ? mCaptureTap.load(std::memory_order_acquire) : nullptr;
+    }
+
     std::atomic<webrtc::AudioTransport*> engine_{ nullptr };
     static const int                     NUM_PACKETS_TO_FILTER = 30; // 300 ms of smoothing (30 frames)
     float                                mSumVector[NUM_PACKETS_TO_FILTER];
@@ -196,6 +213,7 @@ private:
     std::atomic<bool>                    mExternalMicActive{ false };
     std::atomic<LLWebRTCSpeechSource*>   mSpeechSource{ nullptr };   // [AI MODE 2026-11-05]
     std::atomic<LLWebRTCPlayoutTap*>     mCaptureTap{ nullptr };
+    std::atomic<bool>                    mCaptureTapOpen{ false };   // [W113 2026-11-25] closed while muted (mMute starts true)
     std::atomic<LLWebRTCPlayoutTap*>     mListenTap{ nullptr };
     std::atomic<LLWebRTCPlayoutTap*>     mRecorderTap{ nullptr };   // [W111 VIDEO 2026-11-24] the video recorder's copy
     std::vector<int16_t>                 mSpeechBuf;                 // capture thread only
@@ -210,7 +228,7 @@ private:
 class LLWebRTCAudioDeviceModule : public webrtc::AudioDeviceModule
 {
 public:
-    explicit LLWebRTCAudioDeviceModule(webrtc::scoped_refptr<webrtc::AudioDeviceModule> inner) : inner_(std::move(inner)), tuning_(false)
+    explicit LLWebRTCAudioDeviceModule(webrtc::scoped_refptr<webrtc::AudioDeviceModule> inner) : inner_(inner), tuning_(false)
     {
         RTC_CHECK(inner_);
     }
@@ -227,8 +245,14 @@ public:
     }
 
     int32_t Init() override { return inner_->Init(); }
-    int32_t Terminate() override { return inner_->Terminate(); }
+    int32_t Terminate() override {
+        // libwebrtc attempts to terminate the adm when peer connections go to zero, but we don't want that,
+        // now that we're keeping the adm active throughout the session.
+        return 0;
+    }
     bool    Initialized() const override { return inner_->Initialized(); }
+
+    int32_t ForceTerminate() { return inner_->Terminate(); }
 
     // --- Device enumeration/selection (forward) ---
     int16_t PlayoutDevices() override { return inner_->PlayoutDevices(); }
@@ -363,32 +387,10 @@ public:
     void SetCaptureTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetCaptureTap(tap); }
     void SetListenTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetListenTap(tap); }
     void SetRecorderTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetRecorderTap(tap); }   // [W111 VIDEO 2026-11-24/]
-    void  SetTuning(bool tuning, bool mute)
-    {
-        tuning_ = tuning;
-        if (tuning)
-        {
-            recording_wanted_ = true;   // [VR AUDIO]
-            inner_->InitRecording();
-            inner_->StartRecording();
-            inner_->StopPlayout();
-        }
-        else
-        {
-            recording_wanted_ = !mute;   // [VR AUDIO]
-            if (mute)
-            {
-                inner_->StopRecording();
-            }
-            else
-            {
-                inner_->InitRecording();
-                inner_->StartRecording();
-            }
-            inner_->InitPlayout();
-            inner_->StartPlayout();
-        }
-    }
+    // [W113 2026-11-25] ours ([AI MODE]): closes the capture tap while the device would have been stopped (LLWebRTCImpl::updateCaptureTapGate)
+    void SetCaptureTapOpen(bool open) { audio_transport_.SetCaptureTapOpen(open); }
+    // [W113 2026-11-25] upstream (4124f969ee7) moved SetTuning out of line (llwebrtc.cpp); ours' [VR AUDIO] recording_wanted_ went with it
+    void  SetTuning(bool tuning, bool mute);
 
 protected:
     ~LLWebRTCAudioDeviceModule() override { SetExternalMic(nullptr); }   // [VR AUDIO] the mic clock stops first
@@ -485,14 +487,17 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     }
 
     void init();
-    void terminate();
+    // Returns true if shutdown completed cleanly and this object may be
+    // destroyed.  Returns false if it timed out: a detached thread is still
+    // using this object and its webrtc threads, so it must be leaked, not
+    // deleted.
+    bool terminate();
 
     //
     // LLWebRTCDeviceInterface
     //
 
     void setAudioConfig(LLWebRTCDeviceInterface::AudioConfig config = LLWebRTCDeviceInterface::AudioConfig()) override;
-
     void refreshDevices() override;
 
     void setDevicesObserver(LLWebRTCDevicesObserver *observer) override;
@@ -500,6 +505,8 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
 
     void setCaptureDevice(const std::string& id) override;
     void setRenderDevice(const std::string& id) override;
+
+    void setVoiceEnabled(bool enable) override;
 
     void setTuningMode(bool enable) override;
     float getTuningAudioLevel() override;
@@ -594,16 +601,29 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     LLWebRTCPeerConnectionInterface* newPeerConnection();
     void freePeerConnection(LLWebRTCPeerConnectionInterface* peer_connection);
 
-  protected:
+    // Start playout once a connection's audio is established (playout is gated
+    // on there being a connection to render).  Capture is not touched here --
+    // it follows voice-enabled state, not connection state.  Safe to call from
+    // any thread (work is posted to the worker thread).
+    void startPlayout();
 
-    void workerDeployDevices();
+  protected:
 
     // <WolfViewer 2026-09-26> libwebrtc m144: the audio device module is created from an
     // Environment (which owns the task queue factory) instead of a raw TaskQueueFactory.
     // Source: secondlife/viewer develop 95120bc676 llwebrtc_impl.h (const webrtc::Environment mEnv).
     // Declared first so it is constructed before and destroyed after every member that may use
     // it, as webrtc/api/environment/environment.h asks ("the first member in the class").
+    // [W113 2026-11-25] upstream declares the same member here (and its own worker helpers below); one kept, ours' note.
     const webrtc::Environment                                     mEnv;
+    void workerStartRecording();
+    void workerStartPlayout();
+    void workerDeployDevices(bool reset_module);
+    // We always rely on WebRTC's internal (software APM) audio processing, so
+    // any platform/hardware AEC/AGC/NS must be kept disabled.
+    void workerDisableBuiltInAudioProcessing();
+    // [W113 2026-11-25] ours (see updateCaptureTapGate in llwebrtc.cpp)
+    void updateCaptureTapGate();
 
     LLWebRTCLogSink*                                           mLogSink;
 
@@ -617,15 +637,21 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
 
     webrtc::scoped_refptr<webrtc::AudioProcessing>                mAudioProcessingModule;
 
-    // more native webrtc stuff
-
-
     // Devices
     void updateDevices();
-    void deployDevices();
+    void deployDevices(bool reset_module);
     std::atomic<int>                                           mDevicesDeploying;
     webrtc::scoped_refptr<LLWebRTCAudioDeviceModule>           mDeviceModule;
     std::vector<LLWebRTCDevicesObserver *>                     mVoiceDevicesObserverList;
+    std::atomic<bool>                                          mDevicesDeployingNeedsReset{ false };
+    // <FS:TJ> Try and help crash on Mac with device changes
+    int                                                        mDeployBackoffs{ 0 };
+    std::atomic<bool>                                          mDevicesUpdatePending{ false };
+    // </FS:TJ>
+
+    bool mBuiltinNS;
+    bool mBuiltinAGC;
+    bool mBuiltinAEC;
 
     // accessors in native webrtc for devices aren't apparently implemented yet.
     bool                                                       mTuningMode;
@@ -638,19 +664,23 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     // <WolfViewer 2026-11-03> ticket 502: following the system default device and re-applying a chosen one.
     // Ends one workerDeployDevices() turn (the mDevicesDeploying count), running the next if one is queued.
     void workerFinishDeployTurn();
-#if WEBRTC_LINUX
-    // PulseAudio's index 0 is "default: <description of the server's default>" with no guid (Source: webrtc-sdk
-    // m144_release modules/audio_device/linux/audio_device_pulse_linux.cc:733 PlayoutDeviceName, :1515
-    // GetDefaultDeviceInfo), so the name is what changes when the default changes. Empty until first enumerated.
-    std::string                                                mDefaultPlayoutName;
-    std::string                                                mDefaultRecordingName;
-#endif
+    // [W113 2026-11-25] ours' Linux mDefaultPlayoutName / mDefaultRecordingName went with the updateDevices() redeploy
+    // check that upstream's deploy-on-every-enumeration replaced (see updateDevices() in llwebrtc.cpp).
 #if WEBRTC_WIN
     LLWebRTCDefaultDeviceWatcher*                              mDefaultDeviceWatcher = nullptr;   // worker thread only
 #endif
     // </WolfViewer>
 
+    // Special "Default" entry guid last seen at index 0 so
+    // updateDevices() can detect that case and force a clean re-select.
+    std::string                                                mDefaultPlayoutDeviceGuid;
+    std::string                                                mDefaultRecordingDeviceGuid;
+    bool                                                       mHaveDefaultPlayoutDeviceGuid{ false };
+    bool                                                       mHaveDefaultRecordingDeviceGuid{ false };
+
     bool                                                       mMute;
+    // Whether voice is enabled; gates whether the capture/playout devices run.
+    bool                                                       mVoiceEnabled;
     float                                                      mGain;
 
     LLCustomProcessorStatePtr                                  mPeerCustomProcessor;
@@ -674,11 +704,19 @@ class LLWebRTCPeerConnectionImpl : public LLWebRTCPeerConnectionInterface,
 
 {
   public:
-    LLWebRTCPeerConnectionImpl();
+    LLWebRTCPeerConnectionImpl(const webrtc::Environment& env);
     ~LLWebRTCPeerConnectionImpl();
 
     void init(LLWebRTCImpl * webrtc_impl);
+    // Posts closeOnSignalingThread() and returns immediately.
     void terminate();
+
+    // The actual close.  Signaling thread only.  Callable directly (via a
+    // BlockingCall) when the caller needs the connection to be fully closed
+    // before it continues -- see LLWebRTCImpl::terminate().
+    // webrtc_terminate indicates we're shutting down the webrtc library,
+    // if not, we'll be reusing the peer connection for a reconnection
+    void closeOnSignalingThread(bool webrtc_terminate);
 
     virtual void AddRef() const override = 0;
     virtual webrtc::RefCountReleaseStatus Release() const override = 0;
@@ -750,8 +788,10 @@ class LLWebRTCPeerConnectionImpl : public LLWebRTCPeerConnectionInterface,
     void enableSenderTracks(bool enable);
     void enableReceiverTracks(bool enable);
 
-  protected:
+    void gatherConnectionStats() override;
 
+  protected:
+    const webrtc::Environment mEnv;
     LLWebRTCImpl * mWebRTCImpl;
 
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> mPeerConnectionFactory;
@@ -778,6 +818,14 @@ class LLWebRTCPeerConnectionImpl : public LLWebRTCPeerConnectionInterface,
     // connection state tracking for delayed renegotiation on disconnect
     webrtc::PeerConnectionInterface::PeerConnectionState mPeerConnectionState;
     uint32_t mDisconnectCount;
+
+    // Accessed only on the WebRTC signaling thread.
+    bool mStatsRequestPending;
+
+    // Set by closeOnSignalingThread() so that no new stats request (or other
+    // callback into the viewer) is issued while we're tearing down.
+    // Accessed only on the WebRTC signaling thread.
+    bool mShuttingDown;
 
     std::atomic<int> mPendingJobs;
 };

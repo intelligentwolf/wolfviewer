@@ -148,7 +148,7 @@
 	value="1 .85 .73 1" />
 	<color
       name="LtRed"
-      value="1 0.2 0.2 1" />
+      value="1 0.703 0.703 1" />
 
   <!-- Skin and Theme Colors -->
 
@@ -479,10 +479,10 @@
      reference="Yellow" />
     <color
      name="AvatarListItemBeyondShoutRange"
-     reference="Red" />
+     reference="LtRed" />
     <color
      name="AvatarListItemAgeAlert"
-     reference="Red" />
+     reference="LtRed" />
     <color
      name="BackgroundChatColor"
      reference="DkGray" />
@@ -714,6 +714,9 @@
     <color
      name="HTMLLinkColor"
      reference="AnsaStorm_HtmlLink" />
+    <color
+     name="HTMLLinkColorHovertips"
+     reference="Black" />
     <color
      name="HealthTextColor"
      reference="White" />
@@ -1048,7 +1051,7 @@
      reference="SL-TitaniumGray" />
     <color
      name="ScriptErrorColor"
-     reference="Red" />
+     reference="LtRed" />
     <color
      name="ScrollBGStripeColor"
      reference="White_10" />
@@ -1271,10 +1274,6 @@
   <color
       name="CurrencyColor"
       reference="LabelTextColor" />
-	  
-  <color
-      name="Phototools_Header"
-      reference="EmphasisColor" />
 
   <!-- syntax highlighting (LSL Scripts) -->
   <color
@@ -1460,4 +1459,7 @@
 	<color
 	 name="WolfBuildAccent"
 	 value="0.000 0.621 0.848 1.000" />
+  <color
+    name="HighlightPanelBackground"
+    reference="EmphasisColor" />
 </colors>

@@ -1428,7 +1428,11 @@ bool LLViewerJoystick::toggleFlycam()
 void LLViewerJoystick::scanJoystick()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_INPUT;
-    if (mDriverState != JDS_INITIALIZED || !gSavedSettings.getBOOL("JoystickEnabled"))
+    // <FS:PP> Speed optimisation
+    // if (mDriverState != JDS_INITIALIZED || !gSavedSettings.getBOOL("JoystickEnabled"))
+    static LLCachedControl<bool> joystick_enabled(gSavedSettings, "JoystickEnabled");
+    if (mDriverState != JDS_INITIALIZED || !joystick_enabled())
+    // </FS:PP>
     {
         return;
     }
@@ -1471,7 +1475,11 @@ void LLViewerJoystick::scanJoystick()
         toggle_flycam = 0;
     }
 
-    if (!mOverrideCamera && !(LLToolMgr::getInstance()->inBuildMode() && gSavedSettings.getBOOL("JoystickBuildEnabled")))
+    // <FS:PP> Speed optimisation
+    // if (!mOverrideCamera && !(LLToolMgr::getInstance()->inBuildMode() && gSavedSettings.getBOOL("JoystickBuildEnabled")))
+    static LLCachedControl<bool> joystick_build_enabled(gSavedSettings, "JoystickBuildEnabled");
+    if (!mOverrideCamera && !(LLToolMgr::getInstance()->inBuildMode() && joystick_build_enabled()))
+    // </FS:PP>
     {
         moveAvatar();
     }

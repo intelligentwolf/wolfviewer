@@ -2219,6 +2219,19 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
                     else
                     {
                         LLPostponedNotification::add<LLPostponedOfferNotification>(params, from_id, false);
+
+                        // <FS:PP> Flash application icon after receiving a teleport request
+                        if (IM_TELEPORT_REQUEST == dialog)
+                        {
+                            LLWindow* viewer_window = gViewerWindow->getWindow();
+                            static LLCachedControl<bool> sFlashIcon(gSavedSettings, "FSFlashOnMessage");
+                            if (viewer_window && sFlashIcon)
+                            {
+                                viewer_window->flashIcon(5.f);
+                            }
+                        }
+                        // </FS:PP>
+
                     }
 // [/RLVa:KB]
 //                      LLPostponedNotification::add<LLPostponedOfferNotification>(params, from_id, false);
@@ -2410,6 +2423,7 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
                         LLNotification::Params params("OfferFriendship");
                         params.substitutions = args;
                         params.payload = payload;
+                        params.offer_from_agent = true;
                         LLPostponedNotification::add<LLPostponedOfferNotification>(params, from_id, false);
                         make_ui_sound("UISndFriendshipOffer"); // <FS:PP> Friendship offer sound
                     }

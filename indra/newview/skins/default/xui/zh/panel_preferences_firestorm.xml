@@ -28,10 +28,22 @@
 			<slider name="manual_environment_change_transition_period" label="環境過渡時長：" tool_tip="在環境之間的轉換間隔時間（以秒為單位）。0 表示瞬時。" />
 			<check_box name="EnvironmentPersistAcrossLogin" label="在每次登入時保持環境設定" tool_tip="在下次登入時保留當前的環境設定。" />
 			<check_box name="FSRepeatedEnvTogglesShared" label="環境設定快捷鍵為開關式" tool_tip="重複按下快捷鍵可在想要的環境設定和共享環境之間切換。"/>
+			<text name="FSCloudColorLabel">
+				化身載入中／烘焙錯誤時的粒子雲顏色：
+			</text>
+			<text name="FSCloudColorStartLabel">
+				起始：
+			</text>
+			<text name="FSCloudColorEndLabel">
+				結束：
+			</text>
+			<color_swatch name="FSCloudColorStart" tool_tip="化身載入中或烘焙錯誤時粒子雲的起始顏色。立即生效，無需重新啟動。"/>
+			<color_swatch name="FSCloudColorEnd" tool_tip="化身載入中或烘焙錯誤時粒子雲的結束顏色。立即生效，無需重新啟動。"/>
 		</panel>
 		<panel label="保護" name="ProtectionTab">
 			<check_box label="阻止通過簡單點擊坐在物件上" name="FSBlockClickSit" />
-			<check_box label="停用聊天中的帶標籤連結（URL仍可見）" name="FSDisableLabeledChatLinks" tool_tip="啟用後，來自其他使用者的聊天、私聊、群組通知和物件文字中的帶標籤連結將不會被合併為單一標籤。取而代之的是顯示並連結實際的URL。這有助於防止釣魚攻擊（例如顯示文字隱藏了不同的目標）。檢視器內建的文字（通知、偏好設定等）不受影響。"/>
+			<check_box label="在私聊與群組聊天中預覽超連結的真實 URL（滑鼠懸停時）" name="FSDisableLabeledChatLinks" tool_tip="啟用後，私聊、群組聊天、臨時會議與群組通知中的超連結仍保持原文本，但滑鼠懸停時會立即以提示方式顯示真實目標 URL，用於識別可能隱藏真實位址的釣魚連結。附近聊天由下方選項控制。檢視器內建文字不受影響。"/>
+			<check_box label="在附近聊天與物件訊息中預覽超連結的真實 URL（滑鼠懸停時）" name="FSDisableLabeledChatLinksNearbyChat" tool_tip="啟用後，附近（本地）聊天與物件文字中的超連結仍保持原文本，但滑鼠懸停時會立即以提示方式顯示真實目標 URL。預設關閉。"/>
 			<check_box label="允許指令碼顯示地圖 (llMapDestination)" name="ScriptsCanShowUI" />
 			<text name="revokepermissions_txt">復原權限：</text>
 			<radio_group name="FSRevokePerms">
@@ -144,6 +156,15 @@
 			<check_box label="為指令碼啟用詳細資訊" tool_tip="啟用後，將向指令碼基本資訊中新增對創造者有用的詳細資訊。" name="FSScriptInfoExtended" />
 			<check_box label="按字母順序排序「附著到」選單中的附著點（需要重新啟動）" tool_tip="如果啟用此選項，「附著到」選單中的附件點列表將按字母順序排序。" name="FSSortAttachmentSpotsAlphabetically" />
 			<check_box label="在工具視窗中使用新的[APP_NAME]紋理面板(需要重新啟動)" tool_tip="如果啟用,紋理編輯工具將使用改進的[APP_NAME]工作流,並允許編輯BlinnPhong和PBR材質" name="FSUseNewTexturePanel" />
+			<text name="buildaxiscolors_label">
+				設定建造工具 X/Y/Z 軸的外觀：
+			</text>
+			<color_swatch label="X 軸" name="colorswatchXaxis" tool_tip="點擊以開啟顏色選擇器"/>
+			<color_swatch label="Y 軸" name="colorswatchYaxis" tool_tip="點擊以開啟顏色選擇器"/>
+			<color_swatch label="Z 軸" name="colorswatchZaxis" tool_tip="點擊以開啟顏色選擇器"/>
+			<color_swatch label="文字背景" name="colorswatchEditTextBackgroundColor" tool_tip="點擊以開啟顏色選擇器"/>
+			<spinner label="縮放" name="editWidgetScaling" tool_tip="調整用於編輯旋轉/縮放/位置的控制項大小。"/>
+			<check_box label="文字陰影" tool_tip="啟用後，編輯時的提示文字將顯示陰影。" name="editTextDropShadow"/>
 		</panel>
 		<panel label="指令碼編輯器" name="BuildTabScriptEditor">
 			<text name="text_box_scripting_font" width="155">指令碼編輯器字型：</text>

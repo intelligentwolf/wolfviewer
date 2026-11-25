@@ -1810,6 +1810,10 @@ void RlvForceWear::done()
     if (!remItems.empty())
     {
         WolfOutfitLock::Bypass not_held;   // [T964 2026-11-21] an RLVa command, not the resident's own click: not held by the outfit lock (wolfoutfitlock.h)
+        // NOTE: immediate_delete (last parameter) has to stay 'true'. Attachments were already detached above (ObjectDetach)
+        //       so their COF links must be gone before anything else runs updateAppearanceFromCOF() (re-attaches them,
+        //       FIRE-36976) or updateCOF(append) (slams stale links back into COF). The COF version desync this used to
+        //       cause is handled in remove_inventory_item() and AISUpdate::doUpdate() (FIRE-33455).
         LLAppearanceMgr::instance().removeItemsFromAvatar(remItems, no_op, cb, true);
     }
 

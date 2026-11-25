@@ -292,6 +292,10 @@ public:
     void initFolderRoot();
     void initializeViewBuilding();
 
+    // <FS:TP> [FIRE-34881] Build or tear down the Library root view live, without a restart
+    void setLibraryFolderVisible(bool visible);
+    // </FS:TP>
+
 protected:
     void openStartFolderOrMyInventory(); // open the first level of inventory
     void onItemsCompletion();           // called when selected items are complete
@@ -318,7 +322,7 @@ protected:
     LLPointer<LLFolderViewGroupedItemBridge> mGroupedItemBridge;
     Params                      mParams;    // stored copy of parameter block
 
-    std::map<LLUUID, LLFolderViewItem*> mItemMap;
+    std::unordered_map<LLUUID, LLFolderViewItem*> mItemMap;
     /**
      * Pointer to LLInventoryFolderViewModelBuilder.
      *

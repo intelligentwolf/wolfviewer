@@ -447,7 +447,6 @@
 			<menu_item_check label="Debug-Fenster" name="Debug Console"/>
 			<menu_item_call label="Meldungen" name="Notifications"/>
 			<menu_item_check label="Schnelle Timer" name="Fast Timers"/>
-			<menu_item_check label="Speicher" name="Memory"/>
 			<menu_item_check label="Szenestatistiken" name="Scene Statistics"/>
 			<menu_item_check label="Monitor zum Laden von Szenen" name="Scene Loading Monitor"/>
 			<menu_item_check label="Region-Debug-Konsole" name="Region Debug Console"/>
@@ -481,6 +480,7 @@
 			<menu_item_call label="LLError erzwingen, Meldung anzeigen und abstürzen" name="Force LLError Message And Crash"/>
 			<menu_item_call label="Fehlerhaften Speicherzugriff erzwingen" name="Force Bad Memory Access"/>
 			<menu_item_call label="Fehlerhaften Speicherzugriff in Coroutine erzwingen" name="Force Bad Memory Access in Coroutine"/>
+			<menu_item_call label="Fehlerhafte Speicher-Allokation für Texturen erzwingen" name="Force Image Allocation Failure"/>
 			<menu_item_call label="Endlosschleife erzwingen" name="Force Infinite Loop"/>
 			<menu_item_call label="Treiber-Absturz erzwingen" name="Force Driver Carsh"/>
 			<menu_item_call label="Softwareausnahme erzwingen" name="Force Software Exception"/>

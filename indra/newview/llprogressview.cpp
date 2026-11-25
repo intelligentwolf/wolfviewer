@@ -461,6 +461,18 @@ void LLProgressView::drawDancingWolf(F32 alpha)
 void LLProgressView::draw()
 {
     static LLTimer timer;
+    // <FS:TJ> Fix pink screen when quitting the viewer and FSDisableLogoutScreens is true
+    static LLCachedControl<bool> disable_logout_screens(gSavedSettings, "FSDisableLogoutScreens");
+    if (LLAppViewer::instance()->quitRequested())
+    {
+        releaseTextures();
+        if (disable_logout_screens())
+        {
+            drawStartTexture(1.0f);
+            return;
+        }
+    }
+    // </FS:TJ>
 
     if (mFadeFromLoginTimer.getStarted())
     {

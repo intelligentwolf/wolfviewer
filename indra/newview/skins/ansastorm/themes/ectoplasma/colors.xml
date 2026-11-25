@@ -659,6 +659,9 @@
      name="HTMLLinkColor"
      reference="AnsaStorm_HtmlLink" />
     <color
+     name="HTMLLinkColorHovertips"
+     reference="Black" />
+    <color
      name="HealthTextColor"
      reference="White" />
     <color
@@ -1149,9 +1152,6 @@
 	 reference="LabelTextColor" />
 
   <color
-      name="Phototools_Header"
-      reference="SchemeLightest_35" />
-  <color
       name="ScriptSelectedColor"
       reference="EmphasisColor" />
   <color
@@ -1201,4 +1201,7 @@
 	<color
 	 name="WolfBuildAccent"
 	 value="0.000 1.000 0.080 1.000" />
+  <color
+    name="HighlightPanelBackground"
+    reference="SchemeLightest_35" />
 </colors>

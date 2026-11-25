@@ -598,7 +598,10 @@
      reference="DkGray" />
     <color
      name="HTMLLinkColor"
-	 value="0.113 0.210 0.170 1" />
+     value="0.113 0.210 0.170 1" />
+    <color
+     name="HTMLLinkColorHovertips"
+     reference="SL-White" />
     <color
      name="HealthTextColor"
      reference="White" />
@@ -851,12 +854,6 @@
   <color
       name="PathfindingCharacterBeaconColor"
       reference="Red_80" />
-
-<!-- Phototools_Header Added Feb 28 2022 Anastasia Horngold to fix orange headers -->
-  <color
-      name="Phototools_Header"
-      reference="EmphasisColor_13" />
-
     <color
      name="ScriptBgReadOnlyColor"
      reference="SL-TitaniumGray" />
@@ -1213,4 +1210,7 @@
 	<color
 	 name="WolfBuildAccent"
 	 value="0.000 0.000 0.000 1.000" />
+  <color
+    name="HighlightPanelBackground"
+    reference="EmphasisColor_13" />
 </colors>

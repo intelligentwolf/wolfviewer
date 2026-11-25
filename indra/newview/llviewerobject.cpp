@@ -150,6 +150,7 @@ static LLVector3 sWolfSnapBlend;
 // </WolfViewer>
 
 std::map<std::string, U32> LLViewerObject::sObjectDataMap;
+std::unordered_map<LLUUID, std::vector<LLViewerObject*>> LLViewerObject::sPendingUpdatesByOwner;
 
 // The maximum size of an object extra parameters binary (packed) block
 #define MAX_OBJECT_PARAMS_SIZE 1024
@@ -546,6 +547,8 @@ void LLViewerObject::markDead()
             mReflectionProbe->mViewerObject = nullptr;
             mReflectionProbe = nullptr;
         }
+
+        removeObjectFromPendingUpdate(this);
 
         sNumZombieObjects++;
 
@@ -1596,7 +1599,7 @@ U32 LLViewerObject::processUpdateMessage(LLMessageSystem *mesgsys,
                         U16 param_type;
                         S32 param_size;
                         dp.unpackU16(param_type, "param_type");
-                        dp.unpackBinaryData(param_block, param_size, "param_data");
+                        dp.unpackBinaryData(param_block, MAX_OBJECT_PARAMS_SIZE, param_size, "param_data");
                         //LL_INFOS() << "Param type: " << param_type << ", Size: " << param_size << LL_ENDL;
                         LLDataPackerBinaryBuffer dp2(param_block, param_size);
                         unpackParameterEntry(param_type, &dp2);
@@ -1853,7 +1856,7 @@ U32 LLViewerObject::processUpdateMessage(LLMessageSystem *mesgsys,
                     dp->unpackU32(size, "ScratchPadSize");
                     delete [] mData;
                     mData = new U8[size];
-                    dp->unpackBinaryData((U8 *)mData, sp_size, "PartData");
+                    dp->unpackBinaryData((U8 *)mData, size, sp_size, "PartData");
                 }
                 else
                 {
@@ -1932,7 +1935,7 @@ U32 LLViewerObject::processUpdateMessage(LLMessageSystem *mesgsys,
                     U16 param_type;
                     S32 param_size;
                     dp->unpackU16(param_type, "param_type");
-                    dp->unpackBinaryData(param_block, param_size, "param_data");
+                    dp->unpackBinaryData(param_block, MAX_OBJECT_PARAMS_SIZE, param_size, "param_data");
                     //LL_INFOS() << "Param type: " << param_type << ", Size: " << param_size << LL_ENDL;
                     LLDataPackerBinaryBuffer dp2(param_block, param_size);
                     unpackParameterEntry(param_type, &dp2);
@@ -3499,6 +3502,7 @@ S32 LLFilenameAndTask::sCount = 0;
 // static
 void LLViewerObject::processTaskInv(LLMessageSystem* msg, void** user_data)
 {
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_NETWORK;
     LLUUID task_id;
     msg->getUUIDFast(_PREHASH_InventoryData, _PREHASH_TaskID, task_id);
     LLViewerObject* object = gObjectList.findObject(task_id);
@@ -4991,9 +4995,10 @@ const LLQuaternion LLViewerObject::getRenderRotation() const
     }
     else
     {
-        if (!mDrawable->isRoot())
+        LLDrawable* parent = mDrawable->getParent();
+        if (!mDrawable->isRoot() && parent)
         {
-            ret = getRotation() * LLQuaternion(mDrawable->getParent()->getWorldMatrix());
+            ret = getRotation() * LLQuaternion(parent->getWorldMatrix());
         }
         else
         {
@@ -6973,17 +6978,20 @@ LLViewerObject::ExtraParameter* LLViewerObject::createNewParameterEntry(U16 para
       }
     };
 
-    ExtraParameter& entry = mExtraParameterList[U32(param_type >> 4) - 1];
-    if (new_block)
+    if (isValidExtraParamType(param_type))
     {
-        entry.in_use = in_use;
-        *entry.in_use = false; // not in use yet
-        entry.data = new_block;
-        return &entry;
-    }
-    else
-    {
-        entry.is_invalid = true;
+        ExtraParameter& entry = mExtraParameterList[U32(param_type >> 4) - 1];
+        if (new_block)
+        {
+            entry.in_use = in_use;
+            *entry.in_use = false; // not in use yet
+            entry.data = new_block;
+            return &entry;
+        }
+        else
+        {
+            entry.is_invalid = true;
+        }
     }
     return nullptr;
 }
@@ -7013,7 +7021,7 @@ bool LLViewerObject::setParameterEntry(U16 param_type, const LLNetworkData& new_
 // Should always return true.
 bool LLViewerObject::setParameterEntryInUse(U16 param_type, bool in_use, bool local_origin)
 {
-    if (param_type <= LLNetworkData::PARAMS_MAX)
+    if (isValidExtraParamType(param_type))
     {
         ExtraParameter* param = (in_use ? getExtraParameterEntryCreate(param_type) : &getExtraParameterEntry(param_type));
         if (param && param->data && *param->in_use != in_use)
@@ -7028,7 +7036,7 @@ bool LLViewerObject::setParameterEntryInUse(U16 param_type, bool in_use, bool lo
 
 void LLViewerObject::parameterChanged(U16 param_type, bool local_origin)
 {
-    if (param_type <= LLNetworkData::PARAMS_MAX)
+    if (isValidExtraParamType(param_type))
     {
         const ExtraParameter& param = getExtraParameterEntry(param_type);
         if (param.data)
@@ -8245,6 +8253,61 @@ bool LLViewerObject::isReachable()
         }
     }
     return false;
+}
+
+void LLViewerObject::markObjectsForUpdate(const LLUUID& owner_id)
+{
+    sPendingUpdatesByOwner.erase(owner_id);
+    for (S32 i = 0; i < gObjectList.getNumObjects(); ++i)
+    {
+        LLViewerObject* obj = gObjectList.getObject(i);
+        if (!obj || obj->isDead() || obj->isAvatar() || obj->permYouOwner())
+        {
+            continue;
+        }
+        sPendingUpdatesByOwner[owner_id].push_back(obj);
+    }
+}
+
+void LLViewerObject::removeObjectFromPendingUpdate(LLViewerObject* obj)
+{
+    for (auto& [owner_id, objects] : sPendingUpdatesByOwner)
+    {
+        objects.erase(std::remove(objects.begin(), objects.end(), obj), objects.end());
+    }
+}
+
+bool LLViewerObject::isObjectInPendingUpdate(const LLUUID& owner_id, LLViewerObject* obj)
+{
+    if (!obj)
+    {
+        return false;
+    }
+    auto it = sPendingUpdatesByOwner.find(owner_id);
+    if (it != sPendingUpdatesByOwner.end())
+    {
+        const auto& objects = it->second;
+        return std::find(objects.begin(), objects.end(), obj) != objects.end();
+    }
+    return false;
+}
+
+void LLViewerObject::requestObjectUpdate()
+{
+    if (LLViewerRegion* regionp = getRegion())
+    {
+        LLMessageSystem* msg = gMessageSystem;
+        msg->newMessageFast(_PREHASH_RequestMultipleObjects);
+        msg->nextBlockFast(_PREHASH_AgentData);
+        msg->addUUIDFast(_PREHASH_AgentID, gAgent.getID());
+        msg->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
+        msg->nextBlockFast(_PREHASH_ObjectData);
+        msg->addU8Fast(_PREHASH_CacheMissType, 0);
+        msg->addU32Fast(_PREHASH_ID, getLocalID());
+        msg->sendReliable(regionp->getHost());
+
+        removeObjectFromPendingUpdate(this);
+    }
 }
 
 class ObjectPhysicsProperties : public LLHTTPNode

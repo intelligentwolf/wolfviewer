@@ -2955,44 +2955,80 @@ void LLMeshUploadThread::packModelIntance(
                 texture_index.find(texture) == texture_index.end())
             {
                 texture_index[texture] = texture_num;
-                std::string str = texture_str.str();
-                // <FS:Wolf> An empty texture here is a failure, not a texture.
-                //
-                // Both guards above fail silently: hasSavedRawImage() is false while a texture
-                // is still fetching or after its saved raw image has been dropped
-                // (llviewertexture.cpp:2505 destroySavedRawImage, reached from
-                // LLLoadedCallbackEntry::cleanUpCallbackList when the preview is torn down), and
-                // convertToUploadFile can return null or an invalid buffer. Either way this used
-                // to register a ZERO-BYTE entry in texture_list that the faces below then point
-                // at with face_entry["image"], so the upload "succeeded" and every face came back
-                // blank. Record it; doWholeModelUpload refuses to send the model.
-                //
-                // include_textures is false for the fee request (:3249), where an empty entry is
-                // expected and correct - it is only counting them - so this only applies to the
-                // real upload (:3195).
-                if (include_textures && str.empty())
+                if (include_textures)
                 {
-                    mTextureDataMissing = true;
-                    std::string missing = material.mDiffuseMapFilename;
-                    if (missing.empty())
+                    std::string str = texture_str.str();
+                    // <FS:Wolf> An empty texture here is a failure, not a texture.
+                    //
+                    // Both guards above fail silently: hasSavedRawImage() is false while a texture
+                    // is still fetching or after its saved raw image has been dropped
+                    // (llviewertexture.cpp:2505 destroySavedRawImage, reached from
+                    // LLLoadedCallbackEntry::cleanUpCallbackList when the preview is torn down), and
+                    // convertToUploadFile can return null or an invalid buffer. Either way this used
+                    // to register a ZERO-BYTE entry in texture_list that the faces below then point
+                    // at with face_entry["image"], so the upload "succeeded" and every face came back
+                    // blank. Record it; doWholeModelUpload refuses to send the model.
+                    //
+                    // include_textures is false for the fee request (:3249), where an empty entry is
+                    // expected and correct - it is only counting them - so this only applies to the
+                    // real upload (:3195).
+                    if (include_textures && str.empty())
                     {
-                        missing = material.mDiffuseMapLabel;
+                        mTextureDataMissing = true;
+                        std::string missing = material.mDiffuseMapFilename;
+                        if (missing.empty())
+                        {
+                            missing = material.mDiffuseMapLabel;
+                        }
+                        if (missing.empty())
+                        {
+                            missing = "(unnamed texture)";
+                        }
+                        if (std::find(mMissingTextureNames.begin(), mMissingTextureNames.end(), missing)
+                            == mMissingTextureNames.end())
+                        {
+                            mMissingTextureNames.push_back(missing);
+                        }
+                        LL_WARNS(LOG_MESH) << "Texture has no data to upload: " << missing
+                                           << " (hasSavedRawImage " << (S32)texture->hasSavedRawImage() << ")"
+                                           << LL_ENDL;
                     }
-                    if (missing.empty())
-                    {
-                        missing = "(unnamed texture)";
-                    }
-                    if (std::find(mMissingTextureNames.begin(), mMissingTextureNames.end(), missing)
-                        == mMissingTextureNames.end())
-                    {
-                        mMissingTextureNames.push_back(missing);
-                    }
-                    LL_WARNS(LOG_MESH) << "Texture has no data to upload: " << missing
-                                       << " (hasSavedRawImage " << (S32)texture->hasSavedRawImage() << ")"
-                                       << LL_ENDL;
+                    // </FS:Wolf>
+                    res["texture_list"][texture_num] = LLSD::Binary(str.begin(), str.end());
                 }
-                // </FS:Wolf>
-                res["texture_list"][texture_num] = LLSD::Binary(str.begin(), str.end());
+                else
+                {   // When not including the whole texture, we need to send some metadata about the image
+                    // to ensure accurate price estimation. If not included, the server will assume all
+                    // textures are 1024 x 1024, which could lead to a low estimate.
+                    LLSD info = LLSD::emptyMap();
+
+                    S32 texture_width = 0;
+                    S32 texture_height = 0;
+                    if (texture->hasSavedRawImage())
+                    {
+                        LLImageDataLock lock(texture->getSavedRawImage());
+
+                        LLPointer<LLImageJ2C> upload_file = LLViewerTextureList::convertToUploadFile(texture->getSavedRawImage());
+
+                        if (!upload_file.isNull() && upload_file->getDataSize() && !upload_file->isBufferInvalid())
+                        {
+                            texture_width  = upload_file->getWidth();
+                            texture_height = upload_file->getHeight();
+                        }
+                    }
+
+                    if ((texture_width <= 0) || (texture_height <= 0))
+                    {
+                        // Fall back to the texture's stored dimensions if we can't get dimensions from the raw image.
+                        texture_width = texture->getFullWidth();
+                        texture_height = texture->getFullHeight();
+                    }
+
+                    info["width"] = texture_width;
+                    info["height"] = texture_height;
+                    res["texture_info"][texture_num] = info;
+                    res["texture_list"][texture_num] = LLSD::Binary(); // empty binary to indicate texture is not included, for older server compatibility
+                }
                 // store indexes for error handling;
                 texture_list_dest.push_back(material.mDiffuseMapFilename);
                 texture_num++;
@@ -3025,8 +3061,8 @@ void LLMeshUploadThread::wholeModelToLLSD(LLSD& dest, std::vector<std::string>& 
     LLSD res;
     if (mDestinationFolderId.isNull())
     {
-    result["folder_id"] = gInventory.findUserDefinedCategoryUUIDForType(LLFolderType::FT_OBJECT);
-    result["texture_folder_id"] = gInventory.findUserDefinedCategoryUUIDForType(LLFolderType::FT_TEXTURE);
+        result["folder_id"] = gInventory.findUserDefinedCategoryUUIDForType(LLFolderType::FT_OBJECT);
+        result["texture_folder_id"] = gInventory.findUserDefinedCategoryUUIDForType(LLFolderType::FT_TEXTURE);
     }
     else
     {
@@ -3528,6 +3564,8 @@ void LLMeshRepoThread::notifyLoadedMeshes()
             loaded_queue.swap(mLoadedQ);
             mLoadedMutex->unlock();
 
+            LL_PROFILE_ZONE_NAMED("notify loaded meshes");
+
             update_metrics = true;
 
             // Process the elements free of the lock
@@ -3559,6 +3597,8 @@ void LLMeshRepoThread::notifyLoadedMeshes()
             unavil_queue.swap(mUnavailableQ);
             mLoadedMutex->unlock();
 
+            LL_PROFILE_ZONE_NAMED("notify unavail meshes");
+
             update_metrics = true;
 
             // Process the elements free of the lock
@@ -3577,6 +3617,7 @@ void LLMeshRepoThread::notifyLoadedMeshes()
     {
         if (mLoadedMutex->trylock())
         {
+            LL_PROFILE_ZONE_NAMED("notify misc meshes");
             std::deque<LLPointer<LLMeshSkinInfo>> skin_info_q;
             std::deque<UUIDBasedRequest> skin_info_unavail_q;
             std::list<LLModel::Decomposition*> decomp_q;

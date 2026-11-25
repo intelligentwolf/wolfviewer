@@ -694,13 +694,25 @@ void LLPipeline::init()
     // <FS:PP> FIRE-33085 Region corner markers
     connectRefreshCachedSettingsSafe("fsregioncornerbeacons");
     // </FS:PP>
+    // <FS:PP> FIRE-36767 Sync beacon settings when changed via debug settings
+    connectRefreshCachedSettingsSafe("physicalbeacon");
+    connectRefreshCachedSettingsSafe("scriptsbeacon");
+    connectRefreshCachedSettingsSafe("scripttouchbeacon");
+    connectRefreshCachedSettingsSafe("soundsbeacon");
+    connectRefreshCachedSettingsSafe("particlesbeacon");
+    connectRefreshCachedSettingsSafe("moapbeacon");
+    connectRefreshCachedSettingsSafe("renderbeacons");
+    connectRefreshCachedSettingsSafe("renderhighlights");
+    // </FS:PP>
 
     LLPointer<LLControlVariable> cntrl_ptr = gSavedSettings.getControl("CollectFontVertexBuffers");
     if (cntrl_ptr.notNull())
     {
         cntrl_ptr->getCommitSignal()->connect([](LLControlVariable* control, const LLSD& value, const LLSD& previous)
         {
-            LLFontVertexBuffer::enableBufferCollection(control->getValue().asBoolean());
+            bool enable_buffers = control->getValue().asBoolean();
+            LLFontVertexBuffer::enableBufferCollection(enable_buffers);
+            LLFontWidthBuffer::enableBufferCollection(enable_buffers);
         });
     }
 }
@@ -1211,6 +1223,16 @@ void LLPipeline::refreshCachedSettings()
     // <FS:PP> FIRE-33085 Region corner markers
     LLPipeline::sRenderRegionCornerBeacons = gSavedSettings.getBOOL("fsregioncornerbeacons");
     // </FS:PP>
+    // <FS:PP> FIRE-36767 Sync beacon settings when changed via debug settings
+    LLPipeline::sRenderPhysicalBeacons = gSavedSettings.getBOOL("physicalbeacon");
+    LLPipeline::sRenderScriptedBeacons = gSavedSettings.getBOOL("scriptsbeacon");
+    LLPipeline::sRenderScriptedTouchBeacons = gSavedSettings.getBOOL("scripttouchbeacon");
+    LLPipeline::sRenderSoundBeacons = gSavedSettings.getBOOL("soundsbeacon");
+    LLPipeline::sRenderParticleBeacons = gSavedSettings.getBOOL("particlesbeacon");
+    LLPipeline::sRenderMOAPBeacons = gSavedSettings.getBOOL("moapbeacon");
+    LLPipeline::sRenderBeacons = gSavedSettings.getBOOL("renderbeacons");
+    LLPipeline::sRenderHighlight = gSavedSettings.getBOOL("renderhighlights");
+    // </FS:PP>
 
     LLPipeline::sUseOcclusion =
             (!gUseWireframe
@@ -1320,7 +1342,9 @@ void LLPipeline::refreshCachedSettings()
         LLVOAvatar::updateImpostorRendering(LLVOAvatar::sMaxNonImpostors);
     }
 
-    LLFontVertexBuffer::enableBufferCollection(gSavedSettings.getBOOL("CollectFontVertexBuffers"));
+    bool enable_buffers = gSavedSettings.getBOOL("CollectFontVertexBuffers");
+    LLFontVertexBuffer::enableBufferCollection(enable_buffers);
+    LLFontWidthBuffer::enableBufferCollection(enable_buffers);
 }
 
 void LLPipeline::releaseGLBuffers()
@@ -2938,6 +2962,10 @@ void LLPipeline::clearRebuildGroups()
     {
         LLSpatialGroup* group = *iter;
 
+        if (!group || group->isDead())
+        {
+            continue;
+        }
         // If the group contains HUD objects, save the group
         if (group->isHUDGroup())
         {
@@ -12847,6 +12875,9 @@ void LLPipeline::generateImpostor(LLVOAvatar* avatar, bool preview_avatar, bool 
     LL_DEBUGS_ONCE("AvatarRenderPipeline") << "Avatar " << avatar->getID()
                               << " is " << ( too_complex ? "" : "not ") << "too complex"
                               << LL_ENDL;
+    // <FS> FIRE-34340-2 RLV silhouettes need full avatar geometry, not jelly-doll-only
+    bool rlv_silhouette = !for_profile && !preview_avatar && avatar->isRlvSilhouette();
+    // </FS>
 
     pushRenderTypeMask();
 
@@ -13113,7 +13144,9 @@ void LLPipeline::generateImpostor(LLVOAvatar* avatar, bool preview_avatar, bool 
 
         LLGLDisable blend(GL_BLEND);
 
-        if (visually_muted || too_complex)
+        // <FS> FIRE-34340-2 RLV silhouettes need a solid color baked into the impostor too
+        if (visually_muted || too_complex || rlv_silhouette)
+        // </FS>
         {
             gGL.setColorMask(true, true);
         }
@@ -13138,7 +13171,9 @@ void LLPipeline::generateImpostor(LLVOAvatar* avatar, bool preview_avatar, bool 
 
         gDebugProgram.bind();
 
-        if (visually_muted)
+        // <FS> FIRE-34340-2 Use getMutedAVColor() for all muted/silhouette avatars
+        if (visually_muted || rlv_silhouette)
+        // </FS>
         {   // Visually muted avatar
             LLColor4 muted_color(avatar->getMutedAVColor());
             LL_DEBUGS_ONCE("AvatarRenderPipeline") << "Avatar " << avatar->getID() << " MUTED set solid color " << muted_color << LL_ENDL;

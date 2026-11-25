@@ -701,7 +701,7 @@ bool AOEngine::hasWolfSwimStates() const
     for (S32 state : { AOSet::Floating, AOSet::SwimmingForward })
     {
         const AOSet::AOState* s = mCurrentSet->getState(state);
-        if (s && !s->mAnimations.empty())
+        if (s && !s->mSteps.empty())   // [W113 2026-11-25] Firestorm 7.2.5 48c057cfe63: a state's animations are its steps (mSteps), as mapSwimming checks
         {
             return true;
         }
@@ -716,7 +716,7 @@ bool AOEngine::hasWalkingAnimations() const
         return false;
     }
     const AOSet::AOState* walking = mCurrentSet->getState(AOSet::Walking);
-    return walking && !walking->mAnimations.empty();
+    return walking && !walking->mSteps.empty();   // [W113 2026-11-25] 7.2.5 AO: steps, as mapSwimming checks
 }
 
 // The switch, as checkBelowWater: the animation playing for the last motion stops and the one for the new mapping
@@ -759,7 +759,7 @@ AOSet::AOState* AOEngine::getStateForMotion(const LLUUID& motion) const
                             || motion == ANIM_AGENT_HOVER_UP || motion == ANIM_AGENT_HOVER_DOWN))
     {
         AOSet::AOState* walking = mCurrentSet->getState(AOSet::Walking);
-        if (walking && !walking->mAnimations.empty())
+        if (walking && !walking->mSteps.empty())   // [W113 2026-11-25] 7.2.5 AO: steps, as mapSwimming checks
         {
             return walking;
         }

@@ -31,6 +31,7 @@
 
 #include <string>
 #include <functional>
+#include <map>
 #include <unordered_map>
 
 class LLCallbackMap
@@ -39,7 +40,11 @@ public:
     // callback definition.
     typedef std::function<void* (void* data)> callback_t;
 
-    typedef std::unordered_map<std::string, LLCallbackMap> map_t;
+    // [W113 2026-11-25] std::map, as before Firestorm 7.2.5 (0e687a83b5b made it std::unordered_map): the value type is
+    // this class itself, still incomplete here, and g++-11's libstdc++ (our Linux CI, ubuntu-22.04) cannot instantiate an
+    // unordered_map's node for an incomplete type (CI run 45638976878, linux64-avx2: stl_pair.h "second has incomplete type").
+    // std::map accepts it, as it did up to W111.
+    typedef std::map<std::string, LLCallbackMap> map_t;
     typedef map_t::iterator map_iter_t;
     typedef map_t::const_iterator map_const_iter_t;
 

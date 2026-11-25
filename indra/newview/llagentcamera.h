@@ -212,6 +212,12 @@ public:
 private:
     LLPointer<LLViewerObject> mSitCameraReferenceObject; // Object to which camera is related when sitting
     bool            mSitCameraEnabled;      // Use provided camera information when sitting?
+    // [STARFOLD 2026-11-25] A sit camera whose object this viewer did not know yet when AvatarSitResponse came (a vehicle rezzed
+    // and sat on at once: wolf-space rezzes the Cub and seats its pilot in one step), taken up when the object arrives
+    LLUUID          mSitCameraPendingID;
+    LLVector3       mSitCameraPendingPos, mSitCameraPendingFocus;
+    /** [STARFOLD 2026-11-25] The sit camera is on the WolfTrek ship this resident pilots (WolfStarfold::ship().mRoot). */
+    bool            starfoldShipCamera() const;
     LLVector3       mSitCameraPos;          // Root relative camera pos when sitting
     LLVector3       mSitCameraFocus;        // Root relative camera target when sitting
 

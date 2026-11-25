@@ -1350,14 +1350,26 @@ void LLAgentCamera::updateCamera()
             setSitCamera(LLUUID::null);
         }
     }
+    // [STARFOLD 2026-11-25] a sit camera waiting for its object (setSitCamera): taken up once it is here, dropped once the
+    // avatar is no longer sitting
+    if (mSitCameraPendingID.notNull())
+    {
+        if (!isAgentAvatarValid() || !gAgentAvatarp->isSitting())
+        {
+            mSitCameraPendingID.setNull();
+        }
+        else if (gObjectList.findObject(mSitCameraPendingID))
+        {
+            const LLUUID id = mSitCameraPendingID;
+            setSitCamera(id, mSitCameraPendingPos, mSitCameraPendingFocus);
+        }
+    }
     // [STARFOLD 2026-11-25] Paul: the Cub's camera tilts with the ship. The ship's own sit camera (wolf-space cub.xml root
     // CameraEyeOffset / CameraAtOffset) already turns with it (the sit camera below: object position + offset * object rotation);
     // its "up" turns with it too while the resident pilots a Starfold ship, so a steep climb, dive or a roll keeps the horizon
     // as the pilot sees it instead of the camera spinning round the world's up as the view nears vertical. Only for the ship
     // the region seated this pilot in (WolfStarfold::ship().mRoot), never for any other seat.
-    if (mSitCameraEnabled && mSitCameraReferenceObject.notNull() && !mSitCameraReferenceObject->isDead() && mFocusOnAvatar
-        && camera_mode == CAMERA_MODE_THIRD_PERSON && isAgentAvatarValid() && gAgentAvatarp->isSitting()
-        && WolfStarfold::instance().piloting() && mSitCameraReferenceObject->getID() == WolfStarfold::instance().ship().mRoot)
+    if (camera_mode == CAMERA_MODE_THIRD_PERSON && starfoldShipCamera())
     {
         mCameraUpVector = LLVector3::z_axis * mSitCameraReferenceObject->getRenderRotation();
     }
@@ -1594,6 +1606,10 @@ void LLAgentCamera::updateCamera()
         // This turns off smoothing while editing. -MG
         bool in_build_mode = LLToolMgr::getInstance()->inBuildMode();
         mCameraSmoothingStop = mCameraSmoothingStop || in_build_mode;
+        // [STARFOLD 2026-11-25] the WolfTrek ship's chase camera is held at its ship-frame offset (Paul: it tilts with the ship):
+        // smoothing it in avatar space let the eye trail a held climb and sweep into the hull (the rig, 19 m/s nose up). The
+        // ship's own drawn motion is already smooth (its render position and rotation), so the eye needs none of its own.
+        mCameraSmoothingStop = mCameraSmoothingStop || starfoldShipCamera();
 
         if (cameraThirdPerson() && !mCameraSmoothingStop)
         {
@@ -3109,15 +3125,34 @@ void LLAgentCamera::setSitCamera(const LLUUID &object_id, const LLVector3 &camer
             mSitCameraFocus = camera_focus;
             mSitCameraReferenceObject = reference_object;
             mSitCameraEnabled = true;
+            mSitCameraPendingID.setNull();
+        }
+        else
+        {
+            // [STARFOLD 2026-11-25] the object is not here yet (rezzed and sat on in one step: the region's AvatarSitResponse
+            // can come before the object's own update). The rig: the WolfTrek Cub's camera stayed the ordinary one, close
+            // behind the pilot, so a held climb put the hull across the view. Kept until the object arrives (updateCamera).
+            mSitCameraPendingID = object_id;
+            mSitCameraPendingPos = camera_pos;
+            mSitCameraPendingFocus = camera_focus;
         }
     }
     else
     {
+        mSitCameraPendingID.setNull();
         mSitCameraPos.clearVec();
         mSitCameraFocus.clearVec();
         mSitCameraReferenceObject = NULL;
         mSitCameraEnabled = false;
     }
+}
+
+// [STARFOLD 2026-11-25] see llagentcamera.h
+bool LLAgentCamera::starfoldShipCamera() const
+{
+    return mSitCameraEnabled && mSitCameraReferenceObject.notNull() && !mSitCameraReferenceObject->isDead() && mFocusOnAvatar
+        && isAgentAvatarValid() && gAgentAvatarp->isSitting() && WolfStarfold::instance().piloting()
+        && mSitCameraReferenceObject->getID() == WolfStarfold::instance().ship().mRoot;
 }
 
 //-----------------------------------------------------------------------------

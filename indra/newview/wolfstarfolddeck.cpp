@@ -392,6 +392,7 @@ void WolfStarfoldDeck::draw()
     const bool basewin = WolfStarbase::instance().shown();   // [STARBASES 2026-11-24] the Starbase window
     if (!setup) mClearArmed = false;
     if (!basewin) mArmed.clear();
+    if (!station) { mStationTab = 0; mBuyAsk.clear(); mShipPage = 0; }   // [v11 stage B] a fresh Station window opens on MARKET
     // [WOLFTREK v11] the rename field goes with its window (the Station window closed or left, the Starbase window off its own base)
     if (mEdit == EDIT_STATION && !(station && !basewin && sf.canRenameStation())) cancelEdit();
     if (mEdit == EDIT_BASE && !(basewin && WolfStarbase::instance().tab() == WolfStarbase::TAB_BASE && WolfStarbase::instance().known()
@@ -1021,7 +1022,12 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
     // The Station window (design "Stations": Market, Repairs, Launch in stage 1), centred over the world, drawn as the cockpit is.
     WolfStarfold& sf = WolfStarfold::instance();
     const WolfStarfold::Station& st = sf.station();
-    const F32 w = llmin(W - 32.f, 720.f * u), h = llmin(H - above - 32.f, 460.f * u);
+    // [WOLFTREK v11 stage B] MARKET / SHIPYARD / HANGAR (design.html#fleet: "the Station window's new Hangar tab ... and the Shipyard
+    // tab"), only when the region lists the fleet (k=docked fleet=); none: the window as before. The ship tabs are a wider window.
+    const bool tabs = !st.mFleet.empty();
+    if (!tabs) mStationTab = 0;
+    const bool ships = mStationTab != 0;
+    const F32 w = llmin(W - 32.f, (ships ? 1180.f : 720.f) * u), h = llmin(H - above - 32.f, (ships ? 780.f : (tabs ? 540.f : 460.f)) * u);
     const F32 l = W * 0.5f - w * 0.5f, r = l + w;
     const F32 b = above + (H - above - h) * 0.5f, t = b + h;
     rectG(l, b, r, t, SOLID.hi, SOLID.lo);
@@ -1055,9 +1061,41 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
             T(l + pad, ly, fit(where, 17.f * u, false, w - 2.f * pad), 17.f * u, C_GREEN, false, LLFontGL::LEFT);
         }
     }
+    F32 top = rb - 36.f * u;
+    if (tabs)
+    {
+        const char* names[3] = { "MARKET", "SHIPYARD", "HANGAR" };
+        const char* tips[3] = { "Sell your ore, repairs, launch", "Every ship, its numbers and its price: buy one",
+                                "The ships you own: choose the one you fly next" };
+        const F32 tbh2 = llmax(52.f * u, 44.f), tw = 200.f * u, gap = 8.f * u;   // design: every target at least 44 px
+        for (S32 i = 0; i < 3; ++i)
+            button(l + pad + (F32)i * (tw + gap), top - tbh2, l + pad + (F32)i * (tw + gap) + tw, top, (EHit)(H_STAB_0 + i), names[i], mStationTab == i, tips[i], u);
+        top -= tbh2 + 10.f * u;
+    }
+    // the actions: SELL on the market, CLOSE apart from LAUNCH (the primary, bottom right) on every tab
+    const F32 bh = 60.f * u, bb = b + pad;
+    const WolfStarfold::ShipInfo* flies = nullptr;
+    for (const WolfStarfold::ShipInfo& c : st.mFleet) if (c.mActive) flies = &c;
+    button(r - pad - 200.f * u, bb, r - pad, bb + bh, H_STATION_LAUNCH, "LAUNCH", false,
+           std::string("Leave the station in your ") + (flies ? flies->mTitle : std::string("Cub")), u, true);
+    button(r - pad - 200.f * u - 160.f * u, bb, r - pad - 220.f * u, bb + bh, H_STATION_CLOSE, "CLOSE", false,
+           "Close this window (you stay docked)", u);
+    // the region's answer to a rename or a ship order (k=msg), kept above the buttons until the next one
+    const F32 apx = 16.f * u, ab = bb + bh + 12.f * u, at = ab + apx * 2.2f;
+    if (!sf.stationAnswer().empty())
+    {
+        rectF(l + pad, ab, r - pad, at, LLColor4(0.18f, 0.12f, 0.02f, 0.92f));
+        frameW(l + pad, ab, r - pad, at, llmax(1.f, 1.5f * u), C_AMBER);
+        T(l + pad + 12.f * u, (ab + at) * 0.5f, fit(sf.stationAnswer(), apx, true, w - 2.f * pad - 24.f * u), apx, C_AMBER, true, LLFontGL::LEFT);
+    }
+    if (ships)
+    {
+        drawShips(l + pad, at + 8.f * u, r - pad, top, u);
+        return;
+    }
     // the market: ore, in store, price, value (numbers right-aligned so they stack: ui-ux-design typography)
     const F32 c1 = l + pad, c2 = l + w * 0.55f, c3 = l + w * 0.72f, c4 = r - pad;
-    F32 y = rb - 62.f * u;
+    F32 y = top - 26.f * u;
     T(c1, y, "MARKET", 16.f * u, C_DIM, true, LLFontGL::LEFT);
     T(c2, y, "IN STORE", 14.f * u, C_DIM, true, LLFontGL::RIGHT);
     T(c3, y, "PRICE", 14.f * u, C_DIM, true, LLFontGL::RIGHT);
@@ -1085,21 +1123,9 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
         const F32 sbh = llmax(52.f * u, 44.f);
         button(c4 - 200.f * u, y - sbh * 0.5f, c4, y + sbh * 0.5f, H_BASE_OPEN, "STARBASE", false, "Your starbase: found it, build on it, go home", u);
     }
-    // the actions: SELL (only with something to sell), CLOSE apart from LAUNCH (the primary, bottom right)
-    const F32 bh = 60.f * u, bb = b + pad;
+    // SELL (only with something to sell)
     button(l + pad, bb, l + pad + 260.f * u, bb + bh, H_SELL, total > 0 ? "SELL ALL ORE (" + thousands(total) + ")" : "SELL ALL ORE",
            false, total > 0 ? "Sell everything in store at these prices" : "You have no ore in store", u);
-    button(r - pad - 200.f * u, bb, r - pad, bb + bh, H_STATION_LAUNCH, "LAUNCH", false, "Leave the station in your Cub", u, true);
-    button(r - pad - 200.f * u - 160.f * u, bb, r - pad - 220.f * u, bb + bh, H_STATION_CLOSE, "CLOSE", false,
-           "Close this window (you stay docked)", u);
-    // [WOLFTREK v11] the region's answer to a rename (k=msg), kept above the buttons until the next rename
-    if (!sf.stationAnswer().empty())
-    {
-        const F32 px = 16.f * u, ab = bb + bh + 12.f * u, at = ab + px * 2.2f;
-        rectF(l + pad, ab, r - pad, at, LLColor4(0.18f, 0.12f, 0.02f, 0.92f));
-        frameW(l + pad, ab, r - pad, at, llmax(1.f, 1.5f * u), C_AMBER);
-        T(l + pad + 12.f * u, (ab + at) * 0.5f, fit(sf.stationAnswer(), px, true, w - 2.f * pad - 24.f * u), px, C_AMBER, true, LLFontGL::LEFT);
-    }
 }
 
 void WolfStarfoldDeck::drawGuide(F32 above, F32 W, F32 H, F32 u)
@@ -2118,6 +2144,7 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
                 break;
             }
             if (id >= H_BASE_CLOSE && id <= H_BASE_GHOST_LAST) { pressBase(id); break; }
+            if (id >= H_STAB_0 && id <= H_SHIP_PAGE_NEXT) { pressShip(id); break; }
             if (id >= H_ALIEN_0 && id <= H_ALIEN_LAST)
             {
                 const size_t i = (size_t)(id - H_ALIEN_0);
@@ -2398,4 +2425,260 @@ bool WolfStarfoldDeck::handleUnicodeCharHere(llwchar uni_char)
     mEditText = wstring_to_utf8str(w);
     mEditError.clear();
     return true;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// [WOLFTREK v11 stage B 2026-11-25] the Shipyard and the Hangar
+// Source: design.html#fleet ("In the Station window's new Hangar tab you choose which one you fly next, and the Shipyard tab shows
+// each ship with a turntable picture, its stats as bars with numbers, and Buy. A ship bought is never lost"); the wording, the card
+// states and the bars as WolfStorm 9fbd3d4 (js/world/wolf_starfold.js shipCards / buyConfirmText, js/ui/starfold/wolf_starfold_hud.js
+// _ships): BUY asks first ("Buy the Warden for 12,000 Starmarks?", NO where BUY was), "You need N more Starmarks", FLY THIS SHIP,
+// "You fly this next"; the bars are fractions of the fleet's best, each with its number (never the bar alone).
+// Who and what (ui-ux-design): a resident of 35 to 65 who has mined for a few evenings wants a faster or tougher ship; the flow
+// SHIPYARD -> a card -> BUY -> YES, BUY IT -> (the region's answer stays in the window) -> LAUNCH flies it. Every target 44 px or more.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+namespace
+{
+    // Each class's picture: our own simple top view, nose up, in a 100 x 100 box with y down - the same shapes WolfStorm draws
+    // (wolf_starfold_hud.js SILHOUETTE: the Cub a round-nosed capsule with small tail fins, the Lurcher a lean dart with swept wings,
+    // the Runner long and slim with twin long engines, the Haulbear blunt and boxy with cargo pods, the Warden a broad armoured hull
+    // with three gun mounts). No copied art; an unknown class gets a plain arrowhead.
+    void drawShipPicture(const std::string& id, F32 x0, F32 y0, F32 size, bool active, F32 u)
+    {
+        const LLColor4 fill(0.086f, 0.196f, 0.310f, 1.f);                                  // #16324f
+        const LLColor4 edge = active ? LLColor4(0.46f, 1.f, 0.62f, 1.f) : LLColor4(0.31f, 0.89f, 1.f, 1.f);   // #75ff9e / #4fe3ff
+        const F32 k = size / 100.f, lw = llmax(1.5f, 2.5f * k);
+        auto X = [&](F32 px) { return x0 + px * k; };
+        auto Y = [&](F32 py) { return y0 + size - py * k; };
+        auto poly = [&](std::initializer_list<F32> xy, F32 cx, F32 cy)
+        {
+            std::vector<F32> v(xy);
+            const size_t n = v.size() / 2;
+            noTex();
+            gGL.begin(LLRender::TRIANGLES);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const size_t j = (i + 1) % n;
+                vtx(X(cx), Y(cy), fill); vtx(X(v[2 * i]), Y(v[2 * i + 1]), fill); vtx(X(v[2 * j]), Y(v[2 * j + 1]), fill);
+            }
+            gGL.end();
+            for (size_t i = 0; i < n; ++i)
+            {
+                const size_t j = (i + 1) % n;
+                lineW(X(v[2 * i]), Y(v[2 * i + 1]), X(v[2 * j]), Y(v[2 * j + 1]), lw, edge);
+            }
+        };
+        auto box = [&](F32 x, F32 y, F32 w, F32 h) { poly({ x, y, x + w, y, x + w, y + h, x, y + h }, x + w * 0.5f, y + h * 0.5f); };
+        auto oval = [&](F32 cx, F32 cy, F32 rx, F32 ry) { ellipseF(X(cx), Y(cy), rx * k, ry * k, fill); ellipseLine(X(cx), Y(cy), rx * k, ry * k, lw, edge, 40); };
+        auto glass = [&](F32 cx, F32 cy, F32 rx, F32 ry) { ellipseF(X(cx), Y(cy), rx * k, ry * k, edge, 24); };
+        auto stroke = [&](F32 ax, F32 ay, F32 bx, F32 by) { lineW(X(ax), Y(ay), X(bx), Y(by), llmax(2.f, 4.f * k), edge); };
+        if (id == "cub")
+        {
+            poly({ 36, 76, 22, 92, 38, 86 }, 32, 85); poly({ 64, 76, 78, 92, 62, 86 }, 68, 85);
+            oval(50, 52, 15, 36); glass(50, 34, 7, 7);
+        }
+        else if (id == "lurcher")
+        {
+            poly({ 50, 6, 57, 40, 90, 66, 58, 62, 56, 90, 44, 90, 42, 62, 10, 66, 43, 40 }, 50, 55);
+            glass(50, 34, 4, 9);
+        }
+        else if (id == "runner")
+        {
+            box(20, 30, 10, 56); box(70, 30, 10, 56); box(30, 52, 15, 6); box(55, 52, 15, 6); box(45, 8, 10, 84);
+            glass(50, 44, 5, 5);
+        }
+        else if (id == "haulbear")
+        {
+            box(11, 32, 18, 40); box(71, 32, 18, 40); box(31, 10, 38, 80);
+            stroke(38, 10, 36, 2); stroke(62, 10, 64, 2);
+            rectF(X(42), Y(28), X(58), Y(18), edge);
+        }
+        else if (id == "warden")
+        {
+            poly({ 50, 14, 68, 38, 92, 52, 92, 74, 70, 72, 62, 92, 38, 92, 30, 72, 8, 74, 8, 52, 32, 38 }, 50, 58);
+            stroke(50, 14, 50, 3); stroke(38, 40, 38, 20); stroke(62, 40, 62, 20);
+            glass(50, 48, 7, 9);
+        }
+        else poly({ 50, 8, 84, 90, 50, 72, 16, 90 }, 50, 60);
+        (void)u;
+    }
+
+    std::string priceText(const WolfStarfold::ShipInfo& c)
+    {
+        return c.mPrice > 0 ? thousands(c.mPrice) + " " + WolfStarfold::currency() : std::string("Free, always yours");
+    }
+}
+
+void WolfStarfoldDeck::drawShips(F32 l, F32 b, F32 r, F32 t, F32 u)
+{
+    WolfStarfold& sf = WolfStarfold::instance();
+    const WolfStarfold::Station& st = sf.station();
+    const bool hangar = mStationTab == 2;
+    mShipIds.assign(8, std::string());
+    std::vector<const WolfStarfold::ShipInfo*> list;
+    for (const WolfStarfold::ShipInfo& c : st.mFleet) if (!hangar || c.mOwned) list.push_back(&c);
+    // the fleet's best of each (the bars are fractions of it: WolfStorm shipCards), toughness = shield + armour + hull
+    F32 bSpeed = 1e-6f, bTurn = 1e-6f, bHold = 1e-6f, bTough = 1e-6f, bGuns = 1e-6f;
+    for (const WolfStarfold::ShipInfo& c : st.mFleet)
+    {
+        bSpeed = llmax(bSpeed, c.mSpeed); bTurn = llmax(bTurn, c.mTurn); bHold = llmax(bHold, c.mHold);
+        bTough = llmax(bTough, c.mShield + c.mArmour + c.mHull); bGuns = llmax(bGuns, (F32)c.mGuns);
+    }
+    const F32 w = r - l;
+    F32 y = t - 12.f * u;
+    const std::string intro = hangar ? std::string("The ships you own. Choose the one you fly next, then Launch.")
+        : "Every ship is good at one thing and weaker at another. A ship you buy is yours for good. You have " + thousands(st.mCredits) + " "
+          + WolfStarfold::currency() + ".";
+    T(l, y, fit(intro, 16.f * u, false, w), 16.f * u, C_TEXT, false, LLFontGL::LEFT);
+    y -= 22.f * u;
+    T(l, b + 10.f * u, "Toughness is shield / armour / hull.", 14.f * u, C_DIM, false, LLFontGL::LEFT);
+    const F32 rowsT = y - 4.f * u, rowsB = b + 26.f * u;
+    if (list.empty()) return;
+    const F32 minRow = llmax(84.f * u, 60.f), bh = llmax(44.f * u, 44.f);
+    S32 per = (S32)list.size();
+    if ((rowsT - rowsB) / (F32)per < minRow) per = llmax(1, (S32)((rowsT - rowsB - bh - 6.f * u) / minRow));
+    const S32 pages = llmax(1, ((S32)list.size() + per - 1) / per);
+    mShipPage = llclamp(mShipPage, 0, pages - 1);
+    F32 top = rowsT;
+    if (pages > 1)
+    {
+        T(l, top - bh * 0.5f, llformat("Ships, page %d of %d", mShipPage + 1, pages), 15.f * u, C_DIM, true, LLFontGL::LEFT);
+        button(r - 2.f * bh - 6.f * u, top - bh, r - bh - 6.f * u, top, H_SHIP_PAGE_PREV, "<", false, "The page before", u);
+        button(r - bh, top - bh, r, top, H_SHIP_PAGE_NEXT, ">", false, "The next page", u);
+        top -= bh + 6.f * u;
+    }
+    const F32 rowH = llmin((top - rowsB) / (F32)per, 120.f * u);
+    for (S32 i = 0; i < per && mShipPage * per + i < (S32)list.size(); ++i)
+    {
+        const WolfStarfold::ShipInfo& c = *list[(size_t)(mShipPage * per + i)];
+        const F32 rt = top - (F32)i * rowH, rb = rt - rowH + 6.f * u, mid = (rt + rb) * 0.5f, rh = rt - rb;
+        mShipIds[(size_t)i] = c.mId;
+        rectF(l, rb, r, rt, c.mActive ? LLColor4(0.03f, 0.12f, 0.08f, 0.85f) : LLColor4(0.03f, 0.07f, 0.16f, 0.75f));
+        if (c.mActive) frameW(l, rb, r, rt, llmax(2.f, 2.f * u), C_GREEN);
+        // the picture
+        const F32 pic = llmin(rh - 10.f * u, 96.f * u);
+        drawShipPicture(c.mId, l + 8.f * u, mid - pic * 0.5f, pic, c.mActive, u);
+        // name (YOURS beside it), role, price
+        const F32 tx = l + 16.f * u + pic, tw = 250.f * u, ls = llmin(1.f, rh / (90.f * u));
+        const std::string title = upper(c.mTitle);
+        T(tx, mid + 24.f * u * ls, fit(title, 20.f * u, true, tw), 20.f * u, c.mActive ? C_GREEN : C_TEXT, true, LLFontGL::LEFT);
+        if (c.mOwned)
+        {
+            const F32 bx = tx + llmin(textW(title, 20.f * u, true), tw) + 12.f * u, bw2 = textW("YOURS", 12.f * u, true) + 18.f * u, by = mid + 24.f * u * ls;
+            pillLine(bx, by - 11.f * u, bx + bw2, by + 11.f * u, llmax(1.5f, 2.f * u), C_GREEN);
+            T(bx + bw2 * 0.5f, by, "YOURS", 12.f * u, C_GREEN, true);
+        }
+        T(tx, mid, fit(c.mRole, 13.f * u, false, tw + 40.f * u), 13.f * u, C_DIM, false, LLFontGL::LEFT);
+        T(tx, mid - 24.f * u * ls, priceText(c), 15.f * u, C_AMBER, true, LLFontGL::LEFT);
+        // the action column on the right, the stats between
+        const F32 aw = 240.f * u, al = r - 8.f * u - aw, ar = r - 8.f * u;
+        const F32 sx0 = tx + tw + 50.f * u, sx1 = al - 16.f * u, cw = llmax((sx1 - sx0) * 0.5f - 10.f * u, 60.f * u);
+        const bool asking = mBuyAsk == c.mId && !c.mOwned;
+        if (asking)
+        {
+            // the plain question in the stats' place (design: a plain "Are you sure?"), NO where BUY was
+            rectF(sx0 - 8.f * u, mid - 26.f * u, sx1, mid + 26.f * u, LLColor4(0.18f, 0.12f, 0.02f, 0.95f));
+            frameW(sx0 - 8.f * u, mid - 26.f * u, sx1, mid + 26.f * u, llmax(1.5f, 2.f * u), C_AMBER);
+            T(sx0 + 4.f * u, mid, fit("Buy the " + c.mTitle + " for " + thousands(c.mPrice) + " " + WolfStarfold::currency() + "?", 17.f * u, true, sx1 - sx0 - 16.f * u),
+              17.f * u, C_AMBER, true, LLFontGL::LEFT);
+            const F32 half = (aw - 8.f * u) * 0.5f;
+            button(al, mid - bh * 0.5f, al + half, mid + bh * 0.5f, (EHit)(H_SHIP_YES_0 + i), "YES, BUY IT", false,
+                   "Buy the " + c.mTitle + " now", u, true);
+            button(ar - half, mid - bh * 0.5f, ar, mid + bh * 0.5f, (EHit)(H_SHIP_NO_0 + i), "NO", true, "Do not buy it", u);
+        }
+        else
+        {
+            struct Stat { const char* name; F32 frac; std::string num; };
+            const Stat col1[3] = { { "Speed", c.mSpeed / bSpeed, llformat("%d m/s", (S32)llround(c.mSpeed)) },
+                                   { "Turn", c.mTurn / bTurn, llformat("%d deg/s", (S32)llround(c.mTurn)) },
+                                   { "Hold", c.mHold / bHold, llformat("%d", (S32)llround(c.mHold)) } };
+            const Stat col2[3] = { { "Toughness", (c.mShield + c.mArmour + c.mHull) / bTough,
+                                     llformat("%d / %d / %d", (S32)llround(c.mShield), (S32)llround(c.mArmour), (S32)llround(c.mHull)) },
+                                   { "Guns", (F32)c.mGuns / bGuns, llformat("%d", c.mGuns) },
+                                   { "Pad", -1.f, c.mPad >= 22.f ? std::string("Large pad") : std::string("Medium pad") } };   // SpaceRules.cs PAD_LARGE_M 22
+            for (S32 colN = 0; colN < 2; ++colN)
+            {
+                const F32 cx0 = sx0 + (F32)colN * (cw + 20.f * u), cx1 = cx0 + cw;
+                const Stat* sc = colN == 0 ? col1 : col2;
+                for (S32 k = 0; k < 3; ++k)
+                {
+                    const F32 ly = mid + (F32)(1 - k) * 22.f * u * ls;
+                    T(cx0, ly, sc[k].name, 13.f * u, C_DIM, false, LLFontGL::LEFT);
+                    const F32 bl = cx0 + 84.f * u, br = cx1 - 100.f * u;
+                    if (sc[k].frac >= 0.f && br - bl > 8.f * u)
+                    {
+                        rectF(bl, ly - 5.f * u, br, ly + 5.f * u, LLColor4(0.086f, 0.196f, 0.310f, 1.f));
+                        rectF(bl, ly - 5.f * u, bl + (br - bl) * llclamp(sc[k].frac, 0.f, 1.f), ly + 5.f * u, C_CYAN);
+                    }
+                    T(cx1, ly, sc[k].num, 13.f * u, C_TEXT, true, LLFontGL::RIGHT);
+                }
+            }
+            if (c.mActive) T((al + ar) * 0.5f, mid, "YOU FLY THIS NEXT", 16.f * u, C_GREEN, true);
+            else if (c.mOwned)
+                button(al, mid - bh * 0.5f, ar, mid + bh * 0.5f, (EHit)(H_SHIP_USE_0 + i), "FLY THIS SHIP", false,
+                       "Fly the " + c.mTitle + " next (then press Launch)", u, true);
+            else
+            {
+                const bool shortOf = st.mCredits < c.mPrice;
+                F32 by = mid;
+                if (shortOf)
+                {
+                    by = mid - 8.f * u;
+                    T((al + ar) * 0.5f, by + bh * 0.5f + 10.f * u, fit("You need " + thousands(c.mPrice - st.mCredits) + " more " + WolfStarfold::currency() + ".",
+                      12.f * u, true, aw), 12.f * u, C_AMBER, true);
+                }
+                button(al, by - bh * 0.5f, ar, by + bh * 0.5f, (EHit)(H_SHIP_BUY_0 + i), "BUY", false,
+                       "Buy the " + c.mTitle + " for " + priceText(c), u);
+            }
+        }
+    }
+}
+
+void WolfStarfoldDeck::pressShip(EHit id)
+{
+    WolfStarfold& sf = WolfStarfold::instance();
+    if (id >= H_STAB_0 && id <= H_STAB_LAST)
+    {
+        mStationTab = (S32)(id - H_STAB_0);
+        mBuyAsk.clear();
+        mShipPage = 0;
+        return;
+    }
+    if (id == H_SHIP_PAGE_PREV) { mShipPage = llmax(0, mShipPage - 1); mBuyAsk.clear(); return; }
+    if (id == H_SHIP_PAGE_NEXT) { ++mShipPage; mBuyAsk.clear(); return; }   // clamped when drawn
+    auto slotOf = [&](S32 first) { const size_t i = (size_t)(id - first); return i < mShipIds.size() ? mShipIds[i] : std::string(); };
+    auto find = [&](const std::string& cid) -> const WolfStarfold::ShipInfo*
+    {
+        for (const WolfStarfold::ShipInfo& c : sf.station().mFleet) if (c.mId == cid) return &c;
+        return nullptr;
+    };
+    if (id >= H_SHIP_BUY_0 && id <= H_SHIP_BUY_LAST)
+    {
+        const WolfStarfold::ShipInfo* c = find(slotOf(H_SHIP_BUY_0));
+        if (!c) return;
+        if (sf.station().mCredits < c->mPrice)
+        {
+            // said and kept in the window (WolfStorm's words), never only a sound or a greyed button
+            sf.stationSay("You need " + thousands(c->mPrice - sf.station().mCredits) + " more " + WolfStarfold::currency() + " for a " + c->mTitle
+                          + ". A full hold of ore sells for 200 to 600 at the station.");
+            return;
+        }
+        mBuyAsk = c->mId;
+        return;
+    }
+    if (id >= H_SHIP_NO_0 && id <= H_SHIP_NO_LAST) { mBuyAsk.clear(); return; }
+    if (id >= H_SHIP_YES_0 && id <= H_SHIP_YES_LAST)
+    {
+        const std::string cid = slotOf(H_SHIP_YES_0);
+        if (cid.empty() || cid != mBuyAsk) return;
+        mBuyAsk.clear();
+        sf.buyShip(cid);
+        return;
+    }
+    if (id >= H_SHIP_USE_0 && id <= H_SHIP_USE_LAST)
+    {
+        const std::string cid = slotOf(H_SHIP_USE_0);
+        if (!cid.empty()) sf.useShip(cid);
+    }
 }

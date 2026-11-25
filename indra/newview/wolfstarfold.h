@@ -112,6 +112,16 @@ public:
         std::string mSeq;
     };
     struct Ore { std::string mId, mTitle; S32 mPrice = 0; F32 mHeld = 0.f; };
+    /** [WOLFTREK v11 stage B] One class of the fleet as k=docked lists it (SpaceFleet.cs FleetArgs): fleet=<id>;<title>;<price>;<owned>;
+     *  <active>;<top speed m/s>;<turn deg/s>;<hold>;<shield>;<armour>;<hull>;<guns>;<mass>;<pad m>;<role> (the role the rest). */
+    struct ShipInfo
+    {
+        std::string mId, mTitle, mRole;
+        S64  mPrice = 0;
+        bool mOwned = false, mActive = false;
+        F32  mSpeed = 0.f, mTurn = 0.f, mHold = 0.f, mShield = 0.f, mArmour = 0.f, mHull = 0.f, mMass = 0.f, mPad = 0.f;
+        S32  mGuns = 0;
+    };
     /** k=docked (SpaceEngine.SendDocked). */
     struct Station
     {
@@ -123,6 +133,7 @@ public:
         std::string      mName;
         LLUUID           mShip;
         S32              mPad = -1;
+        std::vector<ShipInfo> mFleet;   // [WOLFTREK v11 stage B] the Shipyard's classes, in its order (none: no Shipyard here)
     };
     struct Rock { LLVector3 mPos; F32 mSize = 0.f; U8 mOre = 0; bool mLeft = true; };
     /** A beam the region said is on (k=beam on=1): its shooter, its target (or a rock), its kind ('p', 'a', 'm'). */
@@ -227,6 +238,13 @@ public:
      *  filter stays the region's. Returns the tidy name, or empty with `why` the plain reason. Any character above ASCII is left
      *  to the region (its char.IsLetterOrDigit is Unicode-wide), so this never refuses what the region would take. */
     static std::string checkName(const std::string& raw, std::string& why);
+    /** [WOLFTREK v11 stage B] The fleet the region last listed (k=docked fleet=), kept while flying for the gauges; empty when none. */
+    const std::vector<ShipInfo>& fleet() const { return mFleet; }
+    /** SF1|ship|buy=<id> / SF1|ship|use=<id> (SpaceFleet.cs ShipVerb, docked only); the answer is a k=msg, kept in the Station window. */
+    void buyShip(const std::string& id);
+    void useShip(const std::string& id);
+    /** A message of the viewer's own for the Station window's answer line (it stays until the next order or answer). */
+    void stationSay(const std::string& text) { mStationAnswer = text; }
     /** [WOLFTREK v11] The hangar view: this pilot's docked ship framed on its pad, turning slowly, until the avatar or the camera
      *  moves (design.html#bay "The camera frames your ship on its pad, as when you look at an object, and turns slowly round it
      *  until you move"). */
@@ -346,7 +364,8 @@ private:
     bool    mStationShown = true;
     Setup   mSetup;
     bool    mSetupShown = false;
-    std::string mStationAnswer;      // the region's answer to a station rename (k=msg), shown in the Station window
+    std::string mStationAnswer;      // the region's answer to a station rename or a ship order (k=msg), shown in the Station window
+    std::vector<ShipInfo> mFleet;    // [WOLFTREK v11 stage B] the last k=docked fleet= lines
     F64     mStationAskedAt = -100.0;
 
     // [WOLFTREK v11] the bay

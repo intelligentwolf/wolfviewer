@@ -307,6 +307,47 @@ namespace
         return ok;
     }
 
+    // [WOLFTREK v11 stage B] Source: SpaceFleet.cs FleetArgs - <id>;<title>;<price>;<owned 0|1>;<active 0|1>;<top speed>;<turn>;
+    // <hold>;<shield>;<armour>;<hull>;<guns>;<mass>;<pad m>;<role>, numbers by F() ("0.##", invariant); the role is the last field and
+    // is taken whole (the rest of the line). False when it does not read (as WolfStorm's parseFleet).
+    bool idToken(const std::string& id)
+    {
+        if (id.empty() || id.size() > 32) return false;
+        for (char c : id) if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) return false;
+        return true;
+    }
+    bool parseFleet(const std::string& v, WolfStarfold::ShipInfo& out)
+    {
+        const std::vector<std::string> f = split(v, ';');
+        if (f.size() < 15 || !idToken(f[0])) return false;
+        if (f[2].empty() || f[2].size() > 12 || f[2].find_first_not_of("0123456789") != std::string::npos) return false;
+        if ((f[3] != "0" && f[3] != "1") || (f[4] != "0" && f[4] != "1")) return false;
+        F32 n[9];
+        for (size_t i = 0; i < 9; ++i)
+        {
+            char* end = nullptr;
+            n[i] = strtof(f[5 + i].c_str(), &end);
+            if (end == f[5 + i].c_str() || *end != 0 || !std::isfinite(n[i]) || n[i] < 0.f) return false;
+        }
+        out.mId = f[0];
+        out.mTitle = clean(f[1]).substr(0, 32);
+        if (out.mTitle.empty()) out.mTitle = out.mId;
+        out.mPrice = (S64)strtoll(f[2].c_str(), nullptr, 10);
+        out.mOwned = f[3] == "1";
+        out.mActive = f[4] == "1";
+        out.mSpeed = n[0]; out.mTurn = n[1]; out.mHold = n[2]; out.mShield = n[3]; out.mArmour = n[4]; out.mHull = n[5];
+        out.mGuns = (S32)llround(n[6]); out.mMass = n[7]; out.mPad = n[8];
+        std::string role = f[14];
+        for (size_t i = 15; i < f.size(); ++i) role += ";" + f[i];
+        out.mRole = clean(role).substr(0, 80);
+        return true;
+    }
+    const WolfStarfold::ShipInfo* fleetClass(const std::vector<WolfStarfold::ShipInfo>& fleet, const std::string& id, const std::string& title)
+    {
+        for (const WolfStarfold::ShipInfo& c : fleet) if ((!id.empty() && c.mId == id) || (id.empty() && !title.empty() && c.mTitle == title)) return &c;
+        return nullptr;
+    }
+
     // Source: wolfair.cpp WolfAirHandler - the region's GenericMessage. Read on any Wolf region underfoot (what is DRAWN
     // follows the region: WolfGrid::showsWolfRegion, Paul 24 Nov "Hypergrid visitors see the sky").
     class WolfStarfoldHandler : public LLDispatchHandler
@@ -822,10 +863,22 @@ void WolfStarfold::parseStatus(const std::vector<std::pair<std::string, std::str
         s.mAliens.push_back(alRaw[i]);
         if (pos) s.mAlienPos.push_back(at);
     }
-    // The class's full figures (SpaceRules.Cub: Shield 100, Armour 100, Hull 100): stage 1 has only the Cub.
-    s.mShieldMax = llmax(100.f, s.mShield);
-    s.mArmourMax = llmax(100.f, s.mArmour);
-    s.mHullMax = llmax(100.f, s.mHull);
+    // [WOLFTREK v11 stage B] the class flown's full figures: the docked fleet= line for cid= (the region's own numbers), else the
+    // class table below by cid= or cls=, else as stage 1 (the Cub's 100s); never below what the ship has now
+    F32 fs = 100.f, fa = 100.f, fh = 100.f;
+    if (const ShipInfo* fi = fleetClass(mFleet, s.mClassId, s.mClass)) { fs = fi->mShield; fa = fi->mArmour; fh = fi->mHull; }
+    else
+    {
+        // Source: wolf-space SpaceRules.cs:56-101 Cub / Lurcher / Runner / Haulbear / Warden (Shield, Armour, Hull)
+        static const struct { const char* id; const char* title; F32 sh, ar, hu; } TABLE[] = {
+            { "cub", "Cub", 100.f, 100.f, 100.f }, { "lurcher", "Lurcher", 90.f, 70.f, 80.f }, { "runner", "Runner", 110.f, 60.f, 90.f },
+            { "haulbear", "Haulbear", 120.f, 200.f, 180.f }, { "warden", "Warden", 180.f, 220.f, 200.f } };
+        for (const auto& c : TABLE)
+            if (s.mClassId == c.id || (s.mClassId.empty() && s.mClass == c.title)) { fs = c.sh; fa = c.ar; fh = c.hu; break; }
+    }
+    s.mShieldMax = llmax(fs, s.mShield);
+    s.mArmourMax = llmax(fa, s.mArmour);
+    s.mHullMax = llmax(fh, s.mHull);
     const bool first = !mPiloting;
     const bool wasAuto = !first && !mShip.mSeq.empty();
     mShip = s;
@@ -919,6 +972,13 @@ void WolfStarfold::parseDocked(const std::vector<std::pair<std::string, std::str
         else if (p.first == "sn") st.mName = clean(p.second).substr(0, 40);
         else if (p.first == "ship") st.mShip.set(p.second, false);
         else if (p.first == "pad") st.mPad = (S32)num(p.second, -1.f);
+        else if (p.first == "fleet")
+        {
+            ShipInfo c;
+            if (parseFleet(p.second, c) && st.mFleet.size() < 16
+                && std::none_of(st.mFleet.begin(), st.mFleet.end(), [&](const ShipInfo& x) { return x.mId == c.mId; }))
+                st.mFleet.push_back(c);
+        }
         else if (p.first == "ore")
         {
             const std::vector<std::string> f = split(p.second, ';');
@@ -935,6 +995,7 @@ void WolfStarfold::parseDocked(const std::vector<std::pair<std::string, std::str
     }
     const bool fresh = !mStation.mDocked;
     mStation = st;
+    if (!st.mFleet.empty()) mFleet = st.mFleet;   // kept while flying (the gauges)
     if (fresh)
     {
         mStationShown = true;
@@ -1031,6 +1092,7 @@ void WolfStarfold::resetRegion()
     mSetup = Setup();
     mSetupShown = false;
     mStationAnswer.clear();
+    mFleet.clear();
     mBayPad = -1;
     if (mHangarOn || mHangarWaitUntil > 0.0) endHangar("a new region");
     mHangarDoneFor.setNull();
@@ -1475,6 +1537,23 @@ void WolfStarfold::renameStation(const std::string& name)
     mStationAnswer = "Renaming your station...";
     mStationAskedAt = now();
     say("name|station=" + tidy);
+}
+
+void WolfStarfold::buyShip(const std::string& id)
+{
+    // Source: SpaceFleet.cs ShipVerb - docked at a station (or a starbase); the answer is a k=msg (Refuse / Say), then a fresh k=docked
+    if (!mStation.mDocked || !idToken(id)) return;
+    mStationAnswer = "Asking the shipyard...";
+    mStationAskedAt = now();
+    say("ship|buy=" + id);
+}
+
+void WolfStarfold::useShip(const std::string& id)
+{
+    if (!mStation.mDocked || !idToken(id)) return;
+    mStationAnswer = "Asking the shipyard...";
+    mStationAskedAt = now();
+    say("ship|use=" + id);
 }
 
 // static

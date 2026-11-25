@@ -99,6 +99,13 @@ public:
         H_RADAR_BASE_0, H_RADAR_BASE_LAST = H_RADAR_BASE_0 + 23,  // a starbase on the radar (BaseRules.CAP_MAX 24)
         // [WOLFTREK v11 2026-11-25] the automatic approach's STOP, and renaming the station and the starbase
         H_BANNER_STOP, H_STATION_RENAME, H_BASE_RENAME, H_NAME_FIELD, H_NAME_SAVE, H_NAME_CANCEL,
+        // [WOLFTREK v11 stage B] the Station window's tabs and its ship cards (SpaceRules.Fleet: 5 classes; room for 8)
+        H_STAB_0, H_STAB_LAST = H_STAB_0 + 2,
+        H_SHIP_BUY_0, H_SHIP_BUY_LAST = H_SHIP_BUY_0 + 7,
+        H_SHIP_USE_0, H_SHIP_USE_LAST = H_SHIP_USE_0 + 7,
+        H_SHIP_NO_0, H_SHIP_NO_LAST = H_SHIP_NO_0 + 7,
+        H_SHIP_YES_0, H_SHIP_YES_LAST = H_SHIP_YES_0 + 7,
+        H_SHIP_PAGE_PREV, H_SHIP_PAGE_NEXT,
     };
 
 private:
@@ -172,6 +179,14 @@ private:
     void cancelEdit();
     /** The field with SAVE and CANCEL across l..r, b..t. */
     void drawEditRow(F32 l, F32 b, F32 r, F32 t, F32 u);
+
+    // [WOLFTREK v11 stage B] the Shipyard and the Hangar (design.html#fleet; as WolfStorm 9fbd3d4 wolf_starfold_hud.js _ships)
+    S32 mStationTab = 0;                 // 0 MARKET, 1 SHIPYARD, 2 HANGAR
+    std::string mBuyAsk;                 // the class whose "Buy the ... for ...?" is showing
+    std::vector<std::string> mShipIds;   // the classes the cards' buttons act on this frame (by slot)
+    S32 mShipPage = 0;
+    void drawShips(F32 l, F32 b, F32 r, F32 t, F32 u);
+    void pressShip(EHit id);
 };
 
 #endif // WOLF_STARFOLDDECK_H

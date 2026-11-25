@@ -1510,7 +1510,9 @@ void WolfStarfold::setupClear()
 void WolfStarfold::stopApproach()
 {
     // Source: SpaceEngine.OnChat - during a Seq only "leave" and, while it is an approach (Seq.In), fly|to=stop (CancelSeq) act
-    if (automaticIn()) say("fly|to=stop");
+    if (!automaticIn()) return;
+    say("fly|to=stop");
+    LL_INFOS("WolfStarfold") << "STOP: sent fly|to=stop during the automatic approach" << LL_ENDL;   // for a rig
 }
 
 const std::string& WolfStarfold::stationName() const
@@ -1661,9 +1663,12 @@ void WolfStarfold::hangarIdle()
     LLViewerObject* o = gObjectList.findObject(mHangarShip);
     if (!o || o->isDead()) { endHangar("the ship is gone"); return; }
     // the camera taken back by the viewer itself (Escape, a walk: LLAgentCamera::resetView sets the focus on the avatar), another
-    // focus (an alt-click elsewhere), mouselook: the view has ended, and the camera is the user's
-    if (gAgentCamera.getFocusOnAvatar() || gAgentCamera.cameraMouselook()
-        || (gAgentCamera.getFocusTargetGlobal() - mHangarFocus).magVec() > 1.5)
+    // focus (an alt-click on something else), mouselook: the view has ended, and the camera is the user's.
+    // [rig 25 Nov 08:27:03Z] Not the focus POINT: LLAgentCamera::calcFocusPositionTargetGlobal follows the focus object (its render
+    // position + the offset taken when the focus was set), and the ship was still settling onto its pad when the view began, so the
+    // point moved more than 1.5 m in the first frame and the view ended at once. The focus OBJECT says whose camera it is; the point
+    // is followed (mHangarFocus below).
+    if (gAgentCamera.getFocusOnAvatar() || gAgentCamera.cameraMouselook() || !hangarFocusIsShip())
     {
         mHangarOn = false;
         LL_INFOS("WolfStarfold") << "hangar view ended: the camera went elsewhere" << LL_ENDL;
@@ -1674,6 +1679,7 @@ void WolfStarfold::hangarIdle()
         | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG | AGENT_CONTROL_NUDGE_LEFT_POS
         | AGENT_CONTROL_NUDGE_LEFT_NEG | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_NUDGE_UP_NEG | AGENT_CONTROL_TURN_LEFT | AGENT_CONTROL_TURN_RIGHT;
     if (gAgent.getControlFlags() & MOVING) { endHangar("the avatar moved"); return; }
+    mHangarFocus = gAgentCamera.getFocusTargetGlobal();   // the ship's middle as the camera follows it
     const LLVector3d off = gAgentCamera.getCameraPositionGlobal() - mHangarFocus;
     const F32 dist = (F32)off.magVec();
     if (dist < 0.01f) return;
@@ -1709,6 +1715,15 @@ void WolfStarfold::hangarIdle()
     mHangarAz += step;
 }
 
+bool WolfStarfold::hangarFocusIsShip() const
+{
+    // the camera's focus object is the framed ship (setCameraPosAndFocusGlobal takes its root: beginHangarCamera)
+    LLViewerObject* fo = gAgentCamera.getFocusObject();
+    if (!fo || fo->isDead()) return false;
+    LLViewerObject* root = fo->getRootEdit();
+    return (root ? root : fo)->getID() == mHangarShip;
+}
+
 void WolfStarfold::endHangar(const char* why)
 {
     const bool wasOn = mHangarOn;
@@ -1717,7 +1732,7 @@ void WolfStarfold::endHangar(const char* why)
     if (!wasOn) return;
     // the camera is still the view's (nothing else took it): it goes back to the avatar, as a walk would take it
     // (LLAgentCamera::resetView: setFocusOnAvatar(true, ANIMATE))
-    if (!gAgentCamera.getFocusOnAvatar() && (gAgentCamera.getFocusTargetGlobal() - mHangarFocus).magVec() <= 1.5)
+    if (!gAgentCamera.getFocusOnAvatar() && hangarFocusIsShip())
     {
         static LLCachedControl<bool> reset_on_move(gSavedSettings, "FSResetCameraOnMovement", true);
         // a walk with "reset the camera on movement" off keeps the camera where it is (the resident's own setting); anything

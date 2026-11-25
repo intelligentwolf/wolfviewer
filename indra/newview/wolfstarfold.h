@@ -310,6 +310,7 @@ private:
     void beginHangarCamera();
     void hangarIdle();
     void endHangar(const char* why);
+    bool hangarFocusIsShip() const;
     void releaseKeys();
     void makeBelt();
     void addNote(const std::string& text);

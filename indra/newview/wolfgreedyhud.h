@@ -62,6 +62,9 @@ public:
     bool handleDoubleClick(S32 x, S32 y, MASK mask) override;
     bool handleToolTip(S32 x, S32 y, MASK mask) override;
     void onMouseCaptureLost() override;
+    /** [HUD KIT 2026-11-25] For LEAP rigs (UI call WolfHudKit.Hits "greedy"): this frame's press targets in window GL pixels with
+     *  their names, sizes and tips, in the form scripts/wolf/hudkit/check_inventory.py --log reads (as WolfDashboard). */
+    static void logHits();
 
     enum EHit { H_NONE = 0, H_ROLL, H_BANK, H_NEW, H_PRACTICE, H_JOIN, H_LEAVE, H_PASS, H_HELP, H_WINDOW, H_PANEL, H_LESS,
                 H_CLOSE, H_DICE, H_SETUP };   // [GREEDY TABLE HERE 2026-11-11/] H_SETUP: "Put a Greedy table here"
@@ -81,6 +84,7 @@ private:
     S32 mPressed = H_NONE;
     bool mOtherWasUp = false;           // [review] another bottom panel was showing last frame (WolfGreedyGame::vehiclePanelUp)
 
+    static const char* hitName(EHit id, S32& offset);   // [HUD KIT 2026-11-25/] logHits: a ranged id is its first + offset
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;
     bool onPanel(S32 x, S32 y) const;

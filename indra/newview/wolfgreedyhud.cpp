@@ -38,6 +38,7 @@
 #include "wolffloatergreedy.h"
 #include "wolfgrid.h"
 #include "wolfhudkit.h"
+#include "llviewerwindow.h"   // [HUD KIT 2026-11-25/] gViewerWindow->getDisplayScale (logHits)
 
 static LLDefaultChildRegistry::Register<WolfGreedyHud> r_wolf_greedy_hud("wolf_greedy_hud");
 
@@ -418,8 +419,68 @@ namespace
     }
 }
 
-WolfGreedyHud::WolfGreedyHud(const Params& p) : LLUICtrl(p) {}
-WolfGreedyHud::~WolfGreedyHud() {}
+namespace
+{
+    WolfGreedyHud* sWolfGreedyHudView = nullptr;   // [HUD KIT 2026-11-25] for logHits; the one view (main_view.xml)
+}
+
+WolfGreedyHud::WolfGreedyHud(const Params& p)
+:   LLUICtrl(p)
+{
+    sWolfGreedyHudView = this;
+}
+
+WolfGreedyHud::~WolfGreedyHud()
+{
+    if (sWolfGreedyHudView == this) sWolfGreedyHudView = nullptr;
+}
+
+// [HUD KIT 2026-11-25] the hit ids by name, for logHits (as in the header's EHit); a ranged id is its first with the offset
+const char* WolfGreedyHud::hitName(EHit id, S32& offset)
+{
+    offset = 0;
+
+    switch (id)
+    {
+    case H_NONE: return "H_NONE";
+    case H_ROLL: return "H_ROLL";
+    case H_BANK: return "H_BANK";
+    case H_NEW: return "H_NEW";
+    case H_PRACTICE: return "H_PRACTICE";
+    case H_JOIN: return "H_JOIN";
+    case H_LEAVE: return "H_LEAVE";
+    case H_PASS: return "H_PASS";
+    case H_HELP: return "H_HELP";
+    case H_WINDOW: return "H_WINDOW";
+    case H_PANEL: return "H_PANEL";
+    case H_LESS: return "H_LESS";
+    case H_CLOSE: return "H_CLOSE";
+    case H_DICE: return "H_DICE";
+    case H_SETUP: return "H_SETUP";
+    default: return "H_UNKNOWN";
+    }
+}
+
+void WolfGreedyHud::logHits()
+{
+    if (!sWolfGreedyHudView) { LL_INFOS("WolfHudKit") << "hits greedy: not shown" << LL_ENDL; return; }
+    // Source: wolftraincab.cpp WolfTrainCabView::logHits - view-local UI units to window GL pixels (localPointToScreen, then the
+    // display scale). The hits are in picture units: x mHitScale (hitAt).
+    const WolfGreedyHud* v = sWolfGreedyHudView;
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    const F32 k = v->mHitScale;
+    LL_INFOS("WolfHudKit") << "hits greedy: " << v->mHits.size() << " (display scale " << scale.mV[VX] << ", zoom " << k << ")" << LL_ENDL;
+    for (const Hit& h : v->mHits)
+    {
+        S32 sx = 0, sy = 0, off = 0;
+        const char* name = hitName(h.mId, off);
+        v->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f * k), ll_round((h.mB + h.mT) * 0.5f * k), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit greedy " << name << (off ? llformat("+%d", off) : std::string()) << " gl "
+                               << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY]) << " size "
+                               << ll_round((h.mR - h.mL) * k * scale.mV[VX]) << "," << ll_round((h.mT - h.mB) * k * scale.mV[VY])
+                               << " tip " << h.mTip << LL_ENDL;
+    }
+}
 
 void WolfGreedyHud::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip)
 {

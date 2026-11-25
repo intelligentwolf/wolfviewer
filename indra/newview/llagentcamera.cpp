@@ -57,6 +57,7 @@
 // [/RLVa:KB]
 #include "fscommon.h"
 #include "wolfcamerafx.h"   // <WolfViewer 2026-10-10/>
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-25/] the ship's chase camera turns its up with the ship
 #include "wolfadaptivedrawdistance.h"   // [TRACK PICK 2026-11-18/] userDrawDistance
 #include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels: the camera in a tunnel
 #include "lltrans.h"
@@ -1348,6 +1349,17 @@ void LLAgentCamera::updateCamera()
         {
             setSitCamera(LLUUID::null);
         }
+    }
+    // [STARFOLD 2026-11-25] Paul: the Cub's camera tilts with the ship. The ship's own sit camera (wolf-space cub.xml root
+    // CameraEyeOffset / CameraAtOffset) already turns with it (the sit camera below: object position + offset * object rotation);
+    // its "up" turns with it too while the resident pilots a Starfold ship, so a steep climb, dive or a roll keeps the horizon
+    // as the pilot sees it instead of the camera spinning round the world's up as the view nears vertical. Only for the ship
+    // the region seated this pilot in (WolfStarfold::ship().mRoot), never for any other seat.
+    if (mSitCameraEnabled && mSitCameraReferenceObject.notNull() && !mSitCameraReferenceObject->isDead() && mFocusOnAvatar
+        && camera_mode == CAMERA_MODE_THIRD_PERSON && isAgentAvatarValid() && gAgentAvatarp->isSitting()
+        && WolfStarfold::instance().piloting() && mSitCameraReferenceObject->getID() == WolfStarfold::instance().ship().mRoot)
+    {
+        mCameraUpVector = LLVector3::z_axis * mSitCameraReferenceObject->getRenderRotation();
     }
 
     // Update UI with our camera inputs

@@ -102,6 +102,11 @@ public:
         std::vector<F32> mSurfW;   // <WolfViewer 2026-10-01/> G of mZoneTex, same layout as mZone
     };
 
+    // [T1042 SURF PHASE 2026-11-25] Water this far from land is open sea (the exposure bake's rule; WolfWaterClearance
+    // OPEN_FETCH_M is the same 150 m), and the land is "in reach" of the surf's path within SURF_PATH_LAND_REACH_M - the
+    // shader's own limit for steering by the land (waterV.glsl dist < 3000.0). KEEP IN STEP with waterV.glsl WOLF_OPEN_SEA_M.
+    static constexpr F32 OPEN_SEA_M = 150.f;
+    static constexpr F32 SURF_PATH_LAND_REACH_M = 3000.f;
     static constexpr S32 RES = 256;
     static constexpr S32 ERES = 256;
     // <WolfViewer 2026-09-21> Deep water for the surf dispersion: the depth used where no
@@ -272,6 +277,7 @@ private:
     F64 mNextCheck = 0.0;
     // Scratch, reused across bakes.
     std::vector<F32> mH, mTmp, mSm, mDist, mOpen, mDepthData, mExpoData, mZoneData;   // <WolfViewer 2026-09-20/> mOpen
+    std::vector<F32> mDistC;   // [T1042 SURF PHASE 2026-11-25/] the chamfer distance to land, for the exposure (R) only
     std::vector<F32> mEDepth, mPath;   // <WolfViewer 2026-09-21/> depth per exposure texel, and the eikonal path baked from it
     std::vector<F32> mSurfMask, mSurfTmp, mSurfGrown, mSurfW, mZoneRG;   // <WolfViewer 2026-10-01/> the surf weight bake
     std::vector<F32> mSurfScale, mScaleNum, mScaleDen, mScaleTmpN, mScaleTmpD;   // [SURF HEIGHT 2026-10-02/] the surf height bake

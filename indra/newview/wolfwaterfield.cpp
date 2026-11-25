@@ -658,6 +658,110 @@ void WolfWaterField::upload(U32& tex, S32 w, S32 h, U32 internal_format, U32 for
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
 }
 
+// [T1042 SURF PHASE 2026-11-25] Exact Euclidean distance transform of an E x E grid in place: d is 0 on the seed texels and
+// big (>= big) elsewhere; it comes back as the distance in metres to the nearest seed (texel spacing sx across, sy down), or
+// big where there is no seed at all. Felzenszwalb & Huttenlocher, "Distance Transforms of Sampled Functions", Theory of
+// Computing 8 (2012) 415-428: the 1-D lower envelope of parabolas (their algorithm DT(f)) down every column, then along
+// every row of the result. Linear in the texel count, as the chamfer sweeps it replaces.
+static void wolf_edt_1d(const F64* f, F64* out, S32 n, F64 h, std::vector<S32>& v, std::vector<F64>& z)
+{
+    const F64 INF = 1e300;
+    v.assign((size_t)n, 0);
+    z.assign((size_t)n + 1, 0.0);
+    S32 k = 0;
+    v[0] = 0;
+    z[0] = -INF;
+    z[1] = INF;
+    for (S32 q = 1; q < n; ++q)
+    {
+        const F64 xq = (F64)q * h;
+        F64 s = 0.0;
+        for (;;)
+        {
+            const F64 xv = (F64)v[k] * h;
+            s = ((f[q] + xq * xq) - (f[v[k]] + xv * xv)) / (2.0 * (xq - xv));
+            if (s <= z[k]) { --k; continue; }   // z[0] is -INF, so k never goes below 0
+            break;
+        }
+        ++k;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = INF;
+    }
+    k = 0;
+    for (S32 q = 0; q < n; ++q)
+    {
+        const F64 xq = (F64)q * h;
+        while (z[k + 1] < xq) ++k;
+        const F64 dx = xq - (F64)v[k] * h;
+        out[q] = dx * dx + f[v[k]];
+    }
+}
+
+// [T1042 SURF PHASE 2026-11-25] The 8-connected chamfer the distance-to-land bake used before wolf_edt (same two sweeps, same
+// step lengths), kept for ONE reader: the swell's exposure (R), so the swell everyone sees is not changed by the surf's
+// exact distances (Paul: keep rough seas - the exact distance is up to 8.2 % shorter, which would calm the swell near land).
+static void wolf_chamfer8(std::vector<F32>& d, S32 E, F32 etx, F32 ety)
+{
+    const F32 diag = sqrtf(etx * etx + ety * ety);
+    for (S32 j = 0; j < E; ++j)
+    {
+        const S32 row = j * E, up = row - E;
+        for (S32 i = 0; i < E; ++i)
+        {
+            F32 v = d[row + i];
+            if (i > 0 && d[row + i - 1] + etx < v) v = d[row + i - 1] + etx;
+            if (j > 0)
+            {
+                if (d[up + i] + ety < v) v = d[up + i] + ety;
+                if (i > 0 && d[up + i - 1] + diag < v) v = d[up + i - 1] + diag;
+                if (i < E - 1 && d[up + i + 1] + diag < v) v = d[up + i + 1] + diag;
+            }
+            d[row + i] = v;
+        }
+    }
+    for (S32 j = E - 1; j >= 0; --j)
+    {
+        const S32 row = j * E, dn = row + E;
+        for (S32 i = E - 1; i >= 0; --i)
+        {
+            F32 v = d[row + i];
+            if (i < E - 1 && d[row + i + 1] + etx < v) v = d[row + i + 1] + etx;
+            if (j < E - 1)
+            {
+                if (d[dn + i] + ety < v) v = d[dn + i] + ety;
+                if (i < E - 1 && d[dn + i + 1] + diag < v) v = d[dn + i + 1] + diag;
+                if (i > 0 && d[dn + i - 1] + diag < v) v = d[dn + i - 1] + diag;
+            }
+            d[row + i] = v;
+        }
+    }
+}
+
+static void wolf_edt(std::vector<F32>& d, S32 E, F32 sx, F32 sy, F32 big)
+{
+    // "no seed", in squared metres: far above any real one ((3 x 3072 m x sqrt 2)^2 ~ 2e8) yet small enough that a double
+    // still resolves the squared positions added to it; anything that large comes back as big
+    const F64 FAR_SQ = 1e20;
+    std::vector<F64> g((size_t)E * E), col((size_t)E), res((size_t)E), z;
+    std::vector<S32> v;
+    for (S32 i = 0; i < E; ++i)
+    {
+        for (S32 j = 0; j < E; ++j) col[(size_t)j] = d[(size_t)j * E + i] <= 0.f ? 0.0 : FAR_SQ;
+        wolf_edt_1d(col.data(), res.data(), E, (F64)sy, v, z);
+        for (S32 j = 0; j < E; ++j) g[(size_t)j * E + i] = res[(size_t)j];
+    }
+    for (S32 j = 0; j < E; ++j)
+    {
+        wolf_edt_1d(g.data() + (size_t)j * E, res.data(), E, (F64)sx, v, z);
+        for (S32 i = 0; i < E; ++i)
+        {
+            const F64 sq = res[(size_t)i];
+            d[(size_t)j * E + i] = sq >= 1e19 ? big : (F32)std::sqrt(sq);
+        }
+    }
+}
+
 void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
 {
     LL_PROFILE_ZONE_SCOPED;
@@ -810,38 +914,13 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
             mEDepth[j * E + i] = has ? llclamp(water_level - hh, 0.f, DEEP_REF_M) : DEEP_REF_M;
         }
     }
-    for (S32 j = 0; j < E; ++j)
-    {
-        const S32 row = j * E, up = row - E;
-        for (S32 i = 0; i < E; ++i)
-        {
-            F32 d = mDist[row + i];
-            if (i > 0 && mDist[row + i - 1] + etx < d) d = mDist[row + i - 1] + etx;
-            if (j > 0)
-            {
-                if (mDist[up + i] + ety < d) d = mDist[up + i] + ety;
-                if (i > 0 && mDist[up + i - 1] + diag < d) d = mDist[up + i - 1] + diag;
-                if (i < E - 1 && mDist[up + i + 1] + diag < d) d = mDist[up + i + 1] + diag;
-            }
-            mDist[row + i] = d;
-        }
-    }
-    for (S32 j = E - 1; j >= 0; --j)
-    {
-        const S32 row = j * E, dn = row + E;
-        for (S32 i = E - 1; i >= 0; --i)
-        {
-            F32 d = mDist[row + i];
-            if (i < E - 1 && mDist[row + i + 1] + etx < d) d = mDist[row + i + 1] + etx;
-            if (j < E - 1)
-            {
-                if (mDist[dn + i] + ety < d) d = mDist[dn + i] + ety;
-                if (i < E - 1 && mDist[dn + i + 1] + diag < d) d = mDist[dn + i + 1] + diag;
-                if (i > 0 && mDist[dn + i - 1] + diag < d) d = mDist[dn + i - 1] + diag;
-            }
-            mDist[row + i] = d;
-        }
-    }
+    // [T1042 SURF PHASE 2026-11-25] EXACT Euclidean distance for the surf (G, and the open sea and the optical path below):
+    // the 8-connected chamfer it was is up to 8.2 % long along 22.5 degrees, so its level lines - the surf's crests - were
+    // octagons round every island and headland (Indi's "blocky", ticket 1042). The chamfer is kept for the swell's exposure
+    // (R) only, mDistC: wolf_chamfer8 above.
+    mDistC = mDist;
+    wolf_chamfer8(mDistC, E, etx, ety);
+    wolf_edt(mDist, E, etx, ety, BIG);
     // <WolfViewer 2026-09-20> B = the chamfer DISTANCE FROM THE OPEN SEA (every texel 150 m or
     // more from land is sea; 0 there, growing toward the shore). The surf reads THIS for its
     // coordinate and direction: iso-lines of distance-to-land run parallel to the NEAREST
@@ -850,39 +929,8 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     // circles"). Iso-lines of distance-from-the-sea are parallel to the sea front and every
     // wave travels landward. Source: terrain_manager.js _bakeSwellExposure (same passes).
     mOpen.assign((size_t)E * E, BIG);
-    for (S32 k = 0; k < E * E; ++k) if (mDist[k] >= 150.f) mOpen[k] = 0.f;
-    for (S32 j = 0; j < E; ++j)
-    {
-        const S32 row = j * E, up = row - E;
-        for (S32 i = 0; i < E; ++i)
-        {
-            F32 d = mOpen[row + i];
-            if (i > 0 && mOpen[row + i - 1] + etx < d) d = mOpen[row + i - 1] + etx;
-            if (j > 0)
-            {
-                if (mOpen[up + i] + ety < d) d = mOpen[up + i] + ety;
-                if (i > 0 && mOpen[up + i - 1] + diag < d) d = mOpen[up + i - 1] + diag;
-                if (i < E - 1 && mOpen[up + i + 1] + diag < d) d = mOpen[up + i + 1] + diag;
-            }
-            mOpen[row + i] = d;
-        }
-    }
-    for (S32 j = E - 1; j >= 0; --j)
-    {
-        const S32 row = j * E, dn = row + E;
-        for (S32 i = E - 1; i >= 0; --i)
-        {
-            F32 d = mOpen[row + i];
-            if (i < E - 1 && mOpen[row + i + 1] + etx < d) d = mOpen[row + i + 1] + etx;
-            if (j < E - 1)
-            {
-                if (mOpen[dn + i] + ety < d) d = mOpen[dn + i] + ety;
-                if (i < E - 1 && mOpen[dn + i + 1] + diag < d) d = mOpen[dn + i + 1] + diag;
-                if (i > 0 && mOpen[dn + i - 1] + diag < d) d = mOpen[dn + i - 1] + diag;
-            }
-            mOpen[row + i] = d;
-        }
-    }
+    for (S32 k = 0; k < E * E; ++k) if (mDist[k] >= OPEN_SEA_M) mOpen[k] = 0.f;
+    wolf_edt(mOpen, E, etx, ety, BIG);   // [T1042 SURF PHASE 2026-11-25/] exact, as mDist above
     // <WolfViewer 2026-09-21> ------------------------------------------------------------
     // THE EIKONAL (OPTICAL) PATH from the open sea — what the surf train's phase is made of.
     //
@@ -928,7 +976,15 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
         for (S32 k = 0; k < E * E; ++k)
         {
             kr[k] = surfWavenumber(k0, surfDepth(mEDepth[k], mDist[k])) / k0;   // <WolfViewer 2026-10-01/> real or reef depth
-            if (mOpen[k] <= 0.f) mPath[k] = 0.f;   // seeded on the same open-sea texels as mOpen
+            // seeded on the same open-sea texels as mOpen. [T1042 SURF PHASE 2026-11-25] ...with OPEN_SEA_M minus the distance
+            // to land, not 0: the path then runs on CONTINUOUSLY over the open sea (its level lines parallel to the coast there,
+            // as the old open-sea fallback's -distance-to-land, waterV.glsl coord), so the surf's phase is ONE field from the
+            // open sea to the beach. It was 0 over all the open sea, the shader switched to the fallback where the path went
+            // flat, and the two phases disagreed by k0 x 150 m + up to 80 m on that line: crests cut off on a line (ticket
+            // 1042). Capped where land is out of reach (SURF_PATH_LAND_REACH_M), where the shader keeps its fallback as before.
+            // A seed is never lowered by the relax below: the distance is 1-Lipschitz and every step costs k/k0 >= 1 x its
+            // length.
+            if (mOpen[k] <= 0.f) mPath[k] = OPEN_SEA_M - llmin(mDist[k], SURF_PATH_LAND_REACH_M);
         }
         // Weight for a step INTO texel c from texel n: the mean of the two texels' k/k0 times the
         // step length — the trapezoid rule for the integral along that step.
@@ -937,31 +993,65 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
             const F32 w = mPath[n] + 0.5f * (kr[c] + kr[n]) * len;
             if (w < mPath[c]) mPath[c] = w;
         };
-        for (S32 j = 0; j < E; ++j)
+        // [T1042 SURF PHASE 2026-11-25] Indi's "blocky" (ticket 1042): an 8-connected step set can only follow 0, 45 and 90
+        // degrees, so the path's level lines - the surf's crests - came out as OCTAGONS round every headland and island, flat
+        // facets joined by 45-degree corners (the path up to 8.2 % too long along 22.5 degrees), and one forward + one
+        // backward sweep did not settle where k/k0 changes (the shoals). Now 16-connected (the 8 plus the eight knight moves
+        // (2, 1) / (1, 2) - the 5x5 chamfer of Borgefors 1986, "Distance transformations in digital images", CVGIP 34,
+        // 344-371, with exact Euclidean step lengths): the level lines follow 0 / 26.6 / 45 / 63.4 / 90 degrees, worst
+        // error 2.7 % at 13.3 degrees (both worst cases computed for this step set, not quoted); the knight step's k/k0 is the
+        // mean of its two ends and the two texels it passes between; and the two sweeps run twice.
+        const F32 knight_xy = sqrtf(4.f * etx * etx + ety * ety);   // (2, 1)
+        const F32 knight_yx = sqrtf(etx * etx + 4.f * ety * ety);   // (1, 2)
+        auto relax_knight = [&](S32 c, S32 n, S32 m1, S32 m2, F32 len)
         {
-            const S32 row = j * E, up = row - E;
-            for (S32 i = 0; i < E; ++i)
+            const F32 w = mPath[n] + 0.25f * (kr[c] + kr[n] + kr[m1] + kr[m2]) * len;
+            if (w < mPath[c]) mPath[c] = w;
+        };
+        for (S32 pass = 0; pass < 2; ++pass)
+        {
+            for (S32 j = 0; j < E; ++j)
             {
-                if (i > 0) relax(row + i, row + i - 1, etx);
-                if (j > 0)
+                const S32 row = j * E, up = row - E, up2 = row - 2 * E;
+                for (S32 i = 0; i < E; ++i)
                 {
-                    relax(row + i, up + i, ety);
-                    if (i > 0) relax(row + i, up + i - 1, diag);
-                    if (i < E - 1) relax(row + i, up + i + 1, diag);
+                    const S32 c = row + i;
+                    if (i > 0) relax(c, row + i - 1, etx);
+                    if (j > 0)
+                    {
+                        relax(c, up + i, ety);
+                        if (i > 0) relax(c, up + i - 1, diag);
+                        if (i < E - 1) relax(c, up + i + 1, diag);
+                        if (i > 1) relax_knight(c, up + i - 2, up + i - 1, row + i - 1, knight_xy);
+                        if (i < E - 2) relax_knight(c, up + i + 2, up + i + 1, row + i + 1, knight_xy);
+                    }
+                    if (j > 1)
+                    {
+                        if (i > 0) relax_knight(c, up2 + i - 1, up + i - 1, up + i, knight_yx);
+                        if (i < E - 1) relax_knight(c, up2 + i + 1, up + i + 1, up + i, knight_yx);
+                    }
                 }
             }
-        }
-        for (S32 j = E - 1; j >= 0; --j)
-        {
-            const S32 row = j * E, dn = row + E;
-            for (S32 i = E - 1; i >= 0; --i)
+            for (S32 j = E - 1; j >= 0; --j)
             {
-                if (i < E - 1) relax(row + i, row + i + 1, etx);
-                if (j < E - 1)
+                const S32 row = j * E, dn = row + E, dn2 = row + 2 * E;
+                for (S32 i = E - 1; i >= 0; --i)
                 {
-                    relax(row + i, dn + i, ety);
-                    if (i < E - 1) relax(row + i, dn + i + 1, diag);
-                    if (i > 0) relax(row + i, dn + i - 1, diag);
+                    const S32 c = row + i;
+                    if (i < E - 1) relax(c, row + i + 1, etx);
+                    if (j < E - 1)
+                    {
+                        relax(c, dn + i, ety);
+                        if (i < E - 1) relax(c, dn + i + 1, diag);
+                        if (i > 0) relax(c, dn + i - 1, diag);
+                        if (i < E - 2) relax_knight(c, dn + i + 2, dn + i + 1, row + i + 1, knight_xy);
+                        if (i > 1) relax_knight(c, dn + i - 2, dn + i - 1, row + i - 1, knight_xy);
+                    }
+                    if (j < E - 2)
+                    {
+                        if (i < E - 1) relax_knight(c, dn2 + i + 1, dn + i + 1, dn + i, knight_yx);
+                        if (i > 0) relax_knight(c, dn2 + i - 1, dn + i - 1, dn + i, knight_yx);
+                    }
                 }
             }
         }
@@ -1015,6 +1105,33 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
             known.swap(next);
         }
         mPath.swap(filled);
+        // [T1042 SURF PHASE 2026-11-25] One [1 2 1] x [1 2 1] pass over every texel the path reached (not those it never
+        // reached) takes out what is left of the texel grid in the level lines (where the relax meets the seeds): it leaves a
+        // linear field - a straight train of crests - exactly as it was, and only rounds what is sharper than a texel or two.
+        {
+            const F32 VALID = 39000.f;
+            std::vector<F32> tmp(mPath);
+            for (S32 pass = 0; pass < 2; ++pass)
+            {
+                const std::vector<F32>& src = pass == 0 ? mPath : tmp;
+                std::vector<F32>& dst = pass == 0 ? tmp : mPath;
+                const S32 step = pass == 0 ? 1 : E;   // horizontal, then vertical
+                for (S32 j = 0; j < E; ++j)
+                {
+                    for (S32 i = 0; i < E; ++i)
+                    {
+                        const S32 c = j * E + i;
+                        if (src[c] >= VALID) { dst[c] = src[c]; continue; }
+                        const bool lo_in = pass == 0 ? i > 0 : j > 0;
+                        const bool hi_in = pass == 0 ? i < E - 1 : j < E - 1;
+                        F32 acc = 2.f * src[c], wsum = 2.f;
+                        if (lo_in && src[c - step] < VALID) { acc += src[c - step]; wsum += 1.f; }
+                        if (hi_in && src[c + step] < VALID) { acc += src[c + step]; wsum += 1.f; }
+                        dst[c] = acc / wsum;
+                    }
+                }
+            }
+        }
     }
     // [SURF 2026-09-07] R = exposure (every existing reader unchanged), G = the chamfer
     // DISTANCE TO LAND in metres (capped at 4000), B = distance from the open sea.
@@ -1023,7 +1140,7 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     mExpoData.assign((size_t)E * E * 4, 1.f);
     for (S32 k = 0; k < E * E; ++k)
     {
-        const F32 t = llclamp((mDist[k] - 6.f) / 144.f, 0.f, 1.f);   // 6 m .. 150 m
+        const F32 t = llclamp((mDistC[k] - 6.f) / 144.f, 0.f, 1.f);   // 6 m .. 150 m ([T1042 SURF PHASE/] the chamfer, as before)
         mExpoData[(size_t)k * 4] = t * t * (3.f - 2.f * t);
         mExpoData[(size_t)k * 4 + 1] = llmin(mDist[k], 4000.f);
         mExpoData[(size_t)k * 4 + 2] = llmin(mOpen[k], 4000.f);

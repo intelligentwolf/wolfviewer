@@ -1207,8 +1207,16 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             // <WolfViewer 2026-09-20> travel = UP the distance-from-the-open-sea gradient (landward),
             // the old distance-to-land rule only where no open sea is in reach (waterV.glsl same).
             const F32 d_open = WolfWaterField::openDistanceAt(*sfield, ex, ey);
-            const F32 ox = WolfWaterField::openDistanceAt(*sfield, ex + dW, ey) - WolfWaterField::openDistanceAt(*sfield, ex - dW, ey);
-            const F32 oy = WolfWaterField::openDistanceAt(*sfield, ex, ey + dH) - WolfWaterField::openDistanceAt(*sfield, ex, ey - dH);
+            // [T1042 SURF PHASE 2026-11-25] waterV.glsl cC / ograd / openS: the open-sea coordinate runs on over the open sea
+            // (B + min(OPEN_SEA_M - min(distance to land, reach), 0)), continuous with B where they meet
+            auto open_coord = [&](F32 x, F32 y)
+            {
+                return WolfWaterField::openDistanceAt(*sfield, x, y)
+                     + llmin(WolfWaterField::OPEN_SEA_M - llmin(WolfWaterField::distanceAt(*sfield, x, y), WolfWaterField::SURF_PATH_LAND_REACH_M), 0.f);
+            };
+            const F32 c_open = open_coord(ex, ey);
+            const F32 ox = open_coord(ex + dW, ey) - open_coord(ex - dW, ey);
+            const F32 oy = open_coord(ex, ey + dH) - open_coord(ex, ey - dH);
             const F32 ol = sqrtf(ox * ox + oy * oy);
             const F32 dist = WolfWaterField::distanceAt(*sfield, ex, ey);
             const F32 gx = WolfWaterField::distanceAt(*sfield, ex + dW, ey) - WolfWaterField::distanceAt(*sfield, ex - dW, ey);
@@ -1227,8 +1235,8 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             const bool have_path = sfield->mSurfK0 > 0.f && d_open < 3000.f && pl > 1.f && !auto_s;   // [T1042 ONE SEA/]
             const bool have_land = dist < 3000.f && gl > 1.f;
             F32 dx, dy, coord;
-            if (have_path) { dx = px / pl; dy = py / pl; coord = d_open; }
-            else if (have_open) { dx = ox / ol; dy = oy / ol; coord = d_open; }
+            if (have_path) { dx = px / pl; dy = py / pl; coord = c_open; }
+            else if (have_open) { dx = ox / ol; dy = oy / ol; coord = c_open; }   // [T1042 SURF PHASE/] c_open, waterV.glsl openS
             else if (have_land) { dx = -gx / gl; dy = -gy / gl; coord = -dist; }
             else
             {

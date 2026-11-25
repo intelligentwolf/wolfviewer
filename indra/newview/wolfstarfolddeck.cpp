@@ -314,12 +314,33 @@ namespace
     }
 }
 
+namespace { WolfStarfoldDeck* sDeck = nullptr; }   // the one deck (main_view.xml "wolf_starfold_deck")
+
 WolfStarfoldDeck::WolfStarfoldDeck(const Params& p) : LLUICtrl(p)
 {
+    sDeck = this;
 }
 
 WolfStarfoldDeck::~WolfStarfoldDeck()
 {
+    if (sDeck == this) sDeck = nullptr;
+}
+
+// static
+void WolfStarfoldDeck::logHits()
+{
+    if (!sDeck) { LL_INFOS("WolfStarfold") << "hits: no deck" << LL_ENDL; return; }
+    // view-local UI units -> window GL pixels: LLView::localPointToScreen gives the root view's (UI) coordinates, and
+    // LLViewerWindow::handleMouseDown divides window GL pixels by the UI scale (llviewerwindow.cpp: x / mDisplayScale.mV[VX])
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    LL_INFOS("WolfStarfold") << "hits: " << sDeck->mHits.size() << " (display scale " << scale.mV[VX] << ")" << LL_ENDL;
+    for (const Hit& h : sDeck->mHits)
+    {
+        S32 sx = 0, sy = 0;
+        sDeck->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f), ll_round((h.mB + h.mT) * 0.5f), &sx, &sy);
+        LL_INFOS("WolfStarfold") << "hit " << (S32)h.mId << " gl " << ll_round(sx * scale.mV[VX]) << "," << ll_round(sy * scale.mV[VY])
+                                 << " tip " << h.mTip << LL_ENDL;
+    }
 }
 
 void WolfStarfoldDeck::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip)

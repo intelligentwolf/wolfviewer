@@ -55,6 +55,10 @@ public:
 
     WolfStarfoldDeck(const Params& p);
     ~WolfStarfoldDeck() override;
+    /** [STARBASES 2026-11-25] For LEAP rigs (WolfStarfold.Do "hits"): logs every press target drawn this frame - its id, its tip
+     *  and its middle in window GL pixels (LLWindow listener mouseDown x/y) - so a rig clicks the real buttons and the radar
+     *  through the window's own mouse path, never by calling the orders itself. */
+    static void logHits();
 
     void draw() override;
     bool handleMouseDown(S32 x, S32 y, MASK mask) override;

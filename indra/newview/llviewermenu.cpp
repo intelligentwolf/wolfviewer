@@ -38,6 +38,7 @@
 #include "wolfdrive.h"   // [WOLF DRIVE 2026-10-09/] the Car Dashboard toolbar button
 #include "wolfhelm.h"   // <WolfViewer 2026-10-28/> Captain's Helm
 #include "wolfstarbase.h"
+#include "wolfstarfolddeck.h"   // [STARBASES 2026-11-25] WolfStarfold.Do "hits"
 #include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolftraincab.h"   // [TRAIN CAB 2026-11-13] the Train Cab (Wolf Rail)
 #include "wolffloatertunnels.h"   // [T934 2026-11-19/] a taken or returned tunnel rock takes its holes with it
@@ -13176,6 +13177,29 @@ void initialize_menus()
         else if (verb == "setup") sf.setupRez(arg);
         else if (verb == "guide") sf.showGuide(arg != "0");
         else if (verb == "station") { if (arg == "0") sf.closeStation(); else sf.showStation(); }
+        // [STARBASES 2026-11-25] for LEAP rigs, read-only: "hits" logs the deck's press targets in window GL pixels; "screenpos:<object
+        // id>[:<link>]" logs where that prim (link 1 = the root, llfloatertools.cpp numbering) is drawn, in window GL pixels. The rig
+        // then clicks there through the LLWindow listener's mouseDown / mouseUp, the window's own mouse path.
+        else if (verb == "hits") WolfStarfoldDeck::logHits();
+        else if (verb == "screenpos")
+        {
+            const size_t c2 = arg.find(':');
+            LLUUID id(arg.substr(0, c2));
+            const S32 link = c2 == std::string::npos ? 1 : llmax(1, atoi(arg.substr(c2 + 1).c_str()));
+            LLViewerObject* o = gObjectList.findObject(id);
+            if (o && link > 1)
+            {
+                LLViewerObject* root = o->getRootEdit();
+                S32 index = 1;
+                o = nullptr;
+                for (LLViewerObject* child : root->getChildren()) if (++index == link) { o = child; break; }
+            }
+            LLCoordGL gl;
+            const bool on = o && LLViewerCamera::getInstance()->projectPosAgentToScreen(o->getPositionAgent(), gl, false);
+            const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+            if (on) LL_INFOS("WolfStarfold") << "screenpos " << arg << " gl " << ll_round(gl.mX * scale.mV[VX]) << "," << ll_round(gl.mY * scale.mV[VY]) << LL_ENDL;
+            else LL_INFOS("WolfStarfold") << "screenpos " << arg << " " << (o ? "off screen" : "no such prim") << LL_ENDL;
+        }
         // [STARBASES 2026-11-24] the Starbase window's buttons by name: "base:open|close|found|spot|restore|home|fly|dockat|pack|
         // scrap|scrapsure|next|prev|turn|build|cancel|own", "base:tab:<0..3>", "base:dock:<all|friends|group|me>", "base:ghost:<kind|
         // own:id|part:id>", "base:attach|send|place|putback|down|core:<id>" (each the same order and checks as its button)

@@ -328,19 +328,131 @@ WolfStarfoldDeck::~WolfStarfoldDeck()
 }
 
 // static
+const char* WolfStarfoldDeck::hitName(S32 id)
+{
+    // [HUD KIT 2026-11-25] the hit's name as the inventories list it (scripts/wolf/hudkit/inventory/wolftrek.json, starbase.json): a
+    // numbered run (a radar contact, a row's button) by its first member's name, H_..._0
+    static const struct { S32 first, last; const char* name; } NAMES[] = {
+        { H_NONE, H_NONE, "H_NONE" },
+        { H_FIRE, H_FIRE, "H_FIRE" },
+        { H_MINE, H_MINE, "H_MINE" },
+        { H_NEXT, H_NEXT, "H_NEXT" },
+        { H_DOCK, H_DOCK, "H_DOCK" },
+        { H_MODE, H_MODE, "H_MODE" },
+        { H_THROTTLE, H_THROTTLE, "H_THROTTLE" },
+        { H_FLY_STATION, H_FLY_STATION, "H_FLY_STATION" },
+        { H_FLY_BELT, H_FLY_BELT, "H_FLY_BELT" },
+        { H_FLY_WORMHOLE, H_FLY_WORMHOLE, "H_FLY_WORMHOLE" },
+        { H_FLY_STOP, H_FLY_STOP, "H_FLY_STOP" },
+        { H_FLY_PICKED, H_FLY_PICKED, "H_FLY_PICKED" },
+        { H_HELP, H_HELP, "H_HELP" },
+        { H_THEME, H_THEME, "H_THEME" },
+        { H_HIDE, H_HIDE, "H_HIDE" },
+        { H_LEAVE, H_LEAVE, "H_LEAVE" },
+        { H_SHOW_TAB, H_SHOW_TAB, "H_SHOW_TAB" },
+        { H_LAUNCH, H_LAUNCH, "H_LAUNCH" },
+        { H_CLOSE, H_CLOSE, "H_CLOSE" },
+        { H_GOTO_PAD, H_GOTO_PAD, "H_GOTO_PAD" },
+        { H_GOTO_STATION, H_GOTO_STATION, "H_GOTO_STATION" },
+        { H_SELL, H_SELL, "H_SELL" },
+        { H_STATION_LAUNCH, H_STATION_LAUNCH, "H_STATION_LAUNCH" },
+        { H_STATION_CLOSE, H_STATION_CLOSE, "H_STATION_CLOSE" },
+        { H_GUIDE_BACK, H_GUIDE_BACK, "H_GUIDE_BACK" },
+        { H_GUIDE_NEXT, H_GUIDE_NEXT, "H_GUIDE_NEXT" },
+        { H_GUIDE_CLOSE, H_GUIDE_CLOSE, "H_GUIDE_CLOSE" },
+        { H_RADAR_STATION, H_RADAR_STATION, "H_RADAR_STATION" },
+        { H_RADAR_BELT, H_RADAR_BELT, "H_RADAR_BELT" },
+        { H_RADAR_WORMHOLE, H_RADAR_WORMHOLE, "H_RADAR_WORMHOLE" },
+        { H_ALIEN_0, H_ALIEN_LAST, "H_ALIEN_0" },
+        { H_SETUP_STATION, H_SETUP_STATION, "H_SETUP_STATION" },
+        { H_SETUP_BELT, H_SETUP_BELT, "H_SETUP_BELT" },
+        { H_SETUP_WORMHOLE, H_SETUP_WORMHOLE, "H_SETUP_WORMHOLE" },
+        { H_SETUP_PAD, H_SETUP_PAD, "H_SETUP_PAD" },
+        { H_SETUP_CLEAR, H_SETUP_CLEAR, "H_SETUP_CLEAR" },
+        { H_SETUP_CLOSE, H_SETUP_CLOSE, "H_SETUP_CLOSE" },
+        { H_WORLD, H_WORLD, "H_WORLD" },
+        { H_BASE_OPEN, H_BASE_OPEN, "H_BASE_OPEN" },
+        { H_BASE_CLOSE, H_BASE_CLOSE, "H_BASE_CLOSE" },
+        { H_BASE_TAB_0, H_BASE_TAB_LAST, "H_BASE_TAB_0" },
+        { H_BASE_FOUND, H_BASE_FOUND, "H_BASE_FOUND" },
+        { H_BASE_SPOT, H_BASE_SPOT, "H_BASE_SPOT" },
+        { H_BASE_RESTORE, H_BASE_RESTORE, "H_BASE_RESTORE" },
+        { H_BASE_HOME, H_BASE_HOME, "H_BASE_HOME" },
+        { H_BASE_FLY, H_BASE_FLY, "H_BASE_FLY" },
+        { H_BASE_DOCKAT, H_BASE_DOCKAT, "H_BASE_DOCKAT" },
+        { H_BASE_DOCK_ALL, H_BASE_DOCK_ALL, "H_BASE_DOCK_ALL" },
+        { H_BASE_DOCK_FRIENDS, H_BASE_DOCK_FRIENDS, "H_BASE_DOCK_FRIENDS" },
+        { H_BASE_DOCK_GROUP, H_BASE_DOCK_GROUP, "H_BASE_DOCK_GROUP" },
+        { H_BASE_DOCK_ME, H_BASE_DOCK_ME, "H_BASE_DOCK_ME" },
+        { H_BASE_PACK, H_BASE_PACK, "H_BASE_PACK" },
+        { H_BASE_SCRAP, H_BASE_SCRAP, "H_BASE_SCRAP" },
+        { H_BASE_PREV, H_BASE_PREV, "H_BASE_PREV" },
+        { H_BASE_NEXT, H_BASE_NEXT, "H_BASE_NEXT" },
+        { H_BASE_TURN, H_BASE_TURN, "H_BASE_TURN" },
+        { H_BASE_BUILD, H_BASE_BUILD, "H_BASE_BUILD" },
+        { H_BASE_CANCEL, H_BASE_CANCEL, "H_BASE_CANCEL" },
+        { H_BASE_OWN_CHECK, H_BASE_OWN_CHECK, "H_BASE_OWN_CHECK" },
+        { H_BASE_PAGE_PREV, H_BASE_PAGE_PREV, "H_BASE_PAGE_PREV" },
+        { H_BASE_PAGE_NEXT, H_BASE_PAGE_NEXT, "H_BASE_PAGE_NEXT" },
+        { H_BASE_CARD_0, H_BASE_CARD_LAST, "H_BASE_CARD_0" },
+        { H_BASE_ROWA_0, H_BASE_ROWA_LAST, "H_BASE_ROWA_0" },
+        { H_BASE_ROWB_0, H_BASE_ROWB_LAST, "H_BASE_ROWB_0" },
+        { H_BASE_ROWC_0, H_BASE_ROWC_LAST, "H_BASE_ROWC_0" },
+        { H_BASE_GHOST_0, H_BASE_GHOST_LAST, "H_BASE_GHOST_0" },
+        { H_RADAR_BASE_0, H_RADAR_BASE_LAST, "H_RADAR_BASE_0" },
+        { H_BANNER_STOP, H_BANNER_STOP, "H_BANNER_STOP" },
+        { H_STATION_RENAME, H_STATION_RENAME, "H_STATION_RENAME" },
+        { H_BASE_RENAME, H_BASE_RENAME, "H_BASE_RENAME" },
+        { H_NAME_FIELD, H_NAME_FIELD, "H_NAME_FIELD" },
+        { H_NAME_SAVE, H_NAME_SAVE, "H_NAME_SAVE" },
+        { H_NAME_CANCEL, H_NAME_CANCEL, "H_NAME_CANCEL" },
+        { H_STAB_0, H_STAB_LAST, "H_STAB_0" },
+        { H_SHIP_BUY_0, H_SHIP_BUY_LAST, "H_SHIP_BUY_0" },
+        { H_SHIP_USE_0, H_SHIP_USE_LAST, "H_SHIP_USE_0" },
+        { H_SHIP_NO_0, H_SHIP_NO_LAST, "H_SHIP_NO_0" },
+        { H_SHIP_YES_0, H_SHIP_YES_LAST, "H_SHIP_YES_0" },
+        { H_SHIP_PAGE_PREV, H_SHIP_PAGE_PREV, "H_SHIP_PAGE_PREV" },
+        { H_SHIP_PAGE_NEXT, H_SHIP_PAGE_NEXT, "H_SHIP_PAGE_NEXT" },
+        { H_HANGAR_SHIPS, H_HANGAR_SHIPS, "H_HANGAR_SHIPS" },
+        { H_HANGAR_OWN, H_HANGAR_OWN, "H_HANGAR_OWN" },
+        { H_OWN_LIST, H_OWN_LIST, "H_OWN_LIST" },
+        { H_FLY_STANDARD, H_FLY_STANDARD, "H_FLY_STANDARD" },
+        { H_OWN_PAGE_PREV, H_OWN_PAGE_PREV, "H_OWN_PAGE_PREV" },
+        { H_OWN_PAGE_NEXT, H_OWN_PAGE_NEXT, "H_OWN_PAGE_NEXT" },
+        { H_DESIGN_USE_0, H_DESIGN_USE_LAST, "H_DESIGN_USE_0" },
+        { H_DESIGN_FORGET_0, H_DESIGN_FORGET_LAST, "H_DESIGN_FORGET_0" },
+        { H_DESIGN_NO_0, H_DESIGN_NO_LAST, "H_DESIGN_NO_0" },
+        { H_DESIGN_YES_0, H_DESIGN_YES_LAST, "H_DESIGN_YES_0" },
+        { H_BUILD_USE_0, H_BUILD_USE_LAST, "H_BUILD_USE_0" },
+        { H_SCAN, H_SCAN, "H_SCAN" },
+        { H_RADAR_SIG, H_RADAR_SIG, "H_RADAR_SIG" },
+    };
+    for (const auto& n : NAMES) if (id >= n.first && id <= n.last) return n.name;
+    return "H_UNKNOWN";
+}
+
+// static
 void WolfStarfoldDeck::logHits()
 {
-    if (!sDeck) { LL_INFOS("WolfStarfold") << "hits: no deck" << LL_ENDL; return; }
+    if (!sDeck) { LL_INFOS("WolfHudKit") << "hits wolftrek: no deck" << LL_ENDL; return; }
     // view-local UI units -> window GL pixels: LLView::localPointToScreen gives the root view's (UI) coordinates, and
-    // LLViewerWindow::handleMouseDown divides window GL pixels by the UI scale (llviewerwindow.cpp: x / mDisplayScale.mV[VX])
+    // LLViewerWindow::handleMouseDown divides window GL pixels by the UI scale (llviewerwindow.cpp: x / mDisplayScale.mV[VX]).
+    // [HUD KIT 2026-11-25] the kit's line (wolftraincab.cpp WolfTrainCabView::logHits): "WolfHudKit hit <hud> <H_NAME> gl <x>,<y> size
+    // <w>,<h> tip <tooltip>", centre and size in window GL pixels; the Starbase window's targets are the "starbase" HUD's, the rest
+    // (cockpit, ground panel, Station window, guide, setup helper) "wolftrek"
     const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
-    LL_INFOS("WolfStarfold") << "hits: " << sDeck->mHits.size() << " (display scale " << scale.mV[VX] << ")" << LL_ENDL;
+    const bool basewin = WolfStarbase::instance().shown();
+    LL_INFOS("WolfHudKit") << "hits wolftrek: " << sDeck->mHits.size() << " (display scale " << scale.mV[VX] << ")" << LL_ENDL;
     for (const Hit& h : sDeck->mHits)
     {
+        const S32 id = (S32)h.mId;
+        const bool starbase = (id >= H_BASE_CLOSE && id <= H_BASE_GHOST_LAST) || id == H_BASE_RENAME
+            || ((id == H_NAME_FIELD || id == H_NAME_SAVE || id == H_NAME_CANCEL) && sDeck->mEdit == EDIT_BASE) || (id == H_NONE && basewin);
         S32 sx = 0, sy = 0;
         sDeck->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f), ll_round((h.mB + h.mT) * 0.5f), &sx, &sy);
-        LL_INFOS("WolfStarfold") << "hit " << (S32)h.mId << " gl " << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY])
-                                 << " tip " << h.mTip << LL_ENDL;
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit " << (starbase ? "starbase " : "wolftrek ") << hitName(id) << " gl "
+                               << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY]) << " size "
+                               << ll_round((h.mR - h.mL) * scale.mV[VX]) << "," << ll_round((h.mT - h.mB) * scale.mV[VY]) << " tip " << h.mTip << LL_ENDL;
     }
 }
 
@@ -593,11 +705,14 @@ void WolfStarfoldDeck::drawCockpit(F32 bottom, F32 W, F32 u)
                                                      : "Dock at " + stationWords + " (within 150 m)";
         std::string flyLabel = "FLY THERE";
         if (mPicked == "station" && !sname.empty()) flyLabel = "FLY TO " + upper(sname);
+        // [WOLFTREK v11 stage D] a found wandering wormhole picked: FLY TO <REGION> (as WolfStorm)
+        if (mPicked.compare(0, 4, "sig:") == 0 && sf.signal().mFound && !sf.signal().mRegion.empty()) flyLabel = "FLY TO " + upper(sf.signal().mRegion);
         // the FLY THERE capsule grows with a name, up to 230 (the centre row then still clears the gauges' words and the radar)
         const F32 flyW = llclamp(textW(flyLabel, 20.f * u, true) / llmax(u, 0.01f) + 34.f, 160.f, 230.f);
         const std::string flyTip = mPicked.empty() ? std::string("Pick a place on the radar first, then FLY THERE")
                                  : (mPicked == "station" ? "Fly to " + stationWords + (sf.system().mBay ? " and dock in its bay" : "")
-                                                         : std::string("Fly to the place you picked on the radar"));
+                                 : (mPicked.compare(0, 4, "sig:") == 0 ? "Fly into the wandering wormhole to " + sf.signal().mRegion
+                                                                       : std::string("Fly to the place you picked on the radar")));
         struct Big { EHit id; std::string label; F32 w; bool lit; bool dim; std::string tip; };
         const Big bigs[5] = {
             { H_FIRE, "FIRE", 120.f, sf.firing(), false, "Fire at your target (hold Space)" },
@@ -636,6 +751,35 @@ void WolfStarfoldDeck::drawCockpit(F32 bottom, F32 W, F32 u)
         capsuleSmall(124.f, H_LEAVE, "LEAVE SHIP", false, "Stand up and leave the ship", false);
         // [STARBASES 2026-11-24] design.html#bases: "in the cockpit (a Base button)"
         capsuleSmall(76.f, H_BASE_OPEN, "BASE", WolfStarbase::instance().shown(), "Your starbase: found it, build on it, go home", false);
+
+        // [WOLFTREK v11 stage D] SCAN (design.html#wormholes2: "one button, with a progress ring, no probe-juggling"): over the big
+        // row's right end, left of the radar (the radar's ellipse begins at x 1264 at this height; the throttle strip ends at 1040);
+        // its ring fills with the region's k=scan p=, and the result stays in words (top left, "SCAN: ...")
+        {
+            const S32 sp = sf.scanProgress();
+            const bool on = sf.scanning();
+            capsule(X(1080.f), Y(104.f), X(1170.f), Y(138.f), H_SCAN, on ? llformat("%d%%", sp) : std::string("SCAN"), on,
+                    "Scan for wandering wormholes near you (Runner: 3 km in 3 s; other ships 1.5 km in 6 s)", u);
+            const F32 rcx = X(1192.f), rcy = Y(121.f), rr = 13.f * u;
+            ring(rcx, rcy, rr, 2.f * u, LLColor4(0.38f, 0.90f, 1.f, 0.35f));
+            if (on)
+            {
+                // the region says every 25 % (SpaceWormholes.cs StepScan): the small turning arc shows it is working meanwhile
+                const F32 spin = (F32)fmod(LLFrameTimer::getElapsedSeconds() * 180.0, 360.0);
+                clockArc(rcx, rcy, rr, 3.f * u, 0.f, 360.f * llclamp((F32)sp / 100.f, 0.f, 1.f), C_AMBER, 32);
+                clockArc(rcx, rcy, rr + 4.f * u, 1.5f * u, spin, spin + 40.f, C_CYAN, 8);
+            }
+            std::string line = on ? std::string("Scanning...") : sf.scanResult();
+            if (!line.empty())
+            {
+                line = "SCAN: " + line;
+                const F32 px = 13.f * u;
+                line = fit(line, px, true, 620.f * u);
+                const F32 lw = textW(line, px, true) + 20.f * u, ly = Y(166.f), lx = X(40.f);
+                pill(lx, ly - px, lx + lw, ly + px, LLColor4(0.01f, 0.03f, 0.08f, 0.78f));
+                T(lx + 10.f * u, ly, line, px, on ? C_AMBER : C_TEXT, true, LLFontGL::LEFT);
+            }
+        }
     }
 
     // ── RIGHT: the hold and Starmarks, the target in words, the holographic radar and the wolf-ear mark ──
@@ -763,11 +907,39 @@ void WolfStarfoldDeck::drawRadar(F32 cx, F32 cy, F32 rx, F32 ry, F32 u)
     if (sys.mHaveWormhole)
     {
         const Mark m = place(region->getPosAgentFromRegion(sys.mWormhole));
-        const LLColor4 c = mPicked == "wormhole" ? C_AMBER : C_CYAN;
+        // [WOLFTREK v11 stage D] its state in colour AND words (design.html#wormholes2), its size with its stability
+        const LLColor3 sc = WolfStarfold::wormholeColour(sys.mWhStab, sys.mWhClosing);
+        const LLColor4 c = mPicked == "wormhole" ? C_AMBER : LLColor4(sc.mV[0], sc.mV[1], sc.mV[2], 1.f);
+        const std::string state = WolfStarfold::wormholeWords(sys.mWhStab, sys.mWhClosing);
         stalk(m, c);
-        ring(m.x, m.head, 7.f * u, 2.5f * u, c);
-        labels.push_back({ m.x, m.head + 16.f * u, "WORMHOLE" + height(m.dz), c, mPicked == "wormhole" ? 0 : 2 });
-        addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_WORMHOLE, "The wormhole to " + sys.mWormholeTo + ": click, then FLY THERE");
+        ring(m.x, m.head, (4.f + 3.f * (F32)sys.mWhStab / 100.f) * u, 2.5f * u, c);
+        // WolfStorm whLook label: WORMHOLE when stable, else WORMHOLE <WORDS>
+        labels.push_back({ m.x, m.head + 16.f * u, (state == "Stable" ? std::string("WORMHOLE") : "WORMHOLE " + upper(state)) + height(m.dz), c, mPicked == "wormhole" ? 0 : 2 });
+        addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_WORMHOLE,
+               WolfStarfold::wormholeSentence(sys.mWhStab, sys.mWhSize, sys.mWhLife, sys.mWhClosing, sys.mWormholeTo) + ": click, then FLY THERE");
+    }
+    // [WOLFTREK v11 stage D] the wandering wormhole (k=sig): a faint "unknown signal" until scanned, then a wormhole named by where it goes
+    if (sf.signal().mHave)
+    {
+        const WolfStarfold::Signal& g = sf.signal();
+        const Mark m = place(region->getPosAgentFromRegion(g.mPos));
+        const bool picked = mPicked == "sig:" + g.mId;
+        if (g.mFound)
+        {
+            const LLColor4 c = picked ? C_AMBER : C_CYAN;
+            stalk(m, c);
+            ring(m.x, m.head, 6.f * u, 2.5f * u, c);
+            labels.push_back({ m.x, m.head + 16.f * u, "WORMHOLE TO " + upper(g.mRegion) + height(m.dz), c, picked ? 0 : 2 });
+            addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_SIG, "A wandering wormhole to " + g.mRegion + ": click, then FLY THERE");
+        }
+        else
+        {
+            const LLColor4 c = C_DIM * 0.85f;
+            stalk(m, c);
+            ring(m.x, m.head, 6.f * u, 1.5f * u, c);
+            labels.push_back({ m.x, m.head + 16.f * u, "UNKNOWN SIGNAL", c, 4 });
+            addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_SIG, "An unknown signal (its place is rough): fly near it and press SCAN");
+        }
     }
     // [STARBASES 2026-11-24] the starbases here (k=bases, SpaceBases.cs SendBasesList: "so the radar and Fly there know them"): a
     // small diamond each, yours labelled once the Starbase window has learned which it is; click one, then FLY THERE or DOCK
@@ -2054,7 +2226,7 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
     // [WOLFTREK v11] the bay's automatic approach or departure flies the ship (SpaceEngine.OnChat ignores these meanwhile): a
     // press says so in words instead of doing nothing (CLAUDE.md: visible feedback)
     if (sf.automatic() && (id == H_FIRE || id == H_MINE || id == H_NEXT || id == H_DOCK || id == H_MODE || id == H_THROTTLE
-                           || id == H_FLY_STATION || id == H_FLY_BELT || id == H_FLY_WORMHOLE || id == H_FLY_STOP || id == H_FLY_PICKED))
+                           || id == H_FLY_STATION || id == H_FLY_BELT || id == H_FLY_WORMHOLE || id == H_FLY_STOP || id == H_FLY_PICKED || id == H_SCAN))
     {
         showHint(sf.automaticIn() ? "Automatic docking: the ship flies itself. Press STOP to take the controls."
                                   : "Automatic departure: you have the controls once you are out of the bay.");
@@ -2106,6 +2278,14 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
         case H_RADAR_STATION: mPicked = "station"; break;
         case H_RADAR_BELT: mPicked = "belt"; break;
         case H_RADAR_WORMHOLE: mPicked = "wormhole"; break;
+        case H_RADAR_SIG:
+            if (sf.signal().mHave && sf.signal().mFound) mPicked = "sig:" + sf.signal().mId;
+            else showHint("An unknown signal: fly near it and press SCAN to find out what it is");
+            break;
+        case H_SCAN:
+            if (sf.scanning()) showHint("Scanning... the result shows beside SCAN");
+            else sf.startScan();
+            break;
         case H_HELP: sf.showGuide(!sf.guideShown()); break;
         case H_THEME: gSavedSettings.setS32("WolfStarfoldTheme", (theme() + 1) % 4); break;
         case H_HIDE: sf.togglePanel(); break;

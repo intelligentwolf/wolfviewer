@@ -85,7 +85,16 @@ public:
         // and bay=1 (the station has a fly-in bay: SpaceBay.cs ReadBay found bay_pad_<n> prims and a bay_mouth)
         std::string mStationName;
         bool        mBay = false;
+        // [WOLFTREK v11 stage D] SpaceEngine.SendSystem whs= (SpaceWormholes.cs WhsField): stability 0-100, size s|l, minutes to live
+        // (-1 never), closing; without it (an older region, or the owner's own named link: "100;l;-1;0") a stable large hole
+        S32         mWhStab = 100;
+        char        mWhSize = 'l';
+        S32         mWhLife = -1;
+        bool        mWhClosing = false;
     };
+    /** [WOLFTREK v11 stage D] The region's wandering wormhole as k=sig told this pilot (SpaceWormholes.cs SendSig): its id (16 hex,
+     *  AlphaWolf space.rs), its place (rounded to 200 m until found), found, and the region it leads to (once found). */
+    struct Signal { bool mHave = false; std::string mId; LLVector3 mPos; bool mFound = false; std::string mRegion; };
     /** k=st (SpaceEngine.Status): this avatar's ship, twice a second while it flies. */
     struct Ship
     {
@@ -170,6 +179,19 @@ public:
     const Ship& ship() const { return mShip; }
     const Station& station() const { return mStation; }
     const std::vector<Rock>& rocks() const { return mRocks; }
+    const Signal& signal() const { return mSig; }
+    /** [WOLFTREK v11 stage D] SCAN: SF1|scan|on=1 (SpaceWormholes.cs StartScan: in space; k=scan p=0..100 [found=<id>]). */
+    void startScan();
+    bool scanning() const { return mScanP >= 0; }
+    S32  scanProgress() const { return mScanP; }
+    /** The last scan's result in words (the region's k=msg after p=100, else ours), kept until the next scan. */
+    const std::string& scanResult() const { return mScanResult; }
+    /** A wormhole's state in words and colour (design.html#wormholes2: cyan stable, amber over half its mass carried, red close to
+     *  closing; always in words too), as WolfStorm: "Stable" (> 50), "Over half spent" (11-50), "Nearly spent" (<= 10), "Closing". */
+    static std::string wormholeWords(S32 stab, bool closing);
+    static LLColor3 wormholeColour(S32 stab, bool closing);
+    /** The wormhole in one plain sentence (the radar's tooltip), as WolfStorm's whDescribe. */
+    static std::string wormholeSentence(S32 stab, char size, S32 life, bool closing, const std::string& region);
     const std::vector<Beam>& beams() const { return mBeams; }
     const std::deque<Note>& notes() const { return mNotes; }
     /** The space line above the sea (metres; -1 when there is no space here). */
@@ -326,6 +348,8 @@ private:
     void hangarIdle();
     void endHangar(const char* why);
     bool hangarFocusIsShip() const;
+    void aimHangarCamera();
+    static U32 hangarMoveFlags();
     void releaseKeys();
     void makeBelt();
     void addNote(const std::string& text);
@@ -397,7 +421,12 @@ private:
     LLVector3d mHangarFocus;         // the ship's middle, global
     bool    mHangarSettled = false;  // the camera has reached the view: its distance, height and bearing are the baseline
     F32     mHangarDist = 0.f, mHangarElev = 0.f, mHangarAz = 0.f;   // expected from the baseline on (the bearing grows as it turns)
-    LLVector3d mHangarAvatarAt;      // where the avatar stood when the view settled
+    LLVector3d mHangarAvatarAt;      // where the avatar stands (a jump of more than 1 m: the region placed it: hold and aim again)
+    F64     mHangarHoldUntil = 0.0;  // nothing but a new key, a launch or the ship ends the view before this
+    F64     mHangarMeasureAt = 0.0;  // the camera has reached the aimed view by then: the baseline is taken
+    bool    mHangarAim = false;      // aim at the ship again when the hold ends
+    U32     mHangarKeys0 = 0;        // movement keys already down when the view began (from the cockpit): not the user's new input
+    F64     mHangarKeysSeenAt = 0.0; // when one of those was last seen down
 
     // the jump
     F64     mJumpAt = -100.0;
@@ -415,6 +444,13 @@ private:
     U32     mRockVerts = 0;
     LLVector3 mRockOrigin;           // the region's agent origin the buffer was written for
     LLPointer<LLViewerTexture> mSpaceMap;   // bindSpaceSky: the all-sky map, made once
+    // [WOLFTREK v11 stage D] the wandering wormhole and the scan
+    Signal  mSig;
+    S32     mScanP = -1;             // -1 not scanning, else the region's last p=
+    F64     mScanAt = -100.0;        // the scan was asked for / last heard
+    bool    mScanHeard = false;      // a k=scan came for this scan
+    F64     mScanEndAt = -100.0;     // p=100 came: the region's k=msg just after it is the result
+    std::string mScanResult;
 };
 
 #endif // WOLF_STARFOLD_H

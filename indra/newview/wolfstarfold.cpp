@@ -97,6 +97,7 @@ namespace
     const F32 HANGAR_DIST_K = 2.6f;          // the ship's half-diagonal times this: the whole ship in a 60-degree view with room round it
     const F32 HANGAR_DIST_MIN = 7.f, HANGAR_DIST_MAX = 24.f;   // metres: a 16-22 m pad's ship stays inside a 56 m wide bay
     const F64 HANGAR_SETTLE_S = 2.0;         // the move to the view (LLAgentCamera animation, at most 1 s) has ended by then
+    const F64 HANGAR_HOLD_S = 3.0;           // after the view begins or the avatar is placed: only a new key, a launch or the ship ends it
     const F64 HANGAR_WAIT_S = 10.0;          // how long the ship's object is waited for when the region's word comes first
     const F64 ANSWER_FOR_S = 20.0;           // a k=msg this soon after a rename is the Station window's answer (as wolfstarbase.cpp)
 
@@ -718,9 +719,57 @@ void WolfStarfold::receive(const LLUUID& region_id, const std::vector<std::strin
             // [WOLFTREK v11] a station rename's answer (SpaceNames.cs RenameStation / OnNameAnswer: Refuse = k=msg) stays in the
             // Station window until the next rename, never only a passing note
             if (stationShown() && now() - mStationAskedAt < ANSWER_FOR_S) mStationAnswer = clean(p.second);
+            // [WOLFTREK v11 stage D] the scan's result in the region's words (StepScan: "Signal resolved: ..." / "Nothing within ..."),
+            // or its refusal before any k=scan came ("Scan in space, above the line.")
+            if (now() - mScanEndAt < 4.0) { mScanResult = clean(p.second); mScanEndAt = -100.0; }
+            else if (mScanP == 0 && !mScanHeard && now() - mScanAt < 4.0) { mScanP = -1; mScanResult = clean(p.second); }
         }
     }
     else if (kind == "bay") parseBay(kv);
+    else if (kind == "sig")
+    {
+        // [WOLFTREK v11 stage D] SpaceWormholes.cs SendSig: s=<id>;<x,y,z>;<found 0|1>;<region> or an empty s= (none)
+        Signal g;
+        for (const auto& p : kv)
+        {
+            if (p.first != "s" || p.second.empty()) continue;
+            const std::vector<std::string> f = split(p.second, ';');
+            if (f.size() < 4 || !idToken(f[0]) || !parseVec(f[1], g.mPos) || (f[2] != "0" && f[2] != "1")) continue;
+            g.mHave = true;
+            g.mId = f[0];
+            g.mFound = f[2] == "1";
+            std::string rn = f[3];
+            for (size_t i = 4; i < f.size(); ++i) rn += ";" + f[i];
+            g.mRegion = clean(rn).substr(0, 64);
+        }
+        const bool news = g.mHave && (!mSig.mHave || g.mId != mSig.mId || g.mFound != mSig.mFound);
+        mSig = g;
+        if (news) LL_INFOS("WolfStarfold") << "signal: " << g.mId << (g.mFound ? " found, to " + g.mRegion : std::string(" unknown")) << " at " << g.mPos << LL_ENDL;
+    }
+    else if (kind == "scan")
+    {
+        // [WOLFTREK v11 stage D] SpaceWormholes.cs StartScan / StepScan: p=0..100 (sent at 0, 25, 50, 75, 100), found=<id> with 100
+        S32 pc = -1;
+        std::string found;
+        for (const auto& p : kv)
+        {
+            if (p.first == "p") pc = llclamp((S32)num(p.second, -1.f), -1, 100);
+            else if (p.first == "found" && idToken(p.second)) found = p.second;
+        }
+        if (pc >= 0)
+        {
+            mScanHeard = true;
+            mScanAt = now();
+            if (pc < 100) mScanP = pc;
+            else
+            {
+                mScanP = -1;
+                mScanEndAt = now();
+                mScanResult = found.empty() ? std::string("Nothing found within range.") : std::string("Signal resolved: a wormhole.");
+                LL_INFOS("WolfStarfold") << "scan: done" << (found.empty() ? std::string(", nothing found") : ", found " + found) << LL_ENDL;
+            }
+        }
+    }
     else if (kind == "bship")
     {
         // [WOLFTREK v11 stage C] Source: SpaceShipDesigns.cs OwnShipsList - up to 12 o=<object N>;<class or ->;<prims>;<ok 1|0>;<name>;
@@ -800,6 +849,18 @@ void WolfStarfold::parseSystem(const LLUUID& region_id, const std::vector<std::p
         else if (k == "station") s.mHaveStation = parseVec(v, s.mStation);
         else if (k == "sn") s.mStationName = clean(v).substr(0, 40);   // NameFilter.NAME_MAX 32: a checked name, kept whole
         else if (k == "bay") s.mBay = v == "1";
+        else if (k == "whs")
+        {
+            // [WOLFTREK v11 stage D] SpaceWormholes.cs WhsField: <stability 0-100>;<size s|l>;<minutes to live, -1 never>;<closing 0|1>
+            const std::vector<std::string> f = split(v, ';');
+            if (f.size() >= 4)
+            {
+                s.mWhStab = llclamp((S32)num(f[0], 100.f), 0, 100);
+                s.mWhSize = f[1] == "s" ? 's' : 'l';
+                s.mWhLife = llmax(-1, (S32)num(f[2], -1.f));
+                s.mWhClosing = f[3] == "1";
+            }
+        }
         else if (k == "wh")
         {
             const std::vector<std::string> f = split(v, ';');
@@ -1131,6 +1192,7 @@ void WolfStarfold::endShip()
     mThrottle = 0.f;
     mShip.mSeq.clear();
     mBayPad = -1;
+    mScanP = -1;
     LL_INFOS("WolfStarfold") << "ship ended" << LL_ENDL;
 }
 
@@ -1156,6 +1218,9 @@ void WolfStarfold::resetRegion()
     mStationAnswer.clear();
     mFleet.clear();
     mBuilds = Builds();
+    mSig = Signal();
+    mScanP = -1;
+    mScanResult.clear();
     mBayPad = -1;
     if (mHangarOn || mHangarWaitUntil > 0.0) endHangar("a new region");
     mHangarDoneFor.setNull();
@@ -1264,7 +1329,9 @@ void WolfStarfold::flyTo(const std::string& where)
     // -> SpaceBases.cs FlyToBase, wolf-space 1.0.7)
     bool baseId = where.size() >= 13 && where.size() <= 37 && where.compare(0, 5, "base:") == 0;
     for (size_t i = 5; baseId && i < where.size(); ++i) baseId = isxdigit((unsigned char)where[i]) != 0;
-    if (where != "station" && where != "belt" && where != "wormhole" && where != "stop" && where != "base" && !baseId) return;
+    // [WOLFTREK v11 stage D] "sig:<id>": the found wandering wormhole (SpaceEngine.cs "fly": to=sig:<id>)
+    const bool sigId = where.size() > 4 && where.compare(0, 4, "sig:") == 0 && idToken(where.substr(4));
+    if (where != "station" && where != "belt" && where != "wormhole" && where != "stop" && where != "base" && !baseId && !sigId) return;
     mFlyTo = where == "stop" ? std::string() : where;
     say("fly|to=" + where);
     mSentAt = now();
@@ -1424,13 +1491,18 @@ void WolfStarfold::sounds()
             }
         }
     }
-    // the wormhole's hum within 400 m of it, louder nearer (the 3 s sound faded at both ends, played again as it ends)
-    if (mSys.mHaveWormhole && t - mHumAt > 2.9)
+    // the wormhole's hum within 400 m of it, louder nearer (the 3 s sound faded at both ends, played again as it ends); [v11 stage D]
+    // the nearer of the region's mouth and a found wandering wormhole
+    const bool sigHum = mSig.mHave && mSig.mFound;
+    if ((mSys.mHaveWormhole || sigHum) && t - mHumAt > 2.9)
     {
         LLViewerRegion* r = gAgent.getRegion();
         if (r)
         {
-            const F32 d = (r->getPosAgentFromRegion(mSys.mWormhole) - LLViewerCamera::getInstance()->getOrigin()).length();
+            const LLVector3 eye = LLViewerCamera::getInstance()->getOrigin();
+            F32 d = 1e9f;
+            if (mSys.mHaveWormhole) d = (r->getPosAgentFromRegion(mSys.mWormhole) - eye).length();
+            if (sigHum) d = llmin(d, (r->getPosAgentFromRegion(mSig.mPos) - eye).length());
             if (d < 400.f)
             {
                 mHumAt = t;
@@ -1507,6 +1579,8 @@ void WolfStarfold::idle()
         const F64 t = now() - mJumpAt;
         if ((!mJumpTpSeen && t > 6.0) || (mJumpTpSeen && !tp)) mJumpEndAt = now();
     }
+    // a scan the region never answered (a lost message): let it go after 20 s (SCAN_S is 6 s)
+    if (mScanP >= 0 && now() - mScanAt > 20.0) { mScanP = -1; mScanResult = "The scan got no answer. Please press SCAN again."; }
     // notes go after a while
     while (!mNotes.empty() && now() - mNotes.front().mAt > NOTE_SHOW_S) mNotes.pop_front();
     // the beams' particle source, alive while space is here
@@ -1666,6 +1740,50 @@ std::string WolfStarfold::classTitle(const std::string& id) const
     return id;
 }
 
+void WolfStarfold::startScan()
+{
+    if (!piloting() || automatic() || mScanP >= 0) return;
+    mScanP = 0;
+    mScanAt = now();
+    mScanHeard = false;
+    mScanResult.clear();
+    say("scan|on=1");
+}
+
+// static
+std::string WolfStarfold::wormholeWords(S32 stab, bool closing)
+{
+    // the same words and thresholds as WolfStorm 9c477ea (js/world/wolf_starfold.js whLook): closing, else 10 or below nearly spent,
+    // 50 or below over half spent, else stable
+    if (closing) return "Closing";
+    if (stab <= 10) return "Nearly spent";
+    return stab <= 50 ? "Over half spent" : "Stable";
+}
+
+// static
+LLColor3 WolfStarfold::wormholeColour(S32 stab, bool closing)
+{
+    // WolfStorm 9c477ea WH_COLOURS: stable 0.12,0.85,1.0 (cyan), over half spent 1.0,0.69,0.18 (amber), nearly spent / closing
+    // 1.0,0.416,0.36 (red)
+    if (closing || stab <= 10) return LLColor3(1.f, 0.416f, 0.36f);
+    return stab <= 50 ? LLColor3(1.f, 0.69f, 0.18f) : LLColor3(0.12f, 0.85f, 1.f);
+}
+
+// static
+std::string WolfStarfold::wormholeSentence(S32 stab, char size, S32 life, bool closing, const std::string& region)
+{
+    // WolfStorm 9c477ea whDescribe, the same sentence
+    std::string w = wormholeWords(stab, closing);
+    LLStringUtil::toLower(w);
+    std::string t = "The wormhole to " + (region.empty() ? std::string("another region") : region) + ": " + w;
+    t += size == 's' ? ", small (the Cub, Lurcher and Runner only)" : ", large (any ship)";
+    if (life < 0) t += ", it never closes";
+    else if (closing) t += ", closing now";
+    else if (life < 60) t += llformat(", about %d minute%s left", llmax(1, life), llmax(1, life) == 1 ? "" : "s");
+    else { const S32 h = (S32)llround((F32)life / 60.f); t += llformat(", about %d hour%s left", h, h == 1 ? "" : "s"); }
+    return t;
+}
+
 // static
 std::string WolfStarfold::checkName(const std::string& raw, std::string& why)
 {
@@ -1714,6 +1832,33 @@ void WolfStarfold::beginHangarCamera()
         LL_INFOS("WolfStarfold") << "hangar view: not in mouselook or appearance mode" << LL_ENDL;
         return;
     }
+    mHangarOn = true;
+    mHangarAt = now();
+    mHangarSettled = false;
+    // [rig 25 Nov 08:57:06Z] the docking moves the avatar by itself (stood up, placed on the walkway: SpaceBay.cs EndSeq W.StandUp,
+    // W.Place) and a key may still be down from the cockpit: for HANGAR_HOLD_S nothing but a NEW key, a launch or the ship going
+    // ends the view, and then it is aimed at the ship again (aimHangarCamera), so the view stands whatever the placing did
+    mHangarHoldUntil = mHangarAt + HANGAR_HOLD_S;
+    mHangarAim = true;
+    mHangarKeys0 = gAgent.getControlFlags() & hangarMoveFlags();
+    mHangarKeysSeenAt = mHangarAt;
+    mHangarAvatarAt = gAgent.getPositionGlobal();
+    aimHangarCamera();
+}
+
+// static
+U32 WolfStarfold::hangarMoveFlags()
+{
+    // the avatar walks, turns, jumps or flies by the user's keys (its own control flags, as LLAgent sets them: indra_constants.h)
+    return AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_LEFT_POS | AGENT_CONTROL_LEFT_NEG | AGENT_CONTROL_UP_POS
+        | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG | AGENT_CONTROL_NUDGE_LEFT_POS
+        | AGENT_CONTROL_NUDGE_LEFT_NEG | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_NUDGE_UP_NEG | AGENT_CONTROL_TURN_LEFT | AGENT_CONTROL_TURN_RIGHT;
+}
+
+void WolfStarfold::aimHangarCamera()
+{
+    LLViewerObject* o = gObjectList.findObject(mHangarShip);
+    if (!o || o->isDead() || !isAgentAvatarValid()) return;
     LLViewerObject* root = o->getRootEdit() ? o->getRootEdit() : o;
     // the linkset's box (each prim's centre give or take half its diagonal), agent metres
     LLVector3 lo, hi;
@@ -1747,10 +1892,9 @@ void WolfStarfold::beginHangarCamera()
     mHangarFocus = gAgent.getPosGlobalFromAgent(centre);
     gAgentCamera.setFocusOnAvatar(false, ANIMATE);
     gAgentCamera.setCameraPosAndFocusGlobal(gAgent.getPosGlobalFromAgent(centre + dir * dist), mHangarFocus, root->getID());
-    mHangarOn = true;
-    mHangarAt = now();
     mHangarSettled = false;
-    LL_INFOS("WolfStarfold") << "hangar view: ship " << root->getID() << ", half-diagonal " << radius << " m, eye " << dist << " m away" << LL_ENDL;
+    mHangarMeasureAt = now() + HANGAR_SETTLE_S;
+    LL_INFOS("WolfStarfold") << "hangar view: aimed at ship " << root->getID() << ", half-diagonal " << radius << " m, eye " << dist << " m away" << LL_ENDL;
 }
 
 void WolfStarfold::hangarIdle()
@@ -1770,23 +1914,41 @@ void WolfStarfold::hangarIdle()
     }
     LLViewerObject* o = gObjectList.findObject(mHangarShip);
     if (!o || o->isDead()) { endHangar("the ship is gone"); return; }
-    // the camera taken back by the viewer itself (Escape, a walk: LLAgentCamera::resetView sets the focus on the avatar), another
-    // focus (an alt-click on something else), mouselook: the view has ended, and the camera is the user's.
-    // [rig 25 Nov 08:27:03Z] Not the focus POINT: LLAgentCamera::calcFocusPositionTargetGlobal follows the focus object (its render
-    // position + the offset taken when the focus was set), and the ship was still settling onto its pad when the view began, so the
-    // point moved more than 1.5 m in the first frame and the view ended at once. The focus OBJECT says whose camera it is; the point
-    // is followed (mHangarFocus below).
-    if (gAgentCamera.getFocusOnAvatar() || gAgentCamera.cameraMouselook() || !hangarFocusIsShip())
+    const F64 t = now();
+    // a key the user presses: the view ends (the camera follows the walk as ever). A key already down when the view began (from the
+    // cockpit) does not count until it has been let go.
+    const U32 keys = gAgent.getControlFlags() & hangarMoveFlags();
+    // (a held key's flag may be missing for a frame between agent updates: it counts as let go after 0.3 s without it)
+    if (keys & mHangarKeys0) mHangarKeysSeenAt = t;
+    else if (mHangarKeys0 && t - mHangarKeysSeenAt > 0.3) mHangarKeys0 = 0;
+    if (keys & ~mHangarKeys0) { endHangar("the avatar moved"); return; }
+    if (gAgentCamera.cameraMouselook()) { mHangarOn = false; LL_INFOS("WolfStarfold") << "hangar view ended: mouselook" << LL_ENDL; return; }
+    // a position change by itself is never the user's (the stand-up, the region placing the pilot on the walkway, a teleport within
+    // the region): it starts the hold again, and the view is aimed at the ship once more after it
+    const LLVector3d me = gAgent.getPositionGlobal();
+    if ((me - mHangarAvatarAt).magVec() > 1.0)
+    {
+        mHangarAvatarAt = me;
+        mHangarHoldUntil = t + HANGAR_HOLD_S;
+        mHangarAim = true;
+        LL_INFOS("WolfStarfold") << "hangar view: the avatar was placed; holding, then aiming again" << LL_ENDL;
+    }
+    if (t < mHangarHoldUntil) return;   // the hold: nothing else ends it (the stand-up or the placing may move the camera meanwhile)
+    if (mHangarAim)
+    {
+        mHangarAim = false;
+        aimHangarCamera();
+        return;
+    }
+    // after the hold: the camera taken by the user ends the view, and the camera is theirs - Escape or a walk (LLAgentCamera::resetView:
+    // the focus back on the avatar), an alt-click on something else (another focus object), and below a zoom, an orbit or a pan.
+    // [rig 25 Nov 08:27:03Z] Not the focus POINT: calcFocusPositionTargetGlobal follows the focus object as the ship settles.
+    if (gAgentCamera.getFocusOnAvatar() || !hangarFocusIsShip())
     {
         mHangarOn = false;
         LL_INFOS("WolfStarfold") << "hangar view ended: the camera went elsewhere" << LL_ENDL;
         return;
     }
-    // the avatar walks, turns or flies (its own control flags, as LLAgent sets them: indra_constants.h)
-    const U32 MOVING = AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_LEFT_POS | AGENT_CONTROL_LEFT_NEG | AGENT_CONTROL_UP_POS
-        | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG | AGENT_CONTROL_NUDGE_LEFT_POS
-        | AGENT_CONTROL_NUDGE_LEFT_NEG | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_NUDGE_UP_NEG | AGENT_CONTROL_TURN_LEFT | AGENT_CONTROL_TURN_RIGHT;
-    if (gAgent.getControlFlags() & MOVING) { endHangar("the avatar moved"); return; }
     mHangarFocus = gAgentCamera.getFocusTargetGlobal();   // the ship's middle as the camera follows it
     const LLVector3d off = gAgentCamera.getCameraPositionGlobal() - mHangarFocus;
     const F32 dist = (F32)off.magVec();
@@ -1795,14 +1957,13 @@ void WolfStarfold::hangarIdle()
     const F32 az = (F32)atan2(off.mdV[VY], off.mdV[VX]);
     if (!mHangarSettled)
     {
-        if (now() - mHangarAt < HANGAR_SETTLE_S) return;
-        // the camera is where it went: its distance, height and bearing as they are now are the baseline (the camera's own
-        // limits may have moved it a little from what was asked)
+        if (t < mHangarMeasureAt) return;
+        // the camera is where it went (its own animation, at most 1 s): its distance, height and bearing are the baseline
         mHangarSettled = true;
         mHangarDist = dist;
         mHangarElev = elev;
         mHangarAz = az;
-        mHangarAvatarAt = gAgent.getPositionGlobal();
+        LL_INFOS("WolfStarfold") << "hangar view: turning (" << dist << " m out, " << elev * RAD_TO_DEG << " deg up)" << LL_ENDL;
         return;
     }
     // the user moved the camera (zoom, orbit, pan): away from where the slow turn has it
@@ -1815,9 +1976,8 @@ void WolfStarfold::hangarIdle()
         LL_INFOS("WolfStarfold") << "hangar view ended: the camera was moved" << LL_ENDL;
         return;
     }
-    if ((gAgent.getPositionGlobal() - mHangarAvatarAt).magVec() > 1.0) { endHangar("the avatar moved"); return; }
-    // the slow turn: the camera tool's own orbit (llagentcamera.cpp:905 cameraOrbitAround - with the focus off the avatar it turns
-    // the camera's offset about +Z by the angle, counter-clockwise: LLVector3d::rotVec(angle, 0, 0, 1) applies LLQuaternion(angle, z))
+    // the slow turn, 6 degrees a second: the camera tool's own orbit (llagentcamera.cpp:905 cameraOrbitAround - with the focus off the
+    // avatar it turns the camera's offset about +Z by the angle, counter-clockwise: LLVector3d::rotVec(angle, 0, 0, 1))
     const F32 step = F_TWO_PI / HANGAR_TURN_S * llclamp((F32)gFrameIntervalSeconds, 0.f, 0.25f);
     gAgentCamera.cameraOrbitAround(step);
     mHangarAz += step;
@@ -2075,34 +2235,55 @@ bool WolfStarfold::renderLens(LLRenderTarget* src, LLRenderTarget* dst, LLVertex
 {
     if (!src || !dst || !screen_triangle || !gWolfStarfoldLensProgram.isComplete() || gCubeSnapshot) return false;
     const F32 tun = tunnel();
-    F32 lens = 0.f;
-    F32 cx = 0.5f, cy = 0.5f, rad = 0.f;
     LLViewerCamera* cam = LLViewerCamera::getInstance();
     LLViewerRegion* region = gAgent.getRegion();
-    if (spaceHere() && mSys.mHaveWormhole && region)
+    // [WOLFTREK v11 stage D] up to two mouths: the region's own (wh=, its state from whs=) and the wandering wormhole once this pilot
+    // has found it (k=sig found=1; SpaceWormholes.cs treats it as a small hole, its state is not sent: drawn stable). Per mouth:
+    // A = centre x, y (0..1 of the frame), Einstein radius (frame heights), strength; B = the ring's colour, closing;
+    // C = the far side's tint, a seed for its sparks.
+    F32 A[8] = { 0.f }, B[8] = { 0.f }, C[8] = { 0.f };
+    S32 n = 0;
+    auto add = [&](const LLVector3& at_region, S32 stab, bool closing, const std::string& to)
     {
-        // the wormhole's centre on screen, from the camera basis (as pipeline.cpp wolfGodRays places the sun: LLCoordFrame
-        // at / left / up, LLCamera's vertical field of view and aspect)
-        const LLVector3 c = region->getPosAgentFromRegion(mSys.mWormhole);
+        if (n >= 2 || !region) return;
+        // design.html#wormholes2: "It visibly shrinks as it is used" - the brief: radius x (0.5 + 0.5 x stab / 100)
+        const F32 radius_m = WORMHOLE_M * (0.5f + 0.5f * (F32)llclamp(stab, 0, 100) / 100.f);
+        // the centre on screen from the camera basis (as pipeline.cpp wolfGodRays places the sun: LLCoordFrame at / left / up,
+        // LLCamera's vertical field of view and aspect)
+        const LLVector3 c = region->getPosAgentFromRegion(at_region);
         const LLVector3 d = c - cam->getOrigin();
         const F32 dist = d.length();
         const F32 fwd = d * cam->getAtAxis();
-        if (fwd > WORMHOLE_M * 0.5f && dist < 8000.f)
-        {
-            const F32 sx = -(d * cam->getLeftAxis()) / fwd;
-            const F32 sy = (d * cam->getUpAxis()) / fwd;
-            const F32 tan_half = tanf(cam->getView() * 0.5f);
-            cx = (sx / (tan_half * cam->getAspect())) * 0.5f + 0.5f;
-            cy = (sy / tan_half) * 0.5f + 0.5f;
-            // the sphere's angular radius as a share of the frame's height (half the frame = tan_half)
-            rad = (WORMHOLE_M / fwd) / tan_half * 0.5f;
-            if (cx > -0.5f && cx < 1.5f && cy > -0.5f && cy < 1.5f && rad > 0.002f) lens = llclamp(spaceFade() * 1.5f, 0.f, 1.f);
-        }
+        if (fwd <= radius_m * 0.5f || dist >= 8000.f) return;
+        const F32 sx = -(d * cam->getLeftAxis()) / fwd;
+        const F32 sy = (d * cam->getUpAxis()) / fwd;
+        const F32 tan_half = tanf(cam->getView() * 0.5f);
+        const F32 cx = (sx / (tan_half * cam->getAspect())) * 0.5f + 0.5f;
+        const F32 cy = (sy / tan_half) * 0.5f + 0.5f;
+        const F32 rad = (radius_m / fwd) / tan_half * 0.5f;   // the sphere's angular radius as a share of the frame's height
+        if (cx <= -0.5f || cx >= 1.5f || cy <= -0.5f || cy >= 1.5f || rad <= 0.002f) return;
+        const F32 strength = llclamp(spaceFade() * 1.5f, 0.f, 1.f);
+        if (strength <= 0.f) return;
+        // the far side's tint "by its seed": the other region's seed is not on the wire, so a hue from its name - WolfStorm 9c477ea
+        // tintOf: FNV-1a 32 over the name's code points, hue (h % 360) / 360, saturation 0.55, value 1, so both viewers tint alike
+        U32 h = 0x811c9dc5u;
+        for (llwchar ch : utf8str_to_wstring(to)) { h ^= (U32)ch; h *= 0x01000193u; }
+        const LLColor3 tint = hsv((F32)(h % 360u) / 360.f, 0.55f, 1.f);
+        const LLColor3 ring = wormholeColour(stab, closing);
+        A[4 * n + 0] = cx; A[4 * n + 1] = cy; A[4 * n + 2] = llmin(rad, 2.f); A[4 * n + 3] = strength;
+        B[4 * n + 0] = ring.mV[0]; B[4 * n + 1] = ring.mV[1]; B[4 * n + 2] = ring.mV[2]; B[4 * n + 3] = closing ? 1.f : 0.f;   // only a closing mouth pulses (WolfStorm whLook pulse)
+        C[4 * n + 0] = tint.mV[0]; C[4 * n + 1] = tint.mV[1]; C[4 * n + 2] = tint.mV[2]; C[4 * n + 3] = (F32)(h % 97u);
+        ++n;
+    };
+    if (spaceHere())
+    {
+        if (mSys.mHaveWormhole) add(mSys.mWormhole, mSys.mWhStab, mSys.mWhClosing, mSys.mWormholeTo);
+        if (mSig.mHave && mSig.mFound) add(mSig.mPos, 100, false, mSig.mRegion);
     }
-    if (lens <= 0.f && tun <= 0.f) return false;
+    if (n == 0 && tun <= 0.f) return false;
     LL_PROFILE_GPU_ZONE("wolf starfold lens");
-    static LLStaticHashedString s_centre("uCentre"), s_radius("uRadius"), s_aspect("uAspect"), s_time("uTime"), s_lens("uLens"),
-        s_tunnel("uTunnel"), s_ring("uRingColor"), s_throat("uThroatColor");
+    static LLStaticHashedString s_a("uLensA"), s_b("uLensB"), s_c("uLensC"), s_aspect("uAspect"), s_time("uTime"), s_tunnel("uTunnel"),
+        s_ring("uRingColor"), s_throat("uThroatColor");
     // Source: pipeline.cpp LLPipeline::wolfPhotoPass - the finished frame in diffuseRect, the screen triangle into dst
     LLGLSLShader* shader = &gWolfStarfoldLensProgram;
     shader->bind();
@@ -2114,13 +2295,13 @@ bool WolfStarfold::renderLens(LLRenderTarget* src, LLRenderTarget* dst, LLVertex
     }
     dst->bindTarget();
     src->bindTexture(0, channel, LLTexUnit::TFO_BILINEAR);
-    shader->uniform2f(s_centre, cx, cy);
-    shader->uniform1f(s_radius, llmin(rad, 2.f));
+    shader->uniform4fv(s_a, 2, A);   // a mouth with strength 0 is skipped by the shader
+    shader->uniform4fv(s_b, 2, B);
+    shader->uniform4fv(s_c, 2, C);
     shader->uniform1f(s_aspect, (F32)dst->getWidth() / llmax((F32)dst->getHeight(), 1.f));
     shader->uniform1f(s_time, (F32)fmod(now(), 3600.0));
-    shader->uniform1f(s_lens, lens);
     shader->uniform1f(s_tunnel, tun);
-    shader->uniform3f(s_ring, 0.35f, 0.95f, 1.f);
+    shader->uniform3f(s_ring, 0.35f, 0.95f, 1.f);     // the jump's tunnel keeps stage 1's colours
     shader->uniform3f(s_throat, 0.25f, 0.35f, 0.9f);
     screen_triangle->setBuffer();
     screen_triangle->drawArrays(LLRender::TRIANGLES, 0, 3);

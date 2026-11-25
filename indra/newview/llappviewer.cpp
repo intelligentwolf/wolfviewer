@@ -30,6 +30,12 @@
 #include <atomic>              // [T943 2026-11-20] wolfExitProgramFilesMissing
 #include <chrono>
 #include <thread>              // [/T943]
+#include <cstdio>              // [T1063 QUIT WATCHDOG 2026-11-25] fileno/_fileno, snprintf
+#if LL_WINDOWS
+#include <io.h>                // [T1063] _write
+#else
+#include <unistd.h>            // [T1063] write
+#endif
 #include "wolfmemorylog.h"     // [W106 MEMLOG 2026-11-13/] WolfMemoryLog::anotherCopyStillOpen, defined here
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
@@ -1686,6 +1692,103 @@ bool LLAppViewer::frame()
     return ret;
 }
 
+// [T1063 QUIT WATCHDOG 2026-11-25] Ticket 1063 (Ricky Fournier, macOS, W111): after Quit the window went but the process
+// stayed ("Stop running in background" in the Dock ended it). Quitting runs a long chain of joins and waits that nothing
+// bounds: our threads (WolfRecorder::shutdown joinWorker, the media sound feeder ~LLAudioPCMStreamsOpenAL joining
+// mThread, WolfVRStream, WolfDJ*, WolfUpdate), OpenAL/CoreAudio teardown (shutdownMirrorMix, alutExit), the stock thread
+// pools (LLAppViewer::cleanup), and after cleanup the C++ runtime's exit() (static destructors, atexit; on macOS AppKit
+// exits after NSTerminateNow in llappdelegate-objc.mm applicationShouldTerminate). If any of them never returns, the
+// window is gone but the process lives on. This is the last resort, on every platform: once the quit has begun, a
+// detached thread ends the process with _exit if it is still alive WOLF_QUIT_CLEANUP_SECS later, or
+// WOLF_QUIT_AFTER_CLEANUP_SECS after cleanup reached "Goodbye!" (by then the settings are saved, and ~LLAppViewer removes
+// the marker files right after). It first writes the last stage reached into the viewer's log, so the next report says
+// where the quit stopped. Nothing here runs unless a quit is under way, and a normal quit reaches neither deadline.
+namespace
+{
+    constexpr S64 WOLF_QUIT_CLEANUP_SECS       = 120;  // from the start of the quit: the whole of LLAppViewer::cleanup
+    constexpr S64 WOLF_QUIT_AFTER_CLEANUP_SECS = 15;   // from "Goodbye!": ~LLAppViewer, the OS's own app exit, exit()
+
+    // Made once and never freed, and holds nothing with a destructor that matters: exit() runs static destructors while
+    // the watchdog thread may still be reading it, so nothing it reads may be destroyed under it.
+    struct WolfQuitWatchdog
+    {
+        std::atomic<S64>         mDeadlineMs{0};             // steady clock, milliseconds; 0 = not armed
+        std::atomic<const char*> mStage{"quit started"};     // string literals only (static storage)
+        LLFILE*                  mLog = nullptr;             // the viewer's log, opened again for appending; may be null
+    };
+    WolfQuitWatchdog* gWolfQuitWatchdog = nullptr;    // set once, on the main thread
+
+    S64 wolf_quit_now_ms()
+    {
+        return (S64)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    // Raw writes, not LLError or buffered stdio: both may be part way through being torn down by exit().
+    void wolf_quit_write(LLFILE* log, const char* text)
+    {
+        const size_t len = strlen(text);
+#if LL_WINDOWS
+        // The log only: a GUI process has no valid stderr, and _write on a bad descriptor calls the CRT's
+        // invalid-parameter handler.
+        if (log)
+        {
+            _write(_fileno(log), text, (unsigned int)len);
+        }
+#else
+        if (log && write(fileno(log), text, len) < 0) {}
+        if (write(2, text, len) < 0) {}
+#endif
+    }
+
+    void wolf_quit_watchdog_run(WolfQuitWatchdog* w)
+    {
+        for (;;)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            const S64 deadline = w->mDeadlineMs.load();
+            if (deadline != 0 && wolf_quit_now_ms() >= deadline)
+            {
+                char line[512];
+                snprintf(line, sizeof(line),
+                         "\nWolfViewer quit watchdog (ticket 1063): the process was still running after Quit; last stage "
+                         "reached: \"%s\". Ending it now with _exit(0).\n", w->mStage.load());
+                wolf_quit_write(w->mLog, line);
+                _exit(0);
+            }
+        }
+    }
+
+    // Main thread. Arms (or re-arms) the deadline `seconds` from now and records the stage (a string literal).
+    void wolf_quit_watchdog_arm(S64 seconds, const char* stage)
+    {
+        if (!gWolfQuitWatchdog)
+        {
+            gWolfQuitWatchdog = new WolfQuitWatchdog;
+            const std::string log_name = LLError::logFileName();
+            if (!log_name.empty())
+            {
+                gWolfQuitWatchdog->mLog = LLFile::fopen(log_name, "a");
+            }
+            std::thread(wolf_quit_watchdog_run, gWolfQuitWatchdog).detach();
+        }
+        gWolfQuitWatchdog->mStage.store(stage);
+        gWolfQuitWatchdog->mDeadlineMs.store(wolf_quit_now_ms() + seconds * 1000);
+        LL_INFOS("AppInit") << "Quit watchdog (" << stage << "): the process ends itself if still running in "
+                            << seconds << " s" << LL_ENDL;
+    }
+
+    // Main thread. Records how far the quit has come (a string literal); does nothing before the quit began.
+    void wolf_quit_watchdog_stage(const char* stage)
+    {
+        if (gWolfQuitWatchdog)
+        {
+            gWolfQuitWatchdog->mStage.store(stage);
+        }
+    }
+}
+// [/T1063]
+
 bool LLAppViewer::doFrame()
 {
     resumeMainloopTimeout("Main:doFrameStart");
@@ -2091,6 +2194,7 @@ bool LLAppViewer::doFrame()
 
     if (LLApp::isExiting())
     {
+        wolf_quit_watchdog_arm(WOLF_QUIT_CLEANUP_SECS, "quit started (doFrame)");   // [T1063 QUIT WATCHDOG 2026-11-25/]
         pingMainloopTimeout("Main:qSnapshot");
         // Save snapshot for next time, if we made it through initialization
         if (STATE_STARTED == LLStartUp::getStartupState())
@@ -2178,6 +2282,7 @@ bool LLAppViewer::cleanup()
 #endif
 
     // <WolfViewer 2026-10-02/> stop and join an update download before the HTTP stack goes away
+    wolf_quit_watchdog_stage("cleanup started");   // [T1063 QUIT WATCHDOG 2026-11-25/]
     WolfUpdate::shutdown();
 
     // [VR PIPE 2026-11-03/] close the headset connection and join the headset server threads
@@ -2235,6 +2340,7 @@ bool LLAppViewer::cleanup()
     LLMortician::setZealous(true);
 
     // Give any remaining SLPlugin instances a chance to exit cleanly.
+    wolf_quit_watchdog_stage("cleanup: media plugins told to exit");   // [T1063 QUIT WATCHDOG 2026-11-25/]
     LLPluginProcessParent::shutdown();
 
     disconnectViewer();
@@ -2356,6 +2462,7 @@ bool LLAppViewer::cleanup()
     if (gAudiop)
     {
         LL_INFOS() << "Shutting down audio" << LL_ENDL;
+        wolf_quit_watchdog_stage("cleanup: audio engine shutting down");   // [T1063 QUIT WATCHDOG 2026-11-25/]
 
         // be sure to stop the internet stream cleanly BEFORE destroying the interface to stop it.
         gAudiop->stopInternetStream();
@@ -2380,6 +2487,7 @@ bool LLAppViewer::cleanup()
     // it.
     cleanupSavedSettings();
     LL_INFOS() << "Settings patched up" << LL_ENDL;
+    wolf_quit_watchdog_stage("cleanup: settings saved");   // [T1063 QUIT WATCHDOG 2026-11-25/]
 
     // delete some of the files left around in the cache.
     removeCacheFiles("*.wav");
@@ -2631,6 +2739,7 @@ bool LLAppViewer::cleanup()
         delete gViewerWindow;
         gViewerWindow = NULL;
         LL_INFOS() << "ViewerWindow deleted" << LL_ENDL;
+        wolf_quit_watchdog_stage("cleanup: window closed");   // [T1063 QUIT WATCHDOG 2026-11-25/]
     }
 
     LLSplashScreen::show();
@@ -2649,6 +2758,7 @@ bool LLAppViewer::cleanup()
     }
 
     LL_INFOS() << "Shutting down message system" << LL_ENDL;
+    wolf_quit_watchdog_stage("cleanup: message system, HTTP and worker threads");   // [T1063 QUIT WATCHDOG 2026-11-25/]
     end_messaging_system();
 
     // Non-LLCurl libcurl library
@@ -2697,6 +2807,7 @@ bool LLAppViewer::cleanup()
     SUBSYSTEM_CLEANUP(LLMetricPerformanceTesterBasic) ;
 
     LL_INFOS() << "Cleaning up Media and Textures" << LL_ENDL;
+    wolf_quit_watchdog_stage("cleanup: media, textures and singletons");   // [T1063 QUIT WATCHDOG 2026-11-25/]
 
     //Note:
     //SUBSYSTEM_CLEANUP(LLViewerMedia) has to be put before gTextureList.shutdown()
@@ -2765,6 +2876,9 @@ bool LLAppViewer::cleanup()
     LLSplashScreen::hide();
 
     LL_INFOS() << "Goodbye!" << LL_ENDL;
+    // [T1063 QUIT WATCHDOG 2026-11-25] What is left (~LLAppViewer, the platform's own exit: AppKit after NSTerminateNow on
+    // macOS, returning from main elsewhere, then the runtime's exit()) takes well under a second; bound it.
+    wolf_quit_watchdog_arm(WOLF_QUIT_AFTER_CLEANUP_SECS, "cleanup finished (Goodbye!) - process exit");
 
     removeDumpDir();
 

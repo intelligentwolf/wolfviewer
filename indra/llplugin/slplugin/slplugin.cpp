@@ -39,6 +39,43 @@
 
 #include <iostream>
 #include <fstream>
+#include <chrono>       // [T1063 QUIT WATCHDOG 2026-11-25]
+#include <cstdlib>      // [T1063] _exit (Windows)
+#include <cstring>      // [T1063] strlen
+#include <thread>       // [T1063]
+#if !LL_WINDOWS
+    #include <unistd.h> // [T1063] _exit, write
+#endif
+
+// [T1063 QUIT WATCHDOG 2026-11-25] Ticket 1063: on macOS the viewer's process stayed after Quit. A media plugin
+// process must never outlive its job either: once it is shutting down (the viewer asked, or the viewer is gone and the
+// socket closed) it normally ends within GOODBYE_SECONDS (12 s, llpluginprocesschild.cpp:36, STATE_UNLOADING's wait for
+// the plugin's goodbye) and then exits (~LLPluginProcessChild calls exit(0) while a plugin instance is loaded). If the
+// plugin's own teardown never returns - CEF's shutdown with its browser, GPU and audio threads, or exit()'s static
+// destructors racing those threads - nothing else would end the process. So a detached thread ends it with _exit
+// SLPLUGIN_EXIT_WATCHDOG_SECS after the shutdown began; a normal shutdown is long over by then.
+static const int SLPLUGIN_EXIT_WATCHDOG_SECS = 20;
+
+static void arm_exit_watchdog()
+{
+    static bool armed = false;      // main thread only
+    if (armed)
+    {
+        return;
+    }
+    armed = true;
+    std::thread([]()
+    {
+        std::this_thread::sleep_for(std::chrono::seconds(SLPLUGIN_EXIT_WATCHDOG_SECS));
+#if !LL_WINDOWS
+        // Raw write: stdio and LLError may be part way through exit()'s teardown. (Windows: SLPlugin is a GUI
+        // process with no stderr.)
+        static const char msg[] = "SLPlugin: still running long after shutting down began (ticket 1063 watchdog); _exit(0)\n";
+        if (write(2, msg, strlen(msg)) < 0) {}
+#endif
+        _exit(0);
+    }).detach();
+}
 using namespace std;
 
 
@@ -217,7 +254,17 @@ int main(int argc, char **argv)
         cocoa_interface.createAutoReleasePool();
 #endif
         timer.reset();
+        // [T1063 QUIT WATCHDOG 2026-11-25] before idle() too: a "shutdown_plugin" that arrived in the last pump/sleep has
+        // set STATE_SHUTDOWNREQ, and this idle() hands the plugin its "cleanup", which is where a teardown would stick
+        if (plugin->isShuttingDown())
+        {
+            arm_exit_watchdog();
+        }
         plugin->idle();
+        if (plugin->isShuttingDown())
+        {
+            arm_exit_watchdog();
+        }
 #if LL_DARWIN
         {
             cocoa_interface.processEvents();
@@ -259,6 +306,7 @@ int main(int argc, char **argv)
         cocoa_interface.deleteAutoReleasePool();
 #endif
     }
+    arm_exit_watchdog();    // [T1063 QUIT WATCHDOG 2026-11-25/] (already armed on any path that ends the loop)
     delete plugin;
 
     ll_cleanup_apr();

@@ -56,6 +56,11 @@ public:
     // returns true if the plugin is unloaded or we're in an unrecoverable error state.
     bool isDone(void);
 
+    // [T1063 QUIT WATCHDOG 2026-11-25] true once this process is on its way out: the viewer asked it to shut down
+    // (STATE_SHUTDOWNREQ and after) or the connection to the viewer failed (STATE_ERROR, STATE_DONE). slplugin.cpp
+    // then bounds how long the process may take to end.
+    bool isShuttingDown() const { return mState >= STATE_SHUTDOWNREQ; }
+
     void killSockets(void);
 
     F64 getSleepTime(void) const { return mSleepTime; };

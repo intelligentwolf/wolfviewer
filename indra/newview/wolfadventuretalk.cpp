@@ -557,6 +557,7 @@ F32 WolfAdventureTalkView::layout(F32 W, F32 H, bool draw) const
 
 void WolfAdventureTalkView::draw()
 {
+    const WolfGameDraw::KitScope kit;   // [HUD KIT 2026-11-25/] drawn in the Gunmetal Console look (wolfgamehud.h)
     const WolfAdventure::Talk& t = WolfAdventure::instance().talk();
     if (t.mNpc != mBoxNpc)
     {

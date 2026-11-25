@@ -297,6 +297,22 @@ void WolfGameHits::add(F32 l, F32 b, F32 r, F32 t, S32 id, S32 arg, const std::s
     mHits.push_back(h);
 }
 
+// Source: wolfskihud.cpp WolfSkiHud::logHits - view-local units to window GL pixels (localPointToScreen, then the display scale)
+void WolfGameHits::log(const LLView* view, const std::string& hud, const char* (*name)(S32 id)) const
+{
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    LL_INFOS("WolfHudKit") << "hits " << hud << ": " << mHits.size() << " (display scale " << scale.mV[VX] << ", zoom 1)" << LL_ENDL;
+    for (const Hit& h : mHits)
+    {
+        S32 sx = 0, sy = 0;
+        view->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f), ll_round((h.mB + h.mT) * 0.5f), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit " << hud << " " << name(h.mId) << (h.mArg ? llformat("+%d", h.mArg) : std::string())
+                               << " gl " << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY]) << " size "
+                               << ll_round((h.mR - h.mL) * scale.mV[VX]) << "," << ll_round((h.mT - h.mB) * scale.mV[VY])
+                               << " tip " << h.mTip << LL_ENDL;
+    }
+}
+
 const WolfGameHits::Hit* WolfGameHits::at(S32 x, S32 y) const
 {
     // The last added is on top (a confirmation over the page).
@@ -548,6 +564,7 @@ void WolfGameConsole::drawBackground(F32 W, F32 H, F32 cut, F32 alpha, const Pal
 
 void WolfGameConsole::draw()
 {
+    const WolfGameDraw::KitScope kit;   // [HUD KIT 2026-11-25/] drawn in the Gunmetal Console look (wolfgamehud.h)
     mHits.clear();
     layoutAndDraw();
     if (hasFocus()) mHits.keepFocusValid();
@@ -2154,6 +2171,7 @@ F32 WolfGameDialogView::layout(F32 W, F32 H, bool draw) const
 
 void WolfGameDialogView::draw()
 {
+    const WolfGameDraw::KitScope kit;   // [HUD KIT 2026-11-25/] drawn in the Gunmetal Console look (wolfgamehud.h)
     LLGLSUIDefault gls_ui;
     layout((F32)getRect().getWidth(), (F32)getRect().getHeight(), true);
     LLUICtrl::draw();

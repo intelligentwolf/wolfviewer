@@ -748,6 +748,7 @@ F32 WolfAdventureCardView::layout(F32 W, F32 H, bool draw) const
 
 void WolfAdventureCardView::draw()
 {
+    const WolfGameDraw::KitScope kit;   // [HUD KIT 2026-11-25/] drawn in the Gunmetal Console look (wolfgamehud.h)
     const WolfAdventure::Card* c = WolfAdventure::instance().topCard();
     if (c && c->mId != mCardId)
     {
@@ -984,6 +985,7 @@ void WolfAdventureHandoutView::setHandout(const std::string& adv, const std::str
 
 void WolfAdventureHandoutView::draw()
 {
+    const WolfGameDraw::KitScope kit;   // [HUD KIT 2026-11-25/] drawn in the Gunmetal Console look (wolfgamehud.h)
     mHits.clear();
     LLGLSUIDefault gls_ui;
     const F32 W = (F32)getRect().getWidth(), H = (F32)getRect().getHeight();

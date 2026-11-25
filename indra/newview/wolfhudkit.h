@@ -27,6 +27,13 @@
 // (generated with the sheet; WolfStorm reads the same map as JSON). The HUD draws the parts as textured quads, the
 // stretchable ones 9-sliced, under its own live needles, words and lamps.
 //
+// Press targets (Paul: "every target 44 px or more"; Shadow's policy 25 Nov): every target is 44 px or more on both sides at
+// FULL size (the HUD's zoom 1.0, UI size 1.0, and at its default size), the target being the whole key, knob or window and
+// the gap round it where that is free. Dragging a HUD smaller (WolfHudResize, down to WolfHudScale::MIN_SCALE) is the
+// resident's own choice and is never limited by it. A target that cannot reach 44 px without changing the HUD's layout is
+// recorded in its inventory ("small_ok" with the reason) and agreed first. Each HUD's logHits gives its targets' sizes at
+// the zoom it is drawn at; scripts/wolf/hudkit/check_inventory.py --log divides by that zoom and checks them at 1.0.
+//
 // Coordinates are the drawing view's own, y up, as the HUDs' other primitives (gGL.vertex2f), so a WolfHudScale::Scope
 // scales them with everything else.
 namespace WolfHudKit

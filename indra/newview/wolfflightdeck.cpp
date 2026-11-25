@@ -49,6 +49,8 @@
 #include "llviewertexture.h"
 #include "wolfflight.h"
 #include "wolfair.h"   // [WOLF AIR 2026-11-01/] the dogfight band
+#include "wolfhudkit.h"   // [HUD KIT 2026-11-25/] the Gunmetal Console parts
+#include "llviewerwindow.h"   // [HUD KIT 2026-11-25/] gViewerWindow->getDisplayScale (logHits)
 #include "llfloaterreg.h"
 #include "llfloaterworldmap.h"
 
@@ -299,6 +301,29 @@ namespace
         gGL.end();
     }
 
+    // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): the deck a machined gunmetal plate (Sailing Mode keeps
+    // its walnut, Paul's "more sailingy"), the glareshield carbon, the autopilot's face a plate in a chrome (sailing: brass)
+    // frame, every button a backlit key in its well (lit while its mode is on, pressed while held), the displays dark glass
+    // in chrome or brass frames with the glass's glare over them, the windows' digits behind glass. Same layout order,
+    // words, hit ids and actions (scripts/wolf/hudkit/inventory/flightdeck.json). Until the sheet has loaded, the old flat
+    // look. Words on a key cap as the Train Cab's (wolftraincab.cpp, WCAG 2 on the cap's lightest middle): C_KEYTEXT 7.9:1,
+    // C_KEYLIT 5.3:1 - colours.xml WolfHudKitText / WolfHudKitAmber.
+    const LLColor4 C_KEYTEXT(0.949f, 0.957f, 0.969f, 1.f);
+    const LLColor4 C_KEYLIT(1.f, 0.753f, 0.38f, 1.f);
+
+    // A key in its well, lit or held; false (nothing drawn) while the sheet loads.
+    bool kitKey(F32 l, F32 b, F32 r, F32 t, bool lit, bool down)
+    {
+        return WolfHudKit::key(l, b, r, t, down ? WolfHudKit::CAP_DOWN : lit ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP);
+    }
+
+    // A frame of chrome (brass) round (l, b) - (r, t), its 26 sheet pixels of border `width` units wide.
+    bool kitFrame(F32 l, F32 b, F32 r, F32 t, F32 width, bool brass)
+    {
+        return WolfHudKit::part(brass ? WolfHudKitMap::P_FRAME_BRASS : WolfHudKitMap::P_FRAME_CHROME, l, b, r, t, LLColor4::white,
+                                llmax(0.05f, width / 26.f));
+    }
+
     // A slotted panel screw.
     void screw(F32 x, F32 y, F32 rad)
     {
@@ -507,13 +532,20 @@ namespace
 
 //-----------------------------------------------------------------------------
 
+namespace
+{
+    WolfFlightDeck* sDeck = nullptr;   // [HUD KIT 2026-11-25] for logHits; the one deck (main_view.xml)
+}
+
 WolfFlightDeck::WolfFlightDeck(const Params& p)
 :   LLUICtrl(p)
 {
+    sDeck = this;
 }
 
 WolfFlightDeck::~WolfFlightDeck()
 {
+    if (sDeck == this) sDeck = nullptr;
 }
 
 void WolfFlightDeck::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip)
@@ -533,6 +565,127 @@ const WolfFlightDeck::Hit* WolfFlightDeck::hitAt(S32 x, S32 y) const
         }
     }
     return nullptr;
+}
+
+// [HUD KIT 2026-11-25] the hit ids by name, for logHits (as in wolfflightdeck.h's EHit; a seat or an engine key is its range's
+// first id + n, as scripts/wolf/hudkit/inventory/flightdeck.json lists the ranges)
+namespace
+{
+    std::string fdHitName(S32 id)
+    {
+        using D = WolfFlightDeck;
+        if (id >= D::H_CREW_SEAT_FIRST && id <= D::H_CREW_SEAT_LAST) return llformat("H_CREW_SEAT_FIRST+%d", id - D::H_CREW_SEAT_FIRST);
+        if (id >= D::H_ENG_FIRST && id <= D::H_ENG_LAST) return llformat("H_ENG_FIRST+%d", id - D::H_ENG_FIRST);
+        switch (id)
+        {
+        case D::H_NONE: return "H_NONE";
+        case D::H_MASTER_WARN: return "H_MASTER_WARN";
+        case D::H_MASTER_CAUT: return "H_MASTER_CAUT";
+        case D::H_AT: return "H_AT";
+        case D::H_SPD_KNOB: return "H_SPD_KNOB";
+        case D::H_LNAV: return "H_LNAV";
+        case D::H_VNAV: return "H_VNAV";
+        case D::H_HDG_KNOB: return "H_HDG_KNOB";
+        case D::H_HDG_SEL: return "H_HDG_SEL";
+        case D::H_ALT_KNOB: return "H_ALT_KNOB";
+        case D::H_ALT_HOLD: return "H_ALT_HOLD";
+        case D::H_VS_WHEEL: return "H_VS_WHEEL";
+        case D::H_VS: return "H_VS";
+        case D::H_CMD: return "H_CMD";
+        case D::H_RANGE_KNOB: return "H_RANGE_KNOB";
+        case D::H_HUD: return "H_HUD";
+        case D::H_HELP: return "H_HELP";
+        case D::H_EXIT: return "H_EXIT";
+        case D::H_GEAR: return "H_GEAR";
+        case D::H_ENGINE: return "H_ENGINE";
+        case D::H_STICK: return "H_STICK";
+        case D::H_THROTTLE: return "H_THROTTLE";
+        case D::H_PLAN: return "H_PLAN";
+        case D::H_ND_SCREEN: return "H_ND_SCREEN";
+        case D::H_TWA_KNOB: return "H_TWA_KNOB";
+        case D::H_WIND: return "H_WIND";
+        case D::H_TACK: return "H_TACK";
+        case D::H_SAIL: return "H_SAIL";
+        case D::H_WEB: return "H_WEB";
+        case D::H_MAP: return "H_MAP";
+        case D::H_BACKGROUND: return "H_BACKGROUND";
+        case D::H_FOLLOW_CAM: return "H_FOLLOW_CAM";
+        case D::H_MINI: return "H_MINI";
+        case D::H_INVENTORY: return "H_INVENTORY";
+        case D::H_REZ: return "H_REZ";
+        case D::H_CDU_SCREEN: return "H_CDU_SCREEN";
+        case D::H_CDU_DIR: return "H_CDU_DIR";
+        case D::H_CDU_APT: return "H_CDU_APT";
+        case D::H_CDU_CTL: return "H_CDU_CTL";
+        case D::H_CDU_EXEC: return "H_CDU_EXEC";
+        case D::H_CDU_CLR: return "H_CDU_CLR";
+        case D::H_CDU_DEL: return "H_CDU_DEL";
+        case D::H_CDU_HELP: return "H_CDU_HELP";
+        case D::H_LSK_L1: return "H_LSK_L1";
+        case D::H_LSK_L2: return "H_LSK_L2";
+        case D::H_LSK_L3: return "H_LSK_L3";
+        case D::H_LSK_L4: return "H_LSK_L4";
+        case D::H_LSK_L5: return "H_LSK_L5";
+        case D::H_LSK_L6: return "H_LSK_L6";
+        case D::H_LSK_R1: return "H_LSK_R1";
+        case D::H_LSK_R2: return "H_LSK_R2";
+        case D::H_LSK_R3: return "H_LSK_R3";
+        case D::H_LSK_R4: return "H_LSK_R4";
+        case D::H_LSK_R5: return "H_LSK_R5";
+        case D::H_LSK_R6: return "H_LSK_R6";
+        case D::H_AIR_FIRE: return "H_AIR_FIRE";
+        case D::H_AIR_DOGFIGHT: return "H_AIR_DOGFIGHT";
+        case D::H_AIR_BAIL: return "H_AIR_BAIL";
+        case D::H_AIR_WPN_GUN: return "H_AIR_WPN_GUN";
+        case D::H_AIR_WPN_IR: return "H_AIR_WPN_IR";
+        case D::H_AIR_WPN_RADAR: return "H_AIR_WPN_RADAR";
+        case D::H_AIR_FLARE: return "H_AIR_FLARE";
+        case D::H_AIR_CHAFF: return "H_AIR_CHAFF";
+        case D::H_JET_REHEAT: return "H_JET_REHEAT";
+        case D::H_JET_AIRBRAKE: return "H_JET_AIRBRAKE";
+        case D::H_JET_NOZ_DN: return "H_JET_NOZ_DN";
+        case D::H_JET_HOVER: return "H_JET_HOVER";
+        case D::H_JET_NOZ_UP: return "H_JET_NOZ_UP";
+        case D::H_JET_WATER: return "H_JET_WATER";
+        case D::H_BOMB_DOORS: return "H_BOMB_DOORS";
+        case D::H_BOMB_STICK: return "H_BOMB_STICK";
+        case D::H_BOMB_RELEASE: return "H_BOMB_RELEASE";
+        case D::H_ENG_AP: return "H_ENG_AP";
+        case D::H_ENG_TRIM: return "H_ENG_TRIM";
+        case D::H_ENG_DROOP: return "H_ENG_DROOP";
+        case D::H_ENG_RH: return "H_ENG_RH";
+        case D::H_ENG_CG_FWD: return "H_ENG_CG_FWD";
+        case D::H_ENG_CG_STOP: return "H_ENG_CG_STOP";
+        case D::H_ENG_CG_AFT: return "H_ENG_CG_AFT";
+        case D::H_AIR_RADAR_RANGE: return "H_AIR_RADAR_RANGE";
+        case D::H_AIR_TARGET: return "H_AIR_TARGET";
+        case D::H_AIR_TARGET_KEY: return "H_AIR_TARGET_KEY";
+        case D::H_AIR_RADAR_MOVE: return "H_AIR_RADAR_MOVE";
+        case D::H_AIR_RADAR_OFF: return "H_AIR_RADAR_OFF";
+        case D::H_AIR_RADAR_SHOW: return "H_AIR_RADAR_SHOW";
+        case D::H_AIR_RADAR_BIGGER: return "H_AIR_RADAR_BIGGER";
+        case D::H_AIR_RADAR_SMALLER: return "H_AIR_RADAR_SMALLER";
+        default: return llformat("H_%d", id);
+        }
+    }
+}
+
+void WolfFlightDeck::logHits()
+{
+    if (!sDeck) { LL_INFOS("WolfHudKit") << "hits flightdeck: no flight deck" << LL_ENDL; return; }
+    // Source: wolftraincab.cpp WolfTrainCabView::logHits - picture units x mHitScale (hitAt) to view-local, to the screen
+    // (localPointToScreen), then the display scale to window GL pixels (llviewerwindow.cpp handleMouseDown)
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    const F32 k = sDeck->mHitScale;
+    LL_INFOS("WolfHudKit") << "hits flightdeck: " << sDeck->mHits.size() << " (display scale " << scale.mV[VX] << ", zoom " << k << ")" << LL_ENDL;
+    for (const Hit& h : sDeck->mHits)
+    {
+        S32 sx = 0, sy = 0;
+        sDeck->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f * k), ll_round((h.mB + h.mT) * 0.5f * k), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit flightdeck " << fdHitName(h.mId) << " gl " << ll_round((F32)sx * scale.mV[VX]) << ","
+                               << ll_round((F32)sy * scale.mV[VY]) << " size " << ll_round((h.mR - h.mL) * k * scale.mV[VX]) << ","
+                               << ll_round((h.mT - h.mB) * k * scale.mV[VY]) << " tip " << h.mTip << LL_ENDL;
+    }
 }
 
 void WolfFlightDeck::pickFonts(F32 unit)
@@ -751,6 +904,10 @@ void WolfFlightDeck::layoutAndDraw()
         walnut(0.f, bottom, W, top - M, (top - M - bottom) / 3.f);
         rectG(0.f, top - M - 3.f, W, top - M, C_BRASS_HI, C_BRASS_LO);   // a brass rubbing strip
     }
+    else if (showBackground() && WolfHudKit::part(WolfHudKitMap::P_PLATE, 0.f, bottom, W, top - M, LLColor4::white, 0.6f))
+    {
+        // [HUD KIT 2026-11-25/] the machined gunmetal plate (its seams are in the picture)
+    }
     else if (showBackground())
     {
         rectG(0.f, bottom, W, top - M, C_PANEL_TOP, C_PANEL_BOT);
@@ -843,6 +1000,7 @@ void WolfFlightDeck::layoutAndDraw()
     F32 x = (W - units * D) * 0.5f;
     pickFonts(D * 0.055f);
     const bool plan = gSavedSettings.getBOOL("WolfFlightNDPlan");
+    mGlass.clear();
     for (const Panel& pn : panels)
     {
         const F32 r = x + pn.w * D;
@@ -867,6 +1025,12 @@ void WolfFlightDeck::layoutAndDraw()
         }
         x = r + gap * D;
     }
+    // [HUD KIT 2026-11-25] the glass over each display, once its contents are drawn (the glare's 30 sheet pixels of edge at a
+    // fifth of a pixel each: a soft sheen at the rim, the middle clear)
+    for (const Glass& g : mGlass)
+    {
+        WolfHudKit::part(WolfHudKitMap::P_GLARE_RECT, g.mL, g.mB, g.mR, g.mT, LLColor4(1.f, 1.f, 1.f, 0.55f), llmax(0.2f, (g.mR - g.mL) / 600.f));
+    }
     // [HUD SIZE 2026-10-12] back to the view's own size for the size handle and the guide over the world
     zoomed.reset();
     mResize.place(screen_bottom, screen_top, screen_w);
@@ -882,6 +1046,19 @@ void WolfFlightDeck::layoutAndDraw()
 void WolfFlightDeck::drawBezel(F32 l, F32 b, F32 r, F32 t, F32 inset, F32& sl, F32& sb, F32& sr, F32& st)
 {
     const F32 rad = inset * 0.9f;
+    // [HUD KIT 2026-11-25] a chrome (sailing: brass) frame the bezel's width, dark glass inside it; the glare goes on afterwards
+    if (WolfHudKit::ready())
+    {
+        sl = l + inset;
+        sb = b + inset;
+        sr = r - inset;
+        st = t - inset;
+        rectF(sl, sb, sr, st, C_SCREEN);
+        WolfHudKit::part(WolfHudKitMap::P_SCREEN, sl, sb, sr, st, LLColor4::white, 0.3f);
+        kitFrame(l, b, r, t, inset, WolfFlight::instance().sailing());
+        mGlass.push_back({ sl, sb, sr, st });
+        return;
+    }
     if (WolfFlight::instance().sailing())
     {
         roundRectF(l - 1.f, b - 3.f, r + 2.f, t, rad, LLColor4(0.f, 0.f, 0.f, 0.45f), LLColor4(0.f, 0.f, 0.f, 0.45f));
@@ -924,7 +1101,11 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
     WolfFlight& f = WolfFlight::instance();
     const F32 M = t - b;
     // the anti-glare lip and the panel face (not with the background hidden: PANEL button)
-    if (showBackground())
+    if (showBackground() && WolfHudKit::part(WolfHudKitMap::P_INLAY, l, b, r, t, LLColor4::white, 0.5f))
+    {
+        rectF(l, t - 2.f, r, t, LLColor4(0.f, 0.f, 0.f, 1.f));   // [HUD KIT 2026-11-25/] the carbon lip, its top edge
+    }
+    else if (showBackground())
     {
         rectG(l, b, r, t, C_GLARE_TOP, C_GLARE_BOT);
         rectF(l, t - 2.f, r, t, LLColor4(0.f, 0.f, 0.f, 1.f));
@@ -951,7 +1132,7 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
                           "Track: sail to the destination set on the CDU, round the land, tacking on the laylines" });
         items.push_back({ K_GAP, 0.25f, H_NONE, "", "", false, "" });
         items.push_back({ K_WINDOW, 1.05f, H_HDG_KNOB, "HEADING", fmt("%03d", (S32)llround(f.selHeading()) % 360), false, "Selected compass heading" });
-        items.push_back({ K_KNOB, 0.85f, H_HDG_KNOB, "HDG", "", false, "Heading knob: scroll or click left / right (Shift: x10)" });
+        items.push_back({ K_KNOB, 0.9f, H_HDG_KNOB, "HDG", "", false, "Heading knob: scroll or click left / right (Shift: x10)" });
         items.push_back({ K_BUTTON, 0.95f, H_HDG_SEL, "HDG", "", f.lateral() == WolfFlight::LAT_HDG, "Steer the selected compass heading" });
         items.push_back({ K_GAP, 0.25f, H_NONE, "", "", false, "" });
         {
@@ -959,17 +1140,17 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
             items.push_back({ K_WINDOW, 1.15f, H_TWA_KNOB, "WIND ANGLE", fmt("%3d%c", llabs(twa), twa >= 0 ? 'S' : 'P'), false,
                               "Wind angle to hold, degrees off the bow (S = wind on the starboard side, P = port)" });
         }
-        items.push_back({ K_KNOB, 0.85f, H_TWA_KNOB, "TWA", "", false, "Wind angle knob: scroll or click left / right" });
+        items.push_back({ K_KNOB, 0.9f, H_TWA_KNOB, "TWA", "", false, "Wind angle knob: scroll or click left / right" });
         items.push_back({ K_BUTTON, 0.95f, H_WIND, "WIND", "", f.lateral() == WolfFlight::LAT_WIND, "Hold this angle to the true wind (starts from the angle you are sailing now)" });
         items.push_back({ K_BUTTON, 0.95f, H_TACK, "TACK", "", false, "Tack (or gybe) through the wind to the other side" });
         items.push_back({ K_GAP, 0.25f, H_NONE, "", "", false, "" });
         items.push_back({ K_BUTTON, 0.95f, H_AT, "MOTOR", "", f.atEngaged(), "Motor speed hold: keep the selected speed with the throttle keys" });
         items.push_back({ K_WINDOW, 1.05f, H_SPD_KNOB, "SPEED", fmt("%3d", (S32)llround(f.selSpeedKt())), false, "Motor speed to hold (knots)" });
-        items.push_back({ K_KNOB, 0.85f, H_SPD_KNOB, "SPD", "", false, "Speed knob: scroll or click left / right (Shift: x10)" });
+        items.push_back({ K_KNOB, 0.9f, H_SPD_KNOB, "SPD", "", false, "Speed knob: scroll or click left / right (Shift: x10)" });
         items.push_back({ K_GAP, 0.35f, H_NONE, "", "", false, "" });
         items.push_back({ K_BUTTON, 1.15f, H_CMD, "AUTO", "", f.apEngaged(), "Autopilot on / standby (the helm keys or the wheel also put it to standby)" });
         items.push_back({ K_GAP, 0.35f, H_NONE, "", "", false, "" });
-        items.push_back({ K_KNOB, 0.85f, H_RANGE_KNOB, "RANGE", fmt("%g", ND_RANGES_NM[range_idx]), false, "Chartplotter range (nautical miles)" });
+        items.push_back({ K_KNOB, 0.9f, H_RANGE_KNOB, "RANGE", fmt("%g", ND_RANGES_NM[range_idx]), false, "Chartplotter range (nautical miles)" });
         items.push_back({ K_BUTTON, 0.95f, H_PLAN, "PLAN", "", gSavedSettings.getBOOL("WolfFlightNDPlan"), "Chartplotter: PLAN (the whole route, north up) or CHART (course up, around you)" });
         items.push_back({ K_BUTTON, 0.95f, H_MAP, "MAP", "", false, "World Map, zoomed to the whole trip: the planned route and where you are on it" });
         items.push_back({ K_BUTTON, 0.95f, H_INVENTORY, "INV", "", WolfHud::inventoryOpen(), WolfHud::inventoryTip() });   // [HUD INVENTORY 2026-10-12/]
@@ -990,7 +1171,7 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
                           heli ? "Autothrottle: hold the selected speed with the forward keys"
                                : "Autothrottle: hold the selected speed with the throttle keys" });
         items.push_back({ K_WINDOW, 1.25f, H_SPD_KNOB, "IAS", fmt("%3d", (S32)llround(f.selSpeedKt())), false, "Selected speed (knots): scroll, or click left/right of the knob" });
-        items.push_back({ K_KNOB, 0.85f, H_SPD_KNOB, "SPD", "", false, "Speed knob: scroll or click left / right (Shift: x10)" });
+        items.push_back({ K_KNOB, 0.9f, H_SPD_KNOB, "SPD", "", false, "Speed knob: scroll or click left / right (Shift: x10)" });
         items.push_back({ K_GAP, 0.25f, H_NONE, "", "", false, "" });
         items.push_back({ K_BUTTON, 0.95f, H_LNAV, "LNAV", "", f.lateral() == WolfFlight::LAT_LNAV || f.lateral() == WolfFlight::LAT_HOLD,
                           "Lateral navigation: fly straight to the destination set on the CDU" });
@@ -998,23 +1179,23 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
                           "Vertical navigation: cruise at CRZ ALT, descend to the destination's height" });
         items.push_back({ K_GAP, 0.25f, H_NONE, "", "", false, "" });
         items.push_back({ K_WINDOW, 1.05f, H_HDG_KNOB, "HEADING", fmt("%03d", (S32)llround(f.selHeading()) % 360), false, "Selected heading" });
-        items.push_back({ K_KNOB, 0.85f, H_HDG_KNOB, "HDG", "", false, "Heading knob: scroll or click left / right (Shift: x10)" });
+        items.push_back({ K_KNOB, 0.9f, H_HDG_KNOB, "HDG", "", false, "Heading knob: scroll or click left / right (Shift: x10)" });
         items.push_back({ K_BUTTON, 0.95f, H_HDG_SEL, "HDG SEL", "", f.lateral() == WolfFlight::LAT_HDG, "Heading select: fly the selected heading" });
         items.push_back({ K_GAP, 0.25f, H_NONE, "", "", false, "" });
         items.push_back({ K_WINDOW, 1.45f, H_ALT_KNOB, "ALTITUDE", fmt("%5d", (S32)llround(f.selAltFt())), false, "Selected altitude (feet above the region's sea level)" });
-        items.push_back({ K_KNOB, 0.85f, H_ALT_KNOB, "ALT", "", false, "Altitude knob: 100 ft a click (Shift: 1000)" });
+        items.push_back({ K_KNOB, 0.9f, H_ALT_KNOB, "ALT", "", false, "Altitude knob: 100 ft a click (Shift: 1000)" });
         items.push_back({ K_BUTTON, 0.95f, H_ALT_HOLD, "ALT HOLD", "", f.vertical() == WolfFlight::VERT_ALT, "Climb or descend to the selected altitude and hold it" });
         items.push_back({ K_GAP, 0.25f, H_NONE, "", "", false, "" });
         {
             const S32 vs = (S32)llround(f.selVsFpm());
             items.push_back({ K_WINDOW, 1.35f, H_VS_WHEEL, "VERT SPEED", f.vertical() == WolfFlight::VERT_VS ? fmt("%+05d", vs) : std::string("     "), false, "Selected vertical speed (feet per minute)" });
         }
-        items.push_back({ K_WHEEL, 0.45f, H_VS_WHEEL, "", "", false, "Vertical speed wheel: 100 ft/min a click" });
+        items.push_back({ K_WHEEL, 0.85f, H_VS_WHEEL, "", "", false, "Vertical speed wheel: 100 ft/min a click" });
         items.push_back({ K_BUTTON, 0.95f, H_VS, "V/S", "", f.vertical() == WolfFlight::VERT_VS, "Vertical speed: climb or descend at the selected rate, level at the selected altitude" });
         items.push_back({ K_GAP, 0.35f, H_NONE, "", "", false, "" });
         items.push_back({ K_BUTTON, 1.15f, H_CMD, "CMD", "", f.apEngaged(), "Autopilot engage / disengage (any flight key also disconnects it)" });
         items.push_back({ K_GAP, 0.35f, H_NONE, "", "", false, "" });
-        items.push_back({ K_KNOB, 0.85f, H_RANGE_KNOB, "RANGE", fmt("%g", ND_RANGES_NM[range_idx]), false, "Navigation display range (nautical miles)" });
+        items.push_back({ K_KNOB, 0.9f, H_RANGE_KNOB, "RANGE", fmt("%g", ND_RANGES_NM[range_idx]), false, "Navigation display range (nautical miles)" });
         items.push_back({ K_BUTTON, 0.95f, H_PLAN, "PLAN", "", gSavedSettings.getBOOL("WolfFlightNDPlan"), "Navigation display: PLAN (the whole route, north up) or MAP (heading up, around you)" });
         items.push_back({ K_BUTTON, 0.95f, H_HUD, "HUD", "", gSavedSettings.getBOOL("WolfFlightHUD"), "Head-up display over the view" });
         // [WOLF FLIGHT 2026-10-10] Paul: "add to the plane hud a thing where i can turn it on and the viewer follows
@@ -1035,6 +1216,9 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
         items.push_back({ K_BUTTON, 1.0f, H_EXIT, "EXIT", "", false, "Leave Flight Mode" });
     }
 
+    // [HUD KIT 2026-11-25] every item's press target is its whole column, the strip's full height (Paul: 44 px or more; at
+    // u = M = 54 a knob's 0.9 u is 48.6 x 54, a button's 0.95 u 51.3 x 54). The knobs were 0.85 u and the V/S wheel 0.45 u
+    // (its target 0.46 u, 24.8 px): now 0.9 u and 0.85 u, the wheel drawn as before in the middle of its wider column.
     F32 total = 0.f;
     for (const Item& it : items) total += it.w;
     const F32 u = llmin(M, (r - l - 2.f * M * 0.3f) / total);
@@ -1057,6 +1241,10 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
                        LLColor4(0.30f, 0.17f, 0.09f, 1.f), LLColor4(0.20f, 0.11f, 0.05f, 1.f));   // a teak face
             brassScrew(x0 + u * 0.12f, (face_b + face_t) * 0.5f, u * 0.06f);
             brassScrew(x1 - u * 0.12f, (face_b + face_t) * 0.5f, u * 0.06f);
+        }
+        else if (WolfHudKit::part(WolfHudKitMap::P_PLATE, x0, face_b, x1, face_t, LLColor4::white, 0.35f))
+        {
+            kitFrame(x0 - u * 0.06f, face_b - u * 0.06f, x1 + u * 0.06f, face_t + u * 0.06f, u * 0.08f, false);   // [HUD KIT 2026-11-25/]
         }
         else
         {
@@ -1084,13 +1272,18 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
             const F32 bl = il + u * 0.08f, br = ir - u * 0.08f, bb = b + M * 0.16f, bt = t - M * 0.16f;
             const bool on = it.lit && blink(0.8f);
             const LLColor4 lens_on = warn ? C_RED : C_AMBER;
-            roundRectF(bl - 2.f, bb - 2.f, br + 2.f, bt + 2.f, u * 0.08f, C_BEZEL_HI, C_BEZEL_LO);
+            if (on) WolfHudKit::glow(cx, (bb + bt) * 0.5f, (br - bl) * 0.75f, withAlpha(lens_on, 0.6f));   // [HUD KIT 2026-11-25/]
+            if (!kitFrame(bl - u * 0.07f, bb - u * 0.07f, br + u * 0.07f, bt + u * 0.07f, u * 0.07f, sail))
+            {
+                roundRectF(bl - 2.f, bb - 2.f, br + 2.f, bt + 2.f, u * 0.08f, C_BEZEL_HI, C_BEZEL_LO);
+            }
             roundRectF(bl, bb, br, bt, u * 0.06f,
                        on ? lens_on : LLColor4(warn ? 0.22f : 0.20f, warn ? 0.05f : 0.14f, 0.03f, 1.f),
                        on ? lerp(lens_on, C_BLACK, 0.35f) : LLColor4(0.10f, 0.03f, 0.02f, 1.f));
+            WolfHudKit::part(WolfHudKitMap::P_GLARE_RECT, bl, bb, br, bt, LLColor4(1.f, 1.f, 1.f, 0.7f), 0.15f);   // the lens's glass
             text(master, warn ? "MASTER" : "MASTER", cx, (bb + bt) * 0.5f + u * 0.02f, on ? C_BLACK : C_MASTER_UNLIT, LLFontGL::HCENTER, LLFontGL::BOTTOM);
             text(master, it.label, cx, (bb + bt) * 0.5f - u * 0.02f, on ? C_BLACK : C_MASTER_UNLIT, LLFontGL::HCENTER, LLFontGL::TOP);
-            addHit(bl, bb, br, bt, it.id, it.tip);
+            addHit(il, b, ir, t, it.id, it.tip);   // [HUD KIT 2026-11-25] the whole column (was the lens alone)
             break;
         }
         case K_BUTTON:
@@ -1102,7 +1295,14 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
             const bool pressed = mPressed == it.id;
             const F32 dy = pressed ? 1.f : 0.f;
             const bool classic = f.sailing();
-            if (classic)
+            const bool kit = WolfHudKit::ready();
+            if (kit)
+            {
+                // [HUD KIT 2026-11-25] a backlit key in its well (sailing: in a brass bezel), its lamp bar as before
+                if (classic) kitFrame(bl - 3.f, bb - 3.f, br + 3.f, bt + 3.f, 3.f, true);
+                kitKey(bl, bb, br, bt, it.lit, pressed);
+            }
+            else if (classic)
             {
                 // an ivory key in a brass bezel; its lamp amber when on
                 brassFrame(bl - 2.5f, bb - 3.f, br + 2.5f, bt + 2.f, 3.f);
@@ -1122,8 +1322,9 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
             {
                 rectF(bl + s * 0.10f, bar_b - 1.f, br - s * 0.10f, bar_t + 1.f, withAlpha(on, 0.25f));
             }
-            text(btn, it.label, cx, bb - dy + s * 0.32f, classic ? C_INK : C_WHITE, LLFontGL::HCENTER, LLFontGL::VCENTER);
-            addHit(bl, bb, br, bt, it.id, it.tip);
+            text(btn, it.label, cx, bb - dy + s * 0.32f, kit ? (it.lit ? C_KEYLIT : C_KEYTEXT) : classic ? C_INK : C_WHITE,
+                 LLFontGL::HCENTER, LLFontGL::VCENTER);
+            addHit(il, b, ir, t, it.id, it.tip);   // [HUD KIT 2026-11-25] the whole column (was the key alone, 0.74 u)
             break;
         }
         case K_WINDOW:
@@ -1132,13 +1333,17 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
             const F32 wl = il + u * 0.06f, wr = ir - u * 0.06f;
             const F32 wb = face_b + (face_t - face_b) * 0.12f, wt = face_t - (face_t - face_b) * 0.36f;
             text(lbl, it.label, cx, face_t - (face_t - face_b) * 0.06f, C_WHITE, LLFontGL::HCENTER, LLFontGL::TOP);
-            rectF(wl - 2.f, wb - 2.f, wr + 2.f, wt + 2.f, C_BEZEL_LO);
+            if (!kitFrame(wl - u * 0.05f, wb - u * 0.05f, wr + u * 0.05f, wt + u * 0.05f, u * 0.05f, f.sailing()))
+            {
+                rectF(wl - 2.f, wb - 2.f, wr + 2.f, wt + 2.f, C_BEZEL_LO);
+            }
             rectG(wl, wb, wr, wt, LLColor4(0.04f, 0.03f, 0.02f, 1.f), LLColor4(0.0f, 0.0f, 0.0f, 1.f));
             // unlit segments behind, like a real LED window
             std::string ghost(it.value.size(), '8');
             text(digits, ghost, cx, (wb + wt) * 0.5f, LLColor4(0.18f, 0.10f, 0.02f, 1.f), LLFontGL::HCENTER, LLFontGL::VCENTER);
             text(digits, it.value, cx, (wb + wt) * 0.5f, C_LED_DIGIT, LLFontGL::HCENTER, LLFontGL::VCENTER);
-            addHit(wl, wb, wr, wt, it.id, it.tip);
+            WolfHudKit::part(WolfHudKitMap::P_GLARE_RECT, wl, wb, wr, wt, LLColor4(1.f, 1.f, 1.f, 0.6f), 0.15f);   // [HUD KIT/] its glass
+            addHit(il, b, ir, t, it.id, it.tip);   // [HUD KIT 2026-11-25] the whole column (was the window alone)
             break;
         }
         case K_KNOB:
@@ -1153,7 +1358,7 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
             else if (it.id == H_RANGE_KNOB) turn = range_idx * 40.f - 140.f;
             circleF(cx + 1.f, cy - 2.f, rad + 1.5f, LLColor4(0.f, 0.f, 0.f, 0.5f));
             if (f.sailing()) circleShaded(cx, cy, rad, C_BRASS_HI, C_BRASS_LO);
-            else circleShaded(cx, cy, rad, C_KNOB_T, C_KNOB_B);
+            else if (!WolfHudKit::part(WolfHudKitMap::P_HUB, cx - rad, cy - rad, cx + rad, cy + rad)) circleShaded(cx, cy, rad, C_KNOB_T, C_KNOB_B);
             for (S32 i = 0; i < 28; ++i)
             {
                 const F32 a = 2.f * PI_F * i / 28.f + turn * DEG_TO_RAD;
@@ -1170,7 +1375,7 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
                 text(lbl, it.value, cx, face_t - u * 0.02f, C_WHITE, LLFontGL::HCENTER, LLFontGL::TOP);
             }
             text(lbl, it.label, cx, face_b + u * 0.02f, C_WHITE, LLFontGL::HCENTER, LLFontGL::BOTTOM);
-            addHit(cx - rad, cy - rad, cx + rad, cy + rad, it.id, it.tip);
+            addHit(il, b, ir, t, it.id, it.tip);   // [HUD KIT 2026-11-25] the whole column (was the knob, 0.61 u); left half down, right up
             break;
         }
         case K_WHEEL:
@@ -1189,7 +1394,7 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
                 lineW(wl + 1.f, y, wr - 1.f, y, 1.2f, LLColor4(0.05f, 0.05f, 0.05f, 1.f));
             }
             text(lbl, "UP", cx, wt + 1.f, C_WHITE, LLFontGL::HCENTER, LLFontGL::BOTTOM);
-            addHit(wl - u * 0.1f, wb, wr + u * 0.1f, wt, it.id, it.tip);
+            addHit(il, b, ir, t, it.id, it.tip);   // [HUD KIT 2026-11-25] the whole column (was 0.46 u); upper half up, lower down
             break;
         }
         default:
@@ -3038,6 +3243,10 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
         roundRectF(l + w * 0.025f, b + w * 0.025f, r - w * 0.025f, t - w * 0.025f, w * 0.03f,
                    LLColor4(0.36f, 0.21f, 0.11f, 1.f), LLColor4(0.24f, 0.13f, 0.06f, 1.f));
     }
+    else if (WolfHudKit::part(WolfHudKitMap::P_PLATE, l, b, r, t, LLColor4::white, 0.4f))
+    {
+        kitFrame(l - w * 0.015f, b - w * 0.015f, r + w * 0.015f, t + w * 0.015f, w * 0.025f, false);   // [HUD KIT 2026-11-25/]
+    }
     else
     {
         roundRectF(l, b, r, t, w * 0.04f, LLColor4(0.33f, 0.35f, 0.37f, 1.f), LLColor4(0.24f, 0.255f, 0.27f, 1.f));
@@ -3052,6 +3261,11 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
     const F32 st = t - h * 0.06f, sb = b + h * 0.30f;
     rectF(sl - 3.f, sb - 3.f, sr + 3.f, st + 3.f, C_BEZEL_LO);
     rectF(sl, sb, sr, st, C_SCREEN);
+    if (WolfHudKit::part(WolfHudKitMap::P_SCREEN, sl, sb, sr, st, LLColor4::white, 0.3f))   // [HUD KIT 2026-11-25] dark glass
+    {
+        kitFrame(sl - w * 0.025f, sb - w * 0.025f, sr + w * 0.025f, st + w * 0.025f, w * 0.025f, WolfFlight::instance().sailing());
+        mGlass.push_back({ sl, sb, sr, st });
+    }
     addHit(sl, sb, sr, st, H_CDU_SCREEN, "Flight computer: click, then type; the line select keys either side enter the scratchpad");
 
     const F32 lh = (st - sb) / 14.f;
@@ -3113,12 +3327,19 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
             const F32 kr = kl + lsk_w;
             const EHit id = (EHit)((s == 0 ? H_LSK_L1 : H_LSK_R1) + i);
             const bool pressed = mPressed == id;
-            roundRectF(kl - 1.f, dy - lh * 0.42f - 2.f, kr + 1.f, dy + lh * 0.42f + 1.f, 2.f, C_BEZEL_LO, C_BEZEL_LO);
-            roundRectF(kl, dy - lh * 0.42f - (pressed ? 1.f : 0.f), kr, dy + lh * 0.42f - (pressed ? 1.f : 0.f), 2.f, C_BTN_T, C_BTN_B);
+            if (!kitKey(kl, dy - lh * 0.42f, kr, dy + lh * 0.42f, false, pressed))
+            {
+                roundRectF(kl - 1.f, dy - lh * 0.42f - 2.f, kr + 1.f, dy + lh * 0.42f + 1.f, 2.f, C_BEZEL_LO, C_BEZEL_LO);
+                roundRectF(kl, dy - lh * 0.42f - (pressed ? 1.f : 0.f), kr, dy + lh * 0.42f - (pressed ? 1.f : 0.f), 2.f, C_BTN_T, C_BTN_B);
+            }
             rectF(kl + lsk_w * 0.25f, dy - 1.f, kr - lsk_w * 0.25f, dy + 1.f, C_WHITE);
             // the tick joining the key to its line
             rectF(s == 0 ? kr + 2.f : sr + 4.f, dy - 0.5f, s == 0 ? sl - 4.f : kl - 2.f, dy + 0.5f, C_DIM);
-            addHit(kl, dy - lh * 0.45f, kr, dy + lh * 0.45f, id, "Line select key");
+            // [HUD KIT 2026-11-25] the press target is the key and its line, as a touch CDU's (Shadow 25 Nov): the line's two rows
+            // (its label above, its data) the full row pitch with no gap, from the unit's edge to the middle of the screen. Never
+            // the title row or the scratchpad's, which stay the screen's. 44 px tall is not possible here: the keys are one
+            // pitch (2 lh = 0.091 D) apart, 26 px at 1080 p (inventory: small_ok).
+            addHit(s == 0 ? l : (sl + sr) * 0.5f, dy - lh * 0.5f, s == 0 ? (sl + sr) * 0.5f : r, dy + lh * 1.5f, id, "Line select key");
         }
     }
 
@@ -3132,32 +3353,44 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
                          { "DEL", H_CDU_DEL, "Delete: then a line select key clears that field" },
                          { "HELP", H_CDU_HELP, "How to fly with Flight Mode: the quick guide" } };
     const F32 kh = h * 0.085f;
-    const F32 k1t = sb - h * 0.035f, k1b = k1t - kh;
-    const F32 k2t = k1b - h * 0.03f, k2b = k2t - kh;
+    // [HUD KIT 2026-11-25] each key's press target fills its share of the space below the screen: that space (the screen's
+    // frame to the unit's foot) in two equal rows, each key the same height as before in the middle of its row (a few
+    // pixels from where they were), across the unit inside its frame
+    const F32 hit1t = sb - w * 0.03f, hit2b = b + w * 0.02f, hit12 = (hit1t + hit2b) * 0.5f;
+    const F32 hitL = l + w * 0.02f, hitR = r - w * 0.02f;
+    const F32 k1t = (hit1t + hit12 + kh) * 0.5f, k1b = k1t - kh;
+    const F32 k2t = (hit12 + hit2b + kh) * 0.5f, k2b = k2t - kh;
     const LLFontGL* kf = avionics("B612", LLFontGL::BOLD, kh * 0.42f);
-    auto key = [&](F32 kl, F32 kb, F32 kr, F32 kt, const Key& k, bool light)
+    auto key = [&](F32 kl, F32 kb, F32 kr, F32 kt, const Key& k, bool light, F32 hl, F32 hb, F32 hr, F32 ht)
     {
         const bool pressed = mPressed == k.id;
-        roundRectF(kl - 1.f, kb - 2.5f, kr + 1.f, kt + 1.f, 3.f, C_BEZEL_LO, C_BEZEL_LO);
-        roundRectF(kl, kb - (pressed ? 1.f : 0.f), kr, kt - (pressed ? 1.f : 0.f), 3.f, C_BTN_T, C_BTN_B);
-        text(kf, k.label, (kl + kr) * 0.5f, (kb + kt) * 0.5f - (pressed ? 1.f : 0.f), C_WHITE, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        const bool kit = kitKey(kl, kb, kr, kt, false, pressed);   // [HUD KIT 2026-11-25/]
+        if (!kit)
+        {
+            roundRectF(kl - 1.f, kb - 2.5f, kr + 1.f, kt + 1.f, 3.f, C_BEZEL_LO, C_BEZEL_LO);
+            roundRectF(kl, kb - (pressed ? 1.f : 0.f), kr, kt - (pressed ? 1.f : 0.f), 3.f, C_BTN_T, C_BTN_B);
+        }
+        text(kf, k.label, (kl + kr) * 0.5f, (kb + kt) * 0.5f - (pressed ? 1.f : 0.f), kit ? C_KEYTEXT : C_WHITE, LLFontGL::HCENTER, LLFontGL::VCENTER);
         if (k.id == H_CDU_EXEC)
         {
             // the EXEC light bar: lit while there is a modification to execute
             rectF(kl + (kr - kl) * 0.2f, kt - kh * 0.2f, kr - (kr - kl) * 0.2f, kt - kh * 0.1f, light ? C_WHITE : LLColor4(0.2f, 0.2f, 0.2f, 1.f));
         }
-        addHit(kl, kb, kr, kt, k.id, k.tip);
+        addHit(hl, hb, hr, ht, k.id, k.tip);
     };
     {
         const S32 n1 = (S32)(sizeof(row1) / sizeof(row1[0])), n2 = (S32)(sizeof(row2) / sizeof(row2[0]));
-        const F32 kw1 = (sr - sl) / (F32)n1, kw2 = (sr - sl) / (F32)n2;
+        // [HUD KIT 2026-11-25] the keys now span the unit inside its frame (were the screen's width, 0.71 w: a DIR TO key was
+        // 0.18 w, 41 px at 1080 p; now 0.24 w), each target its key's own column
+        const F32 kw1 = (hitR - hitL) / (F32)n1, kw2 = (hitR - hitL) / (F32)n2;
         for (S32 i = 0; i < n1; ++i)
         {
-            key(sl + kw1 * i + 3.f, k1b, sl + kw1 * (i + 1) - 3.f, k1t, row1[i], mModified && mPage == PAGE_DIR);
+            key(hitL + kw1 * (F32)i + 3.f, k1b, hitL + kw1 * (F32)(i + 1) - 3.f, k1t, row1[i], mModified && mPage == PAGE_DIR,
+                hitL + kw1 * (F32)i, hit12, hitL + kw1 * (F32)(i + 1), hit1t);
         }
         for (S32 i = 0; i < n2; ++i)
         {
-            key(sl + kw2 * i + 3.f, k2b, sl + kw2 * (i + 1) - 3.f, k2t, row2[i], false);
+            key(hitL + kw2 * (F32)i + 3.f, k2b, hitL + kw2 * (F32)(i + 1) - 3.f, k2t, row2[i], false, hitL + kw2 * (F32)i, hit2b, hitL + kw2 * (F32)(i + 1), hit12);
         }
     }
 }
@@ -3183,7 +3416,9 @@ void WolfFlightDeck::drawMini(F32 bottom)
         cells.push_back({ "SOG KT", fmt("%d", (S32)llround(d.mGS * KT)), C_WHITE, H_NONE, "", 1.0f, false });
         cells.push_back({ "HDG", fmt("%03d", (S32)llround(d.mHeading) % 360), C_WHITE, H_NONE, "", 1.0f, false });
         cells.push_back({ "WIND", fmt("%d KT %+d", (S32)llround(d.mTWS * KT), (S32)llround(d.mTWA)), C_CYAN, H_NONE, "True wind speed and its angle off the bow", 1.7f, false });
-        cells.push_back({ "DEPTH M", fmt("%.1f", d.mDepth), d.mDepth < 2.f ? C_AMBER : C_WHITE, H_NONE, "", 1.1f, false });
+        // [HUD KIT 2026-11-25] shallow water said in words too, not by the amber alone
+        cells.push_back({ d.mDepth < 2.f ? "SHALLOW M" : "DEPTH M", fmt("%.1f", d.mDepth), d.mDepth < 2.f ? C_AMBER : C_WHITE, H_NONE,
+                          "Depth of water under the boat (metres); SHALLOW under 2 m", 1.1f, false });
     }
     else
     {
@@ -3221,8 +3456,17 @@ void WolfFlightDeck::drawMini(F32 bottom)
     mPanelBottom = bottom;
     mPanelTop = t + 2.f;
 
-    roundRectF(l - 3.f, b - 3.f, r + 3.f, t + 3.f, 6.f, C_BEZEL_HI, C_BEZEL_LO);
-    roundRectF(l, b, r, t, 5.f, C_GLARE_BOT, C_GLARE_TOP);
+    // [HUD KIT 2026-11-25] a gunmetal bar in a chrome (sailing: brass) frame, the readouts dark glass, the keys backlit keys
+    const bool kit = WolfHudKit::part(WolfHudKitMap::P_PLATE, l, b, r, t, LLColor4::white, 0.4f);
+    if (kit)
+    {
+        kitFrame(l - 4.f, b - 4.f, r + 4.f, t + 4.f, 5.f, sail);
+    }
+    else
+    {
+        roundRectF(l - 3.f, b - 3.f, r + 3.f, t + 3.f, 6.f, C_BEZEL_HI, C_BEZEL_LO);
+        roundRectF(l, b, r, t, 5.f, C_GLARE_BOT, C_GLARE_TOP);
+    }
     const LLFontGL* vf = avionics("B612Mono", LLFontGL::BOLD, h * 0.42f);
     const LLFontGL* lf = avionics("B612", LLFontGL::NORMAL, h * 0.24f);
     const LLFontGL* kf = avionics("B612", LLFontGL::BOLD, h * 0.34f);
@@ -3234,16 +3478,27 @@ void WolfFlightDeck::drawMini(F32 bottom)
         if (c.key)
         {
             const bool pressed = mPressed == c.hit;
-            roundRectF(cl + 2.f, b + 5.f - (pressed ? 1.f : 0.f), cr - 2.f, t - 5.f - (pressed ? 1.f : 0.f), 3.f, C_BTN_T, C_BTN_B);
-            text(kf, c.value, (cl + cr) * 0.5f, (b + t) * 0.5f - (pressed ? 1.f : 0.f), c.col, LLFontGL::HCENTER, LLFontGL::VCENTER);
+            // lit: REZ waiting (amber), the inventory open (green) - the key lit, its word amber, not the colour alone
+            const bool lit = (c.hit == H_REZ && WolfVehicleRez::pending()) || (c.hit == H_INVENTORY && WolfHud::inventoryOpen());
+            if (kit && kitKey(cl + 2.f, b + 5.f, cr - 2.f, t - 5.f, lit, pressed))
+            {
+                text(kf, c.value, (cl + cr) * 0.5f, (b + t) * 0.5f - (pressed ? 1.f : 0.f), lit ? C_KEYLIT : C_KEYTEXT, LLFontGL::HCENTER, LLFontGL::VCENTER);
+            }
+            else
+            {
+                roundRectF(cl + 2.f, b + 5.f - (pressed ? 1.f : 0.f), cr - 2.f, t - 5.f - (pressed ? 1.f : 0.f), 3.f, C_BTN_T, C_BTN_B);
+                text(kf, c.value, (cl + cr) * 0.5f, (b + t) * 0.5f - (pressed ? 1.f : 0.f), c.col, LLFontGL::HCENTER, LLFontGL::VCENTER);
+            }
         }
         else
         {
             rectF(cl, b + 4.f, cr, t - 4.f, C_SCREEN);
+            if (kit) WolfHudKit::part(WolfHudKitMap::P_SCREEN, cl, b + 4.f, cr, t - 4.f, LLColor4::white, 0.2f);
             text(lf, c.label, (cl + cr) * 0.5f, t - 4.f - h * 0.17f, C_GREY, LLFontGL::HCENTER, LLFontGL::VCENTER);
             text(vf, c.value, (cl + cr) * 0.5f, b + 4.f + h * 0.30f, c.col, LLFontGL::HCENTER, LLFontGL::VCENTER);
         }
-        if (c.hit != H_NONE)
+        // [HUD KIT 2026-11-25] a readout with a tooltip gets a tip-only area (H_NONE): its tip was never shown (the WIND cell's)
+        if (c.hit != H_NONE || !c.tip.empty())
         {
             addHit(cl, b, cr, t, c.hit, c.tip);
         }
@@ -4147,11 +4402,24 @@ void WolfFlightDeck::airButton(F32 x0, F32 x1, F32 bb, F32 bt, F32 w, EHit id, c
 {
     // Source: drawCombat's own button (the 2026-11-01 band), shared by the new displays
     const bool pressed = mPressed == id;
-    roundRectF(x0 - 2.f, bb - 2.f, x1 + 2.f, bt + 2.f, w * 0.02f, withAlpha(lit_col, lit ? 0.9f : 0.25f), withAlpha(lit_col, lit ? 0.6f : 0.15f));
-    roundRectF(x0, bb - (pressed ? 1.f : 0.f), x1, bt - (pressed ? 1.f : 0.f), w * 0.015f, C_BTN_T, C_BTN_B);
+    // [HUD KIT 2026-11-25] a backlit key, its lit colour as a glow round it and a lamp strip along its top (the word stays light
+    // on the cap: a red word on it would be 2.3:1)
+    const bool kit = WolfHudKit::ready();
+    if (kit)
+    {
+        if (lit) WolfHudKit::glow((x0 + x1) * 0.5f, (bb + bt) * 0.5f, (x1 - x0) * 0.7f, withAlpha(lit_col, 0.55f));
+        kitKey(x0, bb, x1, bt, lit, pressed);
+        const F32 kh = bt - bb;
+        rectF(x0 + (x1 - x0) * 0.18f, bt - kh * 0.22f, x1 - (x1 - x0) * 0.18f, bt - kh * 0.14f, withAlpha(lit_col, lit ? 1.f : 0.25f));
+    }
+    else
+    {
+        roundRectF(x0 - 2.f, bb - 2.f, x1 + 2.f, bt + 2.f, w * 0.02f, withAlpha(lit_col, lit ? 0.9f : 0.25f), withAlpha(lit_col, lit ? 0.6f : 0.15f));
+        roundRectF(x0, bb - (pressed ? 1.f : 0.f), x1, bt - (pressed ? 1.f : 0.f), w * 0.015f, C_BTN_T, C_BTN_B);
+    }
     const LLFontGL* f = mF.mSmall;
     if (f && f->getWidthF32(label) > (x1 - x0) * 0.92f) f = mF.mTiny;
-    text(f, label, (x0 + x1) * 0.5f, (bb + bt) * 0.5f, lit ? lit_col : C_WHITE, LLFontGL::HCENTER, LLFontGL::VCENTER);
+    text(f, label, (x0 + x1) * 0.5f, (bb + bt) * 0.5f, kit ? (lit ? C_KEYLIT : C_KEYTEXT) : lit ? lit_col : C_WHITE, LLFontGL::HCENTER, LLFontGL::VCENTER);
     addHit(x0, bb, x1, bt, id, tip);
 }
 
@@ -5009,6 +5277,10 @@ bool WolfFlightDeck::handleMouseDown(S32 x, S32 y, MASK mask)
         return true;   // the panel itself: not a click on the world behind it
     }
     const EHit id = hit->mId;
+    if (id == H_NONE)
+    {
+        return true;   // [HUD KIT 2026-11-25] a readout's tooltip area: the panel, not a control
+    }
     if (id == H_CDU_SCREEN || (id >= H_CDU_DIR && id <= H_LSK_R6))
     {
         setFocus(true);

@@ -224,8 +224,7 @@ F32 WolfHudResize::scale() const
 {
     const F32 s = mScale;
     // a hand-edited NaN would pass llclamp: the default size
-    const F32 least = llclamp(mFloor, WolfHudScale::MIN_SCALE, WolfHudScale::MAX_SCALE);
-    return std::isfinite(s) ? llclamp(s, least, WolfHudScale::MAX_SCALE) : WolfHudScale::DEFAULT_SCALE;
+    return std::isfinite(s) ? llclamp(s, WolfHudScale::MIN_SCALE, WolfHudScale::MAX_SCALE) : WolfHudScale::DEFAULT_SCALE;
 }
 
 void WolfHudResize::place(F32 bottom, F32 top, F32 width)
@@ -281,7 +280,7 @@ void WolfHudResize::drag(S32 y)
     // Several moves within one frame all start from that same drawn frame, so they never compound.
     const F32 h = llmax(1.f, mTop - mBottom);
     const F32 want = llmax(1.f, (F32)y + mGrabOffset - mBottom);
-    const F32 s = llclamp(mPlacedScale * want / h, llclamp(mFloor, WolfHudScale::MIN_SCALE, WolfHudScale::MAX_SCALE), WolfHudScale::MAX_SCALE);
+    const F32 s = llclamp(mPlacedScale * want / h, WolfHudScale::MIN_SCALE, WolfHudScale::MAX_SCALE);
     if (fabsf(s - scale()) > 0.001f)
     {
         gSavedSettings.setF32(mSetting, s);

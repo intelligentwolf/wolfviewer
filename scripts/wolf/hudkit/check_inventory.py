@@ -9,7 +9,9 @@ state, with the action it takes. This script proves a reskin kept all of them:
                      and every hit id ("id": "H_...") is still both declared and used (two or more mentions).
   rig    (--log):    a WolfViewer.log from a LEAP rig run that called the HUD's "hits" verb. Every logged press
                      target ("WolfHudKit hit <hud> <id> gl x,y size w,h tip ...") must be an inventoried id, and
-                     every one that is a button (kind != "tip") must be at least --min px (44) on both sides.
+                     every one that is a button (kind != "tip") must be at least --min px (44) on both sides AT FULL
+                     SIZE (the logged size over the zoom logHits reports; the resident may drag a HUD smaller), unless
+                     its inventory entry carries "small_ok" (an agreed exception, with the reason).
 
 Run from the repository root:
   python3 -I scripts/wolf/hudkit/check_inventory.py                 # all HUDs, static
@@ -56,25 +58,46 @@ def static_check(inv):
 
 
 LOGRX = re.compile(r'WolfHudKit hit (\S+) (\S+) gl (-?\d+),(-?\d+) size (\d+),(\d+) tip ?(.*)$')
+# the header logHits writes before its targets: "hits <hud>: <n> (display scale <s>, zoom <k>)"
+ZOOMRX = re.compile(r'hits (\S+): \d+ \(display scale [-\d.e]+, zoom ([-\d.e]+)\)')
 
 
 def rig_check(inv, log, min_px):
+    # The 44 px rule is at full size (zoom 1.0; the resident may drag a HUD smaller, wolfhudkit.h): each logged size is
+    # divided by the zoom the HUD was drawn at. A control with "small_ok" (an agreed exception, with its reason) is noted,
+    # not failed.
     errs = []
-    known = {c['id']: c for c in inv['controls'] if c.get('id')}
+    # a control is known by its "id", or by its "name" when that is a hit id (the flight deck's LSK L2-L5); a ranged id the
+    # HUD logs as "<first>+n" (the flight deck's seats and engine keys) is its range's first id
+    known = {}
+    for c in inv['controls']:
+        for k in (c.get('id'), c.get('name')):
+            if k and k.startswith('H_'):
+                known.setdefault(k, c)
     seen = 0
+    zoom = 1.0
     with open(log, encoding='utf-8', errors='replace') as f:
         for line in f:
-            m = LOGRX.search(line.rstrip('\n'))
+            line = line.rstrip('\n')
+            z = ZOOMRX.search(line)
+            if z and z.group(1) == inv['hud']:
+                zoom = float(z.group(2)) if float(z.group(2)) > 0 else 1.0
+                continue
+            m = LOGRX.search(line)
             if not m or m.group(1) != inv['hud']:
                 continue
             seen += 1
-            hid, w, h = m.group(2), int(m.group(5)), int(m.group(6))
+            hid = m.group(2).split('+')[0]
+            w, h = int(m.group(5)) / zoom, int(m.group(6)) / zoom
             c = known.get(hid)
             if c is None:
                 errs.append('%s: the rig logged %s, which is not in the inventory' % (inv['hud'], hid))
                 continue
-            if c['kind'] != 'tip' and (w < min_px or h < min_px):
-                errs.append('%s: %s is %d x %d px on the rig (at least %d)' % (inv['hud'], hid, w, h, min_px))
+            if c['kind'] != 'tip' and (w < min_px - 0.5 or h < min_px - 0.5):
+                if c.get('small_ok'):
+                    print('note: %s %s is %.0f x %.0f px at full size (agreed: %s)' % (inv['hud'], hid, w, h, c['small_ok']))
+                else:
+                    errs.append('%s: %s is %.0f x %.0f px at full size on the rig (at least %d)' % (inv['hud'], hid, w, h, min_px))
     if seen == 0:
         errs.append('%s: the log has no "WolfHudKit hit %s" lines (was the hits verb called while it was shown?)' % (inv['hud'], inv['hud']))
     return seen, errs

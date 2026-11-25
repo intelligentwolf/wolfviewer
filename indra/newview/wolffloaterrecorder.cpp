@@ -43,6 +43,7 @@
 #include "llviewertexture.h"
 #include "llviewerwindow.h"
 #include "llwindow.h"
+#include "wolfhudkit.h"
 #include "wolfrecorder.h"
 #include "wolfvrstream.h"
 
@@ -174,11 +175,17 @@ void WolfRecorderTransportButton::draw()
         LLUI::getInstance()->getMousePositionLocal(this, &mx, &my);
         pressed = pointInView(mx, my);
     }
+    // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): the whole target a backlit physical key in its well, held
+    // down while pressed, lit with its lamp while it is the live one (Record while recording, when it reads Stop; Pause while
+    // paused, when it reads Resume); a faint wash on hover; the old flat look until the kit's sheet has loaded.
+    const bool lit = mIcon == ICON_STOP || mIcon == ICON_RESUME;
+    const bool kit = WolfHudKit::key((F32)r.mLeft, (F32)r.mBottom, (F32)r.mRight, (F32)r.mTop,
+                                     pressed ? WolfHudKit::CAP_DOWN : lit ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP, 0.4f);
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     // hover and press: a light wash over the whole target (all of it is clickable, word included)
     if (enabled && (pressed || mNeedsHighlight))
     {
-        gl_rect_2d(r, LLColor4(1.f, 1.f, 1.f, pressed ? 0.16f : 0.08f), true);
+        gl_rect_2d(r, LLColor4(1.f, 1.f, 1.f, kit ? (pressed ? 0.06f : 0.05f) : (pressed ? 0.16f : 0.08f)), true);
     }
     if (hasFocus())   // the keyboard focus, as every other control shows it
     {
@@ -186,11 +193,23 @@ void WolfRecorderTransportButton::draw()
     }
 
     // the round button: a light rim, a dark face, the sign on it
-    const F32 d = (F32)(r.getHeight() - 8);
-    const F32 cx = (F32)r.mLeft + 4.f + d / 2.f, cy = (F32)r.getHeight() / 2.f;
+    // on the kit's key the round button sits inside the cap's well (its border 30 sheet px x 0.4) as a black face in a chrome
+    // bezel under glass (WolfHudKit::gaugeFace / gaugeBezel: the bezel's ring reaches 128 / 106 of the face's radius)
+    const F32 inset = kit ? 12.f : 4.f;
+    const F32 d = (F32)r.getHeight() - 2.f * inset;
+    const F32 cx = (F32)r.mLeft + inset + d / 2.f, cy = (F32)r.getHeight() / 2.f;
+    const F32 face_r = d / 2.f * 106.f / 128.f;
     const F32 a = enabled ? 1.f : 0.4f;
-    circle(cx, cy, d / 2.f, LLColor4(0.90f, 0.91f, 0.92f, a));
-    circle(cx, cy, d / 2.f - 3.f, pressed ? LLColor4(0.22f, 0.24f, 0.27f, a) : LLColor4(0.13f, 0.15f, 0.18f, a));
+    if (kit)
+    {
+        WolfHudKit::gaugeFace(cx, cy - (pressed ? 1.f : 0.f), face_r, false);
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    }
+    else
+    {
+        circle(cx, cy, d / 2.f, LLColor4(0.90f, 0.91f, 0.92f, a));
+        circle(cx, cy, d / 2.f - 3.f, pressed ? LLColor4(0.22f, 0.24f, 0.27f, a) : LLColor4(0.13f, 0.15f, 0.18f, a));
+    }
     const LLColor4 red = enabled ? kRecordRed : LLColor4(0.55f, 0.55f, 0.55f, a);
     switch (mIcon)
     {
@@ -213,10 +232,18 @@ void WolfRecorderTransportButton::draw()
         break;
     }
     }
+    if (kit)
+    {
+        // the sign lit under the glass: a soft glow round it while it is the live key, then the glare and the chrome bezel
+        if (lit && enabled) WolfHudKit::glow(cx, cy, face_r * 1.1f, LLColor4(kRecordRed.mV[VRED], kRecordRed.mV[VGREEN], kRecordRed.mV[VBLUE], 0.35f));
+        WolfHudKit::gaugeBezel(cx, cy - (pressed ? 1.f : 0.f), face_r, false);
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    }
 
-    // the word beside it, in the skin's own label colour (readable in light and dark skins)
+    // the word beside it, in the kit's own words whatever the skin (the window is the gunmetal plate in every skin; colors.xml
+    // WolfHudKit*: Text 7.9:1, lit Amber 5.3:1 on the key cap; Dim when disabled)
     const LLFontGL* font = getFont() ? getFont() : LLFontGL::getFontSansSerifBig();
-    const LLColor4 text = LLUIColorTable::instance().getColor(enabled ? "LabelTextColor" : "LabelDisabledColor");
+    const LLColor4 text = LLUIColorTable::instance().getColor(!enabled ? "WolfHudKitTextDim" : lit ? "WolfHudKitAmber" : "WolfHudKitText");
     font->renderUTF8(getCurrentLabel().getString(), 0, cx + d / 2.f + 12.f, cy, text, LLFontGL::LEFT, LLFontGL::VCENTER,
                      LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
 }
@@ -435,8 +462,17 @@ void WolfFloaterRecorder::drawMeter(int source, const LLRect& rect)
     const S32 top = mid + 6, bottom = mid - 6, width = right - left;
     if (width < 20) return;
     auto xAt = [&](F32 db) { return left + (S32)((F32)width * llclamp((db - kMeterFloorDb) / -kMeterFloorDb, 0.f, 1.f)); };
+    // [HUD KIT 2026-11-25] a lit meter behind glass: the kit's dark-glass screen in a thin chrome frame, the lit bars, the glass's
+    // glare over them; the flat bar until the kit's sheet has loaded
+    const bool kit = WolfHudKit::part(WolfHudKitMap::P_SCREEN, (F32)left - 2.f, (F32)bottom - 2.f, (F32)right + 2.f, (F32)top + 2.f,
+                                      LLColor4::white, 0.3f);
+    if (kit)
+    {
+        WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, (F32)left - 4.f, (F32)bottom - 4.f, (F32)right + 4.f, (F32)top + 4.f,
+                         LLColor4::white, 0.15f);
+    }
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
-    gl_rect_2d(left, top, right, bottom, LLColor4(0.12f, 0.13f, 0.15f, 1.f), true);
+    if (!kit) gl_rect_2d(left, top, right, bottom, LLColor4(0.12f, 0.13f, 0.15f, 1.f), true);
     const F32 level = mMeterDb[source];
     if (level > kMeterFloorDb)
     {
@@ -457,12 +493,21 @@ void WolfFloaterRecorder::drawMeter(int source, const LLRect& rect)
         const S32 x = xAt(mHoldDb[source]);
         gl_rect_2d(x - 1, top, x + 1, bottom, LLColor4(1.f, 1.f, 1.f, 0.9f), true);
     }
-    gl_rect_2d(left, top, right, bottom, LLColor4(0.f, 0.f, 0.f, 0.6f), false);
-    // too loud in words as well as in red, and getting loud as well as in amber (WCAG 1.4.1)
+    if (kit)
+    {
+        WolfHudKit::part(WolfHudKitMap::P_GLARE_RECT, (F32)left - 2.f, (F32)bottom - 2.f, (F32)right + 2.f, (F32)top + 2.f, LLColor4::white, 0.15f);
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    }
+    else
+    {
+        gl_rect_2d(left, top, right, bottom, LLColor4(0.f, 0.f, 0.f, 0.6f), false);
+    }
+    // too loud in words as well as in red, and getting loud as well as in amber (WCAG 1.4.1); in the kit's words, on the
+    // gunmetal inlay in every skin (Amber 5.7:1, Text 8.3:1)
     if (mHoldDb[source] >= kAmberDb)
     {
         font->renderUTF8(getString(mHoldDb[source] >= kRedDb ? "meter_loud" : "meter_high"), 0, (F32)(right + 6), (F32)mid,
-                         LLUIColorTable::instance().getColor(mHoldDb[source] >= kRedDb ? "AlertCautionTextColor" : "LabelTextColor"),
+                         LLUIColorTable::instance().getColor(mHoldDb[source] >= kRedDb ? "WolfHudKitAmber" : "WolfHudKitText"),
                          LLFontGL::LEFT, LLFontGL::VCENTER, LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
     }
 }
@@ -471,9 +516,22 @@ void WolfFloaterRecorder::drawMonitor()
 {
     LLRect m;
     if (!mMonitor->localRectToOtherView(mMonitor->getLocalRect(), &m, this)) return;
+    // [HUD KIT 2026-11-25] the monitor a lit instrument behind glass: the kit's dark-glass screen in a chrome frame (as the Ski
+    // HUD's read-outs, wolfskihud.cpp glass()), the glass's glare over everything at the end; the flat monitor until the
+    // kit's sheet has loaded
+    const bool kit = WolfHudKit::part(WolfHudKitMap::P_SCREEN, (F32)m.mLeft, (F32)m.mBottom, (F32)m.mRight, (F32)m.mTop,
+                                      LLColor4::white, 0.4f);
+    if (kit)
+    {
+        WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, (F32)m.mLeft - 3.f, (F32)m.mBottom - 3.f, (F32)m.mRight + 3.f,
+                         (F32)m.mTop + 3.f, LLColor4::white, 0.25f);
+    }
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
-    gl_rect_2d(m, kMonBg, true);
-    gl_rect_2d(m, kMonEdge, false);
+    if (!kit)
+    {
+        gl_rect_2d(m, kMonBg, true);
+        gl_rect_2d(m, kMonEdge, false);
+    }
 
     // the preview: 16:9, at most a little over half the monitor's width
     S32 ph = m.getHeight() - 16, pw = ph * 16 / 9;
@@ -573,6 +631,11 @@ void WolfFloaterRecorder::drawMonitor()
         const S32 cy = m.mBottom + 16;
         if (mMicOn) cx += drawChip(cx, cy, getString("chip_mic"), kChipRed, LLColor4::white) + 6;
         if (mVoiceOn) drawChip(cx, cy, getString("chip_voice"), kMonEdge, kMonText);
+    }
+    if (kit)
+    {
+        WolfHudKit::part(WolfHudKitMap::P_GLARE_RECT, (F32)m.mLeft, (F32)m.mBottom, (F32)m.mRight, (F32)m.mTop, LLColor4::white, 0.4f);
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     }
 }
 
@@ -744,12 +807,12 @@ void WolfFloaterRecorder::refresh()
     if (!error.empty())
     {
         mMessage->setText("Problem: " + error);
-        mMessage->setColor(LLUIColorTable::instance().getColor("AlertCautionTextColor"));
+        mMessage->setColor(LLUIColorTable::instance().getColor("WolfHudKitAmber"));   // [HUD KIT] on the gunmetal plate, every skin
     }
     else
     {
         mMessage->setText(st.notice == "Saved." ? std::string() : st.notice);
-        mMessage->setColor(LLUIColorTable::instance().getColor("LabelTextColor"));
+        mMessage->setColor(LLUIColorTable::instance().getColor("WolfHudKitText"));
     }
 
     // the Cisco codec: offered only when there is something to download and the encoders found nothing else

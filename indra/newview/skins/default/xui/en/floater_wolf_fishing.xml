@@ -10,29 +10,39 @@
      [FISHING HUD 2026-11-11] Wolf World > Fishing now shows the Fishing HUD (wolffishingoverlay.cpp, main_view.xml
      wolf_fishing_hud); this window is its Board (your week, the top 10) and keeps its own buttons. Challenge mode (off by
      default, remembered per resident) is switched here or with the HUD's CHALLENGE button. -->
+<!-- [HUD KIT 2026-11-25] the Board in Paul's Gunmetal Console look (wolfhudkit.h), as the Fishing HUD and the Wolf HUDs window: the
+     window a machined gunmetal plate, every button a backlit physical key 44 px high (Cast, Reel in, Stop fishing were 40, Update
+     22, Put the rod away 24; the rows below them moved down and the window grew to 656), words in the kit's own colours
+     (colors.xml WolfHudKit*; the status line's and the board note's problems in WolfHudKitAmber, wolffloaterfishing.cpp) whatever
+     the skin. Challenge mode stays the viewer's standard check box (keyboard-operable; inventory small_ok); the two lists stay
+     the standard lists. Same controls, order, words, tooltips and actions (scripts/wolf/hudkit/inventory/fishing.json). -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="610"
+ height="656"
  layout="topleft"
  name="wolf_fishing"
  help_topic="wolf_fishing"
+ bg_opaque_image="WolfHudKit_Plate"
+ bg_alpha_image="WolfHudKit_Plate"
+ bg_opaque_image_overlay="WolfHudKitImage"
+ bg_alpha_image_overlay="WolfHudKitImage"
  save_rect="true"
  single_instance="true"
  title="Fishing"
  width="500">
     <!-- [FISHING HUD 2026-11-11] the Wolf Fishing logo (our own art, the HUD's) beside the line that says what is happening -->
     <icon follows="left|top" height="60" image_name="WolfFishing_Logo" layout="topleft" left="14" mouse_opaque="false" name="fish_logo" top="28" width="60" />
-    <text follows="left|top" font="SansSerifLarge" height="66" layout="topleft" left="84" name="fish_status" top="26" width="400" word_wrap="true">Looking for your fishing rod...</text>
-    <button follows="left|top" font="SansSerifLarge" height="40" label="Cast" layout="topleft" left="16" name="fish_cast" top="98" width="150"
+    <text follows="left|top" font="SansSerifLarge" height="66" layout="topleft" left="84" text_color="WolfHudKitText" name="fish_status" top="26" width="400" word_wrap="true">Looking for your fishing rod...</text>
+    <button follows="left|top" font="SansSerifLarge" height="44" label="Cast" layout="topleft" left="16" label_color="WolfHudKitText" label_color_selected="WolfHudKitAmber" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" name="fish_cast" top="98" width="150"
      tool_tip="Cast your line into the water in front of you. Face the water first." />
-    <button follows="left|top" font="SansSerifLarge" height="40" label="Reel in" layout="topleft" left="176" name="fish_reel" top="98" width="150"
+    <button follows="left|top" font="SansSerifLarge" height="44" label="Reel in" layout="topleft" left="176" label_color="WolfHudKitText" label_color_selected="WolfHudKitAmber" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" name="fish_reel" top="98" width="150"
      tool_tip="Reel in your line and see what you have caught. When a fish bites there is no hurry - it waits for you." />
-    <button follows="left|top" height="40" label="Stop fishing" layout="topleft" left="336" name="fish_stop" top="98" width="148"
+    <button follows="left|top" height="44" label="Stop fishing" layout="topleft" left="336" label_color="WolfHudKitText" label_color_selected="WolfHudKitAmber" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" name="fish_stop" top="98" width="148"
      tool_tip="Take your line out of the water without reeling in" />
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="mine_heading" top="150" width="468">Your week</text>
-    <text follows="left|top" height="20" layout="topleft" left="16" name="fish_mine" top="172" width="468" word_wrap="true" />
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" text_color="WolfHudKitText" name="mine_heading" top="154" width="468">Your week</text>
+    <text follows="left|top" height="20" layout="topleft" left="16" text_color="WolfHudKitText" name="fish_mine" top="176" width="468" word_wrap="true" />
     <scroll_list
      draw_heading="true"
      follows="left|top"
@@ -41,14 +51,14 @@
      left="16"
      multi_select="false"
      name="fish_my_best"
-     top="196"
+     top="200"
      tool_tip="Your ten biggest fish this week: their weights added up are your score."
      width="468">
         <scroll_list.columns label="Your biggest fish" name="fish" relative_width="0.66" />
         <scroll_list.columns label="Where" name="where" relative_width="0.34" />
     </scroll_list>
-    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" name="board_heading" top="316" width="340">This week's top 10 on Wolf Territories</text>
-    <button follows="left|top" height="22" label="Update" layout="topleft" left="384" name="fish_update" top="314" width="100"
+    <text follows="left|top" font="SansSerifBold" height="20" layout="topleft" left="16" text_color="WolfHudKitText" name="board_heading" top="330" width="340">This week's top 10 on Wolf Territories</text>
+    <button follows="left|top" height="44" label="Update" layout="topleft" left="384" label_color="WolfHudKitText" label_color_selected="WolfHudKitAmber" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" name="fish_update" top="318" width="100"
      tool_tip="Read the top 10 again" />
     <scroll_list
      draw_heading="true"
@@ -58,7 +68,7 @@
      left="16"
      multi_select="false"
      name="fish_board"
-     top="340"
+     top="368"
      width="468">
         <scroll_list.columns label="#" name="place" width="28" />
         <scroll_list.columns label="Angler" name="name" relative_width="0.3" />
@@ -66,10 +76,10 @@
         <scroll_list.columns label="Fish" name="fish" relative_width="0.09" />
         <scroll_list.columns label="Biggest" name="best" relative_width="0.44" />
     </scroll_list>
-    <text follows="left|top" height="36" layout="topleft" left="16" name="fish_board_note" top="516" width="468" word_wrap="true" />
-    <text follows="left|top" height="20" layout="topleft" left="16" name="fish_last_week" top="552" width="340" word_wrap="true" />
-    <check_box follows="left|top" height="20" label="Challenge mode" layout="topleft" left="16" name="fish_challenge" top="580" width="220"
+    <text follows="left|top" height="36" layout="topleft" left="16" text_color="WolfHudKitText" name="fish_board_note" top="544" width="468" word_wrap="true" />
+    <text follows="left|top" height="20" layout="topleft" left="16" text_color="WolfHudKitText" name="fish_last_week" top="580" width="340" word_wrap="true" />
+    <check_box follows="left|top" height="20" label="Challenge mode" layout="topleft" left="16" label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" name="fish_challenge" top="614" width="220"
      tool_tip="Challenge mode: to reel in, hold Reel in on the fishing bar and let go before the line goes into the red, or the fish gets away. When it is off, one press of Reel in brings the fish in and there is no hurry." />
-    <button follows="left|top" height="24" label="Put the rod away" layout="topleft" left="354" name="fish_away" top="578" width="130"
+    <button follows="left|top" height="44" label="Put the rod away" layout="topleft" left="354" label_color="WolfHudKitText" label_color_selected="WolfHudKitAmber" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" name="fish_away" top="602" width="130"
      tool_tip="Take the fishing rod off. Get my rod puts it back." />
 </floater>

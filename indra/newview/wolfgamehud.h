@@ -69,6 +69,31 @@ namespace WolfGameDraw
     extern const LLColor4 WOLF_AMBER;      // #f5a524
     extern const LLColor4 CHIP_FILL;       // the Down / Dead chip, #b91c1c
 
+    /**
+     * [HUD KIT 2026-11-25] Paul's "Gunmetal Console" look (wolfhudkit.h) for the game's surfaces. While a KitScope lives - the game
+     * HUD, the Roleplay window, game dialogs and the adventure's card, talk, handout and play views open one in their draw() -
+     * and once the kit's sheet has loaded: every button() is a backlit key in its well (lit while primary or active, held down while
+     * pressed, a glow in the palette's accent under the pointer); icon() slots are wells; the "plain" palette's frame() is a machined
+     * gunmetal plate in a chrome frame and its card() dark glass. The "wolves" palette keeps its night-sky plates and cards, the
+     * game's chosen theme (as the Captain's Helm keeps its oak), with the same physical keys and wells on them. Other users of this
+     * kit (the Adventure Studio, the carousel...) open no scope and keep their look.
+     */
+    class KitScope
+    {
+    public:
+        KitScope();
+        ~KitScope();
+        KitScope(const KitScope&) = delete;
+        KitScope& operator=(const KitScope&) = delete;
+    };
+    /** A KitScope is open and the kit's sheet is ready: draw the Gunmetal Console parts. */
+    bool kitOn();
+    // The kit's key words (as wolftraincab.cpp / wolfdashboard.cpp C_KEYTEXT / C_KEYLIT): 7.9:1 and 5.3:1 on the key's brightest
+    // texel (relative luminance 0.073, measured on hudkit_gunmetal.png); KEY_DANGER #fecaca 5.8:1 there (#fca5a5 would be 4.4).
+    extern const LLColor4 KEY_TEXT;
+    extern const LLColor4 KEY_LIT;
+    extern const LLColor4 KEY_DANGER;
+
     // ---- lettering ----
     /** Cinzel Bold (fonts.xml "WolfDisplay") at the largest size whose line fits `px`;
      *  the viewer's bold sans if that font is missing. Titles, names and big numbers. */
@@ -216,7 +241,11 @@ public:
     };
 
     WolfGameHUD(const Params& p);
+    ~WolfGameHUD();
     void draw() override;
+    /** [HUD KIT 2026-11-25] For LEAP rigs (UI call WolfHudKit.Hits "gamehud"): this frame's press targets - the HUD's, the target
+     *  frame's, the adventure's objective and title, and each notice's X ("notices") - in the form check_inventory.py --log reads. */
+    static void logHits();
     bool handleMouseDown(S32 x, S32 y, MASK mask) override;
     bool handleMouseUp(S32 x, S32 y, MASK mask) override;
     bool handleHover(S32 x, S32 y, MASK mask) override;

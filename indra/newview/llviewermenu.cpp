@@ -34,6 +34,8 @@
 #include "llviewermenu.h"
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] Game Mode
 #include "wolffloaterroleplay.h"   // [WOLF ADVENTURE P1 2026-10-16/] Wolf World > Adventures...
+#include "wolfgamehud.h"   // [HUD KIT 2026-11-25/] WolfGameHUD::logHits (WolfHudKit.Hits)
+#include "wolfgreedyhud.h"   // [HUD KIT 2026-11-25/] WolfGreedyHud::logHits (WolfHudKit.Hits)
 #include "wolffishingoverlay.h"   // [FISHING HUD 2026-11-11/] Wolf World > Fishing on the screen
 #include "wolfdrive.h"   // [WOLF DRIVE 2026-10-09/] the Car Dashboard toolbar button
 #include "wolfhelm.h"   // <WolfViewer 2026-10-28/> Captain's Helm
@@ -13310,6 +13312,8 @@ void initialize_menus()
         else if (hud == "speed") WolfFloaterSpeed::logHits();      // [HUD KIT 2026-11-25/]
         else if (hud == "ski") WolfSkiHud::logHits();              // [HUD KIT 2026-11-25/]
         else if (hud == "fishing") WolfFishingHud::logHits();      // [HUD KIT 2026-11-25/]
+        else if (hud == "gamehud") WolfGameHUD::logHits();         // [HUD KIT 2026-11-25/]
+        else if (hud == "greedy") WolfGreedyHud::logHits();        // [HUD KIT 2026-11-25/]
         else LL_INFOS("WolfHudKit") << "hits: no HUD called \"" << hud << "\"" << LL_ENDL;
     });
     enable.add("WolfTrain.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfTrain::instance().shown(); });

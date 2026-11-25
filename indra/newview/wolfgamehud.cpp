@@ -48,6 +48,7 @@
 #include "llvoavatarself.h"
 #include "wolfgrid.h"
 #include "wolfadventurehud.h"   // [WOLF ADVENTURE 2026-10-16/]
+#include "wolfhudkit.h"   // [HUD KIT 2026-11-25/] the Gunmetal Console parts (KitScope)
 
 static LLDefaultChildRegistry::Register<WolfGameHUD> r_wolf_game_hud("wolf_game_hud");
 
@@ -352,6 +353,23 @@ namespace WolfGameDraw
     const LLColor4 WOLF_SILVER_DIM(170.f / 255.f, 180.f / 255.f, 200.f / 255.f, 1.f);
     const LLColor4 WOLF_AMBER(245.f / 255.f, 165.f / 255.f, 36.f / 255.f, 1.f);
     const LLColor4 CHIP_FILL(0.725f, 0.110f, 0.110f, 1.f);
+    // [HUD KIT 2026-11-25] Source: wolfdashboard.cpp C_KEYTEXT / C_KEYLIT; KEY_DANGER #fecaca (see the header for the contrast)
+    const LLColor4 KEY_TEXT(0.949f, 0.957f, 0.969f, 1.f);
+    const LLColor4 KEY_LIT(1.f, 0.753f, 0.38f, 1.f);
+    const LLColor4 KEY_DANGER(254.f / 255.f, 202.f / 255.f, 202.f / 255.f, 1.f);
+
+    namespace
+    {
+        S32 sKitDepth = 0;   // open KitScopes (the views draw on the main thread, one inside another at most)
+    }
+
+    KitScope::KitScope() { ++sKitDepth; }
+    KitScope::~KitScope() { --sKitDepth; }
+
+    bool kitOn()
+    {
+        return sKitDepth > 0 && WolfHudKit::ready();
+    }
 
     const Palette& wolvesPalette()
     {
@@ -556,6 +574,17 @@ namespace WolfGameDraw
 
     void frame(F32 l, F32 b, F32 r, F32 t, const Palette& p, F32 alpha, F32 cut, bool fill)
     {
+        // [HUD KIT 2026-11-25] the plain palette in the Gunmetal Console look: a machined plate (opaque: the words keep their
+        // contrast over any sky - plate's brightest texel 0.058, so text 8.7:1, dim 4.6:1, ice 5.2:1) in a chrome frame;
+        // "wolves" keeps its night-sky frame (the game's theme)
+        if (kitOn() && !p.mWolves)
+        {
+            const LLColor4 tint(1.f, 1.f, 1.f, alpha);
+            if (fill) WolfHudKit::part(WolfHudKitMap::P_PLATE, l, b, r, t, tint, 0.6f);
+            WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, l - 2.f, b - 2.f, r + 2.f, t + 2.f, tint, 0.25f);
+            noTex();
+            return;
+        }
         // A soft outer glow in the accent, then the plate, then the hairline and the brackets.
         chamferEdge(l - 2.f, b - 2.f, r + 2.f, t + 2.f, cut + 1.f, 4.f, withAlpha(p.mAccent, 0.10f * alpha));
         if (fill)
@@ -589,6 +618,8 @@ namespace WolfGameDraw
 
     void card(F32 l, F32 b, F32 r, F32 t, const Palette& p, F32 cut)
     {
+        // [HUD KIT 2026-11-25/] plain: dark glass (the kit's screen, luminance 0.008 at most); wolves keeps its card
+        if (kitOn() && !p.mWolves && WolfHudKit::part(WolfHudKitMap::P_SCREEN, l, b, r, t, LLColor4::white, 0.4f)) { noTex(); return; }
         chamfer(l, b, r, t, cut, p.mCard, p.mCard);
         chamferEdge(l + 0.5f, b + 0.5f, r - 0.5f, t - 0.5f, cut, 1.f, withAlpha(p.mDim, 0.22f));
     }
@@ -622,6 +653,22 @@ namespace WolfGameDraw
         const bool pressed = !disabled && (flags & BTN_PRESSED) != 0;
         const F32 cut = llmin(6.f, (t - b) * 0.3f);
         const F32 fade = disabled ? 0.5f : 1.f;
+        if (kitOn())
+        {
+            // [HUD KIT 2026-11-25] a backlit key in its well (both palettes, as the Helm's keys on its oak): lit with its lamp while
+            // primary or active, held down while pressed, half lit while it cannot be pressed; a glow in the palette's accent
+            // under the pointer; danger in light red words with a red lamp strip (not the colour alone: the words say it)
+            const WolfHudKitMap::EPart cap = pressed ? WolfHudKitMap::P_KEY_DOWN
+                                           : (primary || (flags & BTN_ACTIVE)) && !disabled ? WolfHudKitMap::P_KEY_LIT : WolfHudKitMap::P_KEY;
+            WolfHudKit::part(cap, l, b, r, t, LLColor4(1.f, 1.f, 1.f, disabled ? 0.55f : 1.f), 0.4f);
+            if (hover && !pressed) WolfHudKit::part(WolfHudKitMap::P_GLOW_RECT, l - 6.f, b - 6.f, r + 6.f, t + 6.f, withAlpha(p.mAccent, 0.35f));
+            noTex();
+            if (danger) rect(l + cut + 4.f, b + 4.f, r - cut - 4.f, b + 6.f, DANGER_EDGE);
+            LLColor4 kink = disabled ? p.mDim : danger ? KEY_DANGER : (primary || (flags & BTN_ACTIVE)) ? KEY_LIT : KEY_TEXT;
+            textL(font, label, (l + r) * 0.5f, (b + t) * 0.5f + 1.f, kink, LLFontGL::HCENTER, LLFontGL::VCENTER, llmax(8.f, r - l - 12.f));
+            if (flags & BTN_FOCUS) focusRing(l, b, r, t, p);
+            return;
+        }
         LLColor4 top = primary ? readable(p.mAccent, 0.5f) : p.mButtonTop;
         LLColor4 bot = primary ? p.mAccent : p.mButtonBottom;
         if (pressed) std::swap(top, bot);
@@ -738,7 +785,12 @@ namespace WolfGameDraw
     void icon(const std::string& ic, F32 l, F32 b, F32 size, const Palette& p, const std::string& fallback, bool framed)
     {
         const F32 cut = framed ? llmin(5.f, size * 0.15f) : 0.f;
-        if (framed)
+        // [HUD KIT 2026-11-25/] the slot a recessed well (both palettes)
+        if (framed && kitOn() && WolfHudKit::part(WolfHudKitMap::P_WELL, l, b, l + size, b + size, LLColor4::white, 0.3f))
+        {
+            noTex();
+        }
+        else if (framed)
         {
             // A recessed slot: dark well, a lit lower edge, the palette's hairline.
             chamfer(l, b, l + size, b + size, cut, LLColor4(0.f, 0.f, 0.f, 0.55f), LLColor4(0.04f, 0.05f, 0.08f, 0.75f));
@@ -1207,9 +1259,69 @@ void wolfGamePortrait(F32 cx, F32 cy, F32 r, const WolfGameDraw::Palette& p)
 // the HUD
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
+namespace
+{
+    WolfGameHUD* sWolfGameHudView = nullptr;   // [HUD KIT 2026-11-25] for logHits; the one view (main_view.xml)
+}
+
+WolfGameHUD::~WolfGameHUD()
+{
+    if (sWolfGameHudView == this) sWolfGameHudView = nullptr;
+}
+
+void WolfGameHUD::logHits()
+{
+    if (!sWolfGameHudView) { LL_INFOS("WolfHudKit") << "hits gamehud: not shown" << LL_ENDL; return; }
+    const WolfGameHUD* v = sWolfGameHudView;
+    // [HUD KIT 2026-11-25] the hit ids by name (as the header's EHit); a local class has the function's access to them
+    struct N
+    {
+        static const char* hudHitName(S32 id)
+        {
+            switch (id)
+            {
+            case H_ACTION: return "H_ACTION";
+            case H_CAST_CANCEL: return "H_CAST_CANCEL";
+            case H_TARGET_CLEAR: return "H_TARGET_CLEAR";
+            case H_BUFF: return "H_BUFF";
+            case H_WEAPON: return "H_WEAPON";
+            case H_TARGET: return "H_TARGET";
+            case H_EMPTY: return "H_EMPTY";
+            case H_PLATE: return "H_PLATE";
+            case H_PORTRAIT: return "H_PORTRAIT";
+            case H_ORB: return "H_ORB";
+            case H_BAG: return "H_BAG";
+            case H_WALLET: return "H_WALLET";
+            case H_PAGE: return "H_PAGE";
+            case H_PANEL_BG: return "H_PANEL_BG";
+            case H_GUIDE_OK: return "H_GUIDE_OK";
+            case H_GUIDE_HELP: return "H_GUIDE_HELP";
+            case H_GUIDE_CARD: return "H_GUIDE_CARD";
+            case H_GAMEMODE_SW: return "H_GAMEMODE_SW";
+            case H_INVENTORY: return "H_INVENTORY";
+            case H_ADV_OBJECTIVE: return "H_ADV_OBJECTIVE";
+            case H_ADV_TITLE: return "H_ADV_TITLE";
+            default: return "H_UNKNOWN";
+            }
+        }
+    };
+    v->mCombatHits.log(v, "gamehud", &N::hudHitName);
+    // the notices' X (NoticeHit, not a WolfGameHits entry): named by the inventory's "notices"
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    for (const NoticeHit& h : v->mNoticeHits)
+    {
+        S32 sx = 0, sy = 0;
+        v->localPointToScreen(h.mClose.getCenterX(), h.mClose.getCenterY(), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit gamehud notices gl " << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY])
+                               << " size " << ll_round((F32)h.mClose.getWidth() * scale.mV[VX]) << "," << ll_round((F32)h.mClose.getHeight() * scale.mV[VY])
+                               << " tip Close this notice" << LL_ENDL;
+    }
+}
+
 WolfGameHUD::WolfGameHUD(const Params& p)
 :   LLUICtrl(p)
 {
+    sWolfGameHudView = this;
     // Built with the main view, before login: the "WolfGame" GenericMessage handler is in place
     // before the first region can send its "game" (WolfGame's constructor registers it).
     WolfGame::instance();
@@ -1225,6 +1337,7 @@ void WolfGameHUD::draw()
     WolfGame& g = WolfGame::instance();
     const LLRect r = getLocalRect();
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    const WolfGameDraw::KitScope kit;   // [HUD KIT 2026-11-25/] the HUD, notices, target and adventure pieces in the Gunmetal Console look
 
     drawEffects(r);
     drawDowned(r);
@@ -1475,8 +1588,9 @@ void WolfGameHUD::drawNotices(const LLRect& r, S32 top_pad, S32 right_pad)
                          LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
         NoticeHit hit;
         hit.mSerial = n.mSerial;
-        hit.mClose.setLeftTopAndSize((S32)(right - 26.f), (S32)(top - 3.f), 22, 22);
-        closeX((F32)hit.mClose.getCenterX(), (F32)hit.mClose.getCenterY(), 4.f, p.mText);
+        // [HUD KIT 2026-11-25] the X drawn where it was (22 x 22 box at the top right); its target the notice's top-right 44 x 44
+        hit.mClose.setLeftTopAndSize((S32)(right - 44.f), (S32)top, 44, 44);
+        closeX(right - 15.f, top - 14.f, 4.f, p.mText);
         y -= 18.f + 4.f;
         for (const std::string& line : title)
         {
@@ -1840,7 +1954,6 @@ void WolfGameHUD::drawTarget(const LLRect& r, S32 top_pad)
     // the X that clears it (§5.5)
     const F32 xcx = pl - 12.f, xcy = top - 12.f;
     closeX(xcx, xcy, 4.f, p.mText);
-    mCombatHits.add(xcx - 10.f, xcy - 10.f, xcx + 10.f, xcy + 10.f, H_TARGET_CLEAR, 0, "Clear the target (Escape)");
     // the words
     const F32 tl = l + PAD + 4.f, tw = pl - 26.f - tl;
     F32 y = top - PAD + 1.f;
@@ -1886,6 +1999,9 @@ void WolfGameHUD::drawTarget(const LLRect& r, S32 top_pad)
     if (!tg.mSrc.empty()) tip += "\nFrom " + tg.mSrc;
     if (!tg.mVerified) tip += " - Unverified: not from this region's game";
     mCombatHits.add(l, b, rr, top, H_TARGET, 0, tip, false);
+    // [HUD KIT 2026-11-25] the X's target: the frame's corner left of the portrait, 44 x 44 (was 20 x 20 round the X), and added
+    // AFTER the frame's tip area - the last added is on top (WolfGameHits::at), so before this the frame's H_TARGET swallowed it
+    mCombatHits.add(pl - 44.f, top - 44.f, pl, top, H_TARGET_CLEAR, 0, "Clear the target (Escape)");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -1903,6 +2019,13 @@ namespace
     /** A tab on the HUD's top edge: its top corners cut, the palette's plate, a hairline edge. */
     void tabShape(F32 l, F32 b, F32 r, F32 t, F32 cut, const Palette& p, bool hover, bool active)
     {
+        // [HUD KIT 2026-11-25/] a backlit key (lit while its page is open or its switch on), a glow under the pointer
+        if (kitOn() && WolfHudKit::part(active ? WolfHudKitMap::P_KEY_LIT : WolfHudKitMap::P_KEY, l, b, r, t, LLColor4::white, 0.4f))
+        {
+            if (hover) WolfHudKit::part(WolfHudKitMap::P_GLOW_RECT, l - 6.f, b - 6.f, r + 6.f, t + 6.f, withAlpha(p.mAccent, 0.35f));
+            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+            return;
+        }
         const LLColor4 top = withAlpha(p.mBaseTop, 0.96f), bot = withAlpha(p.mBaseBottom, 0.96f);
         rectG(l, b, r, t - cut, top, bot);
         rect(l + cut, t - cut, r - cut, t, top);
@@ -1990,7 +2113,18 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
     //      bar), a lit lip along its top. PANEL turns it off: then only the pieces are drawn. ----
     const F32 raise_t = top + floorf(0.22f * S);
     const F32 rl = cx - floorf(0.35f * S), rr = cx + cg + floorf(0.35f * S), rcut = floorf(0.3f * S);
-    if (show_bg)
+    if (show_bg && kitOn() && !p.mWolves)
+    {
+        // [HUD KIT 2026-11-25] plain: the band and its raised middle machined gunmetal plates, the raised one in a chrome frame;
+        // "wolves" keeps its night-blue panel (the game's theme)
+        WolfHudKit::part(WolfHudKitMap::P_PLATE, 0.f, bottom, W, top, LLColor4::white, 0.6f);
+        WolfHudKit::part(WolfHudKitMap::P_PLATE, rl, bottom, rr, raise_t, LLColor4::white, 0.6f);
+        WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, rl - 2.f, bottom - 2.f, rr + 2.f, raise_t + 2.f, LLColor4::white, 0.25f);
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        mCombatHits.add(0.f, bottom, W, top, H_PLATE, 0, std::string(), false);
+        mCombatHits.add(rl, top, rr, raise_t, H_PLATE, 1, std::string(), false);
+    }
+    else if (show_bg)
     {
         rectG(0.f, bottom, W, top, withAlpha(p.mBaseTop, 0.94f), withAlpha(p.mBaseBottom, 0.96f));
         rect(0.f, top - 1.f, W, top, p.mEdge);
@@ -2067,7 +2201,9 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
             walletIcon(rx + cr, wy, cr, p);
             wr = textL(display(0.36f * S), wallet, rx + 2.f * cr + 6.f, wy, p.mAccent, LLFontGL::LEFT, LLFontGL::VCENTER,
                        right_w - 2.f * cr - 6.f);
-            mCombatHits.add(rx, wy - cr - 2.f, wr, wy + cr + 2.f, H_WALLET, 0, "Your money: " + wallet + "\nClick for your bag");
+            // [HUD KIT 2026-11-25/] 44 tall (was 2 cr + 4, 28 at 1080 p) and 44 wide at least; under the bag slots (qb)
+            const F32 wh = llmin(22.f, llmax(cr + 2.f, (qb - bottom) * 0.5f));
+            mCombatHits.add(rx, wy - wh, llmax(wr, rx + 44.f), wy + wh, H_WALLET, 0, "Your money: " + wallet + "\nClick for your bag");
         }
         const std::string held = items.empty() ? std::string("Bag empty") : "Bag: " + thousands((S64)items.size()) + (items.size() == 1 ? " kind" : " kinds");
         if (small->getWidthF32(held) < rx + right_w - wr - 10.f)
@@ -2078,7 +2214,7 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
 
     // ---- the top edge: the console's pages and PANEL on the right, the name plate on the left ----
     const LLFontGL* tf = slotFont(S);
-    const F32 th = llmax(22.f, floorf(0.5f * S)), tpad = 9.f, tcut = 6.f;
+    const F32 th = llmax(44.f, floorf(0.5f * S)), tpad = 9.f, tcut = 6.f;   // [HUD KIT 2026-11-25/] 44 px keys (were 22 at least)
     struct Tab { const char* label; S32 page; const char* tip; };
     static const Tab TABS[] = {
         { "Character", WolfGameConsole::PAGE_STATS,  "Your character: every stat, your level and the game's panel" },
@@ -2106,7 +2242,7 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
             const bool on_now = g.gameModeShownOn();
             label = g.forced() ? "GAME: LOCKED ON" : g.gameModeConnecting() ? "GAME: CONNECTING..." : on_now ? "GAME: ON" : "GAME: OFF";
         }
-        const F32 w = tf->getWidthF32(label) + 2.f * tpad;
+        const F32 w = llmax(44.f, tf->getWidthF32(label) + 2.f * tpad);   // [HUD KIT 2026-11-25/] 44 wide at least (BAG, PETS)
         const F32 l = tx - w;
         const bool sw = t.page == -2;
         const bool panel = t.page == -1;
@@ -2118,8 +2254,10 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
                                                                        : WolfFloaterRoleplay::showingPage((WolfGameConsole::EPage)t.page);
         tabShape(l, top, tx, top + th, tcut, p, hover, (!panel || sw) && active);
         // PANEL off: the word dims and the tooltip says so (never colour alone)
-        textL(tf, label, (l + tx) * 0.5f, top + th * 0.5f, panel && !active ? p.mDim : (hover || active ? p.mAccent : p.mText),
-              LLFontGL::HCENTER, LLFontGL::VCENTER);
+        // [HUD KIT 2026-11-25/] on a key: the kit's key words (lit 5.3:1, else 7.9:1); PANEL off still dims
+        const LLColor4 word = panel && !active ? p.mDim : kitOn() ? ((!panel || sw) && active ? KEY_LIT : KEY_TEXT)
+                                                                  : (hover || active ? p.mAccent : p.mText);
+        textL(tf, label, (l + tx) * 0.5f, top + th * 0.5f, word, LLFontGL::HCENTER, LLFontGL::VCENTER);
         std::string tip = t.tip;
         if (sw) tip = g.forced() ? "Game Mode: LOCKED ON - " + g.forcedText()
                                  : (active ? "Game Mode: ON - click to switch it off (the game HUD goes)" : "Game Mode: OFF - click to switch it on");
@@ -2140,7 +2278,7 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
         LLAvatarName av;
         if (LLAvatarNameCache::get(gAgentID, &av)) name = av.getDisplayName();
         if (name.empty()) name = g.game().mValid && !g.game().mName.empty() ? g.game().mName : std::string("Roleplay");
-        const LLFontGL* nf = display(th * 0.62f);
+        const LLFontGL* nf = display(llmax(22.f, floorf(0.5f * S)) * 0.62f);   // [HUD KIT 2026-11-25/] the name its old size on the taller key
         std::string sub;
         if (g.hasLevel())
         {
@@ -2151,8 +2289,9 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
         if (m + w < tx - floorf(0.3f * S))
         {
             tabShape(m, top, m + w, top + th, tcut, p, false, false);
-            const F32 after = textL(nf, name, m + tpad, top + th * 0.5f, p.mAccent, LLFontGL::LEFT, LLFontGL::VCENTER);
-            if (!sub.empty()) textL(small, sub, after + 12.f, top + th * 0.5f, p.mText, LLFontGL::LEFT, LLFontGL::VCENTER);
+            const bool kit = kitOn();   // [HUD KIT 2026-11-25/] on a key: the kit's key words (amber 4.0:1 there would fail)
+            const F32 after = textL(nf, name, m + tpad, top + th * 0.5f, kit ? KEY_LIT : p.mAccent, LLFontGL::LEFT, LLFontGL::VCENTER);
+            if (!sub.empty()) textL(small, sub, after + 12.f, top + th * 0.5f, kit ? KEY_TEXT : p.mText, LLFontGL::LEFT, LLFontGL::VCENTER);
             mCombatHits.add(m, top, m + w, top + th, H_PORTRAIT, 1, name + (sub.empty() ? std::string() : " - " + sub) + "\nClick for your character");
         }
     }
@@ -2197,7 +2336,7 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
         const LLFontGL* title_font = display(17.f);
         const F32 cw2 = llmax(280.f, right_w), cl = W - m - cw2, cbt = right_top + 16.f;
         const std::vector<std::string> body = wrap(gf, "Game Mode is on and the game is along the bottom. Keep playing while this is up.", cw2 - 24.f, 4);
-        const F32 bh = 26.f;
+        const F32 bh = 44.f;   // [HUD KIT 2026-11-25/] Got it, Full help 44 tall (were 26)
         const F32 chh = 12.f + (F32)title_font->getLineHeight() + 4.f + (F32)body.size() * glh + 10.f + bh + 12.f;
         frame(cl, cbt, cl + cw2, cbt + chh, p, 1.f, 8.f);
         mCombatHits.add(cl, cbt, cl + cw2, cbt + chh, H_GUIDE_CARD, 0, std::string(), false);
@@ -2221,13 +2360,15 @@ void WolfGameHUD::drawEmptySlot(F32 x, F32 b, F32 S, const std::string& key)
 {
     const Palette& p = gamePalette();
     const F32 cut = llmin(5.f, S * 0.15f);
-    chamfer(x, b, x + S, b + S, cut, LLColor4(0.f, 0.f, 0.f, 0.45f), LLColor4(0.03f, 0.04f, 0.07f, 0.6f));
+    // [HUD KIT 2026-11-25/] an empty well in the Gunmetal Console look
+    const bool kit = kitOn() && WolfHudKit::part(WolfHudKitMap::P_WELL, x, b, x + S, b + S, LLColor4::white, 0.3f);
+    if (!kit) chamfer(x, b, x + S, b + S, cut, LLColor4(0.f, 0.f, 0.f, 0.45f), LLColor4(0.03f, 0.04f, 0.07f, 0.6f));
     {
         // faint hatching: an empty slot, not a missing one
         LLLocalClipRect clip(LLRect((S32)x + 2, (S32)(b + S) - 2, (S32)(x + S) - 2, (S32)b + 2));
         for (F32 d = -S; d < S; d += S * 0.18f) lineW(x + d, b, x + d + S, b + S, 1.f, LLColor4(1.f, 1.f, 1.f, 0.035f));
     }
-    chamferEdge(x + 0.5f, b + 0.5f, x + S - 0.5f, b + S - 0.5f, cut, 1.f, withAlpha(p.mDim, 0.35f));
+    if (!kit) chamferEdge(x + 0.5f, b + 0.5f, x + S - 0.5f, b + S - 0.5f, cut, 1.f, withAlpha(p.mDim, 0.35f));
     if (!key.empty())
     {
         slotFont(S)->renderUTF8(key, 0, x + 3.f, b + S - 2.f, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, LLFontGL::NORMAL, LLFontGL::DROP_SHADOW);
@@ -2441,8 +2582,11 @@ void WolfGameHUD::drawOrb(const WolfGame::Stat& s, S32 i, F32 cx, F32 cy, F32 R)
         gGL.end();
         if (frac < 0.98f) lineW(cx - half(level), level, cx + half(level), level, 1.5f, LLColor4(1.f, 1.f, 1.f, 0.35f));
     }
-    // the glass's shine
-    ellipseF(cx - R * 0.22f, cy + R * 0.45f, R * 0.46f, R * 0.2f, LLColor4(1.f, 1.f, 1.f, 0.16f));
+    // the glass's shine; [HUD KIT 2026-11-25/] in the kit, the glass's glare and a bezel (brass with the wolves' amber, else chrome):
+    // its lip over the globe's outer edge (inner radius 0.92 R, so its ring ends at 1.09 R and clears the next orb, D + og away)
+    if (!(kitOn() && WolfHudKit::gaugeBezel(cx, cy, R * 0.92f, p.mWolves)))
+        ellipseF(cx - R * 0.22f, cy + R * 0.45f, R * 0.46f, R * 0.2f, LLColor4(1.f, 1.f, 1.f, 0.16f));
+    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     // the number and the stat's name, each on a dark pill (never the colour alone)
     pillText(display(R * 0.5f), thousands(s.mValue), cx, cy + R * 0.08f, LLColor4::white);
     pillText(LLFontGL::getFontSansSerifSmallBold(), caps(s.mLabel.empty() ? s.mName : s.mLabel), cx, cy - R * 0.45f, LLColor4::white);
@@ -2501,7 +2645,8 @@ void WolfGameHUD::drawCastBar(F32 cx, F32 bottom, F32 W, F32 H)
         // the X that cancels (and Escape) - §5.4
         const F32 xc = l + W + 14.f, yc = (b + t) * 0.5f;
         closeX(xc, yc, 4.f, mCombatHits.isHover(H_CAST_CANCEL, 0) ? p.mAccent : p.mText);
-        mCombatHits.add(xc - 11.f, yc - 11.f, xc + 11.f, yc + 11.f, H_CAST_CANCEL, 0, "Cancel the cast (Escape)");
+        // [HUD KIT 2026-11-25/] 44 x 44 round the X (was 22): it reaches past the card into the world, where nothing else is
+        mCombatHits.add(xc - 22.f, yc - 22.f, xc + 22.f, yc + 22.f, H_CAST_CANCEL, 0, "Cancel the cast (Escape)");
     }
     else if (c.mEnd == "done")
     {

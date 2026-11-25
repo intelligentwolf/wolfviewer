@@ -1881,86 +1881,87 @@ Only large parcels can be listed in search.
              tool_tip="Copy the music address" width="23" />
             <button follows="left|top" height="22" image_overlay="Stop_Off" layout="topleft" left_pad="2" top_delta="0" name="music_clear_btn"
              tool_tip="Stop the music on this land (clear the address)" width="23" />
-            <button follows="left|top" height="26" label="Radio Stations..." layout="topleft" left="10" top="38" name="radio_stations_btn" width="150"
+            <!-- [HUD KIT 2026-11-25] Radio Stations... 44 px high (was 26; Shadow 25 Nov), everything below it on this tab 18 px lower -->
+            <button follows="left|top" height="44" label="Radio Stations..." layout="topleft" left="10" top="38" name="radio_stations_btn" width="150"
              tool_tip="Browse internet radio by genre, listen, and set a station on this land" />
-            <text follows="left|top" height="16" layout="topleft" left="168" top="43" name="radio_hint" width="300" text_color="LtGray_50">
+            <text follows="left|top" height="16" layout="topleft" left="168" top="52" name="radio_hint" width="300" text_color="LtGray_50">
                 Listen to stations by genre, then set one on this land.
             </text>
-            <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="10" top="68" name="wolf_stations_title" width="230">
+            <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="10" top="86" name="wolf_stations_title" width="230">
                 Wolf Territories stations
             </text>
-            <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="248" top="68" name="my_presets_title" width="222">
+            <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="248" top="86" name="my_presets_title" width="222">
                 My presets
             </text>
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="86" name="wolf_station_set_0" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="104" name="wolf_station_set_0" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="89" name="wolf_station_0" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="86" name="my_preset_0" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="107" name="wolf_station_0" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="104" name="my_preset_0" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="86" name="my_preset_set_0" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="104" name="my_preset_set_0" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="107" name="wolf_station_set_1" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="125" name="wolf_station_set_1" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="110" name="wolf_station_1" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="107" name="my_preset_1" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="128" name="wolf_station_1" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="125" name="my_preset_1" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="107" name="my_preset_set_1" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="125" name="my_preset_set_1" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="128" name="wolf_station_set_2" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="146" name="wolf_station_set_2" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="131" name="wolf_station_2" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="128" name="my_preset_2" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="149" name="wolf_station_2" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="146" name="my_preset_2" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="128" name="my_preset_set_2" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="146" name="my_preset_set_2" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="149" name="wolf_station_set_3" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="167" name="wolf_station_set_3" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="152" name="wolf_station_3" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="149" name="my_preset_3" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="170" name="wolf_station_3" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="167" name="my_preset_3" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="149" name="my_preset_set_3" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="167" name="my_preset_set_3" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="170" name="wolf_station_set_4" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="188" name="wolf_station_set_4" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="173" name="wolf_station_4" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="170" name="my_preset_4" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="191" name="wolf_station_4" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="188" name="my_preset_4" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="170" name="my_preset_set_4" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="188" name="my_preset_set_4" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="191" name="wolf_station_set_5" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="209" name="wolf_station_set_5" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="194" name="wolf_station_5" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="191" name="my_preset_5" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="212" name="wolf_station_5" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="209" name="my_preset_5" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="191" name="my_preset_set_5" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="209" name="my_preset_set_5" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="212" name="wolf_station_set_6" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="230" name="wolf_station_set_6" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="215" name="wolf_station_6" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="212" name="my_preset_6" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="233" name="wolf_station_6" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="230" name="my_preset_6" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="212" name="my_preset_set_6" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="230" name="my_preset_set_6" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="233" name="wolf_station_set_7" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="251" name="wolf_station_set_7" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="236" name="wolf_station_7" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="233" name="my_preset_7" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="254" name="wolf_station_7" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="251" name="my_preset_7" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="233" name="my_preset_set_7" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="251" name="my_preset_set_7" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="254" name="wolf_station_set_8" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="272" name="wolf_station_set_8" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="257" name="wolf_station_8" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="254" name="my_preset_8" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="275" name="wolf_station_8" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="272" name="my_preset_8" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="254" name="my_preset_set_8" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="272" name="my_preset_set_8" width="40"
              tool_tip="Play this address on this land" />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="275" name="wolf_station_set_9" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="10" top="293" name="wolf_station_set_9" width="40"
              tool_tip="Play this station on this land" />
-            <text follows="left|top" height="20" layout="topleft" left="54" top="278" name="wolf_station_9" width="182" use_ellipses="true" />
-            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="275" name="my_preset_9" width="178"
+            <text follows="left|top" height="20" layout="topleft" left="54" top="296" name="wolf_station_9" width="182" use_ellipses="true" />
+            <line_editor follows="left|top" height="20" layout="topleft" left="248" max_length_bytes="255" top="293" name="my_preset_9" width="178"
              tool_tip="Your own stream address. Type or paste it, then press Enter to keep it." />
-            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="275" name="my_preset_set_9" width="40"
+            <button follows="left|top" height="20" label="Set" layout="topleft" left="430" top="293" name="my_preset_set_9" width="40"
              tool_tip="Play this address on this land" />
             <text
              type="string"
@@ -1970,7 +1971,7 @@ Only large parcels can be listed in search.
              layout="topleft"
              left="10"
              name="Sound:"
-             top="304"
+             top="322"
              width="100">
                 Sound:
             </text>

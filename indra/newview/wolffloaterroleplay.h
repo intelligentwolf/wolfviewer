@@ -96,6 +96,10 @@ public:
     S32 pressedId() const { return mPressId; }
     S32 pressedArg() const { return mPressArg; }
     const std::vector<Hit>& all() const { return mHits; }
+    /** [HUD KIT 2026-11-25] For LEAP rigs (UI call WolfHudKit.Hits): every press target of `view` in window GL pixels, named by
+     *  `name(id)` with "+arg" when the arg is not 0, in the form scripts/wolf/hudkit/check_inventory.py --log reads (as
+     *  WolfTrainCabView::logHits; these surfaces are not zoomed, so zoom 1). */
+    void log(const LLView* view, const std::string& hud, const char* (*name)(S32 id)) const;
 
 private:
     std::vector<Hit> mHits;

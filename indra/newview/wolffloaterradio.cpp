@@ -101,7 +101,9 @@ namespace
     // row up to w79 were 80 px at the default 640 px width (floater_wolf_radio.xml), and 16 keys (Wolf, Residents and
     // 14 genres) still make two rows of 8 at the 540 px minimum width (inner width 498 px: 8 x 56 + 7 x 6 = 490).
     constexpr S32 MIN_KEY_W = 56;
+    constexpr S32 KEY_H = 44;            // [HUD KIT 2026-11-25] every press target 44 px or more (genre keys, buttons, Add your station...)
     constexpr S32 KEY_GAP = 6;
+    constexpr S32 CARD_TITLE_TEXT_H = 22;   // [HUD KIT 2026-11-25] the station log heading's words, as before the 44 px row
     constexpr S32 MAX_KEY_ROWS = 4;      // past this the keys narrow instead, so the station log keeps its rows
     // the residents' key and the featured key in the WolfRadioGenre setting (no radio_stations.php genre id is either:
     // wolf_radio_lib.php RS_GENRES)
@@ -1011,15 +1013,18 @@ void WolfFloaterRadio::layoutRadio()
     }
 
     // the genre keys: as many rows under the band as they need (two until the lists load, as before)
-    const S32 key_h = llclamp(ll_round(ch * 0.05f), 24, 32);
+    // [HUD KIT 2026-11-25] every key 44 px high (Paul: "every target 44 px or more"; Shadow 25 Nov: keep the walnut radio, every
+    // control 44 px, the window's minimum height grows to 620, floater_wolf_radio.xml); was 24-32 with the window's height
+    const S32 key_h = KEY_H;
     const S32 key_rows = keyRows(iw);
     const LLRect keys(inner.mLeft, L.grille.mBottom - 14, inner.mRight, L.grille.mBottom - 14 - (key_rows * key_h + (key_rows - 1) * KEY_GAP));
     layoutKeys(keys, key_rows);
 
     // the bottom strip: knobs at the ends, the buttons and the status plate between them
-    L.knob_r = (F32)llclamp(ll_round(ch * 0.045f), 20, 30);
+    L.knob_r = (F32)llclamp(ll_round((F32)ch * 0.045f), KEY_H / 2, 30);   // [HUD KIT 2026-11-25] at least 44 across (was 40)
     const S32 label_h = 16;
-    const S32 strip_h = ll_round(L.knob_r * 2.5f) + label_h + 2;
+    // [HUD KIT 2026-11-25] room for the 44 px buttons and a two-line status plate under them, whatever the knobs' size
+    const S32 strip_h = llmax(ll_round(L.knob_r * 2.5f) + label_h + 2, KEY_H + 6 + 40);
     const LLRect strip(inner.mLeft, inner.mBottom + strip_h, inner.mRight, inner.mBottom);
     L.vol_x = inner.mLeft + L.knob_r * 1.3f;
     L.tune_x = inner.mRight - L.knob_r * 1.3f;
@@ -1029,7 +1034,7 @@ void WolfFloaterRadio::layoutRadio()
     const S32 bx0 = ll_round(L.vol_x + L.knob_r * 1.3f + 12.f);
     const S32 bx1 = ll_round(L.tune_x - L.knob_r * 1.3f - 12.f);
     {
-        constexpr S32 BUTTON_H = 26, GAP = 8;
+        constexpr S32 BUTTON_H = KEY_H, GAP = 8;   // [HUD KIT 2026-11-25] was 26
         const S32 base_w[3] = { 96, 120, 150 };
         const S32 total = base_w[0] + base_w[1] + base_w[2] + 2 * GAP;
         const F32 k = llmin(1.f, (F32)(bx1 - bx0) / total);
@@ -1050,7 +1055,8 @@ void WolfFloaterRadio::layoutRadio()
             labels.push_back(buttons[i]->getLabelUnselected());
             labels.push_back(buttons[i]->getLabelSelected());
         }
-        const LLFontGL* bf = fitFont((F32)BUTTON_H - 8.f, (F32)llmin(w[0], llmin(w[1], w[2])) - 12.f, labels, MIN_KEY_FONT);
+        const LLFontGL* bf = fitFont((F32)llmin(BUTTON_H, 26) - 8.f,   // the words as on the old 26 px buttons
+                                      (F32)llmin(w[0], llmin(w[1], w[2])) - 12.f, labels, MIN_KEY_FONT);
         for (LLButton* b : buttons) b->setFont(bf);
         L.status_plate = LLRect(bx0, strip.mTop - BUTTON_H - 6, bx1, strip.mBottom);
         mStatus->setShape(LLRect(L.status_plate.mLeft + 10, L.status_plate.mTop - 4, L.status_plate.mRight - 10, L.status_plate.mBottom + 4));
@@ -1058,11 +1064,14 @@ void WolfFloaterRadio::layoutRadio()
 
     // the station log card fills the rest
     L.card = LLRect(inner.mLeft, keys.mBottom - 14, inner.mRight, strip.mTop + 10);
-    L.card_title = LLRect(L.card.mLeft + 10, L.card.mTop - 6, L.card.mRight - 10, L.card.mTop - 28);
+    // [HUD KIT 2026-11-25] the heading row tall enough for "Add your station..." at 44 px (was 22: a 20 px key); the heading's
+    // words stay their old size (drawCard: CARD_TITLE_TEXT_H)
+    L.card_title = LLRect(L.card.mLeft + 10, L.card.mTop - 6, L.card.mRight - 10, L.card.mTop - 8 - KEY_H);
     {
         // [WOLF STATIONS 2026-10-25] "Add your station..." at the right of the card's heading row: it adds to this log
-        const S32 h = L.card_title.getHeight() - 2;
-        const LLFontGL* f = fitFont((F32)h - 6.f, 1.e6f, { mAddStation->getLabelUnselected() }, MIN_KEY_FONT);
+        const S32 h = KEY_H;
+        const LLFontGL* f = fitFont((F32)llmin(h, 20) - 6.f,   // the words as on the old 20 px key
+                                      1.e6f, { mAddStation->getLabelUnselected() }, MIN_KEY_FONT);
         const S32 w = llmin(ll_round(f->getWidthF32(mAddStation->getLabelUnselected())) + 20, L.card_title.getWidth() / 3);
         mAddStation->setFont(f);
         mAddStation->setShape(LLRect(L.card_title.mRight - w, L.card_title.mTop, L.card_title.mRight, L.card_title.mTop - h));
@@ -1101,7 +1110,8 @@ void WolfFloaterRadio::layoutKeys(const LLRect& area, S32 rows)
     }
     // one size for every key, the largest at which every name fits (long ones get an ellipsis
     // below the smallest readable size; the tooltip has the whole name)
-    const LLFontGL* f = fitFont((F32)row_h - 8.f, (F32)key_w - 12.f, labels, MIN_KEY_FONT);
+    // [HUD KIT 2026-11-25] the words no bigger than on the old 32 px keys (Paul: "the radio is lovely as it is": only the size changed)
+    const LLFontGL* f = fitFont((F32)llmin(row_h, 32) - 8.f, (F32)key_w - 12.f, labels, MIN_KEY_FONT);
     for (S32 i = 0; i < n; ++i) mGenre[i]->setFont(f);
 }
 
@@ -1497,7 +1507,7 @@ void WolfFloaterRadio::drawCard() const
     {
         title += "  \xC2\xB7  " + mGenre[mGenreIndex]->getLabelUnselected();
     }
-    const LLFontGL* f = heightFont((F32)t.getHeight() - 2.f);
+    const LLFontGL* f = heightFont((F32)llmin(t.getHeight(), CARD_TITLE_TEXT_H) - 2.f);
     // centred on the card, clear of "Add your station..." at the right (and the same margin on the left)
     const F32 clear = mAddStation->getVisible() ? (F32)(t.mRight - mAddStation->getRect().mLeft) + 8.f : 0.f;
     text(f, title, (F32)t.getCenterX(), (F32)t.getCenterY(), INK, LLFontGL::HCENTER, llmax(20.f, (F32)t.getWidth() - 2.f * clear));

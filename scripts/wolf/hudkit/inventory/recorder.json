@@ -137,7 +137,7 @@
    "label": "Problem: <error> (caution colour, stays until the next press) or the recorder's notice (sound encoder, length limit, disk nearly full); plus the codec download's own words",
    "when": "an error or a notice",
    "source": [
-    "name=\"message\" top=\"52\"",
+    "name=\"message\"",
     "mMessage->setText(\"Problem: \" + error);",
     "\"). You can change the limit in the Video Recorder window.\"",
     "\"The recording stopped because the disk is nearly full. The video was saved up to \"",
@@ -208,14 +208,17 @@
    "tip": "The size of the video picture. Your window is fitted inside, with black bars when its shape differs.",
    "action": "setting WolfRecorderSize (720 / 1080)",
    "source": [
-    "<text follows=\"left|top\" font=\"SansSerifLargeBold\" height=\"20\" layout=\"topleft\" left=\"14\" name=\"picture_heading\" top=\"94\" width=\"200\">Picture</text>",
-    "name=\"size_label\" top=\"120\" width=\"140\">Size</text>",
+    "name=\"picture_heading\"",
+    ">Picture</text>",
+    "name=\"size_label\"",
+    ">Size</text>",
     "name=\"size_combo\"",
     "tool_tip=\"The size of the video picture. Your window is fitted inside, with black bars when its shape differs.\"",
     "<combo_box.item label=\"Standard - 1280 x 720 (720p)\" name=\"size_720\" value=\"720\" />",
     "<combo_box.item label=\"High - 1920 x 1080 (1080p)\" name=\"size_1080\" value=\"1080\" />",
     "bindNumberCombo(mSize, \"WolfRecorderSize\");"
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "fps_combo",
@@ -225,13 +228,15 @@
    "tip": "How many pictures a second the video aims for. When WolfViewer draws fewer, the video has fewer.",
    "action": "setting WolfRecorderFps (30 / 60)",
    "source": [
-    "name=\"fps_label\" top=\"148\" width=\"140\">Smoothness</text>",
+    "name=\"fps_label\"",
+    ">Smoothness</text>",
     "name=\"fps_combo\"",
     "tool_tip=\"How many pictures a second the video aims for. When WolfViewer draws fewer, the video has fewer.\"",
     "<combo_box.item label=\"30 pictures a second\" name=\"fps_30\" value=\"30\" />",
     "<combo_box.item label=\"60 pictures a second (busier computer)\" name=\"fps_60\" value=\"60\" />",
     "bindNumberCombo(mFps, \"WolfRecorderFps\");"
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "show_ui_check",
@@ -245,7 +250,8 @@
     "label=\"Show my windows, menus and name tags in the video\"",
     "name=\"show_ui_check\"",
     "tool_tip=\"Off: only the world is recorded. On: the whole window, as you see it. This window and the REC sign are never in the video.\""
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "name": "sound-heading",
@@ -253,8 +259,10 @@
    "label": "Sound / The bars show how loud each sound is while you record.",
    "when": "always",
    "source": [
-    "name=\"sound_heading\" top=\"206\" width=\"120\">Sound</text>",
-    "name=\"sound_hint\" top=\"210\" width=\"348\">The bars show how loud each sound is while you record.</text>"
+    "name=\"sound_heading\"",
+    ">Sound</text>",
+    "name=\"sound_hint\"",
+    ">The bars show how loud each sound is while you record.</text>"
    ]
   },
   {
@@ -269,7 +277,8 @@
     "label=\"World sound and music\"",
     "name=\"world_check\"",
     "tool_tip=\"Sounds, music and media as you hear them\""
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "world_level",
@@ -282,7 +291,8 @@
     "control_name=\"WolfRecorderLevelWorld\"",
     "name=\"world_level\"",
     "tool_tip=\"How loud the world sound is in the video\""
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "world_meter",
@@ -322,7 +332,8 @@
     "label=\"Voice chat (other people)\"",
     "name=\"voice_check\"",
     "tool_tip=\"Other people's voices as you hear them in voice chat\""
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "voice_level",
@@ -335,7 +346,8 @@
     "control_name=\"WolfRecorderLevelVoice\"",
     "name=\"voice_level\"",
     "tool_tip=\"How loud voice chat is in the video\""
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "voice_meter",
@@ -371,7 +383,8 @@
     "label=\"My microphone\"",
     "name=\"mic_check\"",
     "tool_tip=\"Your own voice, for talking over the video. Not sent to voice chat.\""
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "mic_level",
@@ -384,7 +397,8 @@
     "control_name=\"WolfRecorderLevelMic\"",
     "name=\"mic_level\"",
     "tool_tip=\"How loud your microphone is in the video\""
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "mic_meter",
@@ -414,7 +428,8 @@
    "label": "Saving: the videos folder (tooltip: the full path)",
    "when": "always",
    "source": [
-    "name=\"saving_heading\" top=\"384\" width=\"200\">Saving</text>",
+    "name=\"saving_heading\"",
+    ">Saving</text>",
     "name=\"folder_text\"",
     "mFolderText->setToolTip(folder);"
    ]
@@ -455,7 +470,8 @@
    "tip": "Whether a recording stops by itself after a set time. With Never it runs until you press Stop; it still stops by itself, and says so, if the disk gets nearly full.",
    "action": "setting WolfRecorderMaxMinutes (0,1,2,5,10,15,30,60)",
    "source": [
-    "name=\"limit_label\" top=\"450\" width=\"140\">Stop by itself</text>",
+    "name=\"limit_label\"",
+    ">Stop by itself</text>",
     "name=\"limit_combo\"",
     "tool_tip=\"Whether a recording stops by itself after a set time. With Never it runs until you press Stop; it still stops by itself, and says so, if the disk gets nearly full.\"",
     "<combo_box.item label=\"Never - I will press Stop\" name=\"limit_never\" value=\"0\" />",
@@ -467,7 +483,8 @@
     "<combo_box.item label=\"After 30 minutes\" name=\"limit_30\" value=\"30\" />",
     "<combo_box.item label=\"After 60 minutes\" name=\"limit_60\" value=\"60\" />",
     "bindNumberCombo(mLimitCombo, \"WolfRecorderMaxMinutes\");"
-   ]
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; arrows / Space change it)"
   },
   {
    "id": "space_note",

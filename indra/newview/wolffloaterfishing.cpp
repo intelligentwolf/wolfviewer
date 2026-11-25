@@ -144,11 +144,12 @@ void WolfFloaterFishing::refreshWords()
 {
     const WolfFishingSession& s = WolfFishingSession::instance();
     mStatus->setText(s.status().empty() ? std::string("Looking for your fishing rod...") : s.status());
-    mStatus->setColor(LLUIColorTable::instance().getColor(s.statusIsError() ? "AlertCautionTextColor" : "LabelTextColor"));
+    // [HUD KIT 2026-11-25] the kit's own words: the Board is the gunmetal plate in every skin (Amber 6.0:1, Text 8.9:1 on it)
+    mStatus->setColor(LLUIColorTable::instance().getColor(s.statusIsError() ? "WolfHudKitAmber" : "WolfHudKitText"));
     if (!s.weekError().empty())
     {
         mBoardNote->setText(s.weekError());
-        mBoardNote->setColor(LLUIColorTable::instance().getColor("AlertCautionTextColor"));
+        mBoardNote->setColor(LLUIColorTable::instance().getColor("WolfHudKitAmber"));
     }
     else if (s.week().isMap())
     {
@@ -201,7 +202,7 @@ void WolfFloaterFishing::showWeek(const LLSD& w)
     if (w["biggest"].isMap()) note = "Biggest fish this week: " + w["biggest"]["text"].asString() + ", caught by " + w["biggest"]["name"].asString() + ". ";
     note += w["rule"].asString();
     mBoardNote->setText(note);
-    mBoardNote->setColor(LLUIColorTable::instance().getColor("LabelTextColor"));
+    mBoardNote->setColor(LLUIColorTable::instance().getColor("WolfHudKitText"));
     const LLSD& last = w["last"];
     if (last.isMap() && last["board"].size() > 0)
     {

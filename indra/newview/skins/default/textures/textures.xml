@@ -1345,6 +1345,9 @@ with the same filename but different name
 <texture name="WolfHudKit_Key" file_name="wolfhud/key.png" preload="false" scale.left="30" scale.top="98" scale.right="130" scale.bottom="30" />
 <texture name="WolfHudKit_KeyLit" file_name="wolfhud/key_lit.png" preload="false" scale.left="30" scale.top="98" scale.right="130" scale.bottom="30" />
 <texture name="WolfHudKit_KeyDown" file_name="wolfhud/key_down.png" preload="false" scale.left="30" scale.top="98" scale.right="130" scale.bottom="30" />
+<!-- [HUD KIT 2026-11-25] the recessed inlay that frames a section of an XUI window (the Video Recorder's Picture, Sound, Saving):
+     cut from the sheet by hud-kit/xui_parts.py (the sheet's own pixels at the map's inlay rectangle; 9-slice border 16) -->
+<texture name="WolfHudKit_Inlay" file_name="wolfhud/inlay.png" preload="false" scale.left="16" scale.top="176" scale.right="176" scale.bottom="16" />
 <!-- [HUD KIT 2026-11-25] the chooser's icons: each HUD's own glyph (hud-kit/glyphs/<id>.svg, drawn for this) as a backlit legend
      under smoked glass in a chrome bezel, rendered in Blender (hud-kit/icons.py) with its own light bloomed (pack_icons.py) -->
 <texture name="WolfHudIcon_game" file_name="wolfhud/icons/game.png" preload="false" use_mips="true" />

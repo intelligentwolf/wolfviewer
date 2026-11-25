@@ -60,6 +60,12 @@ namespace WolfHudKit
      *  brass) and the glass's glare. */
     bool gaugeFace(F32 cx, F32 cy, F32 r, bool enamel);
     bool gaugeBezel(F32 cx, F32 cy, F32 r, bool brass);
+
+    /** A state told by shape as well as colour (WCAG 1.4.1), for a game piece that is otherwise only tinted (Greedy's scored and
+     *  bust dice): a dark round badge of radius r at (cx, cy) with a light rim and a tick (MARK_TICK) or a cross (MARK_CROSS) in
+     *  `c`. Drawn untextured with gGL (no sheet needed), in the drawing view's coordinates like the other parts. */
+    enum EMark { MARK_TICK, MARK_CROSS };
+    void markBadge(F32 cx, F32 cy, F32 r, EMark mark, const LLColor4& c);
 }
 
 #endif // WOLF_HUDKIT_H

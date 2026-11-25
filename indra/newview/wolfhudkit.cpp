@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfhudkit.h"
+#include <cmath>
 
 #include "llgltexture.h"
 #include "llrender.h"
@@ -119,6 +120,51 @@ namespace WolfHudKit
     bool gaugeFace(F32 cx, F32 cy, F32 r, bool enamel)
     {
         return part(enamel ? WolfHudKitMap::P_FACE_ENAMEL : WolfHudKitMap::P_FACE_BLACK, cx - r, cy - r, cx + r, cy + r);
+    }
+
+    void markBadge(F32 cx, F32 cy, F32 r, EMark mark, const LLColor4& c)
+    {
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        // a disc: the light rim, then the dark face inside it
+        auto disc = [](F32 x, F32 y, F32 rad, const LLColor4& col)
+        {
+            gGL.color4fv(col.mV);
+            gGL.begin(LLRender::TRIANGLES);
+            for (S32 i = 0; i < 20; ++i)
+            {
+                const F32 a0 = F_TWO_PI * (F32)i / 20.f, a1 = F_TWO_PI * (F32)(i + 1) / 20.f;
+                gGL.vertex2f(x, y);
+                gGL.vertex2f(x + rad * cosf(a0), y + rad * sinf(a0));
+                gGL.vertex2f(x + rad * cosf(a1), y + rad * sinf(a1));
+            }
+            gGL.end();
+        };
+        disc(cx, cy, r, LLColor4(0.95f, 0.95f, 0.95f, 0.9f));
+        disc(cx, cy, r * 0.86f, LLColor4(0.08f, 0.07f, 0.06f, 0.92f));
+        // a stroke of width w from (x0, y0) to (x1, y1), as two triangles
+        const F32 w = llmax(1.5f, r * 0.24f);
+        auto seg = [w](F32 x0, F32 y0, F32 x1, F32 y1)
+        {
+            const F32 dx = x1 - x0, dy = y1 - y0, len = sqrtf(dx * dx + dy * dy);
+            if (len <= 0.f) return;
+            const F32 nx = -dy / len * w * 0.5f, ny = dx / len * w * 0.5f;
+            gGL.vertex2f(x0 + nx, y0 + ny); gGL.vertex2f(x0 - nx, y0 - ny); gGL.vertex2f(x1 - nx, y1 - ny);
+            gGL.vertex2f(x0 + nx, y0 + ny); gGL.vertex2f(x1 - nx, y1 - ny); gGL.vertex2f(x1 + nx, y1 + ny);
+        };
+        const F32 k = r * 0.5f;
+        gGL.color4fv(c.mV);
+        gGL.begin(LLRender::TRIANGLES);
+        if (mark == MARK_TICK)
+        {
+            seg(cx - k, cy, cx - k * 0.25f, cy - k * 0.75f);
+            seg(cx - k * 0.25f, cy - k * 0.75f, cx + k, cy + k * 0.8f);
+        }
+        else
+        {
+            seg(cx - k * 0.8f, cy - k * 0.8f, cx + k * 0.8f, cy + k * 0.8f);
+            seg(cx - k * 0.8f, cy + k * 0.8f, cx + k * 0.8f, cy - k * 0.8f);
+        }
+        gGL.end();
     }
 
     bool gaugeBezel(F32 cx, F32 cy, F32 r, bool brass)

@@ -578,7 +578,8 @@ void WolfFloaterLifts::setStatus(const std::string& text, bool error)
 {
     if (!mStatus) return;
     mStatus->setText(text);
-    mStatus->setColor(LLUIColorTable::instance().getColor(error ? "AlertCautionTextColor" : "LabelTextColor"));
+    // [HUD KIT 2026-11-25] the kit's own words: the window is the gunmetal plate in every skin (Amber 6.0:1, Text 8.9:1 on it)
+    mStatus->setColor(LLUIColorTable::instance().getColor(error ? "WolfHudKitAmber" : "WolfHudKitText"));
 }
 
 void WolfFloaterLifts::penStopped()
@@ -788,13 +789,13 @@ void WolfFloaterLifts::onBoxLine(const LLUUID& source, const std::string& text)
             else if (rise < 0) mPlanText += llformat(", %d m down", -rise);
             mPlanText += ".";
             if (f.size() >= 10 && !f[9].empty()) mPlanText += " " + f[9];
-            mPlanInfo->setColor(LLUIColorTable::instance().getColor("LabelTextColor"));
+            mPlanInfo->setColor(LLUIColorTable::instance().getColor("WolfHudKitText"));
         }
         else
         {
             mPlanOk = false;
             mPlanText = f.size() >= 6 ? f[5] : std::string("This line cannot be built.");
-            mPlanInfo->setColor(LLUIColorTable::instance().getColor("AlertCautionTextColor"));
+            mPlanInfo->setColor(LLUIColorTable::instance().getColor("WolfHudKitAmber"));
         }
         updateControls();
         return;

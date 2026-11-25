@@ -327,6 +327,7 @@ S32 WolfAdventurePlayView::measure(S32 width)
 
 void WolfAdventurePlayView::draw()
 {
+    const WolfGameDraw::KitScope kit;   // [HUD KIT 2026-11-25/] drawn in the Gunmetal Console look (wolfgamehud.h)
     mHits.clear();
     const F32 W = (F32)getRect().getWidth(), H = (F32)getRect().getHeight();
     LLGLSUIDefault gls_ui;

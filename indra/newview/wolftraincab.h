@@ -255,6 +255,11 @@ public:
     bool handleToolTip(S32 x, S32 y, MASK mask) override;
     void onMouseCaptureLost() override;
 
+    /** [HUD KIT 2026-11-25] for LEAP rigs, read-only: logs every press target drawn this frame as
+     *  "WolfHudKit hit traincab <H_NAME> gl <x>,<y> size <w>,<h> tip <tooltip>" in window GL pixels (centre and size), the
+     *  form scripts/wolf/hudkit/check_inventory.py --log reads (after WolfStarfoldDeck::logHits). */
+    static void logHits();
+
     enum EHit
     {
         H_NONE = 0,
@@ -268,6 +273,8 @@ public:
     };
 
 private:
+    static WolfTrainCabView* sView;
+    static const char* hitName(EHit id);
     struct Hit { F32 mL, mB, mR, mT; EHit mId; std::string mTip; };
     std::vector<Hit> mHits;
     F32 mPanelB = 0.f, mPanelT = 0.f;

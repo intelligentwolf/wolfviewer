@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <colors>
 
+    <!-- [HUD KIT 2026-11-25] words on the Gunmetal Console parts (wolfhudkit.h), the same in every skin: the parts are pictures.
+         Contrast (WCAG 2) against the key cap's lightest middle as rendered (76, 75, 78): Text 7.9:1, Dim 5.6:1, Amber 5.3:1 -->
+    <color name="WolfHudKitText" value="0.949 0.957 0.969 1" />
+    <color name="WolfHudKitTextDim" value="0.80 0.82 0.85 1" />
+    <color name="WolfHudKitAmber" value="1 0.753 0.38 1" />
+    <color name="WolfHudKitImage" value="1 1 1 1" />
+    <color name="WolfHudKitImageDisabled" value="0.55 0.55 0.58 1" />
     <!-- WolfViewer 2026-09-06: analogue joystick sticks (lljoystickbutton.cpp wolfDrawAnalog).
          The glass look of WolfStorm's css/camera_controls.css and css/touch_controls.css:
          rgba(20,26,38,.42) base, rgba(160,200,255,.45) border, knob (235,245,255) shading to

@@ -39,11 +39,13 @@
 #include "llviewerobject.h"
 #include "llviewerregion.h"
 #include "llvoavatarself.h"
+#include "llviewerwindow.h"
 #include "llwindow.h"
 #include "wolfdrive.h"
 #include "wolfflight.h"
 #include "wolfgrid.h"
 #include "wolfhelm.h"
+#include "wolfhudkit.h"
 
 static LLDefaultChildRegistry::Register<WolfTrainCabView> r_wolf_train_cab("wolf_train_cab");
 
@@ -960,6 +962,47 @@ namespace
         WolfHudScale::text(face("B612", bold ? LLFontGL::BOLD : LLFontGL::NORMAL, llmax(6.f, S(px) * 1.25f)), s, x, y, c, h, LLFontGL::VCENTER);
     }
 
+    // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): the band a machined gunmetal plate, the panels carbon
+    // or dark glass in a chrome (brass for steam and trams) frame, every button a backlit key in its well (lit while chosen or
+    // on, pressed while held), the dial an instrument behind glass in its bezel, the lamps lit lenses. Same layout, words,
+    // hit ids and actions as before (scripts/wolf/hudkit/inventory/traincab.json). Until the sheet has loaded, the old flat
+    // fills. Words on a key cap (its lightest middle as rendered, 76, 75, 78; WCAG 2): C_KEYTEXT 7.9:1, C_KEYDIM 5.6:1,
+    // C_KEYLIT 5.3:1 - the colours.xml WolfHudKit* ones. The status colours (red, amber, green) light lamps and lenses beside
+    // the words; the words themselves stay light, as red on a key cap would be 2.3:1.
+    const LLColor4 C_KEYTEXT(0.949f, 0.957f, 0.969f, 1.f);
+    const LLColor4 C_KEYDIM(0.80f, 0.82f, 0.85f, 1.f);
+    const LLColor4 C_KEYLIT(1.f, 0.753f, 0.38f, 1.f);
+    bool brassCab(const std::string& kind) { return kind.empty() || kind == "steam" || kind == "tram"; }   // themeFor's footplate and tram
+    // a key, lit or held; `flat` (and `edge`, when not clear) the old look while the sheet loads
+    void key(F32 l, F32 b, F32 r, F32 t, bool lit, bool down, const LLColor4& flat, const LLColor4& edge = LLColor4(0.f, 0.f, 0.f, 0.f))
+    {
+        // the key's 30 sheet pixels of bevel at 12.6 units (S(0.42)), whatever its size
+        if (WolfHudKit::key(l, b, r, t, down ? WolfHudKit::CAP_DOWN : lit ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP, S(0.42f))) return;
+        rectF(l, b, r, t, flat);
+        if (edge.mV[VALPHA] > 0.f) frameW(l, b, r, t, S(2.f), edge);
+    }
+    // a panel: carbon (the controls) or dark glass (the signal, the line ahead) in its frame
+    void panel(F32 l, F32 b, F32 r, F32 t, bool glass, bool brass, const LLColor4& flat, const LLColor4& edge)
+    {
+        if (!WolfHudKit::part(glass ? WolfHudKitMap::P_SCREEN : WolfHudKitMap::P_INLAY, l, b, r, t, LLColor4::white, S(0.5f)))
+        {
+            rectF(l, b, r, t, flat);
+            frameW(l, b, r, t, S(2.f), edge);
+            return;
+        }
+        WolfHudKit::part(brass ? WolfHudKitMap::P_FRAME_BRASS : WolfHudKitMap::P_FRAME_CHROME, l - S(3.f), b - S(3.f), r + S(3.f), t + S(3.f),
+                         LLColor4::white, S(0.3f));
+    }
+    // a lamp: the colour behind its lens, a glow round it while lit
+    void lamp(F32 cx, F32 cy, F32 r, const LLColor4& on, const LLColor4& off, bool lit)
+    {
+        if (lit) WolfHudKit::glow(cx, cy, r * 2.6f, LLColor4(on.mV[VRED], on.mV[VGREEN], on.mV[VBLUE], 0.7f));
+        circleF(cx, cy, r, lit ? on : off);
+        // the lens sprite's disc is 46 of its 48 px half-width (parts.py lens: W / 2 - 2)
+        const F32 lr = r * 48.f / 46.f;
+        WolfHudKit::part(WolfHudKitMap::P_LENS, cx - lr, cy - lr, cx + lr, cy + lr);
+    }
+
     std::string fitWMeasure(const std::string& str, F32 px, bool bold, F32 maxw);
     // Text cut to `maxw` picture units on a character boundary, with "..." (review 13 Nov, W12): measured with the very
     // face T() draws it with.
@@ -1086,13 +1129,74 @@ namespace
     const S32 CARD_COUNT = (S32)(sizeof(CARDS) / sizeof(CARDS[0]));
 }
 
+WolfTrainCabView* WolfTrainCabView::sView = nullptr;
+
 WolfTrainCabView::WolfTrainCabView(const Params& p)
 :   LLUICtrl(p)
 {
+    sView = this;
 }
 
 WolfTrainCabView::~WolfTrainCabView()
 {
+    if (sView == this) sView = nullptr;
+}
+
+// static
+const char* WolfTrainCabView::hitName(EHit id)
+{
+    // Source: wolftraincab.h EHit, every member
+    switch (id)
+    {
+    case H_NONE: return "H_NONE";
+    case H_NOTCH_STOP: return "H_NOTCH_STOP";
+    case H_NOTCH_SLOW: return "H_NOTCH_SLOW";
+    case H_NOTCH_GO: return "H_NOTCH_GO";
+    case H_POWER: return "H_POWER";
+    case H_BRAKE: return "H_BRAKE";
+    case H_REV_FWD: return "H_REV_FWD";
+    case H_REV_N: return "H_REV_N";
+    case H_REV_REV: return "H_REV_REV";
+    case H_HORN: return "H_HORN";
+    case H_MODE: return "H_MODE";
+    case H_UNITS: return "H_UNITS";
+    case H_HELP: return "H_HELP";
+    case H_HELP_BACK: return "H_HELP_BACK";
+    case H_HELP_NEXT: return "H_HELP_NEXT";
+    case H_HELP_CLOSE: return "H_HELP_CLOSE";
+    case H_CLOSE: return "H_CLOSE";
+    case H_SHOW_TAB: return "H_SHOW_TAB";
+    case H_AUTO: return "H_AUTO";
+    case H_POINTS: return "H_POINTS";
+    case H_EASY_FWD: return "H_EASY_FWD";
+    case H_EASY_BACK: return "H_EASY_BACK";
+    case H_ENDS: return "H_ENDS";
+    case H_COUPLE: return "H_COUPLE";
+    case H_UNCOUPLE: return "H_UNCOUPLE";
+    case H_ALERT_OK: return "H_ALERT_OK";
+    case H_WALK: return "H_WALK";
+    case H_TURNTABLE: return "H_TURNTABLE";
+    }
+    return "H_UNKNOWN";
+}
+
+// static
+void WolfTrainCabView::logHits()
+{
+    if (!sView) { LL_INFOS("WolfHudKit") << "hits traincab: no cab view" << LL_ENDL; return; }
+    // Source: wolfstarfolddeck.cpp WolfStarfoldDeck::logHits - view-local UI units to window GL pixels (localPointToScreen, then
+    // the display scale, llviewerwindow.cpp handleMouseDown). The cab's hits are in picture units: x mHitScale (hitAt).
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    const F32 k = sView->mHitScale;
+    LL_INFOS("WolfHudKit") << "hits traincab: " << sView->mHits.size() << " (display scale " << scale.mV[VX] << ", zoom " << k << ")" << LL_ENDL;
+    for (const Hit& h : sView->mHits)
+    {
+        S32 sx = 0, sy = 0;
+        sView->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f * k), ll_round((h.mB + h.mT) * 0.5f * k), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit traincab " << hitName(h.mId) << " gl " << ll_round((F32)sx * scale.mV[VX]) << ","
+                               << ll_round((F32)sy * scale.mV[VY]) << " size " << ll_round((h.mR - h.mL) * k * scale.mV[VX]) << ","
+                               << ll_round((h.mT - h.mB) * k * scale.mV[VY]) << " tip " << h.mTip << LL_ENDL;
+    }
 }
 
 void WolfTrainCabView::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip)
@@ -1162,18 +1266,17 @@ void WolfTrainCabView::draw()
             {
                 const F32 half = llmin(380.f, w * 0.5f - 8.f);
                 mTabL = w * 0.5f - half; mTabR = w * 0.5f + half; mTabB = tb + 4.f; mTabT = tb + 58.f;
-                rectF(mTabL, mTabB, mTabR, mTabT, LLColor4(0.02f, 0.07f, 0.04f, 0.94f));
-                frameW(mTabL, mTabB, mTabR, mTabT, 2.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
-                T((mTabL + mTabR) * 0.5f, mTabT - 18.f, fitW(tr.walkNote(), 12.f, true, 2.f * half - 24.f), 12.f, C_WHITE, true);
-                T((mTabL + mTabR) * 0.5f, mTabB + 15.f, "You have two minutes to sit down there. Click to close this message.", 10.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+                key(mTabL, mTabB, mTabR, mTabT, false, mPressed == H_WALK, LLColor4(0.02f, 0.07f, 0.04f, 0.94f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+                T((mTabL + mTabR) * 0.5f, mTabT - 18.f, fitW(tr.walkNote(), 12.f, true, 2.f * half - 24.f), 12.f, C_KEYTEXT, true);
+                T((mTabL + mTabR) * 0.5f, mTabB + 15.f, "You have two minutes to sit down there. Click to close this message.", 10.f, C_KEYLIT);
                 addHit(mTabL, mTabB, mTabR, mTabT, H_WALK, tr.walkNote() + " - click to close this message");
             }
             else
             {
-                mTabL = w * 0.5f - 90.f; mTabR = w * 0.5f + 90.f; mTabB = tb + 4.f; mTabT = tb + 34.f;
-                rectF(mTabL, mTabB, mTabR, mTabT, LLColor4(0.02f, 0.07f, 0.04f, 0.9f));
-                frameW(mTabL, mTabB, mTabR, mTabT, 1.5f, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
-                T((mTabL + mTabR) * 0.5f, (mTabB + mTabT) * 0.5f, "DRIVING - SHOW THE CAB", 10.f, LLColor4(0.86f, 0.69f, 0.34f, 1.f), true);
+                // [HUD KIT 2026-11-25] 44 high (was 30): a target of 44 px or more
+                mTabL = w * 0.5f - 100.f; mTabR = w * 0.5f + 100.f; mTabB = tb + 4.f; mTabT = tb + 48.f;
+                key(mTabL, mTabB, mTabR, mTabT, false, mPressed == H_SHOW_TAB, LLColor4(0.02f, 0.07f, 0.04f, 0.9f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+                T((mTabL + mTabR) * 0.5f, (mTabB + mTabT) * 0.5f, "DRIVING - SHOW THE CAB", 10.f, C_KEYLIT, true);
                 addHit(mTabL, mTabB, mTabR, mTabT, H_SHOW_TAB, "You are still driving: show the Train Cab (F4)");
             }
             mDrawn = true;
@@ -1205,6 +1308,16 @@ void WolfTrainCabView::draw()
             }
         }
     }
+    // [HUD KIT 2026-11-25] Paul: every press target 44 px or more. The smallest are 44 units (X, ?, the guide's Back / Next,
+    // the refusal's OK; the rest are larger): a unit is u x zoom x the UI size in window pixels, so the cab is never drawn
+    // smaller than 1 / (u x UI size). u at full size is this frame's layout below at zoom 1 (a narrower picture only makes u
+    // smaller, so this is the most it can shrink).
+    {
+        const F32 ui_x = llmax(0.1f, LLUI::getScaleFactor().mV[VX]);
+        const F32 want1 = llclamp(Hv * llmax(0.1f, LLUI::getScaleFactor().mV[VY]) * 0.30f, 170.f, 380.f);
+        const F32 u1 = llmin(llmin(want1, llmax(60.f, (Hv - screen_bottom) * 0.55f)) / 304.f, screen_w / 1600.f);
+        mResize.setFloor(1.f / llmax(0.01f, u1 * ui_x));
+    }
     const F32 zoom = mResize.scale();
     const F32 W = screen_w / zoom;
     const F32 bottom = screen_bottom / zoom;
@@ -1232,7 +1345,8 @@ void WolfTrainCabView::draw()
     const bool easy = tr.easy();
 
     // the band: the cab's own colours, a rail along the top
-    rectG(0.f, bottom, W, top, th.hi, th.lo);
+    const bool brass = brassCab(c.mKind);
+    if (!WolfHudKit::part(WolfHudKitMap::P_PLATE, 0.f, bottom, W, top, LLColor4::white, S(0.6f))) rectG(0.f, bottom, W, top, th.hi, th.lo);
     rectF(0.f, top - S(4.f), W, top, th.accentLo);
     rectF(0.f, top - S(2.f), W, top - S(1.f), th.accent);
 
@@ -1244,12 +1358,13 @@ void WolfTrainCabView::draw()
     const std::string vehicles = !driving || c.mVeh < 0 ? std::string() : c.mVeh == 0 ? std::string("  -  1 vehicle") : llformat("  -  %d vehicles", c.mVeh + 1);
     T(X(24.f), Y(242.f), fitW(std::string(th.name) + vehicles + (c.mRegion.empty() ? "" : "  -  " + c.mRegion), 10.f, false, S(470.f)), 10.f, C_GREY, false, LLFontGL::LEFT);
     // close (hide): the cab stays yours; Wolf World > Train Cab brings it back
-    rectF(X(1560.f), Y(268.f), X(1592.f), Y(296.f), th.inset);
-    T(X(1576.f), Y(282.f), "X", 12.f, C_GREY, true);
-    addHit(X(1560.f), Y(268.f), X(1592.f), Y(296.f), H_CLOSE, "Hide the Train Cab - F4 (you keep driving; F4 or Wolf World > Vehicles & Travel > Train Cab brings it back)");
-    rectF(X(1520.f), Y(268.f), X(1552.f), Y(296.f), th.inset);
-    T(X(1536.f), Y(282.f), "?", 13.f, th.accent, true);
-    addHit(X(1520.f), Y(268.f), X(1552.f), Y(296.f), H_HELP, "How to drive");
+    // [HUD KIT 2026-11-25] X and ? 44 x 44 (were 32 x 28): targets of 44 px or more at the cab's full size
+    key(X(1548.f), Y(254.f), X(1592.f), Y(298.f), false, mPressed == H_CLOSE, th.inset);
+    T(X(1570.f), Y(276.f), "X", 13.f, C_KEYTEXT, true);
+    addHit(X(1548.f), Y(254.f), X(1592.f), Y(298.f), H_CLOSE, "Hide the Train Cab - F4 (you keep driving; F4 or Wolf World > Vehicles & Travel > Train Cab brings it back)");
+    key(X(1500.f), Y(254.f), X(1544.f), Y(298.f), mShowHelp, mPressed == H_HELP, th.inset);
+    T(X(1522.f), Y(276.f), "?", 14.f, mShowHelp ? C_KEYLIT : C_KEYTEXT, true);
+    addHit(X(1500.f), Y(254.f), X(1544.f), Y(298.f), H_HELP, "How to drive");
 
     if (!driving)
     {
@@ -1262,15 +1377,15 @@ void WolfTrainCabView::draw()
     }
 
     // ── left: the controls ────────────────────────────────────────────────────────────────────────
-    rectF(X(16.f), Y(14.f), X(520.f), Y(226.f), th.inset);
-    frameW(X(16.f), Y(14.f), X(520.f), Y(226.f), S(2.f), th.accentLo);
+    panel(X(16.f), Y(14.f), X(520.f), Y(226.f), false, brass, th.inset, th.accentLo);
     mLeverB = Y(36.f);
     mLeverT = Y(196.f);
     if (easy)
     {
         // one lever in a gate of three notches
         const F32 sx = X(110.f);
-        rectF(sx - S(10.f), Y(36.f), sx + S(10.f), Y(196.f), LLColor4(0.f, 0.f, 0.f, 0.6f));
+        if (!WolfHudKit::part(WolfHudKitMap::P_SLOT, sx - S(12.f), Y(28.f), sx + S(12.f), Y(204.f), LLColor4::white, S(0.4f)))
+            rectF(sx - S(10.f), Y(36.f), sx + S(10.f), Y(196.f), LLColor4(0.f, 0.f, 0.f, 0.6f));
         static const char* NAMES[WolfTrain::NOTCH_COUNT] = { "STOP", "SLOW", "GO" };
         static const EHit HITS[WolfTrain::NOTCH_COUNT] = { H_NOTCH_STOP, H_NOTCH_SLOW, H_NOTCH_GO };
         static const char* TIPS[WolfTrain::NOTCH_COUNT] = { "Stop: brake to a stand", "Slow: a third of the line's speed", "Go: the line's speed" };
@@ -1282,14 +1397,28 @@ void WolfTrainCabView::draw()
             const F32 ny = Y(36.f + 80.f * (F32)n);
             const bool sel = tr.notch() == n;
             const LLColor4 col = n == WolfTrain::NOTCH_STOP ? C_RED : n == WolfTrain::NOTCH_SLOW ? C_AMBER : C_GREEN;
-            rectF(sx + S(24.f), ny - S(18.f), X(330.f), ny + S(18.f), sel ? col : LLColor4(col.mV[0] * 0.25f, col.mV[1] * 0.25f, col.mV[2] * 0.25f, 1.f));
-            T(X(232.f), ny, NAMES[n], 18.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : col, true);
+            const LLColor4 dark(col.mV[0] * 0.25f, col.mV[1] * 0.25f, col.mV[2] * 0.25f, 1.f);
+            if (WolfHudKit::ready())
+            {
+                // the notch a key, lit when chosen, with its colour in a lamp beside the word (the word says it too)
+                key(sx + S(24.f), ny - S(20.f), X(330.f), ny + S(20.f), sel, mPressed == HITS[n], dark);
+                lamp(sx + S(48.f), ny, S(7.f), col, dark, sel);
+                T(X(240.f), ny, NAMES[n], 18.f, sel ? C_KEYLIT : C_KEYTEXT, true);
+            }
+            else
+            {
+                rectF(sx + S(24.f), ny - S(18.f), X(330.f), ny + S(18.f), sel ? col : dark);
+                T(X(232.f), ny, NAMES[n], 18.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : col, true);
+            }
             addHit(sx - S(30.f), ny - S(24.f), X(330.f), ny + S(24.f), HITS[n], back ? TIPS_BACK[n] : TIPS[n]);
         }
         const F32 ky = Y(36.f + 80.f * (F32)tr.notch());
         lineW(sx, Y(36.f), sx, ky, S(8.f), C_GREY);
-        circleF(sx, ky, S(18.f), th.accent);
-        circleF(sx - S(5.f), ky + S(5.f), S(6.f), LLColor4(1.f, 1.f, 1.f, 0.35f));
+        if (!WolfHudKit::part(WolfHudKitMap::P_HUB, sx - S(19.f), ky - S(19.f), sx + S(19.f), ky + S(19.f)))
+        {
+            circleF(sx, ky, S(18.f), th.accent);
+            circleF(sx - S(5.f), ky + S(5.f), S(6.f), LLColor4(1.f, 1.f, 1.f, 0.35f));
+        }
         T(X(428.f), Y(208.f), "EASY DRIVING", 11.f, th.accent, true);
         // [wolf-rail 1.2, D-c] the way it goes: FORWARD or BACK (slow only), in words, large; F5 too. back=1 from the region
         // (it is backing) reads BACKING on the button.
@@ -1302,10 +1431,9 @@ void WolfTrainCabView::draw()
         {
             const F32 b = Y(d.b), t = Y(d.b + 56.f);
             const bool sel = back == d.isBack;
-            rectF(X(346.f), b, X(510.f), t, sel ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
-            frameW(X(346.f), b, X(510.f), t, S(2.f), th.accent);
+            key(X(346.f), b, X(510.f), t, sel, mPressed == d.id, sel ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f), th.accent);
             const char* word = !d.isBack ? "FORWARD" : (sel && c.mBack ? "BACKING" : "BACK");
-            T(X(428.f), (b + t) * 0.5f, word, 15.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
+            T(X(428.f), (b + t) * 0.5f, word, 15.f, !WolfHudKit::ready() ? (sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE) : sel ? C_KEYLIT : C_KEYTEXT, true);
             addHit(X(346.f), b, X(510.f), t, d.id, d.tip);
         }
         T(X(428.f), Y(42.f), "Up / Down: the lever", 9.f, C_GREY);
@@ -1322,12 +1450,18 @@ void WolfTrainCabView::draw()
         for (const Lever& l : L)
         {
             const F32 lx = X(l.x);
-            rectF(lx - S(12.f), Y(36.f), lx + S(12.f), Y(196.f), LLColor4(0.f, 0.f, 0.f, 0.6f));
-            rectF(lx - S(12.f), Y(36.f), lx + S(12.f), Y(36.f + 160.f * l.v), LLColor4(l.col.mV[0], l.col.mV[1], l.col.mV[2], 0.55f));
+            if (!WolfHudKit::part(WolfHudKitMap::P_SLOT, lx - S(14.f), Y(28.f), lx + S(14.f), Y(204.f), LLColor4::white, S(0.4f)))
+                rectF(lx - S(12.f), Y(36.f), lx + S(12.f), Y(196.f), LLColor4(0.f, 0.f, 0.f, 0.6f));
+            rectF(lx - S(8.f), Y(36.f), lx + S(8.f), Y(36.f + 160.f * l.v), LLColor4(l.col.mV[0], l.col.mV[1], l.col.mV[2], 0.55f));
             for (S32 k = 0; k <= 10; ++k) rectF(lx + S(14.f), Y(36.f + 16.f * (F32)k) - S(0.6f), lx + S(22.f), Y(36.f + 16.f * (F32)k) + S(0.6f), C_DIM);
             const F32 ky = Y(36.f + 160.f * l.v);
-            rectF(lx - S(26.f), ky - S(9.f), lx + S(26.f), ky + S(9.f), th.accent);
-            rectF(lx - S(26.f), ky + S(3.f), lx + S(26.f), ky + S(9.f), LLColor4(1.f, 1.f, 1.f, 0.25f));
+            // the handle: a turned brass (steam, tram) or chrome bar
+            if (!WolfHudKit::part(brass ? WolfHudKitMap::P_KNOB_BRASS : WolfHudKitMap::P_KNOB_CHROME, lx - S(28.f), ky - S(13.f), lx + S(28.f), ky + S(13.f),
+                                  LLColor4::white, S(0.33f)))
+            {
+                rectF(lx - S(26.f), ky - S(9.f), lx + S(26.f), ky + S(9.f), th.accent);
+                rectF(lx - S(26.f), ky + S(3.f), lx + S(26.f), ky + S(9.f), LLColor4(1.f, 1.f, 1.f, 0.25f));
+            }
             T(lx, Y(212.f), l.label, 10.f, C_WHITE, true);
             T(lx, Y(22.f), llformat("%d%%", (S32)llround(l.v * 100.f)), 10.f, C_GREY);
             addHit(lx - S(40.f), Y(28.f), lx + S(40.f), Y(204.f), l.id, l.tip);
@@ -1340,9 +1474,10 @@ void WolfTrainCabView::draw()
         {
             const F32 b = Y(150.f - 54.f * (F32)i), t = b + S(42.f);
             const bool sel = tr.reverser() == RV[i];
-            rectF(X(300.f), b, X(500.f), t, sel ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
-            T(X(400.f), (b + t) * 0.5f, RN[i], 12.f, sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
-            addHit(X(300.f), b, X(500.f), t, RH[i], i == 2 ? std::string("Reverse: with the train standing, power backs it along its line (F5)")
+            key(X(300.f), b, X(500.f), t, sel, mPressed == RH[i], sel ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
+            T(X(400.f), (b + t) * 0.5f, RN[i], 12.f, !WolfHudKit::ready() ? (sel ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE) : sel ? C_KEYLIT : C_KEYTEXT, true);
+            // [HUD KIT 2026-11-25] the press target 48 high (the key 42, rows 54 apart): 44 px or more at full size
+            addHit(X(300.f), b - S(3.f), X(500.f), t + S(3.f), RH[i], i == 2 ? std::string("Reverse: with the train standing, power backs it along its line (F5)")
                                                           : std::string(i == 0 ? "Forward (F5: forward, neutral, reverse in turn)" : "Neutral: no power reaches the wheels (F5)"));
         }
         T(X(400.f), Y(212.f), "REVERSER", 10.f, C_WHITE, true);
@@ -1357,32 +1492,33 @@ void WolfTrainCabView::draw()
         T(X(268.f), Y(86.f), "Take a lever, or press AUTO, to drive yourself.", 10.f, C_GREY);
     }
     // the AUTO button (F8), between the controls and the dial
-    rectF(X(536.f), Y(130.f), X(680.f), Y(214.f), autoOn ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f));
-    frameW(X(536.f), Y(130.f), X(680.f), Y(214.f), S(2.f), th.accent);
-    T(X(608.f), Y(182.f), "AUTO", 18.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : th.accent, true);
+    const bool kit = WolfHudKit::ready();
+    key(X(536.f), Y(130.f), X(680.f), Y(214.f), autoOn, mPressed == H_AUTO, autoOn ? th.accent : LLColor4(0.f, 0.f, 0.f, 0.45f), th.accent);
+    T(X(608.f), Y(182.f), "AUTO", 18.f, kit ? (autoOn ? C_KEYLIT : C_KEYTEXT) : autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : th.accent, true);
     // (the press on its way, the region's answer not heard yet: "ONE MOMENT"; its note says why when it does not agree)
-    T(X(608.f), Y(152.f), autoOn ? "ON" : tr.autoAsking() ? "ONE MOMENT" : "OFF", 11.f, autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_GREY, true);
+    T(X(608.f), Y(152.f), autoOn ? "ON" : tr.autoAsking() ? "ONE MOMENT" : "OFF", 11.f, kit ? (autoOn ? C_KEYLIT : C_KEYDIM) : autoOn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_GREY, true);
     addHit(X(536.f), Y(130.f), X(680.f), Y(214.f), H_AUTO, autoOn ? std::string("Drive yourself again (F8)")
            : std::string("Auto: the train drives itself - the line's speed, stations and signals") + (easy ? " (F8)" : ". Let both levers go first (F8)"));
 
     // [wolf-rail 1.2] the POINTS button (F9): the next points ahead, their setting in words and - when drivers may set them -
     // one press changes them (Paul 13 Nov, D-b); the region's note then says how they are set
     const bool canPts = tr.canChangePoints();
-    rectF(X(536.f), Y(14.f), X(680.f), Y(118.f), canPts ? LLColor4(0.f, 0.f, 0.f, 0.55f) : LLColor4(0.f, 0.f, 0.f, 0.3f));
-    frameW(X(536.f), Y(14.f), X(680.f), Y(118.f), S(2.f), canPts ? th.accent : th.accentLo);
-    T(X(608.f), Y(102.f), "POINTS", 14.f, canPts ? th.accent : C_GREY, true);
+    key(X(536.f), Y(14.f), X(680.f), Y(118.f), false, canPts && mPressed == H_POINTS, canPts ? LLColor4(0.f, 0.f, 0.f, 0.55f) : LLColor4(0.f, 0.f, 0.f, 0.3f),
+        canPts ? th.accent : th.accentLo);
+    const LLColor4 ptsDim = kit ? C_KEYDIM : C_GREY, ptsText = kit ? C_KEYTEXT : C_WHITE, ptsLit = kit ? C_KEYLIT : th.accent;
+    T(X(608.f), Y(102.f), "POINTS", 14.f, canPts ? ptsLit : ptsDim, true);
     if (c.mPts.empty())
     {
         // the same words as the signal's (and WolfStorm's): "None in sight"
-        T(X(608.f), Y(72.f), "None", 11.f, C_GREY, true);
-        T(X(608.f), Y(54.f), "in sight", 10.f, C_GREY);
+        T(X(608.f), Y(72.f), "None", 11.f, ptsDim, true);
+        T(X(608.f), Y(54.f), "in sight", 10.f, ptsDim);
     }
     else
     {
-        T(X(608.f), Y(82.f), fitW(c.mPts, 11.f, true, S(136.f)), 11.f, C_WHITE, true);
-        T(X(608.f), Y(64.f), fitW(settingWords(c.mPtsSet), 10.f, true, S(136.f)), 10.f, C_WHITE, true);
-        T(X(608.f), Y(46.f), "in " + distance(c.mPtsM), 9.f, C_GREY);
-        T(X(608.f), Y(27.f), canPts ? "Press to change" : c.mPtsDriver ? "Too far to change" : "Set by the line", 9.f, canPts ? th.accent : C_GREY, true);
+        T(X(608.f), Y(82.f), fitW(c.mPts, 11.f, true, S(136.f)), 11.f, ptsText, true);
+        T(X(608.f), Y(64.f), fitW(settingWords(c.mPtsSet), 10.f, true, S(136.f)), 10.f, ptsText, true);
+        T(X(608.f), Y(46.f), "in " + distance(c.mPtsM), 9.f, ptsDim);
+        T(X(608.f), Y(27.f), canPts ? "Press to change" : c.mPtsDriver ? "Too far to change" : "Set by the line", 9.f, canPts ? ptsLit : ptsDim, true);
     }
     addHit(X(536.f), Y(14.f), X(680.f), Y(118.f), H_POINTS, canPts ? std::string("Change the points ahead - one press (F9)")
            : c.mPts.empty() ? std::string("No points ahead on the line")
@@ -1394,10 +1530,15 @@ void WolfTrainCabView::draw()
     const F32 k = mph ? MS_TO_MPH : MS_TO_KMH;
     const F32 line_u = c.mLine * k;
     const F32 full = llmax(40.f, ceilf((line_u * 1.25f) / 20.f) * 20.f);   // the dial's full scale: a round figure past the line speed
-    const F32 cx = X(800.f), cy = Y(124.f), r = S(108.f);
-    circleF(cx, cy, r + S(10.f), th.accentLo);
-    circleF(cx, cy, r + S(6.f), th.accent);
-    circleF(cx, cy, r, LLColor4(0.03f, 0.03f, 0.03f, 1.f));
+    // [HUD KIT 2026-11-25] an instrument: its face, the marks and the needle, then the glass and the bezel over them. The bezel's
+    // ring reaches 1.21 x the face (wolfhudkit.cpp gaugeBezel), so the face is 98 to end where the old rings did (118)
+    const F32 cx = X(800.f), cy = Y(124.f), r = S(kit ? 98.f : 108.f);
+    if (!WolfHudKit::gaugeFace(cx, cy, r, false))
+    {
+        circleF(cx, cy, r + S(10.f), th.accentLo);
+        circleF(cx, cy, r + S(6.f), th.accent);
+        circleF(cx, cy, r, LLColor4(0.03f, 0.03f, 0.03f, 1.f));
+    }
     const F32 d0 = -135.f, d1 = 135.f;   // 7:30 to 4:30
     auto deg = [&](F32 v) { return d0 + (d1 - d0) * llclamp(v / full, 0.f, 1.f); };
     for (F32 v = 0.f; v <= full + 0.01f; v += 10.f)
@@ -1418,10 +1559,11 @@ void WolfTrainCabView::draw()
     F32 nx, ny;
     pt(cx, cy, r - S(14.f), deg(c.mSpeed * k), nx, ny);
     lineW(cx, cy, nx, ny, S(4.f), C_RED);
-    circleF(cx, cy, S(10.f), th.accent);
+    if (!WolfHudKit::part(WolfHudKitMap::P_HUB, cx - S(11.f), cy - S(11.f), cx + S(11.f), cy + S(11.f))) circleF(cx, cy, S(10.f), th.accent);
     T(cx, cy - S(44.f), llformat("%d", (S32)llround(c.mSpeed * k)), 24.f, C_WHITE, true);
     T(cx, cy - S(70.f), mph ? "mph" : "km/h", 10.f, C_GREY);
-    addHit(cx - r, cy - r, cx + r, cy + r, H_UNITS, mph ? "Click for km/h (F3)" : "Click for mph (F3)");
+    WolfHudKit::gaugeBezel(cx, cy, r, brass);
+    addHit(cx - S(108.f), cy - S(108.f), cx + S(108.f), cy + S(108.f), H_UNITS, mph ? "Click for km/h (F3)" : "Click for mph (F3)");
     T(cx, Y(266.f), autoOn ? "AUTO" : c.mBack ? "BACKING" : c.mMode == "easy" ? "EASY DRIVING" : "YOU ARE DRIVING", 11.f, th.accent, true);
 
     // ── [wolf-rail 1.3, stage V] SHUNT: CHANGE ENDS, COUPLE, UNCOUPLE along the top band, each only when it can act
@@ -1442,35 +1584,34 @@ void WolfTrainCabView::draw()
         // [wolf-rail 1.3.7] TURNTABLE (tt=) under its turntable's name: the turntable turns the engine round, the driver seated
         const std::string ttTip = "Turn your engine round on the turntable " + c.mTt
             + ": you stay in the cab and go round with it. One press (button only - no key)";
-        // four fixed places of 140 between the badge's band end (X 930) and the ? button (X 1520): 930 + 4 x 146 - 6 = 1508.
+        // four fixed places of 140 between the badge's band end and the ? button: [HUD KIT 2026-11-25] from X 920, 144 apart
+        // (920 + 3 x 144 + 140 = 1492), the ? button 44 wide from X 1500 (it was 930, 146 apart, to 1508 by a 32-wide ? at 1520).
         // The longest word, CHANGE ENDS at 14, is about 5.6 line heights wide in B612 (fonts/B612-Bold.ttf advances; a
         // line height of at most S(14) x 1.25 = 17.5 at u = 1): about 99 of the 130 it is fitted to.
         const Shunt SH[4] = {
-            { 930.f, H_ENDS, tr.canChangeEnds(), "CHANGE ENDS", "F6", "Change ends: then walk to the cab at the other end and sit in it (F6)", false },
-            { 1076.f, H_COUPLE, tr.canCouple(), "COUPLE", coupleSub, coupleTip, wrong },
-            { 1222.f, H_UNCOUPLE, tr.canUncouple(), "UNCOUPLE", "Shift+F7", "Uncouple: your cab's part leaves the rest standing on its own (Shift+F7)", false },
-            { 1368.f, H_TURNTABLE, tr.canTurntable(), "TURNTABLE", c.mTt, ttTip, false },
+            { 920.f, H_ENDS, tr.canChangeEnds(), "CHANGE ENDS", "F6", "Change ends: then walk to the cab at the other end and sit in it (F6)", false },
+            { 1064.f, H_COUPLE, tr.canCouple(), "COUPLE", coupleSub, coupleTip, wrong },
+            { 1208.f, H_UNCOUPLE, tr.canUncouple(), "UNCOUPLE", "Shift+F7", "Uncouple: your cab's part leaves the rest standing on its own (Shift+F7)", false },
+            { 1352.f, H_TURNTABLE, tr.canTurntable(), "TURNTABLE", c.mTt, ttTip, false },
         };
         for (const Shunt& s : SH)
         {
             if (!s.can) continue;
             const F32 l = X(s.l), r = X(s.l + 140.f), b = Y(232.f), t = Y(296.f);
-            rectF(l, b, r, t, s.dim ? LLColor4(0.f, 0.f, 0.f, 0.45f) : LLColor4(0.f, 0.f, 0.f, 0.6f));
-            frameW(l, b, r, t, S(2.f), s.dim ? th.accentLo : th.accent);
-            T((l + r) * 0.5f, Y(274.f), fitW(s.word, 14.f, true, S(130.f)), 14.f, th.accent, true);
-            T((l + r) * 0.5f, Y(248.f), fitW(s.sub, 9.f, true, S(130.f)), 9.f, s.dim ? C_AMBER : C_GREY, true);
+            key(l, b, r, t, false, mPressed == s.id, s.dim ? LLColor4(0.f, 0.f, 0.f, 0.45f) : LLColor4(0.f, 0.f, 0.f, 0.6f), s.dim ? th.accentLo : th.accent);
+            T((l + r) * 0.5f, Y(274.f), fitW(s.word, 14.f, true, S(130.f)), 14.f, kit ? C_KEYTEXT : th.accent, true);
+            T((l + r) * 0.5f, Y(248.f), fitW(s.sub, 9.f, true, S(130.f)), 9.f, s.dim ? (kit ? C_KEYLIT : C_AMBER) : (kit ? C_KEYDIM : C_GREY), true);
             addHit(l, b, r, t, s.id, s.tip);
         }
     }
 
     // ── [wolf-rail 1.2] the signal ahead: its lamp, its word (never the colour alone) and how far ──────────────────────
-    rectF(X(922.f), Y(14.f), X(1040.f), Y(226.f), th.inset);
-    frameW(X(922.f), Y(14.f), X(1040.f), Y(226.f), S(2.f), th.accentLo);
+    panel(X(922.f), Y(14.f), X(1040.f), Y(226.f), true, brass, th.inset, th.accentLo);
     T(X(981.f), Y(208.f), "SIGNAL", 10.f, th.accent, true);
     const bool sig = !c.mSig.empty() && !c.mBack;
     const LLColor4 sigCol = !sig ? C_DIM : c.mSig == "red" ? C_RED : c.mSig == "yellow" ? C_AMBER : C_GREEN;
     circleF(X(981.f), Y(152.f), S(30.f), LLColor4(0.f, 0.f, 0.f, 0.8f));
-    circleF(X(981.f), Y(152.f), S(24.f), sig ? sigCol : LLColor4(0.12f, 0.12f, 0.12f, 1.f));
+    lamp(X(981.f), Y(152.f), S(24.f), sigCol, LLColor4(0.12f, 0.12f, 0.12f, 1.f), sig);
     if (sig)
     {
         T(X(981.f), Y(104.f), c.mSig == "red" ? "STOP" : c.mSig == "yellow" ? "CAUTION" : "CLEAR", 13.f, sigCol, true);
@@ -1484,8 +1625,7 @@ void WolfTrainCabView::draw()
     }
 
     // ── right: the line ahead, the lamp, the horn ─────────────────────────────────────────────────
-    rectF(X(1050.f), Y(14.f), X(1592.f), Y(226.f), th.inset);
-    frameW(X(1050.f), Y(14.f), X(1592.f), Y(226.f), S(2.f), th.accentLo);
+    panel(X(1050.f), Y(14.f), X(1592.f), Y(226.f), true, brass, th.inset, th.accentLo);
     T(X(1070.f), Y(208.f), c.mBack ? "THE LINE BEHIND" : "THE LINE AHEAD", 10.f, th.accent, true, LLFontGL::LEFT);
     if (c.mHasLead)
     {
@@ -1530,19 +1670,18 @@ void WolfTrainCabView::draw()
     rectF(sr - S(3.f), sy - S(12.f), sr + S(3.f), sy + S(12.f), C_RED);   // where the line it sees ends
     rectF(sl - S(8.f), sy - S(6.f), sl + S(8.f), sy + S(6.f), th.accent);  // the engine
     // the protection lamp: lit while the line makes the train brake
-    const LLColor4 lamp = c.mProtect ? C_RED : LLColor4(0.25f, 0.05f, 0.04f, 1.f);
-    circleF(X(1420.f), Y(124.f), S(14.f), lamp);
+    lamp(X(1420.f), Y(124.f), S(14.f), C_RED, LLColor4(0.25f, 0.05f, 0.04f, 1.f), c.mProtect);
     T(X(1500.f), Y(132.f), "LINE", 9.f, c.mProtect ? C_RED : C_GREY, true);
     T(X(1500.f), Y(116.f), "BRAKING", 9.f, c.mProtect ? C_RED : C_GREY, true);
     // [wolf-rail 1.3.7] the region's note (where to go at the end of the line, the turntable's progress, a points setting...):
     // drawn below, over the panel, so it cannot be missed. (A refusal is shown once, in the red strip that stays until OK.)
     // the horn (held while pressed) and the mode switch
     const bool horn = tr.horn();
-    rectF(X(1070.f), Y(26.f), X(1300.f), Y(74.f), horn ? th.accent : th.accentLo);
-    T(X(1185.f), Y(50.f), th.horn, 16.f, horn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
+    key(X(1070.f), Y(26.f), X(1300.f), Y(74.f), horn, mPressed == H_HORN, horn ? th.accent : th.accentLo);
+    T(X(1185.f), Y(50.f), th.horn, 16.f, kit ? (horn ? C_KEYLIT : C_KEYTEXT) : horn ? LLColor4(0.f, 0.f, 0.f, 1.f) : C_WHITE, true);
     addHit(X(1070.f), Y(26.f), X(1300.f), Y(74.f), H_HORN, std::string("Sound the ") + (th.horn == std::string("WHISTLE") ? "whistle" : th.horn == std::string("GONG") ? "gong" : "horn") + " (hold)");
-    rectF(X(1320.f), Y(26.f), X(1580.f), Y(74.f), LLColor4(0.f, 0.f, 0.f, 0.45f));
-    T(X(1450.f), Y(50.f), easy ? "SWITCH TO DRIVER'S MODE" : "SWITCH TO EASY DRIVING", 10.f, th.accent, true);
+    key(X(1320.f), Y(26.f), X(1580.f), Y(74.f), false, mPressed == H_MODE, LLColor4(0.f, 0.f, 0.f, 0.45f));
+    T(X(1450.f), Y(50.f), easy ? "SWITCH TO DRIVER'S MODE" : "SWITCH TO EASY DRIVING", 10.f, kit ? C_KEYTEXT : th.accent, true);
     addHit(X(1320.f), Y(26.f), X(1580.f), Y(74.f), H_MODE, easy ? "Switch to the driver's own levers - F2 (the train stops first)" : "Switch to the one-lever Easy driving - F2 (the train stops first)");
 
     // what is drawn over the panel stacks upwards from its top: the note box, the refusal strip, the guide card
@@ -1579,13 +1718,14 @@ void WolfTrainCabView::draw()
     mShowAlert = !tr.alert().empty();
     if (mShowAlert)
     {
-        const F32 l = W * 0.5f - S(560.f), r = W * 0.5f + S(560.f), b = above + S(8.f), t = b + S(56.f);
+        // [HUD KIT 2026-11-25] 64 high (was 56): its OK key 44 high
+        const F32 l = W * 0.5f - S(560.f), r = W * 0.5f + S(560.f), b = above + S(8.f), t = b + S(64.f);
         mAlertL = l * mHitScale; mAlertR = r * mHitScale; mAlertB = b * mHitScale; mAlertT = t * mHitScale;
         rectF(l, b, r, t, LLColor4(0.30f, 0.02f, 0.02f, 0.96f));
         frameW(l, b, r, t, S(2.f), C_RED);
         T(l + S(20.f), (b + t) * 0.5f, fitW(tr.alert(), 12.f, true, S(950.f)), 12.f, C_WHITE, true, LLFontGL::LEFT);
-        rectF(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), C_WHITE);
-        T(r - S(62.f), (b + t) * 0.5f, "OK", 13.f, LLColor4(0.f, 0.f, 0.f, 1.f), true);
+        key(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), false, mPressed == H_ALERT_OK, C_WHITE);
+        T(r - S(62.f), (b + t) * 0.5f, "OK", 13.f, WolfHudKit::ready() ? C_KEYTEXT : LLColor4(0.f, 0.f, 0.f, 1.f), true);
         addHit(r - S(110.f), b + S(10.f), r - S(14.f), t - S(10.f), H_ALERT_OK, "Close this message (Escape)");
         addHit(l, b, r - S(112.f), t, H_NONE, tr.alert());   // the whole text as a tooltip (it may be cut to fit)
         above = t;
@@ -1611,22 +1751,23 @@ void WolfTrainCabView::drawHelp(F32 above, bool stacked, F32 W)
     T(cx, t - S(74.f), cd.l1, 12.f, C_WHITE);
     T(cx, t - S(102.f), cd.l2, 12.f, C_WHITE);
     T(cx, t - S(130.f), cd.l3, 12.f, C_WHITE);
-    // [1.3.7] a card's fourth line (only "Changing ends" has one), between the third and the dots (at b + 56 = t - 174)
+    // [1.3.7] a card's fourth line (only "Changing ends" has one), between the third (t - 130) and the dots (b + 62 = t - 168)
     if (cd.l4) T(cx, t - S(154.f), cd.l4, 12.f, C_WHITE);
     for (S32 i = 0; i < CARD_COUNT; ++i)   // the dots
     {
-        circleF(cx + S(22.f) * ((F32)i - (F32)(CARD_COUNT - 1) * 0.5f), b + S(56.f), S(5.f), i == mHelpPage ? LLColor4(0.86f, 0.69f, 0.34f, 1.f) : C_DIM);
+        circleF(cx + S(22.f) * ((F32)i - (F32)(CARD_COUNT - 1) * 0.5f), b + S(62.f), S(5.f), i == mHelpPage ? LLColor4(0.86f, 0.69f, 0.34f, 1.f) : C_DIM);
     }
     if (mHelpPage > 0)
     {
-        rectF(l + S(20.f), b + S(14.f), l + S(150.f), b + S(46.f), LLColor4(0.f, 0.f, 0.f, 0.6f));
-        T(l + S(85.f), b + S(30.f), "< Back", 12.f, C_WHITE, true);
-        addHit(l + S(20.f), b + S(14.f), l + S(150.f), b + S(46.f), H_HELP_BACK, "");
+        // [HUD KIT 2026-11-25] Back and Next keys 44 high (were 32), the dots above them
+        key(l + S(20.f), b + S(8.f), l + S(150.f), b + S(52.f), false, mPressed == H_HELP_BACK, LLColor4(0.f, 0.f, 0.f, 0.6f));
+        T(l + S(85.f), b + S(30.f), "< Back", 12.f, C_KEYTEXT, true);
+        addHit(l + S(20.f), b + S(8.f), l + S(150.f), b + S(52.f), H_HELP_BACK, "");
     }
     const bool last = mHelpPage >= CARD_COUNT - 1;
-    rectF(r - S(150.f), b + S(14.f), r - S(20.f), b + S(46.f), LLColor4(0.86f, 0.69f, 0.34f, 1.f));
-    T(r - S(85.f), b + S(30.f), last ? "Got it" : "Next >", 12.f, LLColor4(0.f, 0.f, 0.f, 1.f), true);
-    addHit(r - S(150.f), b + S(14.f), r - S(20.f), b + S(46.f), last ? H_HELP_CLOSE : H_HELP_NEXT, "");
+    key(r - S(150.f), b + S(8.f), r - S(20.f), b + S(52.f), true, mPressed == H_HELP_NEXT || mPressed == H_HELP_CLOSE, LLColor4(0.86f, 0.69f, 0.34f, 1.f));
+    T(r - S(85.f), b + S(30.f), last ? "Got it" : "Next >", 12.f, WolfHudKit::ready() ? C_KEYLIT : LLColor4(0.f, 0.f, 0.f, 1.f), true);
+    addHit(r - S(150.f), b + S(8.f), r - S(20.f), b + S(52.f), last ? H_HELP_CLOSE : H_HELP_NEXT, "");
 }
 
 void WolfTrainCabView::press(EHit id, S32 y)

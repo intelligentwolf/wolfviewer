@@ -1309,6 +1309,37 @@ with the same filename but different name
      wolfgame/CREDITS.txt (also shown on the game window's Help page). -->
 <!-- [GREEDY WINDOW 2026-11-10] the Greedy window's dice (wolffloatergreedy.cpp): our own art, cut from
      region-terrain-work/greedy-dice-2026-11-10/art/make_art.py dice.png; 0 = no die (an outline) -->
+<!-- [HUD KIT 2026-11-25] the Wolf HUDs' parts sheet, Paul's "Gunmetal Console" look (wolfhudkit.h; map wolfhudkitmap.h, generated
+     with it by hud-kit/pack.py from Blender renders of each part). Mipmapped: its parts are drawn well below their sheet size. -->
+<texture name="WolfHudKit_Gunmetal" file_name="wolfhud/hudkit_gunmetal.png" preload="true" use_mips="true" />
+<!-- [HUD KIT 2026-11-25] the Gunmetal Console parts as whole pictures for XUI windows (the Wolf HUDs chooser): the plate and the
+     key in its three states (hud-kit/parts.py renders; 9-slice borders as hudkit_gunmetal.json: plate 24, key 30, y up here) -->
+<texture name="WolfHudKit_Plate" file_name="wolfhud/plate.png" preload="false" scale.left="24" scale.top="232" scale.right="232" scale.bottom="24" />
+<texture name="WolfHudKit_Key" file_name="wolfhud/key.png" preload="false" scale.left="30" scale.top="98" scale.right="130" scale.bottom="30" />
+<texture name="WolfHudKit_KeyLit" file_name="wolfhud/key_lit.png" preload="false" scale.left="30" scale.top="98" scale.right="130" scale.bottom="30" />
+<texture name="WolfHudKit_KeyDown" file_name="wolfhud/key_down.png" preload="false" scale.left="30" scale.top="98" scale.right="130" scale.bottom="30" />
+<!-- [HUD KIT 2026-11-25] the chooser's icons: each HUD's own glyph (hud-kit/glyphs/<id>.svg, drawn for this) as a backlit legend
+     under smoked glass in a chrome bezel, rendered in Blender (hud-kit/icons.py) with its own light bloomed (pack_icons.py) -->
+<texture name="WolfHudIcon_game" file_name="wolfhud/icons/game.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_car" file_name="wolfhud/icons/car.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_skis" file_name="wolfhud/icons/skis.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_plane" file_name="wolfhud/icons/plane.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_spaceship" file_name="wolfhud/icons/spaceship.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_boat" file_name="wolfhud/icons/boat.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_ship" file_name="wolfhud/icons/ship.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_speedboat" file_name="wolfhud/icons/speedboat.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_submarine" file_name="wolfhud/icons/submarine.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_greedy" file_name="wolfhud/icons/greedy.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_roleplay" file_name="wolfhud/icons/roleplay.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_compass" file_name="wolfhud/icons/compass.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_speed" file_name="wolfhud/icons/speed.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_fishing" file_name="wolfhud/icons/fishing.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_train" file_name="wolfhud/icons/train.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_weatherprops" file_name="wolfhud/icons/weatherprops.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_tutorials" file_name="wolfhud/icons/tutorials.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_trainbuilder" file_name="wolfhud/icons/trainbuilder.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_track" file_name="wolfhud/icons/track.png" preload="false" use_mips="true" />
+<texture name="WolfHudIcon_starfold" file_name="wolfhud/icons/starfold.png" preload="false" use_mips="true" />
 <texture name="WolfGreedy_Wood" file_name="wolfgreedy/greedy_wood.png" preload="false" />
 <texture name="WolfGreedy_Plate" file_name="wolfgreedy/greedy_plate.png" preload="false" scale.left="4" scale.top="252" scale.right="252" scale.bottom="4" />
 <texture name="WolfGreedy_Die0" file_name="wolfgreedy/greedy_die_0.png" preload="false" />

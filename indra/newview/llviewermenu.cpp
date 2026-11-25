@@ -13139,6 +13139,14 @@ void initialize_menus()
     enable.add("WolfHelm.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfHelm::instance().hudShowing(); });
     // [TRAIN CAB 2026-11-13] Wolf World > Vehicles & Travel > Train Cab: show / hide it (driving), or open its guide
     commit.add("WolfTrain.Toggle", [](LLUICtrl*, const LLSD&) { WolfTrain::instance().toggleShown(); });
+    // [HUD KIT 2026-11-25] for LEAP rigs, read-only: "traincab" logs the Train Cab's press targets in window GL pixels with their
+    // sizes and hit names (WolfTrainCabView::logHits), for scripts/wolf/hudkit/check_inventory.py --log and the rig's clicks
+    commit.add("WolfHudKit.Hits", [](LLUICtrl*, const LLSD& param)
+    {
+        const std::string hud = param.asString();
+        if (hud == "traincab") WolfTrainCabView::logHits();
+        else LL_INFOS("WolfHudKit") << "hits: no HUD called \"" << hud << "\"" << LL_ENDL;
+    });
     enable.add("WolfTrain.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfTrain::instance().shown(); });
     // [STARFOLD 2026-11-24] Wolf World > Vehicles & Travel > Starfold (Space) and its setup helper (wolfstarfold.h): shown only on
     // the Wolf grid where the region's space is on (the helper: its estate managers, on a region with the space plugin)

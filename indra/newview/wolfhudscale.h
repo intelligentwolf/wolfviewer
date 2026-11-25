@@ -92,8 +92,12 @@ class WolfHudResize
 public:
     explicit WolfHudResize(const char* setting);
 
-    /** The saved size, MIN_SCALE..MAX_SCALE. */
+    /** The saved size, MIN_SCALE..MAX_SCALE (and never below the floor). */
     F32 scale() const;
+
+    /** [HUD KIT 2026-11-25] The smallest size this HUD may be drawn at this frame, above MIN_SCALE: a HUD whose smallest press
+     *  target would come out under 44 px sets it (Paul: every target 44 px or more). 0 = MIN_SCALE alone. */
+    void setFloor(F32 floor) { mFloor = floor; }
 
     /** This frame the HUD is drawn from `bottom` to `top`, `width` wide. */
     void place(F32 bottom, F32 top, F32 width);
@@ -122,6 +126,7 @@ private:
     F32 mBottom = 0.f, mTop = 0.f, mWidth = 0.f;
     F32 mPlacedScale = 1.f;          // the size the HUD was drawn at, from mBottom to mTop
     bool mDragging = false;
+    F32 mFloor = 0.f;                // [HUD KIT 2026-11-25] setFloor
     F32 mGrabOffset = 0.f;           // the top edge's height above the mouse when the drag began
     U32 mHoverFrame = 0;
     bool mHoverSeen = false;

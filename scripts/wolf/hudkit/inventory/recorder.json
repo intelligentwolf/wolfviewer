@@ -1,0 +1,575 @@
+{
+ "hud": "recorder",
+ "title": "Video Recorder",
+ "viewer": "WolfViewer",
+ "files": [
+  "indra/newview/wolffloaterrecorder.cpp",
+  "indra/newview/wolffloaterrecorder.h",
+  "indra/newview/wolfrecorder.cpp",
+  "indra/newview/wolfrecorder.h",
+  "indra/newview/skins/default/xui/en/floater_wolf_recorder.xml",
+  "indra/newview/skins/default/xui/en/menu_viewer.xml",
+  "indra/newview/app_settings/commands.xml",
+  "indra/newview/skins/default/xui/en/strings.xml",
+  "indra/newview/llviewerfloaterreg.cpp"
+ ],
+ "layout_order": "monitor (top: preview picture left; state light + word, timecode, detail line, stops-at line, sound chips right) | transport buttons Record/Stop then Pause/Resume (always in view) | scroll container: status line with Play / Open folder (after a save) or Get the video codec + Cisco note, message line | Picture: Size, Smoothness, Show my windows | Sound: hint, World (check, level, meter, note), Voice chat (check, level, meter, privacy note), My microphone (check, level, meter, note) | Saving: folder, Change..., Open folder, Stop by itself, free space note. Separate: the REC indicator top right of the viewer window (never in the video)",
+ "controls": [
+  {
+   "id": "record_btn",
+   "kind": "button",
+   "label": "Record / Stop / Saving... (big round button: red dot, red square while recording)",
+   "when": "always; disabled while FINISHING",
+   "tip": "Start recording what you see and hear. Press again to stop and save. / Stop recording and save the video.",
+   "action": "WolfFloaterRecorder::onRecord(): WolfRecorder::stop() when recording, else WolfRecorder::start(error) (refusal shown as Problem: ...); hides tooltips when the whole window is recorded",
+   "keys": [
+    "Space / Enter when focused"
+   ],
+   "source": [
+    "name=\"record_btn\"",
+    "label=\"Record\"",
+    "<string name=\"record_label\">Record</string>",
+    "<string name=\"stop_label\">Stop</string>",
+    "<string name=\"saving_label\">Saving...</string>",
+    "<string name=\"record_tip\">Start recording what you see and hear. Press again to stop and save.</string>",
+    "<string name=\"stop_tip\">Stop recording and save the video.</string>",
+    "mRecordBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRecord(); });",
+    "if (!WolfRecorder::start(error)) mStartError = error;",
+    "mRecordBtn->setEnabled(st.state != WolfRecorder::State::FINISHING);",
+    "rec->setIcon(recording ? WolfRecorderTransportButton::ICON_STOP : WolfRecorderTransportButton::ICON_RECORD);"
+   ]
+  },
+  {
+   "id": "pause_btn",
+   "kind": "toggle",
+   "label": "Pause / Resume (round button: two white bars / red dot)",
+   "when": "enabled only while RECORDING",
+   "tip": "Pause the recording. Nothing is recorded until you press Resume. / Carry on recording, in the same video.",
+   "action": "WolfFloaterRecorder::onPause(): WolfRecorder::resume() if paused, else WolfRecorder::pause()",
+   "keys": [
+    "Space / Enter when focused"
+   ],
+   "source": [
+    "name=\"pause_btn\"",
+    "label=\"Pause\"",
+    "<string name=\"pause_label\">Pause</string>",
+    "<string name=\"resume_label\">Resume</string>",
+    "<string name=\"pause_tip\">Pause the recording. Nothing is recorded until you press Resume.</string>",
+    "<string name=\"resume_tip\">Carry on recording, in the same video.</string>",
+    "mPauseBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPause(); });",
+    "if (WolfRecorder::isPaused()) WolfRecorder::resume();",
+    "else WolfRecorder::pause();",
+    "mPauseBtn->setEnabled(st.state == WolfRecorder::State::RECORDING);"
+   ]
+  },
+  {
+   "name": "transport-button-widget",
+   "kind": "behaviour",
+   "label": "wolf_recorder_transport_button: round button drawn with its word beside it, hover/press wash over the whole target, FocusColor keyboard ring, greyed when disabled; still an LLButton for clicks, keys, tooltips and LEAP clickButton",
+   "when": "always",
+   "source": [
+    "static LLDefaultChildRegistry::Register<WolfRecorderTransportButton> r_wolf_recorder_transport_button(\"wolf_recorder_transport_button\");",
+    "enum Icon { ICON_RECORD, ICON_STOP, ICON_PAUSE, ICON_RESUME };",
+    "LLUIColorTable::instance().getColor(\"FocusColor\")"
+   ]
+  },
+  {
+   "name": "monitor",
+   "kind": "gauge",
+   "label": "dark monitor: live preview (or 'The picture shows here / while you record'), state light and word READY / STARTING / REC (pulsing red) / PAUSED (amber bars) / SAVING / SAVED (green), timecode hh:mm:ss (saved length after Stop)",
+   "when": "always",
+   "source": [
+    "name=\"monitor\"",
+    "<string name=\"preview_empty_1\">The picture shows here</string>",
+    "<string name=\"preview_empty_2\">while you record</string>",
+    "<string name=\"state_ready\">READY</string>",
+    "<string name=\"state_starting\">STARTING</string>",
+    "<string name=\"state_rec\">REC</string>",
+    "<string name=\"state_paused\">PAUSED</string>",
+    "<string name=\"state_saving\">SAVING</string>",
+    "<string name=\"state_saved\">SAVED</string>",
+    "drawTimecode(time_font, timecode(live ? mSeconds : (mSaved ? mSavedLength : 0.0)), x, y, kMonText);"
+   ]
+  },
+  {
+   "name": "monitor-detail",
+   "kind": "readout",
+   "label": "line under the timecode: <size> - <fps> pictures a second (idle) / <fps> pictures a second, <n> skipped (recording) / Nothing is recorded while paused; Stops by itself at <end> (amber in the last 30 s)",
+   "when": "always; stops-at while recording with a limit",
+   "source": [
+    "<string name=\"detail_idle\">[SIZE] - [FPS] pictures a second</string>",
+    "<string name=\"detail_recording\">[FPS] pictures a second[DROPPED]</string>",
+    "<string name=\"dropped\">, [N] skipped</string>",
+    "<string name=\"detail_paused\">Nothing is recorded while paused</string>",
+    "<string name=\"monitor_stops_at\">Stops by itself at [END]</string>"
+   ]
+  },
+  {
+   "name": "monitor-chips",
+   "kind": "lamp",
+   "label": "Microphone on (red chip) / Voice chat on (grey chip) at the monitor's foot",
+   "when": "recording, not paused, mic / voice being recorded",
+   "source": [
+    "<string name=\"chip_mic\">Microphone on</string>",
+    "<string name=\"chip_voice\">Voice chat on</string>",
+    "if (mMicOn) cx += drawChip(cx, cy, getString(\"chip_mic\"), kChipRed, LLColor4::white) + 6;"
+   ]
+  },
+  {
+   "name": "status",
+   "kind": "readout",
+   "label": "Press Record to start. Press Stop ... / Starting... / Recording. Press Stop ... / Paused - ... / Recording - it stops by itself at <end>. / Saving the video... / Saved: <file> <size>, <length> long.",
+   "when": "always",
+   "source": [
+    "name=\"status\"",
+    "<string name=\"ready\">Press Record to start. Press Stop when you have finished, and the video is saved.</string>",
+    "<string name=\"starting\">Starting...</string>",
+    "<string name=\"recording\">Recording. Press Stop to finish and save the video.</string>",
+    "<string name=\"paused\">Paused - nothing is being recorded. Press Resume to carry on, or Stop to save.</string>",
+    "<string name=\"near_end\">Recording - it stops by itself at [END].</string>",
+    "<string name=\"finishing\">Saving the video...</string>",
+    "<string name=\"saved_as\">Saved: [FILE]&#10;[SIZE], [LENGTH] long.</string>"
+   ]
+  },
+  {
+   "name": "message",
+   "kind": "readout",
+   "label": "Problem: <error> (caution colour, stays until the next press) or the recorder's notice (sound encoder, length limit, disk nearly full); plus the codec download's own words",
+   "when": "an error or a notice",
+   "source": [
+    "name=\"message\" top=\"52\"",
+    "mMessage->setText(\"Problem: \" + error);",
+    "\"). You can change the limit in the Video Recorder window.\"",
+    "\"The recording stopped because the disk is nearly full. The video was saved up to \"",
+    "\"The sound encoder could not be started, so this video has no sound.\""
+   ]
+  },
+  {
+   "id": "play_btn",
+   "kind": "button",
+   "label": "Play",
+   "when": "after a save (not while the codec is offered)",
+   "tip": "Play the video you have just saved, in this computer's video player",
+   "action": "LLWindow::openFile(mSavedFile); if the file is gone, message 'The saved video is no longer in its folder.'",
+   "source": [
+    "label=\"Play\"",
+    "name=\"play_btn\"",
+    "tool_tip=\"Play the video you have just saved, in this computer's video player\"",
+    "gViewerWindow->getWindow()->openFile(mSavedFile);",
+    "<string name=\"play_missing\">The saved video is no longer in its folder.</string>",
+    "mPlayBtn->setVisible(mSaved && !offer_codec);"
+   ]
+  },
+  {
+   "id": "saved_folder_btn",
+   "kind": "button",
+   "label": "Open folder (beside Play)",
+   "when": "after a save (not while the codec is offered)",
+   "tip": "Show the folder your videos are saved in",
+   "action": "WolfRecorder::openFolder()",
+   "source": [
+    "name=\"saved_folder_btn\"",
+    "mSavedFolderBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfRecorder::openFolder(); });",
+    "mSavedFolderBtn->setVisible(mSaved && !offer_codec);"
+   ]
+  },
+  {
+   "id": "codec_btn",
+   "kind": "button",
+   "label": "Get the video codec (free, from Cisco)",
+   "when": "an error naming the video encoder and the codec not yet installed; enabled only when there is something to download",
+   "tip": "Downloads Cisco's free H.264 video codec to this computer. Only needed when the computer's own video encoder cannot be used.",
+   "action": "WolfVRStream::downloadCodec()",
+   "source": [
+    "label=\"Get the video codec (free, from Cisco)\"",
+    "name=\"codec_btn\"",
+    "tool_tip=\"Downloads Cisco's free H.264 video codec to this computer. Only needed when the computer's own video encoder cannot be used.\"",
+    "mCodecBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfVRStream::downloadCodec(); });",
+    "mCodecBtn->setVisible(offer_codec);",
+    "mCodecBtn->setEnabled(codec == 0);"
+   ]
+  },
+  {
+   "id": "codec_note",
+   "kind": "readout",
+   "label": "OpenH264 Video Codec provided by Cisco Systems, Inc. (licence attribution, shown with the codec button)",
+   "when": "codec offered",
+   "source": [
+    "name=\"codec_note\"",
+    ">OpenH264 Video Codec provided by Cisco Systems, Inc.</text>",
+    "mCodecNote->setVisible(offer_codec);"
+   ]
+  },
+  {
+   "id": "size_combo",
+   "kind": "radio",
+   "label": "Picture > Size: Standard - 1280 x 720 (720p) / High - 1920 x 1080 (1080p)",
+   "when": "idle (disabled while busy)",
+   "tip": "The size of the video picture. Your window is fitted inside, with black bars when its shape differs.",
+   "action": "setting WolfRecorderSize (720 / 1080)",
+   "source": [
+    "<text follows=\"left|top\" font=\"SansSerifLargeBold\" height=\"20\" layout=\"topleft\" left=\"14\" name=\"picture_heading\" top=\"94\" width=\"200\">Picture</text>",
+    "name=\"size_label\" top=\"120\" width=\"140\">Size</text>",
+    "name=\"size_combo\"",
+    "tool_tip=\"The size of the video picture. Your window is fitted inside, with black bars when its shape differs.\"",
+    "<combo_box.item label=\"Standard - 1280 x 720 (720p)\" name=\"size_720\" value=\"720\" />",
+    "<combo_box.item label=\"High - 1920 x 1080 (1080p)\" name=\"size_1080\" value=\"1080\" />",
+    "bindNumberCombo(mSize, \"WolfRecorderSize\");"
+   ]
+  },
+  {
+   "id": "fps_combo",
+   "kind": "radio",
+   "label": "Smoothness: 30 pictures a second / 60 pictures a second (busier computer)",
+   "when": "idle (disabled while busy)",
+   "tip": "How many pictures a second the video aims for. When WolfViewer draws fewer, the video has fewer.",
+   "action": "setting WolfRecorderFps (30 / 60)",
+   "source": [
+    "name=\"fps_label\" top=\"148\" width=\"140\">Smoothness</text>",
+    "name=\"fps_combo\"",
+    "tool_tip=\"How many pictures a second the video aims for. When WolfViewer draws fewer, the video has fewer.\"",
+    "<combo_box.item label=\"30 pictures a second\" name=\"fps_30\" value=\"30\" />",
+    "<combo_box.item label=\"60 pictures a second (busier computer)\" name=\"fps_60\" value=\"60\" />",
+    "bindNumberCombo(mFps, \"WolfRecorderFps\");"
+   ]
+  },
+  {
+   "id": "show_ui_check",
+   "kind": "toggle",
+   "label": "Show my windows, menus and name tags in the video",
+   "when": "idle (disabled while busy)",
+   "tip": "Off: only the world is recorded. On: the whole window, as you see it. This window and the REC sign are never in the video.",
+   "action": "setting WolfRecorderShowInterface",
+   "source": [
+    "control_name=\"WolfRecorderShowInterface\"",
+    "label=\"Show my windows, menus and name tags in the video\"",
+    "name=\"show_ui_check\"",
+    "tool_tip=\"Off: only the world is recorded. On: the whole window, as you see it. This window and the REC sign are never in the video.\""
+   ]
+  },
+  {
+   "name": "sound-heading",
+   "kind": "readout",
+   "label": "Sound / The bars show how loud each sound is while you record.",
+   "when": "always",
+   "source": [
+    "name=\"sound_heading\" top=\"206\" width=\"120\">Sound</text>",
+    "name=\"sound_hint\" top=\"210\" width=\"348\">The bars show how loud each sound is while you record.</text>"
+   ]
+  },
+  {
+   "id": "world_check",
+   "kind": "toggle",
+   "label": "World sound and music",
+   "when": "idle (disabled while busy)",
+   "tip": "Sounds, music and media as you hear them",
+   "action": "setting WolfRecorderSoundWorld",
+   "source": [
+    "control_name=\"WolfRecorderSoundWorld\"",
+    "label=\"World sound and music\"",
+    "name=\"world_check\"",
+    "tool_tip=\"Sounds, music and media as you hear them\""
+   ]
+  },
+  {
+   "id": "world_level",
+   "kind": "slider",
+   "label": "world sound level 0-2 (live while recording)",
+   "when": "always",
+   "tip": "How loud the world sound is in the video",
+   "action": "setting WolfRecorderLevelWorld",
+   "source": [
+    "control_name=\"WolfRecorderLevelWorld\"",
+    "name=\"world_level\"",
+    "tool_tip=\"How loud the world sound is in the video\""
+   ]
+  },
+  {
+   "id": "world_meter",
+   "kind": "gauge",
+   "label": "world level meter: green to -12 dBFS, amber to -3, red above, peak tick; word Loud when too loud",
+   "when": "always (moves while recording)",
+   "tip": "How loud the world sound is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down.",
+   "source": [
+    "name=\"world_meter\"",
+    "tool_tip=\"How loud the world sound is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down.\"",
+    "mMeterViews[WolfRecorder::SOURCE_WORLD] = getChild<LLView>(\"world_meter\");",
+    "<string name=\"meter_loud\">Loud</string>",
+    "constexpr F32 kMeterFloorDb = -60.f, kAmberDb = -12.f, kRedDb = -3.f;"
+   ]
+  },
+  {
+   "id": "world_note",
+   "kind": "readout",
+   "label": "Takes effect after restarting WolfViewer. / ... could not start the route ... / World sound can only be recorded with the OpenAL sound engine.",
+   "when": "world sound unavailable or needs a restart",
+   "source": [
+    "name=\"world_note\"",
+    "<string name=\"world_restart\">Takes effect after restarting WolfViewer.</string>",
+    "<string name=\"world_unavailable\">This computer's sound system could not start the route the world sound is recorded from.</string>",
+    "<string name=\"world_fmod\">World sound can only be recorded with the OpenAL sound engine.</string>"
+   ]
+  },
+  {
+   "id": "voice_check",
+   "kind": "toggle",
+   "label": "Voice chat (other people)",
+   "when": "idle (disabled while busy)",
+   "tip": "Other people's voices as you hear them in voice chat",
+   "action": "setting WolfRecorderSoundVoice",
+   "source": [
+    "control_name=\"WolfRecorderSoundVoice\"",
+    "label=\"Voice chat (other people)\"",
+    "name=\"voice_check\"",
+    "tool_tip=\"Other people's voices as you hear them in voice chat\""
+   ]
+  },
+  {
+   "id": "voice_level",
+   "kind": "slider",
+   "label": "voice chat level 0-2",
+   "when": "always",
+   "tip": "How loud voice chat is in the video",
+   "action": "setting WolfRecorderLevelVoice",
+   "source": [
+    "control_name=\"WolfRecorderLevelVoice\"",
+    "name=\"voice_level\"",
+    "tool_tip=\"How loud voice chat is in the video\""
+   ]
+  },
+  {
+   "id": "voice_meter",
+   "kind": "gauge",
+   "label": "voice level meter",
+   "when": "always (moves while recording)",
+   "tip": "How loud voice chat is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down.",
+   "source": [
+    "name=\"voice_meter\"",
+    "tool_tip=\"How loud voice chat is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down.\"",
+    "mMeterViews[WolfRecorder::SOURCE_VOICE] = getChild<LLView>(\"voice_meter\");"
+   ]
+  },
+  {
+   "id": "voice_note",
+   "kind": "readout",
+   "label": "Other people's voices will be recorded - please ask before sharing.",
+   "when": "voice ticked",
+   "source": [
+    ">Other people's voices will be recorded - please ask before sharing.</text>",
+    "mVoiceNote->setVisible(gSavedSettings.getBOOL(\"WolfRecorderSoundVoice\"));"
+   ]
+  },
+  {
+   "id": "mic_check",
+   "kind": "toggle",
+   "label": "My microphone",
+   "when": "idle (disabled while busy)",
+   "tip": "Your own voice, for talking over the video. Not sent to voice chat.",
+   "action": "setting WolfRecorderSoundMic",
+   "source": [
+    "control_name=\"WolfRecorderSoundMic\"",
+    "label=\"My microphone\"",
+    "name=\"mic_check\"",
+    "tool_tip=\"Your own voice, for talking over the video. Not sent to voice chat.\""
+   ]
+  },
+  {
+   "id": "mic_level",
+   "kind": "slider",
+   "label": "microphone level 0-2",
+   "when": "always",
+   "tip": "How loud your microphone is in the video",
+   "action": "setting WolfRecorderLevelMic",
+   "source": [
+    "control_name=\"WolfRecorderLevelMic\"",
+    "name=\"mic_level\"",
+    "tool_tip=\"How loud your microphone is in the video\""
+   ]
+  },
+  {
+   "id": "mic_meter",
+   "kind": "gauge",
+   "label": "microphone level meter",
+   "when": "always (moves while recording)",
+   "tip": "How loud your microphone is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down.",
+   "source": [
+    "name=\"mic_meter\"",
+    "tool_tip=\"How loud your microphone is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down.\"",
+    "mMeterViews[WolfRecorder::SOURCE_MIC] = getChild<LLView>(\"mic_meter\");"
+   ]
+  },
+  {
+   "id": "mic_note",
+   "kind": "readout",
+   "label": "The microphone is only switched on while a recording runs ... With speakers, it also picks up the world sound.",
+   "when": "always",
+   "source": [
+    "name=\"mic_note\"",
+    ">The microphone is only switched on while a recording runs, and off while it is paused. With speakers, it also picks up the world sound.</text>"
+   ]
+  },
+  {
+   "id": "folder_text",
+   "kind": "readout",
+   "label": "Saving: the videos folder (tooltip: the full path)",
+   "when": "always",
+   "source": [
+    "name=\"saving_heading\" top=\"384\" width=\"200\">Saving</text>",
+    "name=\"folder_text\"",
+    "mFolderText->setToolTip(folder);"
+   ]
+  },
+  {
+   "id": "change_folder_btn",
+   "kind": "button",
+   "label": "Change...",
+   "when": "idle (disabled while busy)",
+   "tip": "Choose the folder your videos are saved in",
+   "action": "LLDirPickerThread -> WolfFloaterRecorder::onFolderPicked -> setting WolfRecorderFolder",
+   "source": [
+    "label=\"Change...\"",
+    "name=\"change_folder_btn\"",
+    "tool_tip=\"Choose the folder your videos are saved in\"",
+    "(new LLDirPickerThread(&WolfFloaterRecorder::onFolderPicked, WolfRecorder::folder()))->getFile();",
+    "gSavedSettings.setString(\"WolfRecorderFolder\", dirs[0]);"
+   ]
+  },
+  {
+   "id": "open_folder_btn",
+   "kind": "button",
+   "label": "Open folder",
+   "when": "always",
+   "tip": "Show the folder your videos are saved in",
+   "action": "WolfRecorder::openFolder()",
+   "source": [
+    "name=\"open_folder_btn\"",
+    "tool_tip=\"Show the folder your videos are saved in\"",
+    "getChild<LLButton>(\"open_folder_btn\")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfRecorder::openFolder(); });"
+   ]
+  },
+  {
+   "id": "limit_combo",
+   "kind": "radio",
+   "label": "Stop by itself: Never - I will press Stop / After 1, 2, 5, 10, 15, 30, 60 minutes",
+   "when": "idle (disabled while busy)",
+   "tip": "Whether a recording stops by itself after a set time. With Never it runs until you press Stop; it still stops by itself, and says so, if the disk gets nearly full.",
+   "action": "setting WolfRecorderMaxMinutes (0,1,2,5,10,15,30,60)",
+   "source": [
+    "name=\"limit_label\" top=\"450\" width=\"140\">Stop by itself</text>",
+    "name=\"limit_combo\"",
+    "tool_tip=\"Whether a recording stops by itself after a set time. With Never it runs until you press Stop; it still stops by itself, and says so, if the disk gets nearly full.\"",
+    "<combo_box.item label=\"Never - I will press Stop\" name=\"limit_never\" value=\"0\" />",
+    "<combo_box.item label=\"After 1 minute\" name=\"limit_1\" value=\"1\" />",
+    "<combo_box.item label=\"After 2 minutes\" name=\"limit_2\" value=\"2\" />",
+    "<combo_box.item label=\"After 5 minutes\" name=\"limit_5\" value=\"5\" />",
+    "<combo_box.item label=\"After 10 minutes\" name=\"limit_10\" value=\"10\" />",
+    "<combo_box.item label=\"After 15 minutes\" name=\"limit_15\" value=\"15\" />",
+    "<combo_box.item label=\"After 30 minutes\" name=\"limit_30\" value=\"30\" />",
+    "<combo_box.item label=\"After 60 minutes\" name=\"limit_60\" value=\"60\" />",
+    "bindNumberCombo(mLimitCombo, \"WolfRecorderMaxMinutes\");"
+   ]
+  },
+  {
+   "id": "space_note",
+   "kind": "readout",
+   "label": "<free> free - room for about <time> of video at this size. / <free> free - about <time> left at the current rate.",
+   "when": "always (every 2 s)",
+   "source": [
+    "name=\"space_note\"",
+    "<string name=\"space_free\">[FREE] free - room for about [TIME] of video at this size.</string>",
+    "<string name=\"space_recording\">[FREE] free - about [TIME] left at the current rate.</string>"
+   ]
+  },
+  {
+   "name": "settings-locked-while-busy",
+   "kind": "behaviour",
+   "label": "Size, Smoothness, Show my windows, the three sound ticks, Change... and Stop by itself are disabled while recording/saving (levels stay live); open combo lists close",
+   "when": "busy",
+   "source": [
+    "for (const char* name : { \"size_combo\", \"fps_combo\", \"show_ui_check\", \"world_check\", \"voice_check\", \"mic_check\", \"change_folder_btn\", \"limit_combo\" })",
+    "for (LLComboBox* combo : { mSize, mFps, mLimitCombo }) combo->hideList();"
+   ]
+  },
+  {
+   "name": "never-in-the-video",
+   "kind": "behaviour",
+   "label": "while the whole window is recorded the window is held back from the video and drawn after the copy; its tooltips are hidden and not made",
+   "when": "recording with Show my windows on",
+   "source": [
+    "if (WolfRecorder::holdBackFromVideo(this)) return;",
+    "if (WolfRecorder::wantsWholeWindow()) return true;"
+   ]
+  },
+  {
+   "name": "scroll",
+   "kind": "behaviour",
+   "label": "everything under the transport buttons scrolls (mouse wheel, scroll bar when needed); a control reached with Tab is scrolled into view; window resizable to 500 x 380 minimum",
+   "when": "always",
+   "source": [
+    "name=\"settings_scroll\"",
+    "mScroll->scrollToShowRect(r);",
+    "min_height=\"380\"",
+    "min_width=\"500\""
+   ]
+  },
+  {
+   "name": "rec-indicator",
+   "kind": "lamp",
+   "label": "top-right of the viewer window: REC <timecode> (blinking red dot) / PAUSED <timecode> (amber bars, amber frame); - stops at <end> in the last 30 s; | Microphone on; | Voice recorded. Drawn after the picture copy, never in the video",
+   "when": "recording",
+   "source": [
+    "std::string text = (paused ? \"PAUSED  \" : \"REC  \") + timecode(secs);",
+    "text += \"  - stops at \" + timecode(gSess.limit);",
+    "text += \"  |  Microphone on\";",
+    "text += \"  |  Voice recorded\";"
+   ]
+  },
+  {
+   "name": "menu-avatar",
+   "kind": "menu",
+   "label": "Avatar > Video Recorder... (next to Snapshot / 360 Snapshot): Floater.ToggleOrBringToFront wolf_recorder",
+   "when": "always, every grid",
+   "source": [
+    "name=\"WolfVideoRecorder\">",
+    "label=\"Video Recorder...\""
+   ]
+  },
+  {
+   "name": "menu-wolf-tools",
+   "kind": "menu",
+   "label": "Wolf World > Tools > Video Recorder...: Floater.ToggleOrBringToFront wolf_recorder",
+   "when": "always, every grid",
+   "source": [
+    "<menu_item_call label=\"Video Recorder...\" name=\"WolfToolsVideoRecorder\">",
+    "<menu_item_call.on_click function=\"Floater.ToggleOrBringToFront\" parameter=\"wolf_recorder\" />"
+   ]
+  },
+  {
+   "name": "toolbar",
+   "kind": "button",
+   "label": "toolbar button Video Recorder (toybox, any toolbar; lit while the window is open)",
+   "when": "when placed on a toolbar",
+   "tip": "Video Recorder: record a short video of what you see, with the sound",
+   "action": "Floater.ToggleOrBringToFront wolf_recorder",
+   "source": [
+    "<command name=\"wolf_recorder\"",
+    "icon=\"Command_WolfRecorder_Icon\"",
+    "execute_parameters=\"wolf_recorder\"",
+    "is_running_parameters=\"wolf_recorder\"",
+    "<string name=\"Command_WolfRecorder_Label\">Video Recorder</string>",
+    "<string name=\"Command_WolfRecorder_Tooltip\">Video Recorder: record a short video of what you see, with the sound</string>"
+   ]
+  },
+  {
+   "name": "leap",
+   "kind": "leap",
+   "label": "floater name wolf_recorder (LLFloaterReg); LEAP LLFloaterRegListener showInstance/toggleInstance wolf_recorder and clickButton record_btn / pause_btn / play_btn / saved_folder_btn / codec_btn / change_folder_btn / open_folder_btn",
+   "when": "always",
+   "source": [
+    "LLFloaterReg::add(\"wolf_recorder\", \"floater_wolf_recorder.xml\", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterRecorder>);",
+    "name=\"wolf_recorder\"",
+    "title=\"Video Recorder\""
+   ]
+  }
+ ]
+}

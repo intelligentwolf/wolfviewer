@@ -555,7 +555,7 @@ void WolfFloaterHuds::refreshTiles()
             if (mStates[i]->getText() != choose)
             {
                 mStates[i]->setText(choose);
-                mStates[i]->setColor(LLUIColorTable::instance().getColor(mHidden[i] ? "LabelTextColor" : "LtGreen"));
+                mStates[i]->setColor(LLUIColorTable::instance().getColor(mHidden[i] ? "WolfHudKitTextDim" : "LtGreen"));
             }
             continue;
         }
@@ -590,14 +590,15 @@ void WolfFloaterHuds::refreshTiles()
             // [WEATHER PROPS 2026-11-13] the props carry on with the window closed: say so rather than a bare OFF
             if (WolfWeatherProps::enabled() && !on) { state = "Props on - window closed"; running = true; }
         }
-        // In the WolfViewer skins a lit (selected) button is only a lighter grey, so the state line says it plainly: a filled
-        // dot and light green words when on, a hollow dot and the label colour when off. LtGreen (colors.xml, 0.79 1 0.79)
-        // keeps well above 4.5:1 on the lit tile's grey.
+        // The state line says it plainly as well as the lit key (never colour alone): a filled dot and light green words when
+        // on, a hollow dot and the kit's dim words when off. [HUD KIT 2026-11-25] the tiles are Gunmetal Console keys whatever
+        // the skin (floater_wolf_huds.xml, WolfHudKit_Key / KeyLit): LtGreen (colors.xml, 0.79 1 0.79) on the key cap's
+        // lightest middle as rendered (76, 75, 78) is 7.7:1, WolfHudKitTextDim 5.6:1.
         state = std::string(running ? "\xE2\x97\x8F " : "\xE2\x97\x8B ") + state;   // U+25CF / U+25CB
         if (mStates[i]->getText() != state)
         {
             mStates[i]->setText(state);
-            mStates[i]->setColor(LLUIColorTable::instance().getColor(running ? "LtGreen" : "LabelTextColor"));
+            mStates[i]->setColor(LLUIColorTable::instance().getColor(running ? "LtGreen" : "WolfHudKitTextDim"));
         }
     }
     if (mStatus)
@@ -618,7 +619,7 @@ void WolfFloaterHuds::refreshTiles()
         if (mStatus->getText() != msg)
         {
             mStatus->setText(msg);
-            mStatus->setColor(LLUIColorTable::instance().getColor(caution ? "AlertCautionTextColor" : "LabelTextColor"));
+            mStatus->setColor(LLUIColorTable::instance().getColor(caution ? "WolfHudKitAmber" : "WolfHudKitTextDim"));
         }
     }
 }

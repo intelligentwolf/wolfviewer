@@ -157,9 +157,11 @@ namespace WolfHudScale
                 }
             }
         }
+        // [HUD KIT 2026-11-25] a soft shadow under every HUD word (LLFontGL DROP_SHADOW_SOFT: four 1 px diagonal copies and
+        // one 2 px below, at 0.3 of the text's alpha, llfontgl.cpp), so lettering on a lit key or a bright sky keeps its edge
         if (use == f)
         {
-            f->renderUTF8(s, 0, x, y, c, h, v, LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
+            f->renderUTF8(s, 0, x, y, c, h, v, LLFontGL::NORMAL, LLFontGL::DROP_SHADOW_SOFT);
             return;
         }
         // `use` drawn at f's height in the picture: scaled by f / use about the point the text hangs from
@@ -172,7 +174,7 @@ namespace WolfHudScale
         gGL.translatef(px, py, 0.f);
         gGL.scalef(k, k, 1.f);
         gGL.translatef(-px, -py, 0.f);
-        use->renderUTF8(s, 0, x, y, c, h, v, LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
+        use->renderUTF8(s, 0, x, y, c, h, v, LLFontGL::NORMAL, LLFontGL::DROP_SHADOW_SOFT);
         gGL.popMatrix();
     }
 
@@ -222,7 +224,8 @@ F32 WolfHudResize::scale() const
 {
     const F32 s = mScale;
     // a hand-edited NaN would pass llclamp: the default size
-    return std::isfinite(s) ? llclamp(s, WolfHudScale::MIN_SCALE, WolfHudScale::MAX_SCALE) : WolfHudScale::DEFAULT_SCALE;
+    const F32 least = llclamp(mFloor, WolfHudScale::MIN_SCALE, WolfHudScale::MAX_SCALE);
+    return std::isfinite(s) ? llclamp(s, least, WolfHudScale::MAX_SCALE) : WolfHudScale::DEFAULT_SCALE;
 }
 
 void WolfHudResize::place(F32 bottom, F32 top, F32 width)
@@ -278,7 +281,7 @@ void WolfHudResize::drag(S32 y)
     // Several moves within one frame all start from that same drawn frame, so they never compound.
     const F32 h = llmax(1.f, mTop - mBottom);
     const F32 want = llmax(1.f, (F32)y + mGrabOffset - mBottom);
-    const F32 s = llclamp(mPlacedScale * want / h, WolfHudScale::MIN_SCALE, WolfHudScale::MAX_SCALE);
+    const F32 s = llclamp(mPlacedScale * want / h, llclamp(mFloor, WolfHudScale::MIN_SCALE, WolfHudScale::MAX_SCALE), WolfHudScale::MAX_SCALE);
     if (fabsf(s - scale()) > 0.001f)
     {
         gSavedSettings.setF32(mSetting, s);

@@ -8,6 +8,8 @@
     <color name="WolfHudKitAmber" value="1 0.753 0.38 1" />
     <color name="WolfHudKitImage" value="1 1 1 1" />
     <color name="WolfHudKitImageDisabled" value="0.55 0.55 0.58 1" />
+    <!-- the inlay drawn darker, so Dim and Amber words on it keep 4.5:1 (on its lightest middle: Text 8.3, Dim 6.0, Amber 5.7) -->
+    <color name="WolfHudKitInlay" value="0.75 0.75 0.75 1" />
     <!-- WolfViewer 2026-09-06: analogue joystick sticks (lljoystickbutton.cpp wolfDrawAnalog).
          The glass look of WolfStorm's css/camera_controls.css and css/touch_controls.css:
          rgba(20,26,38,.42) base, rgba(160,200,255,.45) border, knob (235,245,255) shading to

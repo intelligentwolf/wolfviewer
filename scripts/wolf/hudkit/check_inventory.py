@@ -6,7 +6,10 @@ inventory (inventory/<hud>.json) listing every button, key, toggle, gauge, reado
 state, with the action it takes. This script proves a reskin kept all of them:
 
   static (always):   every control's "source" strings are still in the HUD's source files (whitespace-normalised),
-                     and every hit id ("id": "H_...") is still both declared and used (two or more mentions).
+                     and every hit id ("id": "H_...") is still both declared and used (two or more mentions);
+                     every XUI control of an inventoried window (a button, check box, combo box, slider... whose name is an
+                     inventory id, in the HUD's .xml files) is 44 px or more on both sides as laid out (XUI sizes are full
+                     size: the window is not zoomed), unless its entry carries "small_ok".
   rig    (--log):    a WolfViewer.log from a LEAP rig run that called the HUD's "hits" verb. Every logged press
                      target ("WolfHudKit hit <hud> <id> gl x,y size w,h tip ...") must be an inventoried id, and
                      every one that is a button (kind != "tip") must be at least --min px (44) on both sides AT FULL
@@ -34,6 +37,29 @@ def load(hud):
         return json.load(f)
 
 
+# the XUI widgets a resident presses (llui: LLButton, LLCheckBoxCtrl, LLComboBox, LLSliderCtrl, LLSpinCtrl, LLFlyoutButton,
+# the recorder's transport button)
+XUI_PRESS = ('button', 'check_box', 'combo_box', 'slider', 'spinner', 'flyout_button', 'wolf_recorder_transport_button')
+XUI_TAG = re.compile(r'<(%s)\b([^>]*)>' % '|'.join(XUI_PRESS))
+
+
+def xui_sizes(inv, xml_text, min_px=44):
+    by_id = {c['id']: c for c in inv['controls'] if c.get('id')}
+    errs = []
+    for m in XUI_TAG.finditer(xml_text):
+        attrs = dict(re.findall(r'([\w.]+)="([^"]*)"', m.group(2)))
+        c = by_id.get(attrs.get('name'))
+        if c is None or c['kind'] in ('tip', 'readout', 'gauge', 'lamp', 'behaviour'):
+            continue
+        try:
+            w, h = int(attrs.get('width', '0')), int(attrs.get('height', '0'))
+        except ValueError:
+            continue
+        if (w < min_px or h < min_px) and not c.get('small_ok'):
+            errs.append('%s: %s <%s> is %d x %d px in the XUI (at least %d)' % (inv['hud'], c['id'], m.group(1), w, h, min_px))
+    return errs
+
+
 def static_check(inv):
     errs = []
     text = ''
@@ -43,7 +69,10 @@ def static_check(inv):
             errs.append('%s: source file missing: %s' % (inv['hud'], rel))
             continue
         with open(p, encoding='utf-8', errors='replace') as f:
-            text += '\n' + f.read()
+            body = f.read()
+        text += '\n' + body
+        if rel.endswith('.xml') and '/xui/' in rel:
+            errs += xui_sizes(inv, body)
     flat = norm(text)
     n = 0
     for c in inv['controls']:

@@ -834,8 +834,8 @@ namespace
         if (WolfDrive::isRoad(ty))
         {
             bs.push_back({ 92.f, "BIKE", ty == WolfDrive::TYPE_BIKE, WolfDashboard::H_TYPE_BIKE, "Motorbike dashboard (superbike TFT, handlebars, sequential gears)" });
-            bs.push_back({ 92.f, "TRUCK", ty == WolfDrive::TYPE_TRUCK, WolfDashboard::H_TYPE_TRUCK, "Truck dashboard (Scania style, 12-speed range-splitter: manual or automatic, air brakes)" });
-            bs.push_back({ 92.f, "CAR", ty == WolfDrive::TYPE_CAR, WolfDashboard::H_TYPE_CAR, "Car dashboard (Porsche 911 style, 8 gears: manual or automatic)" });
+            bs.push_back({ 92.f, "TRUCK", ty == WolfDrive::TYPE_TRUCK, WolfDashboard::H_TYPE_TRUCK, "Truck dashboard (long-haul truck style, 12-speed range-splitter: manual or automatic, air brakes)" });
+            bs.push_back({ 92.f, "CAR", ty == WolfDrive::TYPE_CAR, WolfDashboard::H_TYPE_CAR, "Car dashboard (classic sports car style, 8 gears: manual or automatic)" });
         }
         const F32 margin = S(14.f), gap = S(8.f), h = S(30.f), line = S(38.f);
         F32 x = g.W - margin;
@@ -1287,7 +1287,7 @@ namespace
                   i == 0 ? "Retarder stalk: 0, off. Drag the stalk, click a position or use the scroll wheel over it."
                                + keyHint(WolfDrive::ACT_RETARDER_DOWN)
                          : llformat("Retarder stalk: position %d, a fixed %s - braking whenever the accelerator is up "
-                                    "(Scania's five steps). Drag, click or scroll; blue: the stage braking now.", i, TORQUE[i])
+                                    "(five steps, as on a long-haul truck). Drag, click or scroll; blue: the stage braking now.", i, TORQUE[i])
                                + keyHint(i > sel ? WolfDrive::ACT_RETARDER_UP : WolfDrive::ACT_RETARDER_DOWN));
         }
         // the knob in the chosen slot (the lever seen from the driver's side)

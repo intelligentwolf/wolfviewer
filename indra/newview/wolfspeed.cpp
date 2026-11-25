@@ -903,8 +903,8 @@ void WolfFloaterSpeed::drawButton(EHit h, const std::string& label, const std::s
         }
         else
         {
-            text(kbig, label, kx, ky + ksmall->getLineHeight() * 0.45f, kink);
-            text(ksmall, sub, kx, ky - kbig->getLineHeight() * 0.5f, !enabled ? alpha(TEXT_DIM, 0.8f) : lit ? KEYLIT : KEYDIM);
+            text(kbig, label, kx, ky + (F32)ksmall->getLineHeight() * 0.45f, kink);
+            text(ksmall, sub, kx, ky - (F32)kbig->getLineHeight() * 0.5f, !enabled ? alpha(TEXT_DIM, 0.8f) : lit ? KEYLIT : KEYDIM);
         }
         return;
     }

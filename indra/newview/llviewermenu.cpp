@@ -13103,6 +13103,15 @@ void initialize_menus()
     // [BETA CHANNEL 2026-11-12] Help > Check for WolfViewer Updates (menu_viewer.xml and menu_login.xml): an answer every
     // time, an earlier "Not now" forgotten (wolfupdate.h checkByHand).
     commit.add("Wolf.CheckForUpdates", [](LLUICtrl*, const LLSD&) { WolfUpdate::checkByHand(); });
+    // [COFFEE 2026-11-25] Paul: "add the buy me a coffee link to the viewers". Wolf World > Buy us a coffee and Help > Buy
+    // us a coffee (menu_viewer.xml): the grid's virtual coffee shop (gridmanager coffee.php, index.php case "coffee"; the
+    // website menu's "Buy us a coffee"). A Stripe payment page, so always the system browser (loadURLExternal), never the
+    // built-in one, as the login screen's Patreon link (fspanellogin.cpp onClickPatreon); PromptShowURL would follow
+    // UseExternalBrowser instead. The address is kept here, not in wolfgrid.h, which 140 files include.
+    commit.add("Wolf.BuyCoffee", [](LLUICtrl*, const LLSD&)
+    {
+        LLWeb::loadURLExternal("https://www.wolf-grid.com/index.php?f=coffee");
+    });
     enable.add("Wolf.SpanScreensOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfSpanScreens::isOn(); });
     // [FORCED 2026-10-09] The switch may be flipped: on Wolf Territories, and not on a region
     // that requires Game Mode (VIEWER_SPEC.md §6).

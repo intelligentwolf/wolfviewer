@@ -13197,7 +13197,7 @@ void initialize_menus()
             LLCoordGL gl;
             const bool on = o && LLViewerCamera::getInstance()->projectPosAgentToScreen(o->getPositionAgent(), gl, false);
             const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
-            if (on) LL_INFOS("WolfStarfold") << "screenpos " << arg << " gl " << ll_round(gl.mX * scale.mV[VX]) << "," << ll_round(gl.mY * scale.mV[VY]) << LL_ENDL;
+            if (on) LL_INFOS("WolfStarfold") << "screenpos " << arg << " gl " << ll_round((F32)gl.mX * scale.mV[VX]) << "," << ll_round((F32)gl.mY * scale.mV[VY]) << LL_ENDL;
             else LL_INFOS("WolfStarfold") << "screenpos " << arg << " " << (o ? "off screen" : "no such prim") << LL_ENDL;
         }
         // [STARBASES 2026-11-24] the Starbase window's buttons by name: "base:open|close|found|spot|restore|home|fly|dockat|pack|

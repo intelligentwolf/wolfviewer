@@ -338,7 +338,7 @@ void WolfStarfoldDeck::logHits()
     {
         S32 sx = 0, sy = 0;
         sDeck->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f), ll_round((h.mB + h.mT) * 0.5f), &sx, &sy);
-        LL_INFOS("WolfStarfold") << "hit " << (S32)h.mId << " gl " << ll_round(sx * scale.mV[VX]) << "," << ll_round(sy * scale.mV[VY])
+        LL_INFOS("WolfStarfold") << "hit " << (S32)h.mId << " gl " << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY])
                                  << " tip " << h.mTip << LL_ENDL;
     }
 }

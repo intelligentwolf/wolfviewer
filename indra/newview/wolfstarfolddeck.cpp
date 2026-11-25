@@ -22,6 +22,7 @@
 #include <map>
 
 #include "llagent.h"
+#include "llclipboard.h"
 #include "llfocusmgr.h"
 #include "llfontgl.h"
 #include "llfontregistry.h"
@@ -391,6 +392,10 @@ void WolfStarfoldDeck::draw()
     const bool basewin = WolfStarbase::instance().shown();   // [STARBASES 2026-11-24] the Starbase window
     if (!setup) mClearArmed = false;
     if (!basewin) mArmed.clear();
+    // [WOLFTREK v11] the rename field goes with its window (the Station window closed or left, the Starbase window off its own base)
+    if (mEdit == EDIT_STATION && !(station && !basewin && sf.canRenameStation())) cancelEdit();
+    if (mEdit == EDIT_BASE && !(basewin && WolfStarbase::instance().tab() == WolfStarbase::TAB_BASE && WolfStarbase::instance().known()
+                                && WolfStarbase::instance().hasBase())) cancelEdit();
     if (!band && !station && !guide && !tab && !setup && !basewin && sf.notes().empty())
     {
         if (hasMouseCapture()) gFocusMgr.setMouseCapture(nullptr);
@@ -437,6 +442,7 @@ void WolfStarfoldDeck::draw()
     mWorldHalfW = llmax(1.f, W * 0.5f);
     mWorldHalfH = llmax(1.f, (H - top_of_world) * 0.5f);
     drawNotes(top_of_world + 10.f * u, W, llmax(u, 0.8f));
+    if (sf.automatic()) drawBanner(llmax(u, 0.8f));   // shown with the cockpit hidden too
     if (basewin) drawBase(top_of_world, W, H, llmax(u, 0.8f));   // opened from the Station window too: it goes over it
     else if (station) drawStation(top_of_world, W, H, llmax(u, 0.8f));
     else if (setup) drawSetup(top_of_world, W, H, llmax(u, 0.8f));
@@ -577,14 +583,27 @@ void WolfStarfoldDeck::drawCockpit(F32 bottom, F32 W, F32 u)
         addHit(sl - 10.f * u, hy - hh, sr + 10.f * u, hy + hh, H_THROTTLE, "Throttle: drag right for faster (W and S, or Page Up and Page Down)");
 
         // FIRE, MINE, NEXT TARGET, DOCK, FLY THERE (make_mockups.py concept_a: one row, FIRE lit while firing)
-        struct Big { EHit id; const char* label; F32 w; bool lit; bool dim; const char* tip; };
+        // [WOLFTREK v11] the station by its name (design.html#names: "the radar's station label and the Fly there button ('Fly to
+        // Kestrel Reach')"); with a fly-in bay DOCK and FLY THERE work from anywhere here (SpaceBay.cs BayDock: the autopilot to
+        // the approach point, then the automatic approach)
+        const std::string sname = sf.stationName();
+        const std::string stationWords = sname.empty() ? std::string("the station") : sname;
+        const std::string dockTip = sf.system().mBay ? "Dock at " + stationWords + ": your ship flies in by itself from anywhere here"
+                                                     : "Dock at " + stationWords + " (within 150 m)";
+        std::string flyLabel = "FLY THERE";
+        if (mPicked == "station" && !sname.empty()) flyLabel = "FLY TO " + upper(sname);
+        // the FLY THERE capsule grows with a name, up to 230 (the centre row then still clears the gauges' words and the radar)
+        const F32 flyW = llclamp(textW(flyLabel, 20.f * u, true) / llmax(u, 0.01f) + 34.f, 160.f, 230.f);
+        const std::string flyTip = mPicked.empty() ? std::string("Pick a place on the radar first, then FLY THERE")
+                                 : (mPicked == "station" ? "Fly to " + stationWords + (sf.system().mBay ? " and dock in its bay" : "")
+                                                         : std::string("Fly to the place you picked on the radar"));
+        struct Big { EHit id; std::string label; F32 w; bool lit; bool dim; std::string tip; };
         const Big bigs[5] = {
             { H_FIRE, "FIRE", 120.f, sf.firing(), false, "Fire at your target (hold Space)" },
             { H_MINE, "MINE", 120.f, sf.mining(), false, "Mine the nearest rock in reach (M)" },
             { H_NEXT, "NEXT TARGET", 176.f, false, false, "Pick the next Glasswing (Tab)" },
-            { H_DOCK, "DOCK", 120.f, false, false, "Dock at the station (within 150 m)" },
-            { H_FLY_PICKED, "FLY THERE", 160.f, !mPicked.empty(), mPicked.empty(),
-              mPicked.empty() ? "Pick a place on the radar first, then FLY THERE" : "Fly to the place you picked on the radar" } };
+            { H_DOCK, "DOCK", 120.f, false, false, dockTip },
+            { H_FLY_PICKED, flyLabel, flyW, !mPicked.empty(), mPicked.empty(), flyTip } };
         F32 total = 0.f;
         for (const Big& b : bigs) total += b.w;
         total += 12.f * 4.f;
@@ -606,7 +625,8 @@ void WolfStarfoldDeck::drawCockpit(F32 bottom, F32 W, F32 u)
         if (!sf.flyingTo().empty()) capsuleSmall(70.f, H_FLY_STOP, "STOP", false, "Stop flying there", true);
         if (sys.mHaveWormhole) capsuleSmall(118.f, H_FLY_WORMHOLE, "WORMHOLE", sf.flyingTo() == "wormhole", "Fly into the wormhole", true);
         if (sys.mHaveBelt) capsuleSmall(72.f, H_FLY_BELT, "BELT", sf.flyingTo() == "belt", "Fly to the asteroid belt and stop at its edge", true);
-        if (sys.mHaveStation) capsuleSmall(96.f, H_FLY_STATION, "STATION", sf.flyingTo() == "station", "Fly to the station and stop there", true);
+        if (sys.mHaveStation) capsuleSmall(96.f, H_FLY_STATION, "STATION", sf.flyingTo() == "station",
+                                           sys.mBay ? "Fly to " + stationWords + " and dock in its bay" : "Fly to " + stationWords + " and stop there", true);
         capsuleSmall(96.f, H_MODE, sf.drift() ? "DRIFT" : "STEADY", sf.drift(), "Steady flies where the nose points; Drift keeps sliding as you turn (Z)", true);
         fx = 815.f;
         capsuleSmall(44.f, H_HELP, "?", sf.guideShown(), "The guide: how to fly, mine, sell and fight", false);
@@ -733,8 +753,11 @@ void WolfStarfoldDeck::drawRadar(F32 cx, F32 cy, F32 rx, F32 ry, F32 u)
         const LLColor4 c = mPicked == "station" ? C_AMBER : C_TEXT;
         stalk(m, c);
         rectF(m.x - 6.f * u, m.head - 6.f * u, m.x + 6.f * u, m.head + 6.f * u, c);
-        labels.push_back({ m.x, m.head + 14.f * u, "STATION" + height(m.dz), c, mPicked == "station" ? 0 : 1 });
-        addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_STATION, "The station: click, then FLY THERE");
+        // [WOLFTREK v11] its name (k=sys sn=) once it has one
+        const std::string sname = sf.stationName();
+        labels.push_back({ m.x, m.head + 14.f * u, (sname.empty() ? std::string("STATION") : upper(sname)) + height(m.dz), c, mPicked == "station" ? 0 : 1 });
+        addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, H_RADAR_STATION,
+               (sname.empty() ? std::string("The station") : sname + ", the station") + ": click, then FLY THERE or DOCK");
     }
     if (sys.mHaveWormhole)
     {
@@ -758,9 +781,15 @@ void WolfStarfoldDeck::drawRadar(F32 cx, F32 cy, F32 rx, F32 ry, F32 u)
             stalk(m, c);
             const F32 d = 6.f * u;
             quadF(m.x, m.head + d, m.x + d, m.head, m.x, m.head - d, m.x - d, m.head, c);
-            if (picked || mineBase)
-                labels.push_back({ m.x, m.head + 14.f * u, (mineBase ? std::string("YOUR BASE") : upper(kb.mOwner.empty() ? std::string("STARBASE") : kb.mOwner)) + height(m.dz), c, picked ? 0 : 2 });
-            const std::string who = mineBase ? std::string("Your starbase") : (kb.mOwner.empty() ? std::string("A starbase") : kb.mOwner + "'s starbase");
+            // [WOLFTREK v11] its own name with its owner's (design.html#names: "The radar ... use the base's name together with
+            // its owner's name"); without a name, as before
+            std::string what;
+            if (mineBase) what = kb.mName.empty() ? std::string("YOUR BASE") : upper(kb.mName) + " (YOURS)";
+            else if (kb.mName.empty()) what = upper(kb.mOwner.empty() ? std::string("STARBASE") : kb.mOwner);
+            else what = upper(kb.mName) + (kb.mOwner.empty() ? std::string() : " (" + upper(kb.mOwner) + ")");
+            if (picked || mineBase) labels.push_back({ m.x, m.head + 14.f * u, what + height(m.dz), c, picked ? 0 : 2 });
+            std::string who = mineBase ? std::string("Your starbase") : (kb.mOwner.empty() ? std::string("A starbase") : kb.mOwner + "'s starbase");
+            if (!kb.mName.empty()) who = kb.mName + ", " + (mineBase ? std::string("your starbase") : who);
             addHit(m.x - hit, m.head - hit, m.x + hit, m.head + hit, (EHit)(H_RADAR_BASE_0 + (S32)i), who + ": click, then FLY THERE or DOCK");
         }
     }
@@ -873,7 +902,8 @@ void WolfStarfoldDeck::drawHud(F32 u)
     }
 
     // the heading tape across the top: compass degrees (the region's +y is north, +x east), ticks every 5, tall every 15
-    if (level)
+    // ([WOLFTREK v11] not while the bay's automatic approach or departure flies: its banner stands there, drawBanner)
+    if (level && !sf.automatic())
     {
         const F32 heading = fmodf(atan2f(h.mV[VX], h.mV[VY]) * RAD_TO_DEG + 360.f, 360.f);
         const F32 ty = (F32)world.mTop - 118.f * u, tcx = (F32)world.getCenterX(), per = 5.f * u;
@@ -979,7 +1009,8 @@ void WolfStarfoldDeck::drawGround(F32 bottom, F32 W, F32 u)
     // wolf-space 1.0.4 "goto": the region takes you there (past the landing point); its answer shows above the panel (k=msg)
     button(X(690.f), Y(16.f), X(880.f), Y(100.f), H_GOTO_PAD, "TO THE PAD", false, "Take me to the launch pad", u);
     if (sf.system().mHaveStation)
-        button(X(890.f), Y(16.f), X(1060.f), Y(100.f), H_GOTO_STATION, "TO THE STATION", false, "Take me onto the station's deck", u);
+        button(X(890.f), Y(16.f), X(1060.f), Y(100.f), H_GOTO_STATION, "TO THE STATION", false,
+               sf.stationName().empty() ? std::string("Take me onto the station") : "Take me onto " + sf.stationName(), u);
     button(X(1080.f), Y(16.f), X(1300.f), Y(100.f), H_LAUNCH, "LAUNCH", false, "Bring out your Cub and climb to space", u, true);
     button(X(1320.f), Y(16.f), X(1430.f), Y(100.f), H_HELP, "GUIDE", sf.guideShown(), "How to fly, mine, sell and fight", u);
     button(X(1450.f), Y(16.f), X(1560.f), Y(100.f), H_CLOSE, "CLOSE", false, std::string("Close this panel (Wolf World > ") + WolfStarfold::gameName() + " (Space) opens it)", u);
@@ -997,11 +1028,36 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
     frameW(l, b, r, t, 3.f * u, C_EDGE);
     addHit(l, b, r, t, H_NONE, "");   // the window takes its clicks: none fall through to the world
     const F32 pad = 28.f * u;
-    T(l + pad, t - 36.f * u, "STATION", 30.f * u, C_AMBER, true, LLFontGL::LEFT);
-    T(l + pad, t - 72.f * u, "Docked. Your ship is repaired: shield, armour and hull are full.", 17.f * u, C_GREEN, false, LLFontGL::LEFT);
+    // [WOLFTREK v11] the title is the station's name (design.html#names "the Station window's title"); its owner renames it here
+    // (an inline field in the title's place: Enter saves, Escape cancels; the region's answer stays in the window)
+    const std::string sname = sf.stationName();
+    const F32 tbh = llmax(52.f * u, 44.f), rt = t - 14.f * u, rb = rt - tbh;
+    if (mEdit == EDIT_STATION) drawEditRow(l + pad, rb, r - pad, rt, u);
+    else
+    {
+        const bool owner = sf.canRenameStation();
+        const F32 rw = 230.f * u, room = (r - pad) - (l + pad) - (owner ? rw + 12.f * u : 0.f);
+        T(l + pad, (rb + rt) * 0.5f, fit(sname.empty() ? std::string("STATION") : sname, 30.f * u, true, room), 30.f * u, C_AMBER, true, LLFontGL::LEFT);
+        if (owner)
+            button(r - pad - rw, rb, r - pad, rt, H_STATION_RENAME, "RENAME STATION", false,
+                   "Give this station a new name (3 to 32 letters; it must not be in use anywhere on the grid)", u);
+    }
+    {
+        // under the title: why a typed name cannot be saved (said next to the field, never only a passing note), else where you are
+        const F32 ly = rb - 20.f * u;
+        if (mEdit == EDIT_STATION && !mEditError.empty())
+            T(l + pad, ly, fit("Not saved: " + mEditError, 17.f * u, true, w - 2.f * pad), 17.f * u, C_RED, true, LLFontGL::LEFT);
+        else
+        {
+            std::string where = sname.empty() ? std::string("Docked") : "Docked at " + sname;
+            if (st.mPad > 0) where += llformat(", pad %d", st.mPad);
+            where += sname.empty() && st.mPad <= 0 ? ". Your ship is repaired: shield, armour and hull are full." : ". Your ship is repaired.";
+            T(l + pad, ly, fit(where, 17.f * u, false, w - 2.f * pad), 17.f * u, C_GREEN, false, LLFontGL::LEFT);
+        }
+    }
     // the market: ore, in store, price, value (numbers right-aligned so they stack: ui-ux-design typography)
     const F32 c1 = l + pad, c2 = l + w * 0.55f, c3 = l + w * 0.72f, c4 = r - pad;
-    F32 y = t - 120.f * u;
+    F32 y = rb - 62.f * u;
     T(c1, y, "MARKET", 16.f * u, C_DIM, true, LLFontGL::LEFT);
     T(c2, y, "IN STORE", 14.f * u, C_DIM, true, LLFontGL::RIGHT);
     T(c3, y, "PRICE", 14.f * u, C_DIM, true, LLFontGL::RIGHT);
@@ -1036,7 +1092,14 @@ void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)
     button(r - pad - 200.f * u, bb, r - pad, bb + bh, H_STATION_LAUNCH, "LAUNCH", false, "Leave the station in your Cub", u, true);
     button(r - pad - 200.f * u - 160.f * u, bb, r - pad - 220.f * u, bb + bh, H_STATION_CLOSE, "CLOSE", false,
            "Close this window (you stay docked)", u);
-
+    // [WOLFTREK v11] the region's answer to a rename (k=msg), kept above the buttons until the next rename
+    if (!sf.stationAnswer().empty())
+    {
+        const F32 px = 16.f * u, ab = bb + bh + 12.f * u, at = ab + px * 2.2f;
+        rectF(l + pad, ab, r - pad, at, LLColor4(0.18f, 0.12f, 0.02f, 0.92f));
+        frameW(l + pad, ab, r - pad, at, llmax(1.f, 1.5f * u), C_AMBER);
+        T(l + pad + 12.f * u, (ab + at) * 0.5f, fit(sf.stationAnswer(), px, true, w - 2.f * pad - 24.f * u), px, C_AMBER, true, LLFontGL::LEFT);
+    }
 }
 
 void WolfStarfoldDeck::drawGuide(F32 above, F32 W, F32 H, F32 u)
@@ -1553,11 +1616,27 @@ void WolfStarfoldDeck::drawBaseHome(F32 l, F32 b, F32 r, F32 t, F32 u)
     const F32 pic = llmin(llmin(180.f * u, (t - b) * 0.5f), 96.f * u + targetH(u));
     drawBasePicture(l + pic * 0.5f, t - pic * 0.55f, pic, u);
     const F32 x0 = l + pic + 20.f * u, cw = r - x0;
-    F32 y = t - 14.f * u;
-    std::string state = "Your starbase";
-    if (sb.baseState() == "packing") state += " is being packed away";
-    T(x0, y, state, 21.f * u, C_TEXT, true, LLFontGL::LEFT);
-    y -= 30.f * u;
+    // [WOLFTREK v11] the base's own name (k=base name=) with RENAME (its owner's: this tab is always the asker's own base,
+    // SpaceBases.cs SendBase); renaming puts the field in the name's place, Enter saves, Escape cancels
+    const F32 nbh = targetH(u);
+    F32 y = t - 4.f * u;
+    if (mEdit == EDIT_BASE) drawEditRow(x0, y - nbh, r, y, u);
+    else
+    {
+        std::string state = sb.baseName().empty() ? std::string("Your starbase") : sb.baseName();
+        if (sb.baseState() == "packing") state += " is being packed away";
+        const F32 rw = 150.f * u;
+        T(x0, y - nbh * 0.5f, fit(state, 21.f * u, true, cw - rw - 12.f * u), 21.f * u, C_TEXT, true, LLFontGL::LEFT);
+        button(r - rw, y - nbh, r, y, H_BASE_RENAME, "RENAME", false, "Give your starbase a new name (3 to 32 letters)", u);
+    }
+    y -= nbh + 18.f * u;
+    if (mEdit == EDIT_BASE && !mEditError.empty())
+    {
+        // why the typed name cannot be saved, next to the field (in the facts line's place while it shows)
+        T(x0, y, fit("Not saved: " + mEditError, 16.f * u, true, cw), 16.f * u, C_RED, true, LLFontGL::LEFT);
+        y -= 28.f * u;
+    }
+    else
     {
         // one line of facts: how far, the prims, the Starmarks
         std::string facts;
@@ -1946,8 +2025,23 @@ void WolfStarfoldDeck::press(EHit id, S32 x, S32 y)
 {
     WolfStarfold& sf = WolfStarfold::instance();
     if (id != H_SETUP_CLEAR) mClearArmed = false;   // any other press disarms the remove
+    // [WOLFTREK v11] the bay's automatic approach or departure flies the ship (SpaceEngine.OnChat ignores these meanwhile): a
+    // press says so in words instead of doing nothing (CLAUDE.md: visible feedback)
+    if (sf.automatic() && (id == H_FIRE || id == H_MINE || id == H_NEXT || id == H_DOCK || id == H_MODE || id == H_THROTTLE
+                           || id == H_FLY_STATION || id == H_FLY_BELT || id == H_FLY_WORMHOLE || id == H_FLY_STOP || id == H_FLY_PICKED))
+    {
+        showHint(sf.automaticIn() ? "Automatic docking: the ship flies itself. Press STOP to take the controls."
+                                  : "Automatic departure: you have the controls once you are out of the bay.");
+        return;
+    }
     switch (id)
     {
+        case H_BANNER_STOP: sf.stopApproach(); break;
+        case H_STATION_RENAME: startEdit(EDIT_STATION, sf.stationName()); break;
+        case H_BASE_RENAME: startEdit(EDIT_BASE, WolfStarbase::instance().baseName()); break;
+        case H_NAME_FIELD: setFocus(true); break;
+        case H_NAME_SAVE: saveEdit(); break;
+        case H_NAME_CANCEL: cancelEdit(); break;
         case H_FIRE: sf.fire(!sf.firing()); break;
         case H_MINE: sf.mine(!sf.mining()); break;
         case H_NEXT: sf.nextTarget(); break;
@@ -2071,7 +2165,7 @@ bool WolfStarfoldDeck::handleMouseDown(S32 x, S32 y, MASK mask)
     }
     if (onPanel(x, y)) return true;   // the console itself (under its curved edge): not the world behind it
     // piloting, on the world above the panel: point and fly while the button is held
-    if (sf.piloting() && !sf.panelHidden() && !onPanel(x, y))
+    if (sf.piloting() && !sf.automatic() && !sf.panelHidden() && !onPanel(x, y))
     {
         mPressed = H_WORLD;
         gFocusMgr.setMouseCapture(this);
@@ -2125,7 +2219,7 @@ bool WolfStarfoldDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
         // a quick second click counts as another press (FIRE / MINE toggle back, a second NEXT TARGET), as a single would
         // [STARBASES] never for the Starbase window or the radar's bases: Pack up, Scrap and Take down wait for a deliberate
         // second press, and a double click must not be taken as one
-        if (hit->mId != H_NONE && hit->mId != H_THROTTLE && !(hit->mId >= H_BASE_OPEN && hit->mId <= H_RADAR_BASE_LAST)) press(hit->mId, x, y);
+        if (hit->mId != H_NONE && hit->mId != H_THROTTLE && hit->mId < H_BASE_OPEN) press(hit->mId, x, y);
         return true;
     }
     return onPanel(x, y);
@@ -2151,4 +2245,157 @@ void WolfStarfoldDeck::onMouseCaptureLost()
     if (mPressed == H_WORLD) WolfStarfold::instance().setPointer(false, 0.f, 0.f);
     mPressed = H_NONE;
     mResize.end();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// [WOLFTREK v11 2026-11-25] the automatic approach's banner, and the rename field
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+void WolfStarfoldDeck::drawBanner(F32 u)
+{
+    // design.html#bay: "the cockpit shows Automatic docking ... you need to touch nothing. The keys do nothing during the approach;
+    // STOP hands you the controls again." Words, not colour alone; STOP only for an approach (SpaceEngine.OnChat: a departure
+    // cannot be stopped); nothing on it counts down.
+    WolfStarfold& sf = WolfStarfold::instance();
+    if (!gViewerWindow) return;
+    LLRect world = gViewerWindow->getWorldViewRectScaled();
+    const LLRect mine = calcScreenRect();
+    world.translate(-mine.mLeft, -mine.mBottom);
+    const bool in = sf.automaticIn();
+    std::string title = "AUTOMATIC DEPARTURE";
+    if (in)
+    {
+        const S32 pad = sf.bayPad();
+        title = pad > 0 ? llformat("AUTOMATIC DOCKING - pad %d", pad) : (pad == 0 ? std::string("AUTOMATIC DOCKING - the lift") : std::string("AUTOMATIC DOCKING"));
+    }
+    const std::string sname = sf.stationName().empty() ? std::string("the station") : sf.stationName();
+    const std::string line = in ? "The ship flies itself into " + sname + " and lands. STOP gives you the controls."
+                                : "The ship flies itself out of " + sname + ". You have the controls once you are clear.";
+    const F32 px = 24.f * u, px2 = 16.f * u, bh = llmax(52.f * u, 44.f), gap = 16.f * u;
+    const F32 stopW = in ? llmax(120.f * u, 44.f) : 0.f;
+    const F32 textWide = llmax(textW(title, px, true), textW(line, px2, false));
+    const F32 w = llmin((F32)world.getWidth() - 32.f, textWide + 48.f * u + (in ? stopW + gap : 0.f));
+    const F32 h = llmax(bh + 20.f * u, px * 1.4f + px2 * 1.6f + 24.f * u);
+    const F32 cx = (F32)world.getCenterX(), top = (F32)world.mTop - 18.f * u;
+    const F32 l = cx - w * 0.5f, r = cx + w * 0.5f, b = top - h, t = top;
+    pill(l, b, r, t, LLColor4(0.02f, 0.05f, 0.12f, 0.90f));
+    pillLine(l, b, r, t, llmax(1.5f, 2.f * u), C_AMBER);
+    addHit(l, b, r, t, H_NONE, "");   // the banner takes its clicks: none steer the ship (none would: the region flies it)
+    const F32 tx = l + 24.f * u, room = (r - l) - 48.f * u - (in ? stopW + gap : 0.f);
+    T(tx, t - 12.f * u - px * 0.7f, fit(title, px, true, room), px, C_AMBER, true, LLFontGL::LEFT);
+    T(tx, b + 12.f * u + px2 * 0.8f, fit(line, px2, false, room), px2, C_TEXT, false, LLFontGL::LEFT);
+    if (in)
+    {
+        const F32 sb = (b + t) * 0.5f - bh * 0.5f;
+        capsule(r - 20.f * u - stopW, sb, r - 20.f * u, sb + bh, H_BANNER_STOP, "STOP", false, "Stop the automatic docking and take the controls", u);
+    }
+}
+
+void WolfStarfoldDeck::startEdit(EEdit what, const std::string& now)
+{
+    mEdit = what;
+    mEditText = now;
+    mEditError.clear();
+    setFocus(true);   // the typed letters come here (handleKeyHere / handleUnicodeCharHere), not to the world's keys
+}
+
+void WolfStarfoldDeck::cancelEdit()
+{
+    if (mEdit == EDIT_NONE) return;
+    mEdit = EDIT_NONE;
+    mEditText.clear();
+    mEditError.clear();
+    if (hasFocus()) setFocus(false);
+}
+
+void WolfStarfoldDeck::saveEdit()
+{
+    if (mEdit == EDIT_NONE) return;
+    std::string why;
+    const std::string name = WolfStarfold::checkName(mEditText, why);
+    if (name.empty())
+    {
+        mEditError = why;   // the field stays open with the words as typed, the reason beside it
+        return;
+    }
+    if (mEdit == EDIT_STATION) WolfStarfold::instance().renameStation(name);
+    else WolfStarbase::instance().rename(name);
+    cancelEdit();
+}
+
+void WolfStarfoldDeck::drawEditRow(F32 l, F32 b, F32 r, F32 t, F32 u)
+{
+    // the field, then SAVE (the primary) and CANCEL, each a big target (design: at least 44 px)
+    const F32 bw = llmax(130.f * u, 44.f), gap = 8.f * u;
+    const F32 fr = r - 2.f * (bw + gap);
+    const bool focused = hasFocus();
+    rectF(l, b, fr, t, LLColor4(0.01f, 0.03f, 0.08f, 0.96f));
+    frameW(l, b, fr, t, focused ? llmax(2.f, 3.f * u) : llmax(1.f, 2.f * u), focused ? C_AMBER : (mEditError.empty() ? C_EDGE : C_RED));
+    const F32 px = llmin((t - b) * 0.40f, 20.f * u), room = (fr - l) - 30.f * u, cy = (b + t) * 0.5f;
+    F32 x = l + 12.f * u;
+    if (mEditText.empty())
+    {
+        T(x, cy, fit("Type the new name", px, false, room), px, C_DIM, false, LLFontGL::LEFT);
+    }
+    else
+    {
+        // the end of the text stays in view while typing (as wolfadventuretalk.cpp's box: only what fits, from the right)
+        LLWString w = utf8str_to_wstring(mEditText);
+        while (w.size() > 1 && textW(wstring_to_utf8str(w), px, false) > room) w.erase(0, 1);
+        const std::string shown = wstring_to_utf8str(w);
+        T(x, cy, shown, px, C_TEXT, false, LLFontGL::LEFT);
+        x += textW(shown, px, false);
+    }
+    if (focused && fmod(LLFrameTimer::getElapsedSeconds(), 1.0) < 0.6)
+        rectF(x + 2.f * u, cy - px * 0.6f, x + 2.f * u + llmax(1.f, 2.f * u), cy + px * 0.6f, C_TEXT);
+    addHit(l, b, fr, t, H_NAME_FIELD, "Type the new name (3 to 32 letters, numbers, spaces, apostrophes and hyphens), then press Enter or SAVE. Escape cancels.");
+    button(fr + gap, b, fr + gap + bw, t, H_NAME_SAVE, "SAVE", false, "Save the new name (Enter)", u, true);
+    button(r - bw, b, r, t, H_NAME_CANCEL, "CANCEL", false, "Keep the name as it is (Escape)", u);
+}
+
+bool WolfStarfoldDeck::handleKeyHere(KEY key, MASK mask)
+{
+    // Source: wolfadventuretalk.cpp WolfAdventureTalkView::handleKeyHere - Backspace, Enter, Ctrl+V, and every printable key is
+    // the field's (its character arrives in handleUnicodeCharHere), so typed letters never reach the world's or the cockpit's
+    // keys (LLViewerInput::scanKey bails on mKeyHandledByUI)
+    if (mEdit == EDIT_NONE) return false;
+    if (key == KEY_ESCAPE && mask == MASK_NONE) { cancelEdit(); return true; }
+    if ((key == KEY_RETURN || key == KEY_PAD_RETURN) && mask == MASK_NONE) { saveEdit(); return true; }
+    if (key == KEY_BACKSPACE && mask == MASK_NONE)
+    {
+        LLWString w = utf8str_to_wstring(mEditText);
+        if (!w.empty()) w.pop_back();
+        mEditText = wstring_to_utf8str(w);
+        mEditError.clear();
+        return true;
+    }
+    if (key == 'V' && (mask & MASK_CONTROL))
+    {
+        LLWString pasted;
+        if (LLClipboard::instance().pasteFromClipboard(pasted))
+        {
+            LLWString w = utf8str_to_wstring(mEditText);
+            for (llwchar c : pasted)
+            {
+                if (w.size() >= 40) break;   // a little over NameFilter.NAME_MAX (32): folded spaces may shorten it
+                w.push_back(c < 0x20 ? (llwchar)' ' : c);
+            }
+            mEditText = wstring_to_utf8str(w);
+            mEditError.clear();
+        }
+        return true;
+    }
+    if ((mask == MASK_NONE || mask == MASK_SHIFT) && key != KEY_TAB && key < KEY_SPECIAL) return true;
+    return false;
+}
+
+bool WolfStarfoldDeck::handleUnicodeCharHere(llwchar uni_char)
+{
+    if (mEdit == EDIT_NONE) return false;
+    if (uni_char < 0x20 || uni_char == 0x7f) return true;
+    LLWString w = utf8str_to_wstring(mEditText);
+    if (w.size() < 40) w.push_back(uni_char);
+    mEditText = wstring_to_utf8str(w);
+    mEditError.clear();
+    return true;
 }

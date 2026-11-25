@@ -67,6 +67,10 @@ public:
     bool handleDoubleClick(S32 x, S32 y, MASK mask) override;
     bool handleToolTip(S32 x, S32 y, MASK mask) override;
     void onMouseCaptureLost() override;
+    // [WOLFTREK v11 2026-11-25] the rename field (custom-drawn, as wolfadventuretalk.cpp's text box): typed letters while it has
+    // the keyboard, Enter saves, Escape cancels
+    bool handleKeyHere(KEY key, MASK mask) override;
+    bool handleUnicodeCharHere(llwchar uni_char) override;
 
     enum EHit
     {
@@ -93,6 +97,8 @@ public:
         H_BASE_ROWC_0, H_BASE_ROWC_LAST = H_BASE_ROWC_0 + 11,   // a row's third (Make seat)
         H_BASE_GHOST_0, H_BASE_GHOST_LAST = H_BASE_GHOST_0 + 11, // a ghost in the world: click to choose it
         H_RADAR_BASE_0, H_RADAR_BASE_LAST = H_RADAR_BASE_0 + 23,  // a starbase on the radar (BaseRules.CAP_MAX 24)
+        // [WOLFTREK v11 2026-11-25] the automatic approach's STOP, and renaming the station and the starbase
+        H_BANNER_STOP, H_STATION_RENAME, H_BASE_RENAME, H_NAME_FIELD, H_NAME_SAVE, H_NAME_CANCEL,
     };
 
 private:
@@ -153,6 +159,19 @@ private:
     F64 mLastRangeAt = 0.0;
     void button(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& label, bool lit, const std::string& tip, F32 u,
                 bool primary = false);
+
+    // [WOLFTREK v11 2026-11-25] the automatic approach's banner over the view (design.html#bay: "the cockpit shows Automatic
+    // docking"), and the rename field in the Station window (the station, its owner) and the Starbase window (the base, its owner)
+    void drawBanner(F32 u);
+    enum EEdit { EDIT_NONE = 0, EDIT_STATION, EDIT_BASE };
+    EEdit mEdit = EDIT_NONE;
+    std::string mEditText;               // what is typed (UTF-8)
+    std::string mEditError;              // why the name cannot be saved (WolfStarfold::checkName), shown under the field
+    void startEdit(EEdit what, const std::string& now);
+    void saveEdit();
+    void cancelEdit();
+    /** The field with SAVE and CANCEL across l..r, b..t. */
+    void drawEditRow(F32 l, F32 b, F32 r, F32 t, F32 u);
 };
 
 #endif // WOLF_STARFOLDDECK_H

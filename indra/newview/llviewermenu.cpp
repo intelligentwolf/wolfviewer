@@ -13181,6 +13181,9 @@ void initialize_menus()
         // id>[:<link>]" logs where that prim (link 1 = the root, llfloatertools.cpp numbering) is drawn, in window GL pixels. The rig
         // then clicks there through the LLWindow listener's mouseDown / mouseUp, the window's own mouse path.
         else if (verb == "hits") WolfStarfoldDeck::logHits();
+        // [WOLFTREK v11 2026-11-25] read-only, for LEAP rigs: "state" logs the cockpit banner (automatic docking / departure and the
+        // pad), the hangar view, the camera mode and focus, and the station's name (WolfStarfold::logState)
+        else if (verb == "state") sf.logState();
         else if (verb == "screenpos")
         {
             const size_t c2 = arg.find(':');

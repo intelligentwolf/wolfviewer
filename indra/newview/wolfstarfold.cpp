@@ -24,9 +24,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "fsnearbychathub.h"
 #include "llagent.h"
+#include "llagentcamera.h"
 #include "llaudioengine.h"
 #include "llchat.h"
 #include "lldir.h"
@@ -87,6 +89,16 @@ namespace
     const F64 JUMP_FADE_S = 1.2;
     const F32 BEAM_SEG_M = 6.f;
     const S32 BEAM_SEGS_MAX = 120;
+    // [WOLFTREK v11] the hangar view (design.html#bay: "frames your ship on its pad, as when you look at an object, and turns
+    // slowly round it until you move")
+    const F32 HANGAR_TURN_S = 60.f;          // one turn round the ship a minute ("turns slowly")
+    const F32 HANGAR_BEARING_DEG = 45.f;     // a three-quarter view: half way between the nose and the side towards the walkway
+    const F32 HANGAR_ELEV_DEG = 22.f;        // a little above the ship (the bay is about 22 m high: design.html#bay)
+    const F32 HANGAR_DIST_K = 2.6f;          // the ship's half-diagonal times this: the whole ship in a 60-degree view with room round it
+    const F32 HANGAR_DIST_MIN = 7.f, HANGAR_DIST_MAX = 24.f;   // metres: a 16-22 m pad's ship stays inside a 56 m wide bay
+    const F64 HANGAR_SETTLE_S = 2.0;         // the move to the view (LLAgentCamera animation, at most 1 s) has ended by then
+    const F64 HANGAR_WAIT_S = 10.0;          // how long the ship's object is waited for when the region's word comes first
+    const F64 ANSWER_FOR_S = 20.0;           // a k=msg this soon after a rename is the Station window's answer (as wolfstarbase.cpp)
 
     F64 now() { return LLFrameTimer::getElapsedSeconds(); }
 
@@ -638,8 +650,12 @@ void WolfStarfold::receive(const LLUUID& region_id, const std::vector<std::strin
             if (p.first != "t") continue;
             addNote(clean(p.second));
             WolfStarbase::instance().noteAnswer(clean(p.second));   // the Starbase window shows its answers until the next order
+            // [WOLFTREK v11] a station rename's answer (SpaceNames.cs RenameStation / OnNameAnswer: Refuse = k=msg) stays in the
+            // Station window until the next rename, never only a passing note
+            if (stationShown() && now() - mStationAskedAt < ANSWER_FOR_S) mStationAnswer = clean(p.second);
         }
     }
+    else if (kind == "bay") parseBay(kv);
     // [STARBASES 2026-11-24] k=bases, base, bpart, bghost, bown (SpaceBases.cs): wolfstarbase.cpp
     else if (WolfStarbase::instance().receive(kind, kv)) {}
     else if (kind == "end") endShip();
@@ -687,6 +703,8 @@ void WolfStarfold::parseSystem(const LLUUID& region_id, const std::vector<std::p
             }
         }
         else if (k == "station") s.mHaveStation = parseVec(v, s.mStation);
+        else if (k == "sn") s.mStationName = clean(v).substr(0, 40);   // NameFilter.NAME_MAX 32: a checked name, kept whole
+        else if (k == "bay") s.mBay = v == "1";
         else if (k == "wh")
         {
             const std::vector<std::string> f = split(v, ';');
@@ -709,7 +727,8 @@ void WolfStarfold::parseSystem(const LLUUID& region_id, const std::vector<std::p
         mBeams.clear();
     }
     LL_INFOS("WolfStarfold") << "system: on " << mSys.mOn << ", space from " << mSys.mHeight << " m, belt " << mSys.mHaveBelt << " ("
-                             << mRocks.size() << " rocks), station " << mSys.mHaveStation << ", wormhole " << mSys.mHaveWormhole << LL_ENDL;
+                             << mRocks.size() << " rocks), station " << mSys.mHaveStation << " '" << mSys.mStationName << "' bay "
+                             << mSys.mBay << ", wormhole " << mSys.mHaveWormhole << LL_ENDL;
 }
 
 void WolfStarfold::makeBelt()
@@ -744,6 +763,7 @@ void WolfStarfold::parseStatus(const std::vector<std::pair<std::string, std::str
     s.mAliens.clear();
     s.mAlienPos.clear();
     s.mHaveTargetPos = false;
+    s.mSeq.clear();                      // seq= comes only while the automatic approach or departure flies (SpaceEngine.Status)
     std::vector<LLUUID> alRaw;           // al= and ap= as sent (index for index), paired up below
     std::vector<std::string> apRaw;
     bool haveThr = false;
@@ -790,6 +810,8 @@ void WolfStarfold::parseStatus(const std::vector<std::pair<std::string, std::str
         }
         else if (k == "ap") apRaw = split(v, ';');                    // x,y,z;x,y,z;... in al='s order
         else if (k == "tgp") s.mHaveTargetPos = parseVec(v, s.mTargetPos);
+        else if (k == "cid") s.mClassId = clean(v).substr(0, 32);
+        else if (k == "seq" && (v == "in" || v == "out")) s.mSeq = v;
     }
     const bool pos = apRaw.size() == alRaw.size();
     for (size_t i = 0; i < alRaw.size(); ++i)
@@ -805,8 +827,23 @@ void WolfStarfold::parseStatus(const std::vector<std::pair<std::string, std::str
     s.mArmourMax = llmax(100.f, s.mArmour);
     s.mHullMax = llmax(100.f, s.mHull);
     const bool first = !mPiloting;
+    const bool wasAuto = !first && !mShip.mSeq.empty();
     mShip = s;
+    mLastShip = s.mRoot;
     mLastStatusAt = now();
+    if (first && (mHangarOn || mHangarWaitUntil > 0.0)) endHangar("the pilot launched");
+    if (!wasAuto && !mShip.mSeq.empty())
+    {
+        // the bay's automatic approach or departure began: whatever the pilot held is let go here (the region ignores it anyway:
+        // SpaceEngine.OnChat returns for every verb but leave and a STOP during an approach)
+        releaseKeys();
+        mFlyTo.clear();
+        LL_INFOS("WolfStarfold") << "automatic " << (mShip.mSeq == "in" ? "docking" : "departure") << " (pad " << mBayPad << ")" << LL_ENDL;
+    }
+    else if (wasAuto && mShip.mSeq.empty())
+    {
+        LL_INFOS("WolfStarfold") << "automatic flight over: the pilot has the controls" << LL_ENDL;
+    }
     if (first)
     {
         mPiloting = true;
@@ -879,6 +916,9 @@ void WolfStarfold::parseDocked(const std::vector<std::pair<std::string, std::str
     for (const auto& p : kv)
     {
         if (p.first == "cr") st.mCredits = (S64)strtoll(p.second.c_str(), nullptr, 10);
+        else if (p.first == "sn") st.mName = clean(p.second).substr(0, 40);
+        else if (p.first == "ship") st.mShip.set(p.second, false);
+        else if (p.first == "pad") st.mPad = (S32)num(p.second, -1.f);
         else if (p.first == "ore")
         {
             const std::vector<std::string> f = split(p.second, ';');
@@ -895,8 +935,53 @@ void WolfStarfold::parseDocked(const std::vector<std::pair<std::string, std::str
     }
     const bool fresh = !mStation.mDocked;
     mStation = st;
-    if (fresh) mStationShown = true;
+    if (fresh)
+    {
+        mStationShown = true;
+        mStationAnswer.clear();
+    }
     if (WolfGrid::isOnWolfTerritoriesConfirmed()) claimBottom();
+    // [WOLFTREK v11] the pilot's ship stands on its pad (SpaceEngine.SendDocked ship=, pad=): frame it (once per docking)
+    if (st.mShip.notNull()) startHangar(st.mShip);
+}
+
+void WolfStarfold::parseBay(const std::vector<std::pair<std::string, std::string>>& kv)
+{
+    // Source: SpaceBay.cs - to the pilot: StartSeq "ph=in|out", "pad=<n>", "ship=<root>", "s=<seconds>"; CancelSeq "ph=stop",
+    // "ship="; to everyone: EndSeq / BayRescue "ph=landed", "pad=", "ship=", "at=x,y,z" (the pad's top centre), "yaw=<deg>"; Sink
+    // "ph=lift", "ship=", "pad=". A pad's number is the one painted on it (bay_pad_<n>); 0 is the lift.
+    std::string ph;
+    S32 pad = -1;
+    LLUUID ship;
+    for (const auto& p : kv)
+    {
+        if (p.first == "ph") ph = p.second;
+        else if (p.first == "pad") pad = (S32)num(p.second, -1.f);
+        else if (p.first == "ship") ship.set(p.second, false);
+    }
+    if (ph == "in" || ph == "out")
+    {
+        if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
+        mBayPad = pad;
+        LL_INFOS("WolfStarfold") << "bay: automatic " << (ph == "in" ? "approach" : "departure") << ", pad " << pad << LL_ENDL;
+    }
+    else if (ph == "stop")
+    {
+        // CancelSeq: the ship halts and the pilot has the controls (the next k=st has no seq=); the banner goes now
+        mBayPad = -1;
+        if (ship.isNull() || ship == mShip.mRoot) mShip.mSeq.clear();
+        LL_INFOS("WolfStarfold") << "bay: approach stopped" << LL_ENDL;
+    }
+    else if (ph == "landed")
+    {
+        // everyone hears it; only this avatar's own ship is framed (the ship it last flew here)
+        if (ship.notNull() && ship == mLastShip) startHangar(ship);
+    }
+    else if (ph == "lift")
+    {
+        // the ship goes down through its pad and is removed (SpaceBay.cs Sink): the view of it ends
+        if (ship.notNull() && ship == mHangarShip) endHangar("the ship went down the lift");
+    }
 }
 
 void WolfStarfold::addNote(const std::string& text)
@@ -911,14 +996,22 @@ void WolfStarfold::endShip()
 {
     // SpaceEngine.EndShip: the ship is gone (docked, disabled, left, the edge of a jump)
     mPiloting = false;
-    mFireWanted = false;
-    mMineWanted = false;
+    releaseKeys();
     mFlyTo.clear();
     mThrottle = 0.f;
+    mShip.mSeq.clear();
+    mBayPad = -1;
+    LL_INFOS("WolfStarfold") << "ship ended" << LL_ENDL;
+}
+
+void WolfStarfold::releaseKeys()
+{
+    mFireWanted = false;
+    mMineWanted = false;
     mKeyPitch = mKeyYaw = mKeyRoll = mKeySlideY = mKeySlideZ = 0.f;
     mPointerHeld = false;
+    mPointerPitch = mPointerYaw = 0.f;
     for (bool& b : mKeyHeld) b = false;
-    LL_INFOS("WolfStarfold") << "ship ended" << LL_ENDL;
 }
 
 void WolfStarfold::resetRegion()
@@ -930,6 +1023,10 @@ void WolfStarfold::resetRegion()
     mStation = Station();
     mSetup = Setup();
     mSetupShown = false;
+    mStationAnswer.clear();
+    mBayPad = -1;
+    if (mHangarOn || mHangarWaitUntil > 0.0) endHangar("a new region");
+    mHangarDoneFor.setNull();
     WolfStarbase::instance().reset();
     WolfStarbase::instance().show(false);
     if (mPiloting) endShip();
@@ -1079,6 +1176,7 @@ void WolfStarfold::setPointer(bool held, F32 pitch, F32 yaw)
 void WolfStarfold::sendControls()
 {
     if (!piloting()) return;
+    if (automatic()) return;   // [WOLFTREK v11] the region flies the bay's approach and ignores ctl meanwhile: nothing is sent
     // Source: SpaceEngine.OnChat "ctl": t (kept when absent), p, y, r, sy, sz (0 when absent), m=s/d; each clamped to -1..1
     // there (ShipInput.Clamped) and a Steady throttle below 0 taken as 0. We send all of them, rounded, only on a change.
     auto q = [](F32 v, F32 step) { return llclamp(roundf(v / step) * step, -1.f, 1.f); };
@@ -1106,6 +1204,13 @@ bool WolfStarfold::noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, b
 {
     // [WOLF ONLY] off Wolf, or not piloting a ship here, no key is watched or taken at all
     if (!piloting() || (mask != MASK_NONE && mask != MASK_SHIFT)) return false;
+    if (automatic())
+    {
+        // [WOLFTREK v11] the automatic approach or departure: the cockpit's keys are still the cockpit's (they would swing the
+        // camera round the seat), but they do nothing and send nothing (design.html#bay "The keys do nothing during the approach")
+        return key == 'W' || key == 'S' || key == KEY_PAGE_UP || key == KEY_PAGE_DOWN || key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT
+            || key == KEY_RIGHT || key == 'Q' || key == 'E' || key == ' ' || key == KEY_TAB || key == 'Z' || key == 'M';
+    }
     // Source: design.html "Controls": Page Up / Page Down or W / S the throttle; the arrows pitch and yaw; Q / E roll; Shift +
     // the arrows slide; Space fire; Tab the next target; Z Steady / Drift. Plus M mine (the MINE button's key).
     const bool held = key_level || (key_down && !key_up);
@@ -1294,6 +1399,7 @@ void WolfStarfold::idle()
         else ++it;
     }
     WolfStarbase::instance().idle();
+    hangarIdle();
     sounds();
 }
 
@@ -1328,6 +1434,228 @@ void WolfStarfold::setupRez(const std::string& part)
 void WolfStarfold::setupClear()
 {
     if (canSetUp()) say("setup|clear=1");
+}
+
+// ── [WOLFTREK v11] names and the bay ─────────────────────────────────────────────────────────────────────────────────
+
+void WolfStarfold::stopApproach()
+{
+    // Source: SpaceEngine.OnChat - during a Seq only "leave" and, while it is an approach (Seq.In), fly|to=stop (CancelSeq) act
+    if (automaticIn()) say("fly|to=stop");
+}
+
+const std::string& WolfStarfold::stationName() const
+{
+    // k=sys sn= first: a rename sends the system to everyone again (SpaceNames.cs SetStationName -> SendSystem) but not k=docked;
+    // k=docked sn= (SpaceEngine.SendDocked) when the system has not named it
+    return mSys.mStationName.empty() ? mStation.mName : mSys.mStationName;
+}
+
+bool WolfStarfold::canRenameStation() const
+{
+    // the setup helper's rule (canSetUp): the region checks again (SpaceNames.cs RenameStation: W.IsRegionOwner, the estate owner
+    // or a manager) and says plainly when it refuses
+    LLViewerRegion* r = gAgent.getRegion();
+    return WolfGrid::isOnWolfTerritoriesConfirmed() && spaceHere() && mSys.mHaveStation && r && r->canManageEstate();
+}
+
+void WolfStarfold::renameStation(const std::string& name)
+{
+    std::string why;
+    const std::string tidy = checkName(name, why);
+    if (!canRenameStation() || tidy.empty()) return;
+    // Source: SpaceEngine.OnChat verb "name": kv "station" -> RenameStation (SpaceNames.cs); the answer is a k=msg (Refuse)
+    mStationAnswer = "Renaming your station...";
+    mStationAskedAt = now();
+    say("name|station=" + tidy);
+}
+
+// static
+std::string WolfStarfold::checkName(const std::string& raw, std::string& why)
+{
+    // Source: NameFilter.cs Check (NAME_MIN 3, NAME_MAX 32; the same words for each refusal)
+    why.clear();
+    LLWString w = utf8str_to_wstring(raw);
+    LLWString shown;
+    bool space = false;
+    for (llwchar c : w)
+    {
+        const bool white = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 0x00a0;
+        if (white) { space = !shown.empty(); continue; }
+        if (space) { shown.push_back(' '); space = false; }
+        shown.push_back(c);
+    }
+    if (shown.size() < 3 || shown.size() > 32) { why = "A name needs 3 to 32 letters."; return std::string(); }
+    S32 letters = 0;
+    for (llwchar c : shown)
+    {
+        const bool ascii_letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        const bool ok = ascii_letter || (c >= '0' && c <= '9') || c == ' ' || c == '\'' || c == '-' || c >= 0x80;
+        if (!ok) { why = "A name may use letters, numbers, spaces, apostrophes and hyphens only."; return std::string(); }
+        if (ascii_letter || c >= 0x80) ++letters;
+    }
+    if (letters < 2) { why = "A name needs some letters."; return std::string(); }
+    return wstring_to_utf8str(shown);
+}
+
+void WolfStarfold::startHangar(const LLUUID& ship)
+{
+    // once per docking (k=docked comes again on every sale), only on a Wolf login (the camera is a Wolf tool's)
+    if (ship.isNull() || ship == mHangarDoneFor || !WolfGrid::isOnWolfTerritoriesConfirmed()) return;
+    mHangarDoneFor = ship;
+    mHangarShip = ship;
+    mHangarWaitUntil = now() + HANGAR_WAIT_S;
+    beginHangarCamera();   // at once when the ship's object is here; else hangarIdle tries until the wait ends
+}
+
+void WolfStarfold::beginHangarCamera()
+{
+    LLViewerObject* o = gObjectList.findObject(mHangarShip);
+    if (!o || o->isDead() || !isAgentAvatarValid()) return;
+    mHangarWaitUntil = -1.0;
+    if (gAgentCamera.cameraMouselook() || gAgentCamera.cameraCustomizeAvatar())
+    {
+        LL_INFOS("WolfStarfold") << "hangar view: not in mouselook or appearance mode" << LL_ENDL;
+        return;
+    }
+    LLViewerObject* root = o->getRootEdit() ? o->getRootEdit() : o;
+    // the linkset's box (each prim's centre give or take half its diagonal), agent metres
+    LLVector3 lo, hi;
+    bool any = false;
+    auto grow = [&](LLViewerObject* p)
+    {
+        if (!p || p->isDead()) return;
+        const LLVector3 c = p->getPositionAgent();
+        const F32 r = p->getScale().length() * 0.5f;
+        const LLVector3 a = c - LLVector3(r, r, r), b = c + LLVector3(r, r, r);
+        if (!any) { lo = a; hi = b; any = true; return; }
+        for (S32 i = 0; i < 3; ++i) { lo.mV[i] = llmin(lo.mV[i], a.mV[i]); hi.mV[i] = llmax(hi.mV[i], b.mV[i]); }
+    };
+    grow(root);
+    for (LLViewerObject* child : root->getChildren()) grow(child);
+    const LLVector3 centre = (lo + hi) * 0.5f;
+    const F32 radius = llmax((hi - lo).length() * 0.5f, 2.f);
+    // a three-quarter view from in front of the ship (its nose is +X: SpaceMath), on the side where its pilot stepped out (the
+    // walkway towards the middle of the bay: SpaceBay.cs StepOut), a little above
+    LLVector3 fwd = LLVector3::x_axis * root->getRotationRegion();
+    fwd.mV[VZ] = 0.f;
+    if (fwd.normVec() < 0.1f) fwd = LLVector3::x_axis;
+    LLVector3 side(-fwd.mV[VY], fwd.mV[VX], 0.f);   // the ship's left
+    const LLVector3 toMe = gAgent.getPositionAgent() - centre;
+    if (toMe * side < 0.f) side = -side;
+    const F32 bearing = HANGAR_BEARING_DEG * DEG_TO_RAD, elev = HANGAR_ELEV_DEG * DEG_TO_RAD;
+    const LLVector3 dir = (fwd * cosf(bearing) + side * sinf(bearing)) * cosf(elev) + LLVector3::z_axis * sinf(elev);
+    const F32 dist = llclamp(radius * HANGAR_DIST_K, HANGAR_DIST_MIN, HANGAR_DIST_MAX);
+    // Source: lltoolfocus.cpp (alt-click focus): setFocusOnAvatar(false, ANIMATE) then the focus; setCameraPosAndFocusGlobal places
+    // the eye as well and moves there with the camera's own animation (llagentcamera.cpp:3064)
+    mHangarFocus = gAgent.getPosGlobalFromAgent(centre);
+    gAgentCamera.setFocusOnAvatar(false, ANIMATE);
+    gAgentCamera.setCameraPosAndFocusGlobal(gAgent.getPosGlobalFromAgent(centre + dir * dist), mHangarFocus, root->getID());
+    mHangarOn = true;
+    mHangarAt = now();
+    mHangarSettled = false;
+    LL_INFOS("WolfStarfold") << "hangar view: ship " << root->getID() << ", half-diagonal " << radius << " m, eye " << dist << " m away" << LL_ENDL;
+}
+
+void WolfStarfold::hangarIdle()
+{
+    if (!mHangarOn)
+    {
+        if (mHangarWaitUntil > 0.0)
+        {
+            if (now() > mHangarWaitUntil)
+            {
+                mHangarWaitUntil = -1.0;
+                LL_INFOS("WolfStarfold") << "hangar view: the ship's object never arrived" << LL_ENDL;
+            }
+            else beginHangarCamera();
+        }
+        return;
+    }
+    LLViewerObject* o = gObjectList.findObject(mHangarShip);
+    if (!o || o->isDead()) { endHangar("the ship is gone"); return; }
+    // the camera taken back by the viewer itself (Escape, a walk: LLAgentCamera::resetView sets the focus on the avatar), another
+    // focus (an alt-click elsewhere), mouselook: the view has ended, and the camera is the user's
+    if (gAgentCamera.getFocusOnAvatar() || gAgentCamera.cameraMouselook()
+        || (gAgentCamera.getFocusTargetGlobal() - mHangarFocus).magVec() > 1.5)
+    {
+        mHangarOn = false;
+        LL_INFOS("WolfStarfold") << "hangar view ended: the camera went elsewhere" << LL_ENDL;
+        return;
+    }
+    // the avatar walks, turns or flies (its own control flags, as LLAgent sets them: indra_constants.h)
+    const U32 MOVING = AGENT_CONTROL_AT_POS | AGENT_CONTROL_AT_NEG | AGENT_CONTROL_LEFT_POS | AGENT_CONTROL_LEFT_NEG | AGENT_CONTROL_UP_POS
+        | AGENT_CONTROL_UP_NEG | AGENT_CONTROL_NUDGE_AT_POS | AGENT_CONTROL_NUDGE_AT_NEG | AGENT_CONTROL_NUDGE_LEFT_POS
+        | AGENT_CONTROL_NUDGE_LEFT_NEG | AGENT_CONTROL_NUDGE_UP_POS | AGENT_CONTROL_NUDGE_UP_NEG | AGENT_CONTROL_TURN_LEFT | AGENT_CONTROL_TURN_RIGHT;
+    if (gAgent.getControlFlags() & MOVING) { endHangar("the avatar moved"); return; }
+    const LLVector3d off = gAgentCamera.getCameraPositionGlobal() - mHangarFocus;
+    const F32 dist = (F32)off.magVec();
+    if (dist < 0.01f) return;
+    const F32 elev = asinf(llclamp((F32)off.mdV[VZ] / dist, -1.f, 1.f));
+    const F32 az = (F32)atan2(off.mdV[VY], off.mdV[VX]);
+    if (!mHangarSettled)
+    {
+        if (now() - mHangarAt < HANGAR_SETTLE_S) return;
+        // the camera is where it went: its distance, height and bearing as they are now are the baseline (the camera's own
+        // limits may have moved it a little from what was asked)
+        mHangarSettled = true;
+        mHangarDist = dist;
+        mHangarElev = elev;
+        mHangarAz = az;
+        mHangarAvatarAt = gAgent.getPositionGlobal();
+        return;
+    }
+    // the user moved the camera (zoom, orbit, pan): away from where the slow turn has it
+    F32 daz = az - mHangarAz;
+    while (daz > F_PI) daz -= F_TWO_PI;
+    while (daz < -F_PI) daz += F_TWO_PI;
+    if (fabsf(dist - mHangarDist) > llmax(1.f, 0.15f * mHangarDist) || fabsf(elev - mHangarElev) > 6.f * DEG_TO_RAD || fabsf(daz) > 12.f * DEG_TO_RAD)
+    {
+        mHangarOn = false;
+        LL_INFOS("WolfStarfold") << "hangar view ended: the camera was moved" << LL_ENDL;
+        return;
+    }
+    if ((gAgent.getPositionGlobal() - mHangarAvatarAt).magVec() > 1.0) { endHangar("the avatar moved"); return; }
+    // the slow turn: the camera tool's own orbit (llagentcamera.cpp:905 cameraOrbitAround - with the focus off the avatar it turns
+    // the camera's offset about +Z by the angle, counter-clockwise: LLVector3d::rotVec(angle, 0, 0, 1) applies LLQuaternion(angle, z))
+    const F32 step = F_TWO_PI / HANGAR_TURN_S * llclamp((F32)gFrameIntervalSeconds, 0.f, 0.25f);
+    gAgentCamera.cameraOrbitAround(step);
+    mHangarAz += step;
+}
+
+void WolfStarfold::endHangar(const char* why)
+{
+    const bool wasOn = mHangarOn;
+    mHangarOn = false;
+    mHangarWaitUntil = -1.0;
+    if (!wasOn) return;
+    // the camera is still the view's (nothing else took it): it goes back to the avatar, as a walk would take it
+    // (LLAgentCamera::resetView: setFocusOnAvatar(true, ANIMATE))
+    if (!gAgentCamera.getFocusOnAvatar() && (gAgentCamera.getFocusTargetGlobal() - mHangarFocus).magVec() <= 1.5)
+    {
+        static LLCachedControl<bool> reset_on_move(gSavedSettings, "FSResetCameraOnMovement", true);
+        // a walk with "reset the camera on movement" off keeps the camera where it is (the resident's own setting); anything
+        // else (the ship gone, a launch, a new region) gives it back
+        if (reset_on_move || strcmp(why, "the avatar moved") != 0) gAgentCamera.setFocusOnAvatar(true, ANIMATE);
+    }
+    LL_INFOS("WolfStarfold") << "hangar view ended: " << why << LL_ENDL;
+}
+
+void WolfStarfold::logState() const
+{
+    // read-only, for a LEAP rig (WolfStarfold.Do "state"): what the cockpit's banner says and what the camera is doing
+    std::string banner;
+    if (automatic())
+    {
+        if (mShip.mSeq == "out") banner = "AUTOMATIC DEPARTURE";
+        else banner = mBayPad > 0 ? llformat("AUTOMATIC DOCKING - pad %d", mBayPad) : (mBayPad == 0 ? std::string("AUTOMATIC DOCKING - the lift") : std::string("AUTOMATIC DOCKING"));
+    }
+    LLViewerObject* fo = gAgentCamera.getFocusObject();
+    LL_INFOS("WolfStarfold") << "state: piloting " << piloting() << ", seq '" << mShip.mSeq << "', class '" << mShip.mClassId << "', banner '" << banner
+                             << "', docked " << mStation.mDocked << " pad " << mStation.mPad << " ship " << mStation.mShip
+                             << ", hangar view " << mHangarOn << " (ship " << mHangarShip << "), camera mode " << (S32)gAgentCamera.getCameraMode()
+                             << ", focus on avatar " << gAgentCamera.getFocusOnAvatar() << ", focus object " << (fo ? fo->getID() : LLUUID::null)
+                             << ", station '" << stationName() << "' bay " << mSys.mBay << ", rename answer '" << mStationAnswer << "'" << LL_ENDL;
 }
 
 // ── the cockpit's visibility ─────────────────────────────────────────────────────────────────────────────────────────

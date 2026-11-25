@@ -24,6 +24,7 @@
 #include "llsingleton.h"
 #include "lluuid.h"
 #include "v3color.h"
+#include "v3dmath.h"
 #include "v3math.h"
 
 class LLGLSLShader;
@@ -80,6 +81,10 @@ public:
         bool        mHaveWormhole = false;
         LLVector3   mWormhole;
         std::string mWormholeTo;
+        // [WOLFTREK v11 2026-11-25] SpaceEngine.SendSystem sn= (the station's name, only once AlphaWolf or the owner gave it one)
+        // and bay=1 (the station has a fly-in bay: SpaceBay.cs ReadBay found bay_pad_<n> prims and a bay_mouth)
+        std::string mStationName;
+        bool        mBay = false;
     };
     /** k=st (SpaceEngine.Status): this avatar's ship, twice a second while it flies. */
     struct Ship
@@ -101,6 +106,10 @@ public:
         std::vector<LLVector3> mAlienPos;   // the same order as mAliens; empty when the region did not send ap=
         bool        mHaveTargetPos = false;
         LLVector3   mTargetPos;             // region metres
+        // [WOLFTREK v11 2026-11-25] SpaceEngine.Status: cid= the class id (always), seq=in|out while the bay's automatic approach or
+        // departure flies the ship (SpaceBay.cs StartSeq .. EndSeq / CancelSeq); empty when the pilot has the controls
+        std::string mClassId;
+        std::string mSeq;
     };
     struct Ore { std::string mId, mTitle; S32 mPrice = 0; F32 mHeld = 0.f; };
     /** k=docked (SpaceEngine.SendDocked). */
@@ -109,6 +118,11 @@ public:
         bool             mDocked = false;
         S64              mCredits = 0;
         std::vector<Ore> mOres;
+        // [WOLFTREK v11 2026-11-25] SpaceEngine.SendDocked: sn= the station's name, ship= and pad= the pilot's ship on its pad
+        // (only when it stands on a pad, not when it went below by the lift)
+        std::string      mName;
+        LLUUID           mShip;
+        S32              mPad = -1;
     };
     struct Rock { LLVector3 mPos; F32 mSize = 0.f; U8 mOre = 0; bool mLeft = true; };
     /** A beam the region said is on (k=beam on=1): its shooter, its target (or a rock), its kind ('p', 'a', 'm'). */
@@ -191,6 +205,34 @@ public:
     void mine(bool on);
     bool mining() const;
     void flyTo(const std::string& where);   // "station", "belt", "wormhole", "stop", "base" (the pilot's own starbase)
+    /** [WOLFTREK v11] The bay's automatic approach (seq=in) or departure (seq=out) flies the ship: the keys and the pointer send
+     *  nothing (SpaceEngine.OnChat ignores them during it; STOP during an approach hands the controls back). */
+    bool automatic() const { return piloting() && !mShip.mSeq.empty(); }
+    bool automaticIn() const { return automatic() && mShip.mSeq == "in"; }
+    /** The pad the region gave this pilot for the approach or departure (k=bay ph=in|out pad=; 0 the lift, -1 not said). */
+    S32 bayPad() const { return mBayPad; }
+    /** STOP during the automatic approach: SF1|fly|to=stop (SpaceEngine.OnChat -> SpaceBay.cs CancelSeq). */
+    void stopApproach();
+    /** The station's name as the region last said it (k=docked sn=, else k=sys sn=); empty while it has none. */
+    const std::string& stationName() const;
+    /** [WOLFTREK v11] RENAME STATION (the Station window): the region's owner or an estate manager (SpaceNames.cs RenameStation
+     *  checks W.IsRegionOwner; the button follows the setup helper's rule, LLViewerRegion::canManageEstate). */
+    bool canRenameStation() const;
+    /** SF1|name|station=<name> (SpaceEngine.OnChat "name"); the name is checked first by checkName. */
+    void renameStation(const std::string& name);
+    /** The region's last answer to a station rename while the Station window is open ("Renaming..." until it comes). */
+    const std::string& stationAnswer() const { return mStationAnswer; }
+    /** Source: NameFilter.cs Check - the same character rules, so a name the region would refuse for its letters is said at
+     *  once: spaces folded, 3 to 32 characters, letters, digits, spaces, apostrophes and hyphens, at least two letters. The word
+     *  filter stays the region's. Returns the tidy name, or empty with `why` the plain reason. Any character above ASCII is left
+     *  to the region (its char.IsLetterOrDigit is Unicode-wide), so this never refuses what the region would take. */
+    static std::string checkName(const std::string& raw, std::string& why);
+    /** [WOLFTREK v11] The hangar view: this pilot's docked ship framed on its pad, turning slowly, until the avatar or the camera
+     *  moves (design.html#bay "The camera frames your ship on its pad, as when you look at an object, and turns slowly round it
+     *  until you move"). */
+    bool hangarView() const { return mHangarOn; }
+    /** One line for a LEAP rig (WolfStarfold.Do "state"): the banner, the hangar view, the camera mode, the station's name. */
+    void logState() const;
     /** An intent from another Starfold part (the Starbase window, wolfstarbase.cpp): "base|...", "dock|at=...". Sent as every
      *  intent is (a Wolf login, the one-second budget). */
     void intent(const std::string& verb_and_args);
@@ -245,6 +287,12 @@ private:
     void parseStatus(const std::vector<std::pair<std::string, std::string>>& kv);
     void parseBeam(const std::vector<std::pair<std::string, std::string>>& kv);
     void parseDocked(const std::vector<std::pair<std::string, std::string>>& kv);
+    void parseBay(const std::vector<std::pair<std::string, std::string>>& kv);
+    void startHangar(const LLUUID& ship);
+    void beginHangarCamera();
+    void hangarIdle();
+    void endHangar(const char* why);
+    void releaseKeys();
     void makeBelt();
     void addNote(const std::string& text);
     void endShip();
@@ -298,6 +346,22 @@ private:
     bool    mStationShown = true;
     Setup   mSetup;
     bool    mSetupShown = false;
+    std::string mStationAnswer;      // the region's answer to a station rename (k=msg), shown in the Station window
+    F64     mStationAskedAt = -100.0;
+
+    // [WOLFTREK v11] the bay
+    S32     mBayPad = -1;            // k=bay ph=in|out pad=
+    LLUUID  mLastShip;               // the root of the ship this avatar last flew here (k=bay ph=landed for it frames it)
+    // the hangar view
+    bool    mHangarOn = false;
+    LLUUID  mHangarShip;             // the ship framed, or waited for (its object not here yet)
+    LLUUID  mHangarDoneFor;          // framed once per docking: k=docked comes again on every sale
+    F64     mHangarWaitUntil = -1.0; // waiting for the ship's object until then
+    F64     mHangarAt = 0.0;         // the view began
+    LLVector3d mHangarFocus;         // the ship's middle, global
+    bool    mHangarSettled = false;  // the camera has reached the view: its distance, height and bearing are the baseline
+    F32     mHangarDist = 0.f, mHangarElev = 0.f, mHangarAz = 0.f;   // expected from the baseline on (the bearing grows as it turns)
+    LLVector3d mHangarAvatarAt;      // where the avatar stood when the view settled
 
     // the jump
     F64     mJumpAt = -100.0;

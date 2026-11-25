@@ -55,8 +55,8 @@ public:
         S32 mSize[3] = { 1, 1, 1 };
         bool building() const;            // still being built (its finish time not reached)
     };
-    /** k=bases b=<id>;x,y,z;yaw;owner name;dock - every base here. */
-    struct Known { std::string mId, mOwner, mDock; LLVector3 mPos; S32 mYaw = 0; };
+    /** k=bases b=<id>;x,y,z;yaw;owner name;dock[;name] - every base here ([WOLFTREK v11] the base's own name, may be empty). */
+    struct Known { std::string mId, mOwner, mDock, mName; LLVector3 mPos; S32 mYaw = 0; };
     /** k=bghost g=cx,cy,cz,rot. */
     struct Ghost { S32 mCell[3] = { 0, 0, 0 }; S32 mRot = 0; };
     /** k=bown o=<id>;<kind>;<prims>;<metres>;<ok>;<name>;<reason>;<sx,sy,sz>. */
@@ -96,6 +96,8 @@ public:
     S32 baseYaw() const { return mYaw; }
     const std::string& baseState() const { return mState; }
     const std::string& dock() const { return mDock; }
+    /** [WOLFTREK v11] k=base name= : the base's own name (empty until it has one). */
+    const std::string& baseName() const { return mName; }
     S32 primsUsed() const { return mPrimsUsed; }
     S32 primsMax() const { return mPrimsMax; }
     bool haveStarmarks() const { return mStarmarks >= 0; }
@@ -177,6 +179,9 @@ public:
     void placeAsIs(const std::string& part);   // a stored decoration: the region picks a free spot in the frame
     void sendToBase(const std::string& object);
     void askOwn();
+    /** [WOLFTREK v11] RENAME (the owner's): SF1|base|name=<name> (SpaceBases.cs BaseVerb -> SpaceNames.cs RenameBase); the name is
+     *  checked first (WolfStarfold::checkName) and the region answers by k=msg. */
+    void rename(const std::string& name);
 
 private:
     bool order(const std::string& args, bool exempt = false);
@@ -188,7 +193,7 @@ private:
     LLUUID mRegion;                 // the region all this is about
     // k=base
     bool mKnown = false, mHas = false;
-    std::string mId, mState, mDock, mRaids;
+    std::string mId, mState, mDock, mRaids, mName;
     LLVector3 mPos;
     S32 mYaw = 0, mPrimsUsed = 0, mPrimsMax = 0;
     S64 mStarmarks = -1;

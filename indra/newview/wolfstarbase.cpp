@@ -204,7 +204,8 @@ bool WolfStarbase::receive(const std::string& kind, const std::vector<std::pair<
     }
     if (kind == "bases")
     {
-        // Source: SpaceBases.cs SendBasesList: on=0/1, then b=<id>;x,y,z;yaw;owner;dock ("none": no docking ring ready)
+        // Source: SpaceBases.cs SendBasesList: on=0/1, then b=<id>;x,y,z;yaw;owner;dock ("none": no docking ring ready);name
+        // ([WOLFTREK v11] the base's own name, empty until it has one; a checked name, no ';' or '|')
         mBases.clear();
         for (const auto& p : kv)
         {
@@ -219,6 +220,7 @@ bool WolfStarbase::receive(const std::string& kind, const std::vector<std::pair<
                 k.mYaw = toInt(f[2]) & 3;
                 k.mOwner = clean(f[3], 40);
                 k.mDock = token(f[4]);
+                if (f.size() >= 6) k.mName = clean(f[5], 40);
                 mBases.push_back(k);
             }
         }
@@ -312,6 +314,7 @@ void WolfStarbase::parseBase(const std::vector<std::pair<std::string, std::strin
         else if (k == "state") mState = token(v);
         else if (k == "dock") mDock = token(v);
         else if (k == "raids") mRaids = token(v);
+        else if (k == "name") mName = clean(v, 40);   // [WOLFTREK v11] SpaceBases.cs SendBase name=
         else if (k == "starmarks") mStarmarks = (S64)strtoll(v.c_str(), nullptr, 10);
         else if (k == "open") mOpen = v == "1";
         else if (k == "count") mCount = toInt(v);
@@ -344,6 +347,7 @@ void WolfStarbase::parseBase(const std::vector<std::pair<std::string, std::strin
         mId.clear();
         mState.clear();
         mDock.clear();
+        mName.clear();
     }
 }
 
@@ -387,7 +391,7 @@ void WolfStarbase::noteAnswer(const std::string& text)
 void WolfStarbase::reset()
 {
     mKnown = mHas = false;
-    mId.clear(); mState.clear(); mDock.clear(); mRaids.clear();
+    mId.clear(); mState.clear(); mDock.clear(); mRaids.clear(); mName.clear();
     mPos.clearVec();
     mYaw = mPrimsUsed = mPrimsMax = 0;
     mStarmarks = -1;
@@ -713,6 +717,16 @@ void WolfStarbase::makeSeat(const std::string& p)
 void WolfStarbase::placeAsIs(const std::string& p) { if (!token(p).empty()) order("base|place=" + token(p)); }
 void WolfStarbase::attachAsIs(const std::string& object) { if (!token(object).empty()) order("base|attach=" + token(object)); }
 void WolfStarbase::sendToBase(const std::string& object) { if (!token(object).empty()) order("base|send=" + token(object)); }
+
+void WolfStarbase::rename(const std::string& name)
+{
+    std::string why;
+    const std::string tidy = WolfStarfold::checkName(name, why);
+    if (tidy.empty()) { mAnswer = why; return; }
+    // Source: SpaceBases.cs BaseVerb: kv "name" -> RenameBase (SpaceNames.cs), the owner's own base only ("You have no starbase
+    // here" otherwise); NameFilter has the last word and the answer is a k=msg (OnNameAnswer: "Your starbase is now called ...")
+    if (order("base|name=" + tidy)) mAnswer = "Renaming your starbase...";
+}
 
 void WolfStarbase::askOwn()
 {

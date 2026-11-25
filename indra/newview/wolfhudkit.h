@@ -37,7 +37,7 @@ namespace WolfHudKit
     bool ready();
 
     /** One part across (l, b) - (r, t). A part with 9-slice borders keeps its corners square and stretches its edges and middle;
-     *  its borders are drawn `k` screen units per sheet pixel (k <= 0: in proportion to the part, min of width and height
+     *  its borders are drawn `k` screen units per sheet pixel (k <= 0: in proportion to the part, the smaller of its width and height
      *  ratios), never more than half the rectangle. A part without borders is stretched to fill. `tint` multiplies it
      *  (a glow sprite is white: tint it). Returns false (draws nothing) while the sheet is not ready. */
     bool part(EPart p, F32 l, F32 b, F32 r, F32 t, const LLColor4& tint = LLColor4::white, F32 k = -1.f);

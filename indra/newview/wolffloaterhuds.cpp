@@ -57,7 +57,7 @@ namespace
         "The Train Cab",   // [HUDS TRAIN 2026-11-13/] floater_wolf_huds.xml name_train
         "Weather Props", "Tutorial Videos",   // [WEATHER PROPS / TUTORIALS 2026-11-13/] floater_wolf_huds.xml name_weatherprops / name_tutorials
         "The Train Builder", "Lay Railway Track",   // [HUDS TILES 2 2026-11-14/] floater_wolf_huds.xml name_trainbuilder / name_track
-        "Starfold"   // [STARFOLD 2026-11-24/] the game's name is WolfStarfold::gameName(); this window's XML says it too (name_starfold)
+        "WolfTrek"   // [STARFOLD 2026-11-24/] [WOLFTREK 2026-11-25] the game's name is WolfStarfold::gameName(); this window's XML says it too (name_starfold)
     };
 
     // [HUDS SMALL 2026-11-14] the status line's two kinds of words, here once so fitToArea can measure the tallest

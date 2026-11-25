@@ -2224,18 +2224,18 @@
             <!-- [STARFOLD 2026-11-24] wolfstarfold.cpp: Starfold, our space game - the cockpit (flying) or the Launch panel. Only on
              the Wolf grid AND only on a region whose space is on (WolfStarfold.Available); the owner's setup helper only for its
              estate owner or managers on a region with the space plugin (WolfStarfold.CanSetUp). -->
-            <menu_item_check label="Starfold (Space)" name="WolfStarfold">
+            <menu_item_check label="WolfTrek (Space)" name="WolfStarfold">
                 <menu_item_check.on_check function="WolfStarfold.IsShown" />
                 <menu_item_check.on_click function="WolfStarfold.Toggle" />
                 <menu_item_check.on_visible function="WolfStarfold.Available" />
             </menu_item_check>
             <!-- [STARBASES 2026-11-24] design.html#bases: "under Wolf World > Starfold > My starbase" (wolfstarbase.cpp): where space is on -->
-            <menu_item_check label="Starfold: My Starbase" name="WolfStarbase">
+            <menu_item_check label="WolfTrek: My Starbase" name="WolfStarbase">
                 <menu_item_check.on_check function="WolfStarbase.IsShown" />
                 <menu_item_check.on_click function="WolfStarbase.Toggle" />
                 <menu_item_check.on_visible function="WolfStarfold.Available" />
             </menu_item_check>
-            <menu_item_check label="Starfold Setup Helper (Region Owner)" name="WolfStarfoldSetup">
+            <menu_item_check label="WolfTrek Setup Helper (Region Owner)" name="WolfStarfoldSetup">
                 <menu_item_check.on_check function="WolfStarfold.SetupShown" />
                 <menu_item_check.on_click function="WolfStarfold.ToggleSetup" />
                 <menu_item_check.on_visible function="WolfStarfold.CanSetUp" />

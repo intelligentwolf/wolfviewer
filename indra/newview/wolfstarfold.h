@@ -59,7 +59,7 @@ class WolfStarfold : public LLSingleton<WolfStarfold>
 
 public:
     /** The game's name, its currency, the ship and the alien, for everything a resident reads. */
-    static const char* gameName() { return "Starfold"; }
+    static const char* gameName() { return "WolfTrek"; }   // [WOLFTREK 2026-11-25] Paul: residents read WolfTrek ("Starfold" is a Steam game); code names stay Starfold
     static const char* currency() { return "Starmarks"; }
 
     // ── what the region said ─────────────────────────────────────────────────────────────────────────────────────────

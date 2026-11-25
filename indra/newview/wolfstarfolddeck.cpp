@@ -982,7 +982,7 @@ void WolfStarfoldDeck::drawGround(F32 bottom, F32 W, F32 u)
         button(X(890.f), Y(16.f), X(1060.f), Y(100.f), H_GOTO_STATION, "TO THE STATION", false, "Take me onto the station's deck", u);
     button(X(1080.f), Y(16.f), X(1300.f), Y(100.f), H_LAUNCH, "LAUNCH", false, "Bring out your Cub and climb to space", u, true);
     button(X(1320.f), Y(16.f), X(1430.f), Y(100.f), H_HELP, "GUIDE", sf.guideShown(), "How to fly, mine, sell and fight", u);
-    button(X(1450.f), Y(16.f), X(1560.f), Y(100.f), H_CLOSE, "CLOSE", false, "Close this panel (Wolf World > Starfold opens it)", u);
+    button(X(1450.f), Y(16.f), X(1560.f), Y(100.f), H_CLOSE, "CLOSE", false, std::string("Close this panel (Wolf World > ") + WolfStarfold::gameName() + " (Space) opens it)", u);
 }
 
 void WolfStarfoldDeck::drawStation(F32 above, F32 W, F32 H, F32 u)

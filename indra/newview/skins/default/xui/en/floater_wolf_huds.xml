@@ -178,9 +178,9 @@
              middle (left 276). Opens the cockpit (flying) or the Launch panel, as Wolf World > Vehicles &amp; Travel > Starfold (Space);
              greyed where the region's space is off (wolffloaterhuds.cpp refreshTiles). Picture: region-terrain-work/
              space-game-2026-11-24/huds-tile/make_hud_art_starfold.py. -->
-        <button follows="left|top" layout="topleft" left="276" top="696" width="256" height="108" name="tile_starfold" is_toggle="true" label="" tab_stop="true" tool_tip="Starfold: Fly a spaceship above this region - mine the belt, fight raiders, go through the wormhole. Only where the region's owner has switched space on." />
+        <button follows="left|top" layout="topleft" left="276" top="696" width="256" height="108" name="tile_starfold" is_toggle="true" label="" tab_stop="true" tool_tip="WolfTrek: Fly a spaceship above this region - mine the belt, fight raiders, go through the wormhole. Only where the region's owner has switched space on." />
         <icon follows="left|top" layout="topleft" left="286" top="710" width="80" height="80" name="pic_starfold" image_name="WolfHuds_starfold" mouse_opaque="false" />
-        <text follows="left|top" layout="topleft" left="376" top="706" width="148" height="20" name="name_starfold" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">Starfold (Space)</text>
+        <text follows="left|top" layout="topleft" left="376" top="706" width="148" height="20" name="name_starfold" font="SansSerifLarge" font.style="BOLD" mouse_opaque="false" use_ellipses="true">WolfTrek (Space)</text>
         <text follows="left|top" layout="topleft" left="376" top="728" width="148" height="46" name="desc_starfold" font="SansSerif" wrap="true" mouse_opaque="false">Fly a spaceship high above this region.</text>
         <text follows="left|top" layout="topleft" left="376" top="778" width="148" height="18" name="state_starfold" font="SansSerif" font.style="BOLD" mouse_opaque="false">OFF</text>
     </panel>

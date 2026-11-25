@@ -953,11 +953,16 @@ void WolfStarfold::parseBay(const std::vector<std::pair<std::string, std::string
     std::string ph;
     S32 pad = -1;
     LLUUID ship;
+    LLVector3 at;
+    bool haveAt = false;
+    F32 yaw = 0.f;
     for (const auto& p : kv)
     {
         if (p.first == "ph") ph = p.second;
         else if (p.first == "pad") pad = (S32)num(p.second, -1.f);
         else if (p.first == "ship") ship.set(p.second, false);
+        else if (p.first == "at") haveAt = parseVec(p.second, at);
+        else if (p.first == "yaw") yaw = num(p.second);
     }
     if (ph == "in" || ph == "out")
     {
@@ -974,7 +979,9 @@ void WolfStarfold::parseBay(const std::vector<std::pair<std::string, std::string
     }
     else if (ph == "landed")
     {
-        // everyone hears it; only this avatar's own ship is framed (the ship it last flew here)
+        // everyone hears it; only this avatar's own ship is framed (the ship it last flew here). The pad's place is logged for a
+        // rig (a camera on the walkway, the sign over the mouth)
+        if (haveAt) LL_INFOS("WolfStarfold") << "bay: ship " << ship << " landed on pad " << pad << " at " << at << " yaw " << yaw << LL_ENDL;
         if (ship.notNull() && ship == mLastShip) startHangar(ship);
     }
     else if (ph == "lift")
@@ -1651,9 +1658,13 @@ void WolfStarfold::logState() const
         else banner = mBayPad > 0 ? llformat("AUTOMATIC DOCKING - pad %d", mBayPad) : (mBayPad == 0 ? std::string("AUTOMATIC DOCKING - the lift") : std::string("AUTOMATIC DOCKING"));
     }
     LLViewerObject* fo = gAgentCamera.getFocusObject();
+    // the camera's bearing round the hangar view's focus (degrees from +X towards +Y), so a rig can see it turn
+    const LLVector3d off = gAgentCamera.getCameraPositionGlobal() - mHangarFocus;
+    const F32 bearing = mHangarOn ? (F32)(atan2(off.mdV[VY], off.mdV[VX]) * RAD_TO_DEG) : 0.f;
     LL_INFOS("WolfStarfold") << "state: piloting " << piloting() << ", seq '" << mShip.mSeq << "', class '" << mShip.mClassId << "', banner '" << banner
                              << "', docked " << mStation.mDocked << " pad " << mStation.mPad << " ship " << mStation.mShip
-                             << ", hangar view " << mHangarOn << " (ship " << mHangarShip << "), camera mode " << (S32)gAgentCamera.getCameraMode()
+                             << ", throttle " << mThrottle << ", last ctl or fly sent " << (now() - mSentAt) << " s ago"
+                             << ", hangar view " << mHangarOn << " (ship " << mHangarShip << ", bearing " << bearing << " deg), camera mode " << (S32)gAgentCamera.getCameraMode()
                              << ", focus on avatar " << gAgentCamera.getFocusOnAvatar() << ", focus object " << (fo ? fo->getID() : LLUUID::null)
                              << ", station '" << stationName() << "' bay " << mSys.mBay << ", rename answer '" << mStationAnswer << "'" << LL_ENDL;
 }

@@ -132,6 +132,9 @@ public:
     bool getVisible() const { return mVisible; }
     bool getHidden() const { return mHidden; }
     void setHidden( bool hide ) { mHidden = hide; }
+    // [RECORDING PRIVACY 2026-11-25] where the tag is on screen this frame (UI pixels; updateScreenPos): the Video
+    // Recorder covers the tags of people who asked not to be recorded (wolfrecordprivacy.cpp recordingMasks)
+    const LLRectf& getSoftScreenRect() const { return mSoftScreenRect; }
     void shift(const LLVector3& offset);
     F32 getWorldHeight() const;
 

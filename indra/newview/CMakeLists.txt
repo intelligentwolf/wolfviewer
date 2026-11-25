@@ -1082,6 +1082,7 @@ set(viewer_SOURCE_FILES
     wolffloatervulkan.cpp   # [VULKAN BACKEND 2026-11-08] Wolf World > Vulkan Renderer
     wolffloaterrecorder.cpp   # [W111 VIDEO 2026-11-24] Video Recorder window
     wolfrecorder.cpp   # [W111 VIDEO 2026-11-24] Video Recorder: capture, sound mix, encoding thread
+    wolfrecordprivacy.cpp   # [RECORDING PRIVACY 2026-11-25] ticket 1060: "Don't include me in other people's recordings"
     wolfskis.cpp   # [SKIS 2026-11-06]
     wolfskihud.cpp   # [SKIS 2026-11-06]
     wolffloaterskis.cpp   # [SKIS 2026-11-06]
@@ -2171,6 +2172,7 @@ set(viewer_HEADER_FILES
     wolffloatervulkan.h   # [VULKAN BACKEND 2026-11-08]
     wolffloaterrecorder.h   # [W111 VIDEO 2026-11-24]
     wolfrecorder.h   # [W111 VIDEO 2026-11-24]
+    wolfrecordprivacy.h   # [RECORDING PRIVACY 2026-11-25]
     wolfskis.h   # [SKIS 2026-11-06]
     wolfskihud.h   # [SKIS 2026-11-06]
     wolffloaterskis.h   # [SKIS 2026-11-06]

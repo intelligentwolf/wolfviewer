@@ -587,6 +587,41 @@
     "name=\"wolf_recorder\"",
     "title=\"Video Recorder\""
    ]
+  },
+  {
+   "id": "privacy_note",
+   "kind": "readout",
+   "label": "N people nearby have asked not to be recorded; they are left out of your video. (+ a line when the check is failing)",
+   "when": "while the window is open and someone nearby has asked (ticket 1060, wolfrecordprivacy.h)",
+   "source": [
+    "name=\"privacy_note\"",
+    "<string name=\"privacy_left_out_many\">[N] people nearby have asked not to be recorded; they are left out of your video.</string>",
+    "WolfRecordPrivacy::nearbyCount()"
+   ]
+  },
+  {
+   "id": "no_recording_check",
+   "kind": "toggle",
+   "label": "Don't include me in other people's recordings",
+   "when": "always; enabled once the account's answer is in (Wolf Territories residents only)",
+   "tip": "Ticked: WolfViewer's and WolfStorm's video recorders show a grey shape instead of you and your name tag in other people's videos. Saved on your Wolf Territories account straight away.",
+   "action": "WolfRecordPrivacy::setOwn (gridmanager recordingprivacy.php action=set)",
+   "source": [
+    "name=\"no_recording_check\"",
+    "label=\"Don't include me in other people's recordings\"",
+    "WolfRecordPrivacy::setOwn(ctrl->getValue().asBoolean());"
+   ],
+   "small_ok": "a standard viewer widget, keyboard-operable (Tab to it; Space changes it)"
+  },
+  {
+   "id": "no_recording_note",
+   "kind": "readout",
+   "label": "WolfViewer and WolfStorm recorders leave you out. Other screen-recording programs can't be stopped. / Checking... / Saving... / Problem: ...",
+   "when": "always",
+   "source": [
+    "name=\"no_recording_note\"",
+    "mNoRecordingNote->setText("
+   ]
   }
  ]
 }

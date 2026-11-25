@@ -53,6 +53,7 @@
 #include "llwindow.h"
 #include "wolfrec_audioenc.h"
 #include "wolfrec_mp4.h"
+#include "wolfrecordprivacy.h"
 #include "wolfvkbridge.h"
 #include "wolfvrpipe_video.h"
 #include "wolfvrscreen.h"
@@ -439,8 +440,92 @@ namespace
         y1 = y0 + fh;
     }
 
+    // [RECORDING PRIVACY 2026-11-25] Ticket 1060. Shapes over the people who asked not to be recorded, drawn into the
+    // picture texture (bound as the draw framebuffer) after the window was scaled into it and before it is read back.
+    // Plain scissored clears (GL 4.6 core 17.4.3 Clear: only the scissor box is written, after the colour mask; no
+    // shader, no blending, no vertex state to disturb), so a rounded shape is a stack of bands. The picture texture is
+    // upside down against the window (capture step 1), so its row 0 is the top of the scene.
+    void fillRect(S32 l, S32 t, S32 r, S32 b, const LLColor4& c)   // picture pixels, t < b (t = nearer the top)
+    {
+        if (r <= l || b <= t) return;
+        glScissor(l, t, r - l, b - t);
+        glClearColor(c.mV[VRED], c.mV[VGREEN], c.mV[VBLUE], 1.f);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+    // A rectangle with rounded corners of `radius` (bands of a few pixels at the top and bottom, each inset to the curve)
+    void fillRounded(S32 l, S32 t, S32 r, S32 b, S32 radius, const LLColor4& c)
+    {
+        radius = llmin(radius, (r - l) / 2, (b - t) / 2);
+        if (radius < 2)
+        {
+            fillRect(l, t, r, b, c);
+            return;
+        }
+        const S32 step = llmax(1, radius / 6);
+        for (S32 dy = 0; dy < radius; dy += step)
+        {
+            // the curve's inset at the middle of this band: radius - sqrt(radius^2 - (radius - y)^2)
+            const F32 y = (F32)radius - ((F32)dy + 0.5f * (F32)step);
+            const S32 in = (S32)std::lround((F32)radius - std::sqrt(llmax(0.f, (F32)(radius * radius) - y * y)));
+            const S32 h = llmin(step, radius - dy);
+            fillRect(l + in, t + dy, r - in, t + dy + h, c);   // top band
+            fillRect(l + in, b - dy - h, r - in, b - dy, c);   // bottom band
+        }
+        fillRect(l, t + radius, r, b - radius, c);
+    }
+    // One left-out person: a soft grey shape over the whole of them, with a lighter head-and-shoulders sign in it, so the
+    // video shows that someone is there without showing who. Picture pixels, t < b.
+    void drawLeftOut(S32 l, S32 t, S32 r, S32 b)
+    {
+        const S32 w = r - l, h = b - t;
+        if (w <= 0 || h <= 0) return;
+        static const LLColor4 kShape(0.42f, 0.43f, 0.45f, 1.f);
+        static const LLColor4 kSign(0.60f, 0.61f, 0.63f, 1.f);
+        fillRounded(l, t, r, b, llmin(w, h) / 6, kShape);
+        if (w < 24 || h < 32) return;   // too small for the sign to read
+        // the sign: a head and shoulders, centred, in proportion to the narrower side
+        const S32 cx = l + w / 2;
+        const S32 unit = llmin(w, h * 2 / 3);
+        const S32 head = llmax(4, unit / 5);              // head half-width
+        const S32 head_top = t + h / 6;
+        fillRounded(cx - head, head_top, cx + head, head_top + 2 * head, head, kSign);
+        const S32 sh_top = head_top + 2 * head + llmax(2, head / 3);
+        const S32 sh_half = llmax(6, unit * 2 / 5);
+        const S32 sh_bottom = llmin(b - h / 10, sh_top + 3 * head);
+        fillRounded(cx - sh_half, sh_top, cx + sh_half, sh_bottom, head, kSign);
+    }
+    void drawPrivacyMasks(bool name_tags, S32 ww, S32 wh, S32 x0, S32 y0, S32 x1, S32 y1)
+    {
+        static std::vector<LLRectf> rects;   // main thread only; kept to avoid an allocation a picture
+        WolfRecordPrivacy::recordingMasks(name_tags, rects);
+        if (rects.empty()) return;
+        GLint box[4];
+        GLfloat cc[4];
+        GLboolean mask[4];
+        glGetIntegerv(GL_SCISSOR_BOX, box);
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, cc);
+        glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glEnable(GL_SCISSOR_TEST);
+        // window raw pixels (bottom-left origin) -> picture pixels: the same mapping as the blit (fitRect, flipped)
+        const F32 sx = (F32)(x1 - x0) / (F32)ww, sy = (F32)(y1 - y0) / (F32)wh;
+        for (const LLRectf& r : rects)
+        {
+            const S32 l = llclamp((S32)std::floor(x0 + r.mLeft * sx), x0, x1);
+            const S32 rr = llclamp((S32)std::ceil(x0 + r.mRight * sx), x0, x1);
+            const S32 t = llclamp((S32)std::floor(y1 - r.mTop * sy), y0, y1);      // the window's top = the picture's row y0
+            const S32 b = llclamp((S32)std::ceil(y1 - r.mBottom * sy), y0, y1);
+            drawLeftOut(l, t, rr, b);
+        }
+        glDisable(GL_SCISSOR_TEST);   // capture() turned it off for the copy and puts it back itself
+        glScissor(box[0], box[1], box[2], box[3]);
+        glClearColor(cc[0], cc[1], cc[2], cc[3]);
+        glColorMask(mask[0], mask[1], mask[2], mask[3]);
+    }
+
     // One copy from `read_fbo` (0 = the back buffer) into the next pixel buffer. Main thread, inside render_ui.
-    void capture(GLuint read_fbo)
+    // [RECORDING PRIVACY 2026-11-25/] `name_tags`: the copied picture has the name tags in it (drawPrivacyMasks).
+    void capture(GLuint read_fbo, bool name_tags)
     {
         const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
         if (ww <= 0 || wh <= 0) return;
@@ -496,6 +581,8 @@ namespace
         S32 x0, y0, x1, y1;
         fitRect(ww, wh, gGpu.w, gGpu.h, x0, y0, x1, y1);
         glBlitFramebuffer(0, 0, ww, wh, x0, y1, x1, y0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        // [RECORDING PRIVACY 2026-11-25/] 1b. the people who asked not to be recorded, left out of this picture only
+        drawPrivacyMasks(name_tags, ww, wh, x0, y0, x1, y1);
 
         // 2. the picture -> its pixel buffer, without waiting (GL 4.6 core 18.2.2 ReadPixels into a bound
         //    PIXEL_PACK_BUFFER: the last argument is an offset and the call returns at once)
@@ -1402,10 +1489,10 @@ Report status()
     return st;
 }
 
-void captureWorld()
+void captureWorld(bool name_tags_drawn)
 {
     if (gSess.ui || !pictureDue()) return;
-    capture(0);   // the back buffer right after renderFinalize: the finished world, before any HUD or UI
+    capture(0, name_tags_drawn);   // the back buffer right after renderFinalize: the finished world, before any HUD or UI
 }
 
 void captureWholeWindowAndDrawIndicator()
@@ -1415,7 +1502,7 @@ void captureWholeWindowAndDrawIndicator()
     {
         // OpenGL: the back buffer as it is now. Vulkan: wolfvrscreen.cpp composeVkBigScreen builds the composite from
         // the back buffer as it is now (and Big Screen reuses that one in this frame). Either way, before the held views.
-        capture(WolfVRScreen::wholeWindowFramebuffer());
+        capture(WolfVRScreen::wholeWindowFramebuffer(), true);   // [RECORDING PRIVACY 2026-11-25/] the tags are in it
     }
     // [W111 RECORDER UI 2026-11-24/] the recorder's own window, after the copy: never in the video
     gHeldViews.erase(std::remove_if(gHeldViews.begin(), gHeldViews.end(),

@@ -23,7 +23,9 @@
      (colors.xml WolfHudKit*: on the plate Text 8.9:1, Dim 6.4:1, Amber 6.0:1; on the inlay, drawn at WolfHudKitInlay, 8.3 / 6.0 /
      5.7:1). The combo boxes, check boxes and sliders stay the viewer's standard ones (keyboard-operable; inventory small_ok).
      Same controls, order, words, tooltips and actions (scripts/wolf/hudkit/inventory/recorder.json); the scrolling is kept:
-     every part below the buttons moved down with the taller keys and the settings panel grew to 552. -->
+     every part below the buttons moved down with the taller keys and the settings panel grew to 552.
+     [RECORDING PRIVACY 2026-11-25] the people-left-out note under the status (everything below moved down 40) and the Privacy
+     section at the end: the settings panel grew to 712. -->
 <floater
  can_close="true"
  can_minimize="true"
@@ -46,53 +48,55 @@
     <wolf_recorder_transport_button follows="left|top" font="SansSerifHuge" height="58" label="Pause" layout="topleft" left="224" name="pause_btn" tab_stop="true" top="174" width="190" tool_tip="Pause the recording. Nothing is recorded until you press Resume." />
 
     <scroll_container border_visible="false" follows="all" height="398" layout="topleft" left="0" name="settings_scroll" opaque="false" reserve_scroll_corner="false" top="238" width="500">
-    <panel background_visible="false" follows="left|top" height="552" layout="topleft" left="0" name="settings_panel" top="0" width="484">
+    <panel background_visible="false" follows="left|top" height="712" layout="topleft" left="0" name="settings_panel" top="0" width="484">
         <!-- the three framed sections, first so they are drawn under everything else (llview.cpp addChild: push_front; draw: rbegin) -->
-        <icon follows="left|top" height="112" layout="topleft" left="6" name="picture_frame" top="120" width="474" color="WolfHudKitInlay" image_name="WolfHudKit_Inlay" mouse_opaque="false" />
-        <icon follows="left|top" height="174" layout="topleft" left="6" name="sound_frame" top="234" width="474" color="WolfHudKitInlay" image_name="WolfHudKit_Inlay" mouse_opaque="false" />
-        <icon follows="left|top" height="140" layout="topleft" left="6" name="saving_frame" top="410" width="474" color="WolfHudKitInlay" image_name="WolfHudKit_Inlay" mouse_opaque="false" />
+        <icon follows="left|top" height="112" layout="topleft" left="6" name="picture_frame" top="160" width="474" color="WolfHudKitInlay" image_name="WolfHudKit_Inlay" mouse_opaque="false" />
+        <icon follows="left|top" height="174" layout="topleft" left="6" name="sound_frame" top="274" width="474" color="WolfHudKitInlay" image_name="WolfHudKit_Inlay" mouse_opaque="false" />
+        <icon follows="left|top" height="140" layout="topleft" left="6" name="saving_frame" top="450" width="474" color="WolfHudKitInlay" image_name="WolfHudKit_Inlay" mouse_opaque="false" />
 
         <text follows="left|top" font="SansSerif" height="46" layout="topleft" left="14" name="status" top="2" width="280" wrap="true" text_color="WolfHudKitText">Press Record to start.</text>
         <button follows="left|top" font="SansSerif" height="44" label="Play" layout="topleft" left="300" name="play_btn" top="4" width="80" tool_tip="Play the video you have just saved, in this computer's video player" visible="false" label_color="WolfHudKitText" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" />
         <button follows="left|top" font="SansSerif" height="44" label="Open folder" layout="topleft" left="386" name="saved_folder_btn" top="4" width="92" tool_tip="Show the folder your videos are saved in" visible="false" label_color="WolfHudKitText" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" />
         <button follows="left|top" font="SansSerif" height="44" label="Get the video codec (free, from Cisco)" layout="topleft" left="290" name="codec_btn" top="4" width="188" tool_tip="Downloads Cisco's free H.264 video codec to this computer. Only needed when the computer's own video encoder cannot be used." visible="false" label_color="WolfHudKitText" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" />
         <text follows="left|top" font="SansSerifSmall" height="30" layout="topleft" left="290" name="codec_note" top="50" width="188" visible="false" wrap="true" text_color="WolfHudKitTextDim">OpenH264 Video Codec provided by Cisco Systems, Inc.</text>
-        <text follows="left|top" font="SansSerif" height="34" layout="topleft" left="14" name="message" top="82" width="464" wrap="true" text_color="WolfHudKitText" />
+        <!-- [RECORDING PRIVACY 2026-11-25] ticket 1060: how many people around are left out of the video, under the status -->
+        <text follows="left|top" font="SansSerif" height="36" layout="topleft" left="14" name="privacy_note" top="82" width="464" wrap="true" text_color="WolfHudKitAmber" />
+        <text follows="left|top" font="SansSerif" height="34" layout="topleft" left="14" name="message" top="122" width="464" wrap="true" text_color="WolfHudKitText" />
 
-        <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="picture_heading" top="124" width="200" text_color="WolfHudKitText">Picture</text>
-        <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="size_label" top="150" width="140" text_color="WolfHudKitText">Size</text>
-        <combo_box follows="left|top" height="24" layout="topleft" left="170" name="size_combo" top="148" width="300" tool_tip="The size of the video picture. Your window is fitted inside, with black bars when its shape differs.">
+        <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="picture_heading" top="164" width="200" text_color="WolfHudKitText">Picture</text>
+        <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="size_label" top="190" width="140" text_color="WolfHudKitText">Size</text>
+        <combo_box follows="left|top" height="24" layout="topleft" left="170" name="size_combo" top="188" width="300" tool_tip="The size of the video picture. Your window is fitted inside, with black bars when its shape differs.">
             <combo_box.item label="Standard - 1280 x 720 (720p)" name="size_720" value="720" />
             <combo_box.item label="High - 1920 x 1080 (1080p)" name="size_1080" value="1080" />
         </combo_box>
-        <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="fps_label" top="178" width="140" text_color="WolfHudKitText">Smoothness</text>
-        <combo_box follows="left|top" height="24" layout="topleft" left="170" name="fps_combo" top="176" width="300" tool_tip="How many pictures a second the video aims for. When WolfViewer draws fewer, the video has fewer.">
+        <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="fps_label" top="218" width="140" text_color="WolfHudKitText">Smoothness</text>
+        <combo_box follows="left|top" height="24" layout="topleft" left="170" name="fps_combo" top="216" width="300" tool_tip="How many pictures a second the video aims for. When WolfViewer draws fewer, the video has fewer.">
             <combo_box.item label="30 pictures a second" name="fps_30" value="30" />
             <combo_box.item label="60 pictures a second (busier computer)" name="fps_60" value="60" />
         </combo_box>
-        <check_box control_name="WolfRecorderShowInterface" follows="left|top" height="22" label="Show my windows, menus and name tags in the video" layout="topleft" left="24" name="show_ui_check" top="206" width="446" tool_tip="Off: only the world is recorded. On: the whole window, as you see it. This window and the REC sign are never in the video." label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
+        <check_box control_name="WolfRecorderShowInterface" follows="left|top" height="22" label="Show my windows, menus and name tags in the video" layout="topleft" left="24" name="show_ui_check" top="246" width="446" tool_tip="Off: only the world is recorded. On: the whole window, as you see it. This window and the REC sign are never in the video." label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
 
-        <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="sound_heading" top="238" width="120" text_color="WolfHudKitText">Sound</text>
-        <text follows="left|top" font="SansSerifSmall" halign="right" height="16" layout="topleft" left="130" name="sound_hint" top="242" width="340" text_color="WolfHudKitTextDim">The bars show how loud each sound is while you record.</text>
-        <check_box control_name="WolfRecorderSoundWorld" follows="left|top" height="22" label="World sound and music" layout="topleft" left="24" name="world_check" top="262" width="200" tool_tip="Sounds, music and media as you hear them" label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
-        <slider control_name="WolfRecorderLevelWorld" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="world_level" show_text="false" top="262" width="130" tool_tip="How loud the world sound is in the video" />
-        <view follows="left|top" height="22" layout="topleft" left="364" name="world_meter" top="262" width="108" tool_tip="How loud the world sound is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
-        <text follows="left|top" font="SansSerif" height="28" layout="topleft" left="44" name="world_note" top="284" width="426" wrap="true" text_color="WolfHudKitTextDim" />
-        <check_box control_name="WolfRecorderSoundVoice" follows="left|top" height="22" label="Voice chat (other people)" layout="topleft" left="24" name="voice_check" top="314" width="200" tool_tip="Other people's voices as you hear them in voice chat" label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
-        <slider control_name="WolfRecorderLevelVoice" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="voice_level" show_text="false" top="314" width="130" tool_tip="How loud voice chat is in the video" />
-        <view follows="left|top" height="22" layout="topleft" left="364" name="voice_meter" top="314" width="108" tool_tip="How loud voice chat is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
-        <text follows="left|top" font="SansSerif" height="18" layout="topleft" left="44" name="voice_note" top="336" width="426" wrap="true" text_color="WolfHudKitTextDim">Other people's voices will be recorded - please ask before sharing.</text>
-        <check_box control_name="WolfRecorderSoundMic" follows="left|top" height="22" label="My microphone" layout="topleft" left="24" name="mic_check" top="356" width="200" tool_tip="Your own voice, for talking over the video. Not sent to voice chat." label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
-        <slider control_name="WolfRecorderLevelMic" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="mic_level" show_text="false" top="356" width="130" tool_tip="How loud your microphone is in the video" />
-        <view follows="left|top" height="22" layout="topleft" left="364" name="mic_meter" top="356" width="108" tool_tip="How loud your microphone is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
-        <text follows="left|top" font="SansSerif" height="30" layout="topleft" left="44" name="mic_note" top="378" width="426" wrap="true" text_color="WolfHudKitTextDim">The microphone is only switched on while a recording runs, and off while it is paused. With speakers, it also picks up the world sound.</text>
+        <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="sound_heading" top="278" width="120" text_color="WolfHudKitText">Sound</text>
+        <text follows="left|top" font="SansSerifSmall" halign="right" height="16" layout="topleft" left="130" name="sound_hint" top="282" width="340" text_color="WolfHudKitTextDim">The bars show how loud each sound is while you record.</text>
+        <check_box control_name="WolfRecorderSoundWorld" follows="left|top" height="22" label="World sound and music" layout="topleft" left="24" name="world_check" top="302" width="200" tool_tip="Sounds, music and media as you hear them" label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
+        <slider control_name="WolfRecorderLevelWorld" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="world_level" show_text="false" top="302" width="130" tool_tip="How loud the world sound is in the video" />
+        <view follows="left|top" height="22" layout="topleft" left="364" name="world_meter" top="302" width="108" tool_tip="How loud the world sound is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
+        <text follows="left|top" font="SansSerif" height="28" layout="topleft" left="44" name="world_note" top="324" width="426" wrap="true" text_color="WolfHudKitTextDim" />
+        <check_box control_name="WolfRecorderSoundVoice" follows="left|top" height="22" label="Voice chat (other people)" layout="topleft" left="24" name="voice_check" top="354" width="200" tool_tip="Other people's voices as you hear them in voice chat" label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
+        <slider control_name="WolfRecorderLevelVoice" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="voice_level" show_text="false" top="354" width="130" tool_tip="How loud voice chat is in the video" />
+        <view follows="left|top" height="22" layout="topleft" left="364" name="voice_meter" top="354" width="108" tool_tip="How loud voice chat is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
+        <text follows="left|top" font="SansSerif" height="18" layout="topleft" left="44" name="voice_note" top="376" width="426" wrap="true" text_color="WolfHudKitTextDim">Other people's voices will be recorded - please ask before sharing.</text>
+        <check_box control_name="WolfRecorderSoundMic" follows="left|top" height="22" label="My microphone" layout="topleft" left="24" name="mic_check" top="396" width="200" tool_tip="Your own voice, for talking over the video. Not sent to voice chat." label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
+        <slider control_name="WolfRecorderLevelMic" decimal_digits="1" follows="left|top" height="22" increment="0.1" initial_value="1" layout="topleft" left="228" max_val="2" min_val="0" name="mic_level" show_text="false" top="396" width="130" tool_tip="How loud your microphone is in the video" />
+        <view follows="left|top" height="22" layout="topleft" left="364" name="mic_meter" top="396" width="108" tool_tip="How loud your microphone is in the video, while you record: green is good, amber is loud, red (with the word Loud) is too loud - move the slider down." />
+        <text follows="left|top" font="SansSerif" height="30" layout="topleft" left="44" name="mic_note" top="418" width="426" wrap="true" text_color="WolfHudKitTextDim">The microphone is only switched on while a recording runs, and off while it is paused. With speakers, it also picks up the world sound.</text>
 
-        <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="saving_heading" top="414" width="200" text_color="WolfHudKitText">Saving</text>
-        <text follows="left|top" font="SansSerif" height="44" layout="topleft" left="24" name="folder_text" top="440" width="236" wrap="true" text_color="WolfHudKitText">...</text>
-        <button follows="left|top" font="SansSerif" height="44" label="Change..." layout="topleft" left="266" name="change_folder_btn" top="440" width="100" tool_tip="Choose the folder your videos are saved in" label_color="WolfHudKitText" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" />
-        <button follows="left|top" font="SansSerif" height="44" label="Open folder" layout="topleft" left="372" name="open_folder_btn" top="440" width="100" tool_tip="Show the folder your videos are saved in" label_color="WolfHudKitText" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" />
-        <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="limit_label" top="496" width="140" text_color="WolfHudKitText">Stop by itself</text>
-        <combo_box follows="left|top" height="24" layout="topleft" left="170" name="limit_combo" top="494" width="300" tool_tip="Whether a recording stops by itself after a set time. With Never it runs until you press Stop; it still stops by itself, and says so, if the disk gets nearly full.">
+        <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="saving_heading" top="454" width="200" text_color="WolfHudKitText">Saving</text>
+        <text follows="left|top" font="SansSerif" height="44" layout="topleft" left="24" name="folder_text" top="480" width="236" wrap="true" text_color="WolfHudKitText">...</text>
+        <button follows="left|top" font="SansSerif" height="44" label="Change..." layout="topleft" left="266" name="change_folder_btn" top="480" width="100" tool_tip="Choose the folder your videos are saved in" label_color="WolfHudKitText" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" />
+        <button follows="left|top" font="SansSerif" height="44" label="Open folder" layout="topleft" left="372" name="open_folder_btn" top="480" width="100" tool_tip="Show the folder your videos are saved in" label_color="WolfHudKitText" label_color_disabled="WolfHudKitTextDim" image_unselected="WolfHudKit_Key" image_hover_unselected="WolfHudKit_Key" image_selected="WolfHudKit_KeyLit" image_hover_selected="WolfHudKit_KeyLit" image_pressed="WolfHudKit_KeyDown" image_pressed_selected="WolfHudKit_KeyDown" image_disabled="WolfHudKit_Key" image_disabled_selected="WolfHudKit_KeyLit" image_color="WolfHudKitImage" image_color_disabled="WolfHudKitImageDisabled" hover_glow_amount="0.22" />
+        <text follows="left|top" font="SansSerif" height="22" layout="topleft" left="24" name="limit_label" top="536" width="140" text_color="WolfHudKitText">Stop by itself</text>
+        <combo_box follows="left|top" height="24" layout="topleft" left="170" name="limit_combo" top="534" width="300" tool_tip="Whether a recording stops by itself after a set time. With Never it runs until you press Stop; it still stops by itself, and says so, if the disk gets nearly full.">
             <combo_box.item label="Never - I will press Stop" name="limit_never" value="0" />
             <combo_box.item label="After 1 minute" name="limit_1" value="1" />
             <combo_box.item label="After 2 minutes" name="limit_2" value="2" />
@@ -102,7 +106,15 @@
             <combo_box.item label="After 30 minutes" name="limit_30" value="30" />
             <combo_box.item label="After 60 minutes" name="limit_60" value="60" />
         </combo_box>
-        <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="24" name="space_note" top="524" width="446" wrap="true" text_color="WolfHudKitTextDim" />
+        <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="24" name="space_note" top="564" width="446" wrap="true" text_color="WolfHudKitTextDim" />
+    
+        <!-- [RECORDING PRIVACY 2026-11-25] Ticket 1060 (Luke Koda: "That should be up to each person"). The resident's own
+             choice, kept on the grid website (wolfrecordprivacy.h), the same box as Preferences > Privacy and the website's
+             account page. Saved as soon as it is ticked; honest about what it cannot do. -->
+        <icon follows="left|top" height="112" layout="topleft" left="6" name="privacy_frame" top="594" width="474" color="WolfHudKitInlay" image_name="WolfHudKit_Inlay" mouse_opaque="false" />
+        <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="14" name="privacy_heading" top="598" width="200" text_color="WolfHudKitText">Privacy</text>
+        <check_box follows="left|top" height="22" label="Don't include me in other people's recordings" layout="topleft" left="24" name="no_recording_check" top="624" width="446" tool_tip="Ticked: WolfViewer's and WolfStorm's video recorders show a grey shape instead of you and your name tag in other people's videos. Saved on your Wolf Territories account straight away." label_text.text_color="WolfHudKitText" label_text.text_readonly_color="WolfHudKitTextDim" />
+        <text follows="left|top" font="SansSerif" height="46" layout="topleft" left="44" name="no_recording_note" top="648" width="426" wrap="true" text_color="WolfHudKitTextDim">WolfViewer and WolfStorm recorders leave you out. Other screen-recording programs can't be stopped.</text>
     </panel>
     </scroll_container>
 
@@ -144,5 +156,11 @@
     <string name="world_unavailable">This computer's sound system could not start the route the world sound is recorded from.</string>
     <string name="world_fmod">World sound can only be recorded with the OpenAL sound engine.</string>
     <string name="space_free">[FREE] free - room for about [TIME] of video at this size.</string>
+    <string name="privacy_left_out_one">1 person nearby has asked not to be recorded; they are left out of your video.</string>
+    <string name="privacy_left_out_many">[N] people nearby have asked not to be recorded; they are left out of your video.</string>
+    <string name="privacy_check_failing">The list of people who have asked not to be recorded can't be checked just now. Anyone not checked yet is left out for their first 20 seconds.</string>
+    <string name="privacy_loading">Checking your choice...</string>
+    <string name="privacy_saving">Saving your choice...</string>
+    <string name="privacy_not_wolf">Only Wolf Territories residents can choose this, while logged in to Wolf Territories.</string>
     <string name="space_recording">[FREE] free - about [TIME] left at the current rate.</string>
 </floater>

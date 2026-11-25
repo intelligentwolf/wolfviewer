@@ -40,6 +40,7 @@
 #include "llagent.h"
 #include "llagentcamera.h"
 #include "llcheckboxctrl.h"
+#include "wolfrecordprivacy.h"   // [RECORDING PRIVACY 2026-11-25/] Preferences > Privacy: "Don't include me in other people's recordings"
 #include "llcolorswatch.h"
 #include "llcombobox.h"
 #include "llcommandhandler.h"
@@ -3904,9 +3905,26 @@ public:
         mInvDropTarget->setDADCallback(boost::bind(&LLPanelPreferencePrivacy::onDADAutoresponseItem, this, _1));
         getChild<LLButton>("clear_autoresponse_item")->setCommitCallback(boost::bind(&LLPanelPreferencePrivacy::onClearAutoresponseItem, this));
 
+        // [RECORDING PRIVACY 2026-11-25] ticket 1060: saved on the Wolf Territories account at once (wolfrecordprivacy.h),
+        // not with OK/Cancel - like the website's own box
+        mNoRecordingCheck = getChild<LLCheckBoxCtrl>("WolfNoRecording");
+        mNoRecordingCheck->setCommitCallback([](LLUICtrl* ctrl, const LLSD&) { WolfRecordPrivacy::setOwn(ctrl->getValue().asBoolean()); });
+
         return LLPanelPreference::postBuild();
     }
     // </FS:Ansariel>
+
+    // [RECORDING PRIVACY 2026-11-25] the box follows the account's answer (it arrives a moment after the window opens)
+    /*virtual*/ void draw()
+    {
+        if (mNoRecordingCheck)
+        {
+            const WolfRecordPrivacy::Own own = WolfRecordPrivacy::ownState();
+            mNoRecordingCheck->setEnabled(own == WolfRecordPrivacy::Own::KNOWN);
+            if (own != WolfRecordPrivacy::Own::SAVING) mNoRecordingCheck->set(WolfRecordPrivacy::ownOptedOut());
+        }
+        LLPanelPreference::draw();
+    }
 
     // <FS:Ansariel> Send inventory item on autoresponse
     /* virtual */ void onOpen(const LLSD& key)
@@ -3948,6 +3966,7 @@ private:
     // <FS:Ansariel> Send inventory item on autoresponse
     FSCopyTransInventoryDropTarget* mInvDropTarget;
     std::string                     mAutoresponseItem;
+    LLCheckBoxCtrl*                 mNoRecordingCheck = nullptr;   // [RECORDING PRIVACY 2026-11-25/]
 
     // <FS:Ansariel> DebugLookAt checkbox status not working properly
     void onChangeDebugLookAt()

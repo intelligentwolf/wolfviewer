@@ -108,11 +108,19 @@ namespace WolfRecorder
     /** Opens the folder in the computer's file manager. */
     void openFolder();
 
-    /** llviewerdisplay.cpp render_ui, right after renderFinalize: the finished world (world-only recordings). */
-    void captureWorld();
+    /** llviewerdisplay.cpp render_ui, right after renderFinalize: the finished world (world-only recordings).
+     *  [RECORDING PRIVACY 2026-11-25] `name_tags_drawn`: the name tags are already in that picture (a headset view draws
+     *  them into each eye first, WolfVRScreen::drawHudObjectsInEye), so those of people who asked not to be recorded are
+     *  covered too. */
+    void captureWorld(bool name_tags_drawn);
     /** llviewerdisplay.cpp render_ui, after the UI: the whole window (recordings with the interface), then the
      *  recording indicator over it (never in the video). */
     void captureWholeWindowAndDrawIndicator();
+    // [RECORDING PRIVACY 2026-11-25] Ticket 1060. Every picture copy (both kinds) leaves out the people around who asked
+    // not to be recorded (wolfrecordprivacy.h): after the window is scaled into the picture and before the picture is
+    // read back, a soft grey shape is drawn over each of them (and over their name tag when the picture has the tags),
+    // in the recorder's own picture only - the screen is untouched, so the resident recording still sees everyone.
+    // Cost: a few scissored clears per hidden person, on the GPU, only in the frames that are recorded.
     /** wolfvrscreen.cpp keepWorldForBigScreen: Vulkan mode needs the world kept for the whole-window composite. */
     bool wantsWholeWindow();
 

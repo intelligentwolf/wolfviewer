@@ -81,16 +81,18 @@ static int16_t PLAYOUT_DEVICE_DEFAULT = 0;
 static int16_t RECORD_DEVICE_DEFAULT  = 0;
 #endif
 
-#if WEBRTC_WIN
+#if WEBRTC_WIN || WEBRTC_LINUX
 // <WolfViewer 2026-11-03/> ticket 502: the saved value meaning "the system default" (llpanelvoicedevicesettings.cpp
 // DEFAULT_DEVICE); an empty value (nothing saved yet) also ends up on the default in workerDeployDevices().
-// [W113 2026-11-25] now Windows-only: its other user (ours' updateDevices() redeploy check) gave way to upstream's
-// deploy on every enumeration, and an unused static function would warn on Linux/macOS.
+// [W113 2026-11-25] used by the Windows default-device watcher and the Linux default-name check in updateDevices();
+// macOS has neither (an unused static function would warn there).
 static bool isDefaultDeviceSelection(const std::string& id)
 {
     return id.empty() || id == "Default";
 }
+#endif
 
+#if WEBRTC_WIN
 // <WolfViewer 2026-11-03> ticket 502: follow Windows' default communications device while the viewer runs.
 // The ADM registers its own IMMNotificationClient, but its OnDefaultDeviceChanged only logs, and only
 // OnDeviceStateChanged reaches AudioDeviceObserver::OnDevicesUpdated (Source: webrtc-sdk m144_release
@@ -528,7 +530,7 @@ void LLWebRTCAudioDeviceModule::SetTuning(bool tuning, bool mute)
     }
     // On exit, capture is deliberately left running (mute is handled by gain,
     // not by stopping the device, so there's no AEC cold-start hiss).  Playout
-    // is restored by the caller via workerOpenPlayout(), keeping it gated on
+    // is restored by the caller via workerStartPlayout() (setTuningMode), keeping it gated on   // [W113 2026-11-25] upstream's comment named workerOpenPlayout, which does not exist
     // there being a connection to render.
 }
 
@@ -933,11 +935,13 @@ void LLWebRTCImpl::workerFinishDeployTurn()
 // hiss on unmute), so this is a no-op when already recording.  Device changes
 // go through workerDeployDevices(), which stops recording first to force a
 // clean re-select; voice off goes through setVoiceEnabled(false).
-void LLWebRTCImpl::workerStartRecording()
+void LLWebRTCImpl::workerStartRecording(bool for_tuning)
 {
     // Only run capture while voice is enabled, and never cold-start it when
     // it's already running (that would cause the unmute hiss).
-    if (!mDeviceModule || !mVoiceEnabled || mDeviceModule->Recording())
+    // [W113 2026-11-25] ours: tuning (the voice preferences' mic meter) also runs with voice off - setTuningMode passes
+    // for_tuning so the chosen microphone is selected and started then too, and stops it again when tuning ends.
+    if (!mDeviceModule || (!mVoiceEnabled && !for_tuning) || mDeviceModule->Recording())
     {
         // <FS:minerjr> [FIRE-36022]
         // If the device is not avaiable, then make sure the flag for the WebRTC updated devices flag is turned off for the co-routine
@@ -1086,7 +1090,7 @@ void LLWebRTCImpl::workerStartPlayout()
 // a clean re-select of both devices, then re-applies per-connection mute/track
 // state.  To merely bring playout up when a connection is established (without
 // disturbing the connection's own mute/track management) call
-// workerOpenPlayout() directly -- see startPlayout().
+// workerStartPlayout() directly -- see startPlayout().   [W113 2026-11-25: upstream's comment said workerOpenPlayout]
 // [W113 2026-11-25] upstream's split of this function (4124f969ee7 capture for the whole session; #6109 module
 // reinit 7e99751c86e / 68f78d1e2d2 / 82c2cfcff1d; Mac back-off fc2481e6dbd) with ours (ticket 502) re-applied to it:
 // the turn accounting (turnHandedOn / workerFinishDeployTurn) and the retry when the device lock is busy, which
@@ -1281,11 +1285,11 @@ void LLWebRTCImpl::setVoiceEnabled(bool enable)
                 // across calls and mute/unmute), and start playout if there's
                 // already a connection to render.
                 mDeviceModule->Init();
-                // [W113 2026-11-25] ours (ticket 502) counts every workerDeployDevices() run as a turn of
-                // mDevicesDeploying and every run ends one (workerFinishDeployTurn / the signalling task); upstream
-                // calls it directly here without taking one, which would leave the count one lower on each voice-on.
-                mDevicesDeploying.fetch_add(1, std::memory_order_relaxed);
-                workerDeployDevices(false);
+                // [W113 2026-11-25] through deployDevices(), not upstream's direct workerDeployDevices(false): every
+                // run ends a turn of mDevicesDeploying (workerFinishDeployTurn / the signalling task), and a direct run
+                // beside a coalesced one in flight took the count below zero. deployDevices() takes the turn, or folds
+                // this into the run already queued (which re-reads mVoiceEnabled when it runs).
+                deployDevices(false);
             }
             else
             {
@@ -1303,6 +1307,7 @@ void LLWebRTCImpl::updateDevices()
 {
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     bool reset_module = false;
+    bool redeploy = false;   // [W113 2026-11-25] ours: see the redeploy condition below
     try // Try catch needed for uniquie lock as will throw an exception if a second lock is attempted or the mutex is invalid
     {
     // Attempt to lock the access to the audio device, wait up to 1 second for other threads to unlock.
@@ -1418,12 +1423,43 @@ void LLWebRTCImpl::updateDevices()
         mRecordingDeviceList.emplace_back(name, guid);
     }
 
-    // [W113 2026-11-25] ours (ticket 502) redeployed here only when a chosen device appeared or went away, or (Linux)
-    // when PulseAudio's index-0 "default: <name>" changed. Upstream (#6109 7e99751c86e / 68f78d1e2d2) now ends every
-    // updateDevices() with deployDevices(reset_module), which stops and re-selects both devices on every enumeration,
-    // a superset of ours' cases (a Linux "Default" re-opens the server's current default at InitPlayout/InitRecording,
-    // audio_device_pulse_linux.cc:2105-2147), so ours' check and its mDefaultPlayoutName/mDefaultRecordingName were
-    // dropped rather than deploy twice. Windows' default device still follows LLWebRTCDefaultDeviceWatcher.
+    // <WolfViewer 2026-11-03> ticket 502: on Linux "Default" opens PulseAudio's default at InitPlayout /
+    // InitRecording time (a null device name: audio_device_pulse_linux.cc:2105-2147), and the ADM reports no device
+    // changes, so a new server default is picked up here, when the list is refreshed. PulseAudio's index 0 is
+    // "default: <description>" with no guid (audio_device_pulse_linux.cc:733 PlayoutDeviceName, :1515
+    // GetDefaultDeviceInfo), so upstream's guid compare below never sees it change; the name does. macOS: upstream's
+    // guid compare; Windows: LLWebRTCDefaultDeviceWatcher.
+    // [W113 2026-11-25] restored (the first W113 resolution had dropped it for upstream's deploy-on-every-enumeration).
+    bool linuxDefaultChanged = false;
+#if WEBRTC_LINUX
+    {
+        char name[webrtc::kAdmMaxDeviceNameSize];
+        char guid[webrtc::kAdmMaxGuidSize];
+        std::string playoutDefault;
+        std::string recordingDefault;
+        if (renderDeviceCount > 0 && mDeviceModule->PlayoutDeviceName(0, name, guid) == 0)
+        {
+            playoutDefault = name;
+        }
+        if (captureDeviceCount > 0 && mDeviceModule->RecordingDeviceName(0, name, guid) == 0)
+        {
+            recordingDefault = name;
+        }
+        linuxDefaultChanged = (isDefaultDeviceSelection(mPlayoutDevice) && !mDefaultPlayoutName.empty()
+                               && !playoutDefault.empty() && playoutDefault != mDefaultPlayoutName)
+                           || (isDefaultDeviceSelection(mRecordingDevice) && !mDefaultRecordingName.empty()
+                               && !recordingDefault.empty() && recordingDefault != mDefaultRecordingName);
+        if (!playoutDefault.empty())
+        {
+            mDefaultPlayoutName = playoutDefault;
+        }
+        if (!recordingDefault.empty())
+        {
+            mDefaultRecordingName = recordingDefault;
+        }
+    }
+#endif
+    // </WolfViewer>
 
     RTC_LOG(LS_INFO) << "updateDevices, playout count: " << renderDeviceCount << "; capture count: " << captureDeviceCount;
 
@@ -1471,6 +1507,16 @@ void LLWebRTCImpl::updateDevices()
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     //bool reset_module = lostPlayoutDevice || lostRecordingDevice || defaultPlayoutChanged || defaultRecordingChanged;
     reset_module = lostPlayoutDevice || lostRecordingDevice || defaultPlayoutChanged || defaultRecordingChanged;
+
+    // [W113 2026-11-25] ours first: upstream ends EVERY enumeration with deployDevices(), which stops and restarts the
+    // microphone and speakers on each refreshDevices() / OS device event (an audible blip). Redeploy only when there is
+    // something to apply: upstream's #6109 module reset (a device in use vanished, the macOS default changed), a chosen
+    // device that appeared or vanished (ticket 502: a headset switched on after log-in is applied once it shows), or
+    // the Linux default changed (above).
+    redeploy = reset_module
+            || linuxDefaultChanged
+            || hadPlayoutDevice != deviceStillPresent(mPlayoutDeviceList, mPlayoutDevice)
+            || hadRecordingDevice != deviceStillPresent(mRecordingDeviceList, mRecordingDevice);
     }
     // There are two exceptions that unique_lock can trigger, operation_not_permitted or resource_deadlock_would_occur
     catch (const std::system_error& e)
@@ -1503,7 +1549,10 @@ void LLWebRTCImpl::updateDevices()
     }
     // </FS:minerjr> [FIRE-36022]
 
-    deployDevices(reset_module);
+    if (redeploy)   // [W113 2026-11-25] see the redeploy condition above
+    {
+        deployDevices(reset_module);
+    }
 }
 
 void LLWebRTCImpl::OnDevicesUpdated()
@@ -1551,23 +1600,51 @@ void LLWebRTCImpl::setTuningMode(bool enable)
 {
     mTuningMode = enable;
     updateCaptureTapGate();   // [W113 2026-11-25] see updateCaptureTapGate()
+    // [W113 2026-11-25] the send gain as wantedSendGain() gives it (0 while either mute says so), not mGain alone
     if (!mTuningMode
-        && !mMute
         && mPeerCustomProcessor
-        && mPeerCustomProcessor->getGain() != mGain)
+        && mPeerCustomProcessor->getGain() != wantedSendGain())
     {
-        mPeerCustomProcessor->setGain(mGain);
+        mPeerCustomProcessor->setGain(wantedSendGain());
     }
     mWorkerThread->PostTask(
         [this]
         {
+            if (!mDeviceModule)   // [W113 2026-11-25] the module is gone once terminate() has started
+            {
+                return;
+            }
+            // [W113 2026-11-25] ours first, with voice off (setVoiceEnabled(false) stopped capture and ForceTerminate'd
+            // the module): the mic meter must still work, so the module is initialised again and the chosen microphone
+            // started - on an uninitialised ADM InitMicrophone / InitRecording / StartRecording all return -1
+            // (audio_device_impl.cc CHECKinitialized_, read in the Chromium copy of libwebrtc), so SetTuning below
+            // alone would leave the meter dead.
+            if (mTuningMode && !mVoiceEnabled)
+            {
+                if (!mDeviceModule->Initialized())
+                {
+                    mDeviceModule->Init();
+                }
+                workerStartRecording(true);
+            }
             mDeviceModule->SetTuning(mTuningMode, mMute);
             if (!mTuningMode)
             {
-                // Restore playout after tuning, gated on there being a
-                // connection to render (so the output device isn't left
-                // spinning with no engine data).
-                workerStartPlayout();
+                if (!mVoiceEnabled)
+                {
+                    // [W113 2026-11-25] ours first: tuning ended with voice off, so the microphone is released again,
+                    // exactly as setVoiceEnabled(false) leaves it (SetTuning leaves capture running for voice on only).
+                    mDeviceModule->ForceStopRecording();
+                    mDeviceModule->StopPlayout();
+                    mDeviceModule->ForceTerminate();
+                }
+                else
+                {
+                    // Restore playout after tuning, gated on there being a
+                    // connection to render (so the output device isn't left
+                    // spinning with no engine data).
+                    workerStartPlayout();
+                }
             }
             mSignalingThread->PostTask(
                 [this]
@@ -1766,8 +1843,30 @@ void LLWebRTCImpl::setMicGain(float gain)
     mGain = gain;
     if (!mTuningMode && mPeerCustomProcessor)
     {
-        mPeerCustomProcessor->setGain(gain);
+        // [W113 2026-11-25] was setGain(gain): with capture now running through mute (4124f969ee7) a volume change
+        // while muted put the microphone back on the send path. 0 while muted, as intSetMute sets it.
+        mPeerCustomProcessor->setGain(wantedSendGain());
     }
+}
+
+// [W113 2026-11-25] the send gain: 0 while the engine is muted (mMute) or the resident is (mResidentMicMuted, which
+// stays right while tuning, when wolfApplyMicMute does not update mMute); else the resident's mic level. While
+// AI Mode speaks the processor passes its own unity gain instead (LLCustomProcessorState::getEffectiveGain) with the
+// microphone replaced by the AI's voice (LLWebRTCSpeechSource), so nothing of the resident's goes out then either.
+float LLWebRTCImpl::wantedSendGain() const
+{
+    return (mMute || mResidentMicMuted.load(std::memory_order_acquire)) ? 0.0f : mGain;
+}
+
+// [W113 2026-11-25] see llwebrtc.h setResidentMicMuted
+void LLWebRTCImpl::setResidentMicMuted(bool muted)
+{
+    mResidentMicMuted.store(muted, std::memory_order_release);
+    if (!mTuningMode && mPeerCustomProcessor)
+    {
+        mPeerCustomProcessor->setGain(wantedSendGain());
+    }
+    updateCaptureTapGate();
 }
 
 void LLWebRTCImpl::setMute(bool mute, int delay_ms)
@@ -1789,7 +1888,7 @@ void LLWebRTCImpl::intSetMute(bool mute, int delay_ms)
     // selection (workerStartRecording) and shutdown, not to mute.
     if (mPeerCustomProcessor)
     {
-        mPeerCustomProcessor->setGain(mMute ? 0.0f : mGain);
+        mPeerCustomProcessor->setGain(wantedSendGain());   // [W113 2026-11-25] was mMute ? 0 : mGain; see wantedSendGain()
     }
     updateCaptureTapGate();   // [W113 2026-11-25] see updateCaptureTapGate()
 }
@@ -1800,11 +1899,15 @@ void LLWebRTCImpl::intSetMute(bool mute, int delay_ms)
 // heard the resident only while unmuted or tuning. Upstream now keeps capture running through mute (the gain stage
 // above silences what is sent), so the tap is closed here instead whenever the device would have been stopped.
 // One difference: ours stopped the device delay_ms after a mute (the fade); the tap closes at once.
+// [W113 2026-11-25] Paul's rule: no WolfViewer tap gets microphone sound while the resident is muted, tuning or not, and
+// whoever is talking for them (AI Mode keeps the engine unmuted while it speaks). So the resident's own mute
+// (setResidentMicMuted, from LLWebRTCVoiceClient::setMuteMic) closes it outright; mMute alone can be stale while
+// tuning (wolfApplyMicMute returns early then) and is false while the AI speaks.
 void LLWebRTCImpl::updateCaptureTapGate()
 {
     if (mDeviceModule)
     {
-        mDeviceModule->SetCaptureTapOpen(!mMute || mTuningMode);
+        mDeviceModule->SetCaptureTapOpen(!mResidentMicMuted.load(std::memory_order_acquire) && (!mMute || mTuningMode));
     }
 }
 

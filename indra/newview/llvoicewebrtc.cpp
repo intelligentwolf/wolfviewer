@@ -76,6 +76,7 @@
 #include "stringize.h"
 
 #include "llwebrtc.h"
+#include "wolfrecorder.h"   // [W113 2026-11-25] WolfRecorder::setVoiceMicMuted (setMuteMic)
 
 // for base64 decoding
 #include "apr_base64.h"
@@ -90,6 +91,10 @@ const F32 STATS_TIMER_DELAY = 2.0;
 using namespace std::chrono_literals; // Needed for shared timed mutex to use time
 // </FS:minerjr> [FIRE-36022]
 namespace {
+
+    // [W113 2026-11-25] setMuteMic has run at least once, so mMuteMic is the resident's real mute (its initial false
+    // is only a default); until then the engine keeps its own "muted" start (llwebrtc.h setResidentMicMuted).
+    bool sWolfMuteMicKnown = false;
 
     const F32      MAX_AUDIO_DIST           = 50.0f;
     const F32      VOLUME_SCALE_WEBRTC      = 0.01f;
@@ -310,6 +315,11 @@ void LLWebRTCVoiceClient::initWebRTC()
     llwebrtc::init(this);
 
     mWebRTCDeviceInterface = llwebrtc::getDeviceInterface();
+    // [W113 2026-11-25] the resident's own mute as it stands, if known (setMuteMic may have run before this engine existed)
+    if (sWolfMuteMicKnown)
+    {
+        mWebRTCDeviceInterface->setResidentMicMuted(mMuteMic);
+    }
     mWebRTCDeviceInterface->unsetDevicesObserver(this); // <FS:Ansariel> initWebRTC() can get multiple times - make sure to unset previous observers before re-adding
     mWebRTCDeviceInterface->setDevicesObserver(this);
 
@@ -1078,6 +1088,9 @@ void LLWebRTCVoiceClient::tuningStop()
             mWebRTCDeviceInterface->setTuningMode(false);
         }
         mIsInTuningMode = false;
+        // [W113 2026-11-25] wolfApplyMicMute() ignores mute changes while tuning, so the engine's mute may be stale
+        // now (muted or unmuted in the preferences while the meter ran): apply the current one.
+        wolfApplyMicMute();
     }
 }
 
@@ -2194,6 +2207,15 @@ void LLWebRTCVoiceClient::setMuteMic(bool muted)
     }
 
     mMuteMic = muted;
+    sWolfMuteMicKnown = true;
+    // [W113 2026-11-25] Paul's rule: while the resident is muted nothing of the microphone leaves the machine and no
+    // WolfViewer tap gets it. Capture now runs through mute (upstream 4124f969ee7), so the engine and the video recorder
+    // are told the resident's own mute directly - also while tuning, when wolfApplyMicMute() below changes nothing.
+    WolfRecorder::setVoiceMicMuted(muted && mVoiceEnabled);   // with voice off the voice mute is not the resident's say
+    if (mWebRTCDeviceInterface)
+    {
+        mWebRTCDeviceInterface->setResidentMicMuted(muted);
+    }
     wolfApplyMicMute();
 }
 
@@ -2288,6 +2310,7 @@ void LLWebRTCVoiceClient::setVoiceEnabled(bool enabled)
         // TODO: Refactor this so we don't call into LLVoiceChannel, but simply
         // use the status observer
         mVoiceEnabled = enabled;
+        WolfRecorder::setVoiceMicMuted(mMuteMic && enabled);   // [W113 2026-11-25] see setMuteMic
         LLVoiceClientStatusObserver::EStatusType status;
 
         // Gate the audio devices on voice being enabled: the capture mic and

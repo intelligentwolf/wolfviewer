@@ -118,6 +118,13 @@ namespace WolfRecorder
 
     /** Before the sound engine and voice shut down (LLAppViewer::cleanup): finishes any recording and waits. */
     void shutdown();
+
+    /** [W113 2026-11-25] Any thread (LLWebRTCVoiceClient::setMuteMic). The resident's own microphone mute in voice
+     *  (mute button, push-to-talk not held, mic disabled). While muted the recorder's microphone track records
+     *  silence - the same number of samples at the same times, so sound and pictures stay in step (Paul's rule: no
+     *  WolfViewer tap gets microphone sound while the resident is muted). The voice client passes false while voice
+     *  is off (no voice mute to obey then: the recorder's microphone records as before); false until it first says. */
+    void setVoiceMicMuted(bool muted);
 }
 
 #endif // WOLF_RECORDER_H

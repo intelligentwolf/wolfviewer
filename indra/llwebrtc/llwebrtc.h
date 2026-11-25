@@ -240,6 +240,12 @@ class LLWebRTCDeviceInterface
     virtual void setListenTap(LLWebRTCPlayoutTap* tap) = 0;
     virtual void setSpeechGain(bool open) = 0;
 
+    // [W113 2026-11-25] the resident's own microphone mute in voice (mute button, push-to-talk not held, mic disabled:
+    // newview LLWebRTCVoiceClient::setMuteMic), apart from setMute() above, which AI Mode opens while it speaks and
+    // which can lag while tuning. While true nothing of the microphone is sent (the send gain is 0) and the capture tap
+    // gets nothing, whatever setMute / tuning say. Starts true until the viewer first says.
+    virtual void setResidentMicMuted(bool muted) = 0;
+
     // [W111 VIDEO 2026-11-24] the video recorder's own copy of the voices as heard (newview wolfrecorder.cpp), a slot of
     // its own beside the DJ, VR and AI taps; called on the playout thread like them, before setPlayoutSilenced silences
     // the speakers. nullptr removes it; the tap object must outlive the voice engine (the recorder's is static).

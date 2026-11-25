@@ -997,8 +997,10 @@ void WolfAIMode::startSpeaking()
     if (!mSayPcm.empty() && voiceUp())
     {
         // into his own voice: the mic held, the gain stage at unity, the voice path kept open even if the resident is muted
-        if (llwebrtc::LLWebRTCDeviceInterface* dev = llwebrtc::getDeviceInterface()) dev->setSpeechGain(true);
+        // [W113 2026-11-25] the mic is held (replaced by the AI's voice) BEFORE the gain goes to unity: since Firestorm 7.2.5
+        // the microphone stays open while muted, so unity gain first could pass a muted resident's own mic for a moment.
         sSpeech.mHold = true;
+        if (llwebrtc::LLWebRTCDeviceInterface* dev = llwebrtc::getDeviceInterface()) dev->setSpeechGain(true);
         if (LLWebRTCVoiceClient* v = voiceClient()) v->wolfSetSpeechOpen(true);
         mVoiceOpened = true;
         mServerPeak = 0.f;

@@ -99,6 +99,9 @@ namespace
     // [W111 RECORDER UI 2026-11-24] The microphone is really open (the worker opened it; not when it could not be opened
     // or there is no sound encoder): only then do the window and the REC sign say "Microphone on".
     std::atomic<bool> gMicLive{false};
+    // [W113 2026-11-25] the resident is muted in voice (WolfRecorder::setVoiceMicMuted, from LLWebRTCVoiceClient): the
+    // microphone track then records silence (Mic::pump). Written on the main thread, read on the worker.
+    std::atomic<bool> gVoiceMicMuted{false};
     S64 recNowUs()
     {
         std::lock_guard<std::mutex> lk(gClockM);
@@ -648,8 +651,14 @@ namespace
             if (n <= 0) return;
             buf.resize((size_t)n);
             alcCaptureSamples(dev, buf.data(), n);
-            std::vector<float> st((size_t)n * 2);
-            for (ALCint i = 0; i < n; ++i) st[(size_t)i * 2] = st[(size_t)i * 2 + 1] = (float)buf[(size_t)i] / 32768.f;
+            // [W113 2026-11-25] Paul's rule: no microphone sound while the resident is muted in voice. The capture is
+            // still read (the device's buffer must not fill) and the same number of samples goes into the ring, as
+            // silence, so the sound keeps its length and stays in step with the pictures.
+            std::vector<float> st((size_t)n * 2, 0.f);
+            if (!gVoiceMicMuted.load(std::memory_order_acquire))
+            {
+                for (ALCint i = 0; i < n; ++i) st[(size_t)i * 2] = st[(size_t)i * 2 + 1] = (float)buf[(size_t)i] / 32768.f;
+            }
             gMicRing.push(st.data(), st.size());
         }
         // [W111 RECORDER UI 2026-11-24] Paused: what was captured before the pause goes in, then the capture stops
@@ -1190,6 +1199,12 @@ namespace
 
 namespace WolfRecorder
 {
+// [W113 2026-11-25] see wolfrecorder.h
+void setVoiceMicMuted(bool muted)
+{
+    gVoiceMicMuted.store(muted, std::memory_order_release);
+}
+
 bool worldSoundAvailable()
 {
 #if LL_OPENAL

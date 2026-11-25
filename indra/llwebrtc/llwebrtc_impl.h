@@ -526,6 +526,7 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     void setListenTap(LLWebRTCPlayoutTap* tap) override;
     void setRecorderPlayoutTap(LLWebRTCPlayoutTap* tap) override;   // [W111 VIDEO 2026-11-24/]
     void setSpeechGain(bool open) override;
+    void setResidentMicMuted(bool muted) override;   // [W113 2026-11-25] see llwebrtc.h
 
     void intSetMute(bool mute, int delay_ms = 20);
 
@@ -616,7 +617,7 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     // it, as webrtc/api/environment/environment.h asks ("the first member in the class").
     // [W113 2026-11-25] upstream declares the same member here (and its own worker helpers below); one kept, ours' note.
     const webrtc::Environment                                     mEnv;
-    void workerStartRecording();
+    void workerStartRecording(bool for_tuning = false);   // [W113 2026-11-25] for_tuning: ours, the mic meter with voice off
     void workerStartPlayout();
     void workerDeployDevices(bool reset_module);
     // We always rely on WebRTC's internal (software APM) audio processing, so
@@ -624,6 +625,7 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     void workerDisableBuiltInAudioProcessing();
     // [W113 2026-11-25] ours (see updateCaptureTapGate in llwebrtc.cpp)
     void updateCaptureTapGate();
+    float wantedSendGain() const;   // [W113 2026-11-25] see llwebrtc.cpp
 
     LLWebRTCLogSink*                                           mLogSink;
 
@@ -664,8 +666,14 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     // <WolfViewer 2026-11-03> ticket 502: following the system default device and re-applying a chosen one.
     // Ends one workerDeployDevices() turn (the mDevicesDeploying count), running the next if one is queued.
     void workerFinishDeployTurn();
-    // [W113 2026-11-25] ours' Linux mDefaultPlayoutName / mDefaultRecordingName went with the updateDevices() redeploy
-    // check that upstream's deploy-on-every-enumeration replaced (see updateDevices() in llwebrtc.cpp).
+#if WEBRTC_LINUX
+    // PulseAudio's index 0 is "default: <description of the server's default>" with no guid (Source: webrtc-sdk
+    // m144_release modules/audio_device/linux/audio_device_pulse_linux.cc:733 PlayoutDeviceName, :1515
+    // GetDefaultDeviceInfo), so the name is what changes when the default changes. Empty until first enumerated.
+    // [W113 2026-11-25] restored with ours' redeploy condition in updateDevices().
+    std::string                                                mDefaultPlayoutName;
+    std::string                                                mDefaultRecordingName;
+#endif
 #if WEBRTC_WIN
     LLWebRTCDefaultDeviceWatcher*                              mDefaultDeviceWatcher = nullptr;   // worker thread only
 #endif
@@ -680,7 +688,10 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
 
     bool                                                       mMute;
     // Whether voice is enabled; gates whether the capture/playout devices run.
-    bool                                                       mVoiceEnabled;
+    // [W113 2026-11-25] atomic: written on the main thread (setVoiceEnabled), read on the worker thread
+    std::atomic<bool>                                          mVoiceEnabled;
+    // [W113 2026-11-25] the resident's own mute (setResidentMicMuted); muted until the voice client says otherwise
+    std::atomic<bool>                                          mResidentMicMuted{ true };
     float                                                      mGain;
 
     LLCustomProcessorStatePtr                                  mPeerCustomProcessor;

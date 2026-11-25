@@ -24,11 +24,13 @@
 #include <vector>
 
 #include "llsd.h"
+#include "llhandle.h"
 #include "llsingleton.h"
 #include "lluuid.h"
 
 class LLChat;
 class LLChatEntry;
+class LLUICtrl;
 
 // Source: wolfstorm/js/ui/speech_to_text.js SpeechToText and js/ui/text_to_speech.js
 // TextToSpeech — the same gates, the same numbers, the same two server endpoints.
@@ -162,6 +164,13 @@ private:
     void reportOnce(const std::string& key, const std::string& message);
     static void report(const std::string& message);
     static void tip(const std::string& message);
+
+    // [W113 2026-11-25] Paul (via Shadow): a microphone is open only while it is visibly listening. Dictation opens the
+    // device only while a nearby chat box has focus, and that box shows LISTENING_LABEL as its hint while it does.
+    void updateListening();   // per frame while dictating: open + label when a chat box has focus, close + restore when not
+    void stopListening();     // close the device and give the box its own hint back
+    LLHandle<LLUICtrl> mListeningBox;   // the chat box showing the listening hint
+    std::string      mListeningBoxLabel;   // its own hint, put back when listening stops
 
     // capture state (the device is an ALCdevice*, kept untyped so this header needs no AL)
     void*            mCaptureDevice = nullptr;

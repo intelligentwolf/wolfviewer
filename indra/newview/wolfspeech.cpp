@@ -120,7 +120,7 @@ WolfSpeech::WolfSpeech()
 
 WolfSpeech::~WolfSpeech()
 {
-    closeCapture();
+    stopListening();
     for (const Played& p : mPlayed)
     {
         LLFile::remove(p.mPath);
@@ -159,12 +159,13 @@ void WolfSpeech::idle()
     // it stops (the toolbar button and menu item are gone there too).
     if (mDictating && !isAvailable())
     {
-        closeCapture();
+        stopListening();
         mDictating = false;
         resetUtterance();
     }
     if (mDictating)
     {
+        updateListening();   // [W113 2026-11-25] the microphone is open only while a chat box has focus and says so
         pollCapture();
     }
     pumpSpeech();
@@ -201,7 +202,7 @@ void WolfSpeech::toggleDictation()
 {
     if (mDictating)
     {
-        closeCapture();
+        stopListening();
         mDictating = false;
         resetUtterance();
         tip("Dictation off.");
@@ -231,6 +232,7 @@ void WolfSpeech::toggleDictation()
     }
     mDictating = true;
     mReportedKey.clear();
+    updateListening();   // [W113 2026-11-25] the open above proved the microphone works; it stays open only with a focused chat box
     mNoiseFloor = 0.f;
     LL_INFOS("WolfSpeech") << "dictation on" << LL_ENDL;
     tip("Dictation on: click into the nearby chat bar and speak. A pause sends the line. "
@@ -260,6 +262,60 @@ bool WolfSpeech::openCapture()
 #else
     return false;
 #endif
+}
+
+// [W113 2026-11-25] Paul (via Shadow): dictation is an explicit action and does not follow the voice mute, but its
+// microphone is open only while it visibly listens and is closed the moment it stops. The device used to stay open for
+// as long as dictation was on, with the audio thrown away while no chat box had focus (processBlock).
+static const char* LISTENING_LABEL = "Listening... speak, a pause sends the line";
+
+void WolfSpeech::updateListening()
+{
+    LLChatEntry* box = focusedChatBox();
+    LLUICtrl* shown = mListeningBox.get();
+    if (shown && shown != box)
+    {
+        if (LLChatEntry* old = dynamic_cast<LLChatEntry*>(shown))
+        {
+            old->setLabel(mListeningBoxLabel);
+        }
+        mListeningBox = LLHandle<LLUICtrl>();
+    }
+    if (!box)
+    {
+        if (mCaptureDevice)
+        {
+            closeCapture();
+            resetUtterance();
+        }
+        return;
+    }
+    if (!mCaptureDevice && !openCapture())
+    {
+        // never retried frame by frame: dictation goes off and says why
+        stopListening();
+        mDictating = false;
+        resetUtterance();
+        report("Dictation could not open the microphone, so it has been turned off. Check the microphone is plugged in "
+               "and that no other program is using it, then turn dictation on again.");
+        return;
+    }
+    if (mListeningBox.get() != box)
+    {
+        mListeningBoxLabel = box->getLabel();
+        box->setLabel(LLStringExplicit(LISTENING_LABEL));
+        mListeningBox = box->getHandle();
+    }
+}
+
+void WolfSpeech::stopListening()
+{
+    closeCapture();
+    if (LLChatEntry* box = dynamic_cast<LLChatEntry*>(mListeningBox.get()))
+    {
+        box->setLabel(mListeningBoxLabel);
+    }
+    mListeningBox = LLHandle<LLUICtrl>();
 }
 
 void WolfSpeech::closeCapture()

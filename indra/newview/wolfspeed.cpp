@@ -35,8 +35,10 @@
 #include "llviewercontrol.h"
 #include "llviewergenericmessage.h"
 #include "llviewerregion.h"
+#include "llviewerwindow.h"   // [HUD KIT 2026-11-25/] gViewerWindow->getDisplayScale (logHits)
 #include "llwindow.h"
 #include "wolfgrid.h"
+#include "wolfhudkit.h"   // [HUD KIT 2026-11-25/] Paul's Gunmetal Console look
 
 namespace
 {
@@ -616,6 +618,36 @@ WolfFloaterSpeed::WolfFloaterSpeed(const LLSD& key)
 {
 }
 
+// [HUD KIT 2026-11-25] Source: wolftraincab.cpp WolfTrainCabView::logHits - each drawn control's rectangle (window units, drawn
+// at full size: a floater is not zoomed) to window GL pixels; the dial is its ring, 0.55 R to 1.08 R (hitAt).
+void WolfFloaterSpeed::logHits()
+{
+    WolfFloaterSpeed* f = LLFloaterReg::findTypedInstance<WolfFloaterSpeed>("wolf_speed");
+    if (!f || !f->getVisible()) { LL_INFOS("WolfHudKit") << "hits speed: not open" << LL_ENDL; return; }
+    static const char* const NAMES[H_COUNT] = { "H_NONE", "H_DIAL", "H_WALK", "H_RUN", "H_FAST", "H_SUPER", "H_OFF", "H_THEME",
+                                                "H_DISMISS", "H_REGION_ALLOW", "H_CAP_DOWN", "H_CAP_UP", "H_REGION_SAVE" };
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    S32 n = 0;
+    for (S32 i = H_DIAL; i < H_COUNT; ++i) n += (i == H_DIAL ? f->mDialR > 0.f : !f->mHit[i].isEmpty()) ? 1 : 0;
+    LL_INFOS("WolfHudKit") << "hits speed: " << n << " (display scale " << scale.mV[VX] << ", zoom 1)" << LL_ENDL;
+    for (S32 i = H_DIAL; i < H_COUNT; ++i)
+    {
+        LLRect r = f->mHit[i];
+        if (i == H_DIAL)
+        {
+            if (f->mDialR <= 0.f) continue;
+            const S32 d = ll_round(f->mDialR * 1.08f);
+            r = LLRect(ll_round(f->mDialCX) - d, ll_round(f->mDialCY) + d, ll_round(f->mDialCX) + d, ll_round(f->mDialCY) - d);
+        }
+        if (r.isEmpty()) continue;
+        S32 sx = 0, sy = 0;
+        f->localPointToScreen(r.getCenterX(), r.getCenterY(), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit speed " << NAMES[i] << " gl " << ll_round((F32)sx * scale.mV[VX]) << ","
+                               << ll_round((F32)sy * scale.mV[VY]) << " size " << ll_round((F32)r.getWidth() * scale.mV[VX]) << ","
+                               << ll_round((F32)r.getHeight() * scale.mV[VY]) << " tip " << LL_ENDL;
+    }
+}
+
 bool WolfFloaterSpeed::postBuild()
 {
     WolfSpeed::getInstance();
@@ -854,6 +886,28 @@ void WolfFloaterSpeed::drawButton(EHit h, const std::string& label, const std::s
     const Palette& p = palette();
     const F32 l = (F32)r.mLeft, b = (F32)r.mBottom, rt = (F32)r.mRight, t = (F32)r.mTop;
     const bool hot = enabled && (mHover == h || mPressed == h);
+    // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): a backlit key in its well - lit with its lamp while chosen,
+    // pressed while held, a glow in the theme's colour under the pointer; words in the kit's key colours (wolftraincab.cpp:
+    // 7.9:1, lit 5.3:1, the second line 5.6:1), dim while it cannot be pressed. The old flat button until the sheet has loaded.
+    if (WolfHudKit::key(l, b, rt, t, mPressed == h && enabled ? WolfHudKit::CAP_DOWN : lit ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP, 0.4f))
+    {
+        static const LLColor4 KEYTEXT(0.949f, 0.957f, 0.969f, 1.f), KEYLIT(1.f, 0.753f, 0.38f, 1.f), KEYDIM(0.80f, 0.82f, 0.85f, 1.f);
+        if (hot && mPressed != h) WolfHudKit::part(WolfHudKitMap::P_GLOW_RECT, l - 6.f, b - 6.f, rt + 6.f, t + 6.f, alpha(p.mAccent, 0.35f));
+        const LLColor4 kink = !enabled ? alpha(TEXT_DIM, 0.8f) : lit ? KEYLIT : KEYTEXT;
+        const LLFontGL* kbig = LLFontGL::getFontSansSerifBold();
+        const LLFontGL* ksmall = LLFontGL::getFontSansSerifSmall();
+        const F32 kx = (l + rt) * 0.5f, ky = (b + t) * 0.5f;
+        if (sub.empty())
+        {
+            text(kbig, label, kx, ky, kink);
+        }
+        else
+        {
+            text(kbig, label, kx, ky + ksmall->getLineHeight() * 0.45f, kink);
+            text(ksmall, sub, kx, ky - kbig->getLineHeight() * 0.5f, !enabled ? alpha(TEXT_DIM, 0.8f) : lit ? KEYLIT : KEYDIM);
+        }
+        return;
+    }
     if (lit)
     {
         rectG(l, b, rt, t, p.mAccent, lerp(p.mAccent, p.mAccentDim, 0.45f));
@@ -885,10 +939,11 @@ void WolfFloaterSpeed::drawDial(F32 cx, F32 cy, F32 R)
     const bool avail = ws.available();
     const F32 maxv = avail ? ws.maxHere() : 1.f;
 
-    // the face
-    disc(cx, cy, R * 1.06f, alpha(LLColor4::black, 0.55f), alpha(LLColor4::black, 0.f));
+    // the face (the theme's colour); [HUD KIT 2026-11-25] in a chrome bezel behind glass once the kit's sheet has loaded
+    const bool kit = WolfHudKit::ready();
+    disc(cx, cy, R * (kit ? 1.22f : 1.06f), alpha(LLColor4::black, 0.55f), alpha(LLColor4::black, 0.f));
     disc(cx, cy, R, p.mFace, lerp(p.mFace, LLColor4::black, 0.5f));
-    band(cx, cy, R * 0.97f, R, 0.f, F_TWO_PI, EDGE, EDGE);
+    if (!kit) band(cx, cy, R * 0.97f, R, 0.f, F_TWO_PI, EDGE, EDGE);
 
     // the track: allowed (accent, dim), above the region's limit (dark red, labelled LIMIT below)
     const F32 r0 = R * 0.78f, r1 = R * 0.90f;
@@ -931,8 +986,10 @@ void WolfFloaterSpeed::drawDial(F32 cx, F32 cy, F32 R)
         const F32 a = angleOf(shown);
         line(cx - R * 0.12f * cosf(a), cy - R * 0.12f * sinf(a), cx + R * 0.86f * cosf(a), cy + R * 0.86f * sinf(a),
              llmax(2.f, R * 0.035f), lerp(p.mAccent, LLColor4::white, 0.35f));
-        disc(cx, cy, R * 0.07f, EDGE, BUTTON_BOTTOM);
+        if (!WolfHudKit::part(WolfHudKitMap::P_HUB, cx - R * 0.08f, cy - R * 0.08f, cx + R * 0.08f, cy + R * 0.08f))
+            disc(cx, cy, R * 0.07f, EDGE, BUTTON_BOTTOM);
     }
+    if (kit) WolfHudKit::gaugeBezel(cx, cy, R, false);   // [HUD KIT 2026-11-25/]
 
     // the readout in the middle: the speed in force, what it means, and the state in a word
     const LLFontGL* bigf = displayFont(llclamp(R * 0.30f, 14.f, 64.f));
@@ -988,21 +1045,24 @@ void WolfFloaterSpeed::draw()
         return;
     }
     untextured();
-    rectG((F32)left, (F32)bottom, (F32)right, (F32)top, p.mTop, p.mBottom);
+    // [HUD KIT 2026-11-25] a machined gunmetal plate (the theme's gradient until the kit's sheet has loaded)
+    if (!WolfHudKit::part(WolfHudKitMap::P_PLATE, (F32)left, (F32)bottom, (F32)right, (F32)top, LLColor4::white, 0.6f))
+        rectG((F32)left, (F32)bottom, (F32)right, (F32)top, p.mTop, p.mBottom);
 
     const S32 M = 8;                     // one spacing step
     const S32 W = right - left - 2 * M;
     const LLFontGL* bold = LLFontGL::getFontSansSerifBold();
     const LLFontGL* body = LLFontGL::getFontSansSerif();
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
-    const S32 btn_h = llclamp((top - bottom) / 11, 34, 52);
+    // [HUD KIT 2026-11-25] 44 px or more (was 34 at the least; the default 520-tall window gives 46)
+    const S32 btn_h = llclamp((top - bottom) / 11, 44, 52);
     const bool owner = ws.canEditRegion();
 
     // bottom up: the region owner's row, the message, Off, the presets; the dial takes what is left
     S32 y = bottom + M;
     if (owner)
     {
-        const S32 rh = llmax(28, btn_h - 8);
+        const S32 rh = btn_h;   // [HUD KIT 2026-11-25] the owner's row 44 or more (was btn_h - 8, 38 at the default size)
         const S32 w4 = (W - 3 * M) / 4;
         mHit[H_REGION_ALLOW] = LLRect(left + M, y + rh, left + M + w4 + w4 / 2, y);
         mHit[H_CAP_DOWN] = LLRect(mHit[H_REGION_ALLOW].mRight + M, y + rh, mHit[H_REGION_ALLOW].mRight + M + rh, y);
@@ -1022,10 +1082,14 @@ void WolfFloaterSpeed::draw()
 
     // the message panel: a coloured bar and a word for the level, the text, and a dismiss button. It stays until
     // dismissed or replaced by the next pick.
-    const S32 msg_h = body->getLineHeight() * 3 + M;
+    const S32 msg_h = llmax(body->getLineHeight() * 3 + M, 48);   // [HUD KIT 2026-11-25] room for the 44 px x
     {
         const LLRect panel(left + M, y + msg_h, right - M, y);
-        rectG((F32)panel.mLeft, (F32)panel.mBottom, (F32)panel.mRight, (F32)panel.mTop, alpha(BUTTON_BOTTOM, 0.9f), alpha(BUTTON_BOTTOM, 0.9f));
+        // [HUD KIT 2026-11-25] dark glass in a chrome frame (the flat panel until the kit's sheet has loaded)
+        if (WolfHudKit::part(WolfHudKitMap::P_SCREEN, (F32)panel.mLeft, (F32)panel.mBottom, (F32)panel.mRight, (F32)panel.mTop, LLColor4::white, 0.4f))
+            WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, (F32)panel.mLeft - 3.f, (F32)panel.mBottom - 3.f, (F32)panel.mRight + 3.f, (F32)panel.mTop + 3.f, LLColor4::white, 0.25f);
+        else
+            rectG((F32)panel.mLeft, (F32)panel.mBottom, (F32)panel.mRight, (F32)panel.mTop, alpha(BUTTON_BOTTOM, 0.9f), alpha(BUTTON_BOTTOM, 0.9f));
         WolfSpeed::Message m = ws.message();
         if (m.mLevel == WolfSpeed::M_NONE)
         {
@@ -1067,11 +1131,11 @@ void WolfFloaterSpeed::draw()
         const bool can_dismiss = ws.message().mLevel != WolfSpeed::M_NONE;
         if (can_dismiss)
         {
-            const S32 d = body->getLineHeight() + 4;
+            const S32 d = 44;   // [HUD KIT 2026-11-25] 44 x 44 (was a line tall, about 20)
             mHit[H_DISMISS] = LLRect(panel.mRight - d - 2, panel.mTop - 2, panel.mRight - 2, panel.mTop - 2 - d);
             drawButton(H_DISMISS, "x", "", false, true);
         }
-        const F32 text_w = (F32)panel.getWidth() - 4.f - 2.f * M - (can_dismiss ? body->getLineHeight() + 6.f : 0.f);
+        const F32 text_w = (F32)panel.getWidth() - 4.f - 2.f * M - (can_dismiss ? 44.f + 4.f : 0.f);
         const F32 word_w = bold->getWidthF32(m.mWord) + M;
         // the first line follows the word, the rest use the full width
         std::vector<std::string> lines = wrap(body, m.mText, text_w - word_w, 1);
@@ -1118,7 +1182,7 @@ void WolfFloaterSpeed::draw()
     }
 
     // the title strip with THEME, then the dial in what is left
-    const S32 title_h = bold->getLineHeight() + M;
+    const S32 title_h = llmax((S32)bold->getLineHeight() + M, 44 + M / 2);   // [HUD KIT 2026-11-25] THEME 44 tall (was a line and a step, about 24)
     const S32 theme_w = llmax(70, (S32)small->getWidthF32("THEME: NIGHT") + 2 * M);
     mHit[H_THEME] = LLRect(right - M - theme_w, top - M / 2, right - M, top - title_h);
     drawButton(H_THEME, std::string("THEME: ") + p.mName, "", false, true);
@@ -1126,9 +1190,11 @@ void WolfFloaterSpeed::draw()
 
     const S32 dial_top = top - title_h - M;
     const S32 avail_h = dial_top - y;
-    const F32 R = llmax(30.f, llmin((F32)W * 0.46f, (F32)avail_h * 0.52f));
+    // [HUD KIT 2026-11-25] with the kit's bezel (out to 1.21 R, wolfhudkit.cpp gaugeBezel) the dial keeps inside the window
+    const bool bez = WolfHudKit::ready();
+    const F32 R = llmax(30.f, llmin((F32)W * (bez ? 0.41f : 0.46f), (F32)avail_h * (bez ? 0.44f : 0.52f)));
     mDialCX = (F32)(left + right) * 0.5f;
-    mDialCY = (F32)dial_top - R * 1.02f;
+    mDialCY = (F32)dial_top - R * (bez ? 1.21f : 1.02f);
     mDialR = R;
     drawDial(mDialCX, mDialCY, R);
 }

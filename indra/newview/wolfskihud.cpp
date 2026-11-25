@@ -31,8 +31,10 @@
 #include "lltooltip.h"
 #include "llui.h"
 #include "llviewercontrol.h"
+#include "llviewerwindow.h"   // [HUD KIT 2026-11-25/] gViewerWindow->getDisplayScale (logHits)
 #include "llwindow.h"
 #include "wolfskis.h"
+#include "wolfhudkit.h"   // [HUD KIT 2026-11-25/] Paul's Gunmetal Console look
 
 static LLDefaultChildRegistry::Register<WolfSkiHud> r_wolf_ski_hud("wolf_ski_hud");
 
@@ -301,10 +303,33 @@ namespace
         S32 pressed;
     };
 
+    // [HUD KIT 2026-11-25] words on a key cap (wolftraincab.cpp's; WCAG 2 on the cap's lightest middle): 7.9:1 and lit 5.3:1
+    const LLColor4 C_KEYTEXT(0.949f, 0.957f, 0.969f, 1.f);
+    const LLColor4 C_KEYLIT(1.f, 0.753f, 0.38f, 1.f);
+
+    // a dark-glass read-out in a chrome frame (Paul's Gunmetal Console look); the old inset until the kit's sheet has loaded
+    void glass(F32 l, F32 b, F32 r, F32 t, F32 rad, const LLColor4& flat_top, const LLColor4& flat_bot)
+    {
+        if (WolfHudKit::part(WolfHudKitMap::P_SCREEN, l, b, r, t, LLColor4::white, S(0.4f)))
+        {
+            WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, l - S(3.f), b - S(3.f), r + S(3.f), t + S(3.f), LLColor4::white, S(0.25f));
+            return;
+        }
+        roundRectF(l, b, r, t, rad, flat_top, flat_bot);
+    }
+
     void button(Ctx& c, F32 l, F32 b, F32 r, F32 t, const std::string& label, WolfSkiHud::EHit id, const std::string& tip,
-                F32 px, const LLColor4& face_hi, const LLColor4& face_lo)
+                F32 px, const LLColor4& face_hi, const LLColor4& face_lo, bool lit = false)
     {
         const bool down = c.pressed == id;
+        // [HUD KIT 2026-11-25] a backlit key in its well (lit with its lamp while on, pressed while held); the old snow-blue key
+        // until the kit's sheet has loaded
+        if (WolfHudKit::key(l, b, r, t, down ? WolfHudKit::CAP_DOWN : lit ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP, S(0.4f)))
+        {
+            T((l + r) * 0.5f, (b + t) * 0.5f - (down ? S(1.f) : 0.f), label, px, lit ? C_KEYLIT : C_KEYTEXT, true);
+            c.hit(l, b, r, t, id, tip);
+            return;
+        }
         roundRectF(l, b, r, t, (t - b) * 0.25f, down ? face_lo : face_hi, down ? face_hi : face_lo);
         frameW(l, b, r, t, 1.2f, alpha(SNOW, 0.55f));
         T((l + r) * 0.5f, (b + t) * 0.5f, label, px, SNOW, true);
@@ -381,8 +406,59 @@ namespace
     }
 }
 
-WolfSkiHud::WolfSkiHud(const Params& p) : LLUICtrl(p) {}
-WolfSkiHud::~WolfSkiHud() {}
+namespace
+{
+    WolfSkiHud* sWolfSkiHudView = nullptr;   // [HUD KIT 2026-11-25] for logHits; the one view (main_view.xml)
+}
+
+WolfSkiHud::WolfSkiHud(const Params& p)
+:   LLUICtrl(p)
+{
+    sWolfSkiHudView = this;
+}
+
+WolfSkiHud::~WolfSkiHud()
+{
+    if (sWolfSkiHudView == this) sWolfSkiHudView = nullptr;
+}
+
+// [HUD KIT 2026-11-25] the hit ids by name, for logHits (as in the header's EHit); a ranged id is its first with the offset
+const char* WolfSkiHud::hitName(EHit id, S32& offset)
+{
+    offset = 0;
+
+    switch (id)
+    {
+    case H_NONE: return "H_NONE";
+    case H_UNITS: return "H_UNITS";
+    case H_TAKE_OFF: return "H_TAKE_OFF";
+    case H_HIDE: return "H_HIDE";
+    case H_HELP: return "H_HELP";
+    case H_PANEL: return "H_PANEL";
+    default: return "H_UNKNOWN";
+    }
+}
+
+void WolfSkiHud::logHits()
+{
+    if (!sWolfSkiHudView) { LL_INFOS("WolfHudKit") << "hits ski: not shown" << LL_ENDL; return; }
+    // Source: wolftraincab.cpp WolfTrainCabView::logHits - view-local UI units to window GL pixels (localPointToScreen, then the
+    // display scale). The hits are in picture units: x mHitScale (hitAt).
+    const WolfSkiHud* v = sWolfSkiHudView;
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    const F32 k = v->mHitScale;
+    LL_INFOS("WolfHudKit") << "hits ski: " << v->mHits.size() << " (display scale " << scale.mV[VX] << ", zoom " << k << ")" << LL_ENDL;
+    for (const Hit& h : v->mHits)
+    {
+        S32 sx = 0, sy = 0, off = 0;
+        const char* name = hitName(h.mId, off);
+        v->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f * k), ll_round((h.mB + h.mT) * 0.5f * k), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit ski " << name << (off ? llformat("+%d", off) : std::string()) << " gl "
+                               << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY]) << " size "
+                               << ll_round((h.mR - h.mL) * k * scale.mV[VX]) << "," << ll_round((h.mT - h.mB) * k * scale.mV[VY])
+                               << " tip " << h.mTip << LL_ENDL;
+    }
+}
 
 void WolfSkiHud::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip)
 {
@@ -516,7 +592,9 @@ void WolfSkiHud::draw()
     use(g.L);
     if (bg)
     {
-        rectG(0.f, g.bandB, W, g.panelTop, NAVY_HI, NAVY_LO);
+        // [HUD KIT 2026-11-25] a machined gunmetal plate (the night blue until the kit's sheet has loaded); the frosted top edge kept
+        if (!WolfHudKit::part(WolfHudKitMap::P_PLATE, 0.f, g.bandB, W, g.panelTop, LLColor4::white, S(0.6f)))
+            rectG(0.f, g.bandB, W, g.panelTop, NAVY_HI, NAVY_LO);
         rectF(0.f, g.panelTop - S(4.f), W, g.panelTop, alpha(ICE, 0.35f));
         rectF(0.f, g.panelTop - S(2.f), W, g.panelTop - S(1.f), alpha(SNOW, 0.8f));
     }
@@ -528,7 +606,9 @@ void WolfSkiHud::draw()
         const F32 v = s.mSpeed * k;
         mNeedle += (v - mNeedle) * llclamp((F32)LLFrameTimer::getFrameDeltaTimeF32() * 6.f, 0.f, 1.f);
         const F32 cx = X(170.f), cy = YM(752.f), r = S(124.f);
-        circleF(cx, cy, r * 1.08f, INSET, 64);
+        // [HUD KIT 2026-11-25] a real instrument: the kit's black face, and after the needle a chrome bezel behind glass
+        const bool kit = WolfHudKit::gaugeFace(cx, cy, r * 1.0f, false);
+        if (!kit) circleF(cx, cy, r * 1.08f, INSET, 64);
         auto ang = [&](F32 x) { return -135.f + 270.f * llclamp(x / full, 0.f, 1.02f); };
         // the band of the dial: ice to gold to red as it gets fast
         clockArc(cx, cy, r * 0.9f, S(10.f), -135.f, ang(full * 0.5f), alpha(ICE, 0.35f), 32);
@@ -562,19 +642,24 @@ void WolfSkiHud::draw()
             F32 nx, ny;
             pt(cx, cy, r * 0.84f, ang(mNeedle), nx, ny);
             lineW(cx, cy, nx, ny, S(4.f), SNOW);
-            circleShaded(cx, cy, S(10.f), SNOW, ICE_DIM, 20);
+            if (!(kit && WolfHudKit::part(WolfHudKitMap::P_HUB, cx - S(11.f), cy - S(11.f), cx + S(11.f), cy + S(11.f))))
+                circleShaded(cx, cy, S(10.f), SNOW, ICE_DIM, 20);
         }
-        T(cx, cy - S(40.f), llformat("%.0f", v), 34.f, SNOW, true, true);
-        roundRectF(cx - S(34.f), cy - S(84.f), cx + S(34.f), cy - S(62.f), S(6.f), alpha(ICE, 0.25f), alpha(ICE, 0.12f));
-        T(cx, cy - S(73.f), unit, 10.f, ICE, true);
-        addHit(cx - S(40.f), cy - S(88.f), cx + S(40.f), cy - S(58.f), H_UNITS,
+        if (kit) WolfHudKit::gaugeBezel(cx, cy, r, false);
+        // [HUD KIT 2026-11-25] the units a key 80 x 42 (it was a chip, its target 80 x 30), the figure above it
+        T(cx, cy - S(36.f), llformat("%.0f", v), 34.f, SNOW, true, true);
+        const bool chip_down = mPressed == H_UNITS;
+        if (!WolfHudKit::key(cx - S(40.f), cy - S(98.f), cx + S(40.f), cy - S(56.f), chip_down ? WolfHudKit::CAP_DOWN : WolfHudKit::CAP_UP, S(0.4f)))
+            roundRectF(cx - S(34.f), cy - S(84.f), cx + S(34.f), cy - S(62.f), S(6.f), alpha(ICE, 0.25f), alpha(ICE, 0.12f));
+        T(cx, cy - S(77.f), unit, 10.f, WolfHudKit::ready() ? C_KEYTEXT : ICE, true);
+        addHit(cx - S(40.f), cy - S(98.f), cx + S(40.f), cy - S(56.f), H_UNITS,
                mph ? "Speeds in miles an hour. Click for kilometres an hour." : "Speeds in kilometres an hour. Click for miles an hour.");
         if (!bg) roundRectF(cx - S(80.f), YM(898.f), cx + S(80.f), YM(876.f), S(6.f), INSET, INSET);
         T(cx, YM(888.f), s.mTop > 0.1f ? llformat("TOP %.0f %s", s.mTop * k, unit) : std::string("TOP --"), 11.f, GOLD, true);
 
         // the steepness, as the piste markers show it, with a little slope you can see
         const F32 bx = 330.f;
-        roundRectF(X(bx), YM(724.f), X(550.f), YM(612.f), S(8.f), INSET, INSET);
+        glass(X(bx), YM(724.f), X(550.f), YM(612.f), S(8.f), INSET, INSET);   // [HUD KIT 2026-11-25/]
         T(X(bx + 12.f), YM(628.f), "STEEPNESS", 9.f, GREY, true, false, LLFontGL::LEFT);
         std::string word;
         LLColor4 chip;
@@ -594,7 +679,8 @@ void WolfSkiHud::draw()
         T(X(bx + 160.f), YM(701.f), word, 10.f, SNOW, true);
 
         // air time: live while flying, else this run's longest
-        roundRectF(X(bx), YM(856.f), X(550.f), YM(736.f), S(8.f), s.mInAir ? alpha(GOLD, 0.25f) : INSET, INSET);
+        glass(X(bx), YM(856.f), X(550.f), YM(736.f), S(8.f), s.mInAir ? alpha(GOLD, 0.25f) : INSET, INSET);   // [HUD KIT 2026-11-25/]
+        if (s.mInAir && WolfHudKit::ready()) WolfHudKit::part(WolfHudKitMap::P_GLOW_RECT, X(bx), YM(856.f), X(550.f), YM(736.f), alpha(GOLD, 0.35f));
         T(X(bx + 12.f), YM(752.f), s.mInAir ? "IN THE AIR" : "BIGGEST AIR", 9.f, s.mInAir ? GOLD : GREY, true, false, LLFontGL::LEFT);
         const F32 air = s.mInAir ? s.mAirNow : s.mBigAir;
         T(X(bx + 110.f), YM(800.f), air > 0.f ? llformat("%.1f s", air) : std::string("--"), 26.f, s.mInAir ? GOLD : SNOW, true, true);
@@ -605,7 +691,7 @@ void WolfSkiHud::draw()
     // ── CENTRE: the run ──
     use(g.C);
     {
-        roundRectF(X(C_L), YM(642.f), X(C_R), YM(606.f), S(8.f), INSET, INSET);
+        glass(X(C_L), YM(642.f), X(C_R), YM(606.f), S(8.f), INSET, INSET);   // [HUD KIT 2026-11-25/]
         const std::string mw = modeWords(s, sk.kind());
         const LLColor4 mc = s.mWiped ? AMBER : s.mInAir ? GOLD : s.mRunning ? ICE : SNOW;
         fitT(X((C_L + C_R) * 0.5f), YM(624.f), mw, 13.f, 9.f, S(C_R - C_L - 20.f), mc, true);
@@ -621,10 +707,10 @@ void WolfSkiHud::draw()
         T(X((C_L + C_R) * 0.5f), YM(746.f), s.mRunning ? "RUN TIME" : (s.mHaveLast ? "LAST RUN" : "RUN TIME"), 9.f, GREY, true);
         // vertical and top speed of the run
         const F32 vert = s.mRunning ? s.mVertical : (s.mHaveLast ? s.mLastVertical : 0.f);
-        roundRectF(X(C_L + 20.f), YM(860.f), X(C_L + 190.f), YM(770.f), S(8.f), INSET, INSET);
+        glass(X(C_L + 20.f), YM(860.f), X(C_L + 190.f), YM(770.f), S(8.f), INSET, INSET);   // [HUD KIT 2026-11-25/]
         T(X(C_L + 105.f), YM(788.f), "VERTICAL", 9.f, GREY, true);
         T(X(C_L + 105.f), YM(824.f), llformat("%.0f m", vert), 22.f, SNOW, true, true);
-        roundRectF(X(C_R - 190.f), YM(860.f), X(C_R - 20.f), YM(770.f), S(8.f), INSET, INSET);
+        glass(X(C_R - 190.f), YM(860.f), X(C_R - 20.f), YM(770.f), S(8.f), INSET, INSET);   // [HUD KIT 2026-11-25/]
         T(X(C_R - 105.f), YM(788.f), "HEADING", 9.f, GREY, true);
         {
             static const char* const PTS[8] = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
@@ -650,7 +736,7 @@ void WolfSkiHud::draw()
     // ── RIGHT: style, the best here, the buttons ──
     use(g.R);
     {
-        roundRectF(X(R_L), YM(760.f), X(R_L + 300.f), YM(606.f), S(10.f), alpha(GOLD, 0.14f), INSET);
+        glass(X(R_L), YM(760.f), X(R_L + 300.f), YM(606.f), S(10.f), alpha(GOLD, 0.14f), INSET);   // [HUD KIT 2026-11-25/]
         T(X(R_L + 14.f), YM(622.f), "STYLE", 9.f, GOLD, true, false, LLFontGL::LEFT);
         const S32 score = s.mRunning ? s.mScore : (s.mHaveLast ? s.mLastScore : 0);
         T(X(R_L + 150.f), YM(676.f), thousands(score), 38.f, SNOW, true, true);
@@ -686,7 +772,7 @@ void WolfSkiHud::draw()
         // Source: wolfhelmhud.cpp PANEL (WolfHelmHudBackground) - the same switch, for this HUD's own setting
         button(c, X(R_L + 401.f), YM(780.f), X(R_L + 476.f), YM(716.f), "PANEL", H_PANEL,
                bg ? "Background on: click to float the read-outs over the world" : "Background off: click to put the panel back", 11.f,
-               bg ? LLColor4(0.20f, 0.42f, 0.66f, 0.97f) : LLColor4(0.16f, 0.26f, 0.38f, 0.97f), LLColor4(0.06f, 0.11f, 0.18f, 0.97f));
+               bg ? LLColor4(0.20f, 0.42f, 0.66f, 0.97f) : LLColor4(0.16f, 0.26f, 0.38f, 0.97f), LLColor4(0.06f, 0.11f, 0.18f, 0.97f), bg);
         button(c, X(R_L + 482.f), YM(780.f), X(1588.f), YM(716.f), "HIDE", H_HIDE,
                "Hide this HUD while you ride (Wolf World > Winter Fun... brings it back)", 12.f,
                LLColor4(0.16f, 0.26f, 0.38f, 0.97f), LLColor4(0.06f, 0.11f, 0.18f, 0.97f));

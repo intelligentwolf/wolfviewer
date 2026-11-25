@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfhudscale.h"
+#include "wolfhudkit.h"   // [HUD KIT 2026-11-25/] Paul's Gunmetal Console look
 #include "wolfvehiclerez.h"   // [HUD REZ 2026-10-12/]
 #include "wolfdashboard.h"
 
@@ -41,6 +42,7 @@
 #include "llviewercontrol.h"
 #include "llviewerobjectlist.h"
 #include "llvoavatarself.h"
+#include "llviewerwindow.h"   // [HUD KIT 2026-11-25/] gViewerWindow->getDisplayScale (logHits)
 #include "llwindow.h"
 #include "llworld.h"
 #include "wolfdrive.h"
@@ -67,6 +69,10 @@ namespace
     const LLColor4 C_NEEDLE(0.95f, 0.12f, 0.08f, 1.f);       // BMW M: red needles
     const LLColor4 C_TEAL(0.25f, 0.85f, 0.90f, 1.f);
     const LLColor4 C_ORANGE(1.00f, 0.50f, 0.05f, 1.f);
+    // [HUD KIT 2026-11-25] words on a key cap (wolftraincab.cpp's, the colours.xml WolfHudKit* ones; WCAG 2 against the cap's
+    // lightest middle as rendered, 76, 75, 78): C_KEYTEXT 7.9:1, C_KEYLIT 5.3:1
+    const LLColor4 C_KEYTEXT(0.949f, 0.957f, 0.969f, 1.f);
+    const LLColor4 C_KEYLIT(1.f, 0.753f, 0.38f, 1.f);
 
     F64 now() { return LLFrameTimer::getTotalSeconds(); }
     bool blink(F32 period = 0.8f) { return fmod(now(), (F64)period) < period * 0.5f; }
@@ -296,7 +302,14 @@ namespace
         label = w;
         if (w == "engine")        { label = "ENGINE"; }
         else if (w == "oil")      { label = "OIL"; col = C_RED; }
-        else if (w == "battery")  { label = "BATT"; col = C_RED; }
+        else if (w == "battery")
+        {
+            // [HUD KIT 2026-11-25] the submarine's battery is its motor's charge running low, a caution (amber, the word
+            // in full); a road vehicle's is the charging fault, red. (The submarine's own branch, below the "oxygen" one,
+            // was never reached: this one matched first.)
+            if (WolfDrive::instance().type() == WolfDrive::TYPE_SUBMARINE) { label = "BATTERY"; }
+            else                                                           { label = "BATT"; col = C_RED; }
+        }
         else if (w == "brake")    { label = "BRAKE"; col = C_RED; }
         else if (w == "abs")      { label = "ABS"; }
         else if (w == "temp")     { label = "TEMP"; col = C_RED; }
@@ -322,7 +335,6 @@ namespace
             col = C_RED;
         }
         else if (w == "oxygen")   { label = "OXYGEN"; col = C_RED; }
-        else if (w == "battery")  { label = "BATTERY"; }
         else if (w == "leak")     { label = "LEAK"; col = C_RED; }
         // [WOLF RETARDER 2026-10-12] held back by heat (Scania "Limiting at high temperatures"): a caution, amber
         else if (w == "retarder") { label = "RETARDER"; }
@@ -352,8 +364,10 @@ namespace
     // rather than shrinking past it, and the strip's buttons never go under their own minimum.
     const F32 U_MIN = 0.75f;
     const F32 US_MIN = 0.85f, US_MAX = 1.3f;
-    // the lamp row's narrowest, in mockup units: 7 buttons of 34 ("LAMPS" in 10 px bold) and 6 gaps of 5
-    const F32 LAMP_MIN_W = 7.f * 34.f + 6.f * 5.f;
+    // the lamp row's narrowest, in mockup units: 7 keys of 42 and 6 gaps of 5. [HUD KIT 2026-11-25] was 34 wide and 30 tall: now
+    // 42 x 42, 44 px or more at full size (wolfhudkit.h); the row grows left into the free space under the gear stick.
+    const F32 LAMP_H = 42.f;
+    const F32 LAMP_MIN_W = 7.f * 42.f + 6.f * 5.f;
     void use(const Anchor& a) { g.cur = a; }
     F32 X(F32 x) { return g.cur.ox + x * g.cur.u; }
     F32 YM(F32 y) { return g.cur.top0 - y * g.cur.u; }
@@ -414,8 +428,17 @@ namespace
     void drawDial(const Dial& o)
     {
         auto ang = [&](F32 v) { return -135.f + 270.f * llclamp(v / llmax(1.f, o.max), 0.f, 1.04f); };
-        chromeDisc(o.cx, o.cy, o.r * 1.09f);
-        circleF(o.cx, o.cy, o.r * 1.03f, LLColor4(0.02f, 0.02f, 0.024f, 1.f), 64);
+        // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): a real instrument - the kit's black face (the
+        // speedboat's navy, the submarine's green and the truck's faces keep their colour), and after the needle the hub, the
+        // glass's glare and a chrome bezel. Until the sheet has loaded, the old chrome ring and touch of glass.
+        const bool kit = WolfHudKit::ready();
+        const bool tinted = o.sea || o.navy || o.truck;
+        if (!kit)
+        {
+            chromeDisc(o.cx, o.cy, o.r * 1.09f);
+            circleF(o.cx, o.cy, o.r * 1.03f, LLColor4(0.02f, 0.02f, 0.024f, 1.f), 64);
+        }
+        if (!kit || tinted || !WolfHudKit::gaugeFace(o.cx, o.cy, o.r, false))
         circleShaded(o.cx, o.cy, o.r, o.sea ? SEA_FACE_HI : o.navy ? NAVY_FACE_HI : o.truck ? TFACE_HI : FACE_HI,
                      o.sea ? SEA_FACE_LO : o.navy ? NAVY_FACE_LO : o.truck ? TFACE_LO : FACE_LO, 64);
         if (o.green_hi > o.green_lo)
@@ -493,6 +516,11 @@ namespace
             const F32 hx = o.cx + sx * o.r * 0.90f, hy = o.cy + sy * o.r * 0.90f;
             quadF(tx + nx * ww, ty + ny * ww, tx - nx * ww, ty - ny * ww,
                   hx - nx * ww * 0.3f, hy - ny * ww * 0.3f, hx + nx * ww * 0.3f, hy + ny * ww * 0.3f, c);
+        }
+        if (kit && WolfHudKit::part(WolfHudKitMap::P_HUB, o.cx - o.r * 0.11f, o.cy - o.r * 0.11f, o.cx + o.r * 0.11f, o.cy + o.r * 0.11f)
+                && WolfHudKit::gaugeBezel(o.cx, o.cy, o.r, false))
+        {
+            return;
         }
         chromeDisc(o.cx, o.cy, o.r * 0.11f);
         circleF(o.cx, o.cy, o.r * 0.07f, LLColor4(0.043f, 0.043f, 0.051f, 1.f), 24);
@@ -597,13 +625,98 @@ namespace
 
 // ════════════════════════════════════════════════════════════════════════════════════════
 
+namespace
+{
+    WolfDashboard* sDashboard = nullptr;   // [HUD KIT 2026-11-25] for logHits; the one dashboard (main_view.xml)
+}
+
 WolfDashboard::WolfDashboard(const Params& p)
 :   LLUICtrl(p)
 {
+    sDashboard = this;
 }
 
 WolfDashboard::~WolfDashboard()
 {
+    if (sDashboard == this) sDashboard = nullptr;
+}
+
+// [HUD KIT 2026-11-25] the hit ids by name, for logHits (as in wolfdashboard.h's EHit); a ranged id (the selector's and gate's
+// positions, the retarder stalk's) is its range's first id with the offset: "H_SEL_0+3"
+const char* WolfDashboard::hitName(EHit id, S32& offset)
+{
+    offset = 0;
+    if (id >= H_SEL_0 && id <= H_SEL_7)   { offset = id - H_SEL_0;  return "H_SEL_0"; }
+    if (id >= H_GATE_0 && id <= H_GATE_13) { offset = id - H_GATE_0; return "H_GATE_0"; }
+    if (id >= H_RET_0 && id <= H_RET_5)   { offset = id - H_RET_0;  return "H_RET_0"; }
+    switch (id)
+    {
+    case H_NONE: return "H_NONE";
+    case H_WHEEL: return "H_WHEEL";
+    case H_THROTTLE: return "H_THROTTLE";
+    case H_BRAKE: return "H_BRAKE";
+    case H_SHIFT_UP: return "H_SHIFT_UP";
+    case H_SHIFT_DOWN: return "H_SHIFT_DOWN";
+    case H_BOX_MODE: return "H_BOX_MODE";
+    case H_TYPE_CAR: return "H_TYPE_CAR";
+    case H_TYPE_TRUCK: return "H_TYPE_TRUCK";
+    case H_TYPE_BIKE: return "H_TYPE_BIKE";
+    case H_UNITS: return "H_UNITS";
+    case H_PANEL: return "H_PANEL";
+    case H_CONTROLS: return "H_CONTROLS";
+    case H_TRIP: return "H_TRIP";
+    case H_CLOSE: return "H_CLOSE";
+    case H_MAP: return "H_MAP";
+    case H_HELP: return "H_HELP";
+    case H_LIGHTS: return "H_LIGHTS";
+    case H_IND_L: return "H_IND_L";
+    case H_IND_R: return "H_IND_R";
+    case H_HANDBRAKE: return "H_HANDBRAKE";
+    case H_HORN: return "H_HORN";
+    case H_HAZARDS: return "H_HAZARDS";
+    case H_CRUISE: return "H_CRUISE";
+    case H_RANGE: return "H_RANGE";
+    case H_SPLIT: return "H_SPLIT";
+    case H_MINI: return "H_MINI";
+    case H_INVENTORY: return "H_INVENTORY";
+    case H_REZ: return "H_REZ";
+    case H_STAGE: return "H_STAGE";
+    case H_BOOST: return "H_BOOST";
+    case H_ANCHOR: return "H_ANCHOR";
+    case H_ASSIST: return "H_ASSIST";
+    case H_LANDING_GEAR: return "H_LANDING_GEAR";
+    case H_ENGINE: return "H_ENGINE";
+    case H_DIVE: return "H_DIVE";
+    case H_SURFACE: return "H_SURFACE";
+    case H_PERISCOPE: return "H_PERISCOPE";
+    case H_SONAR: return "H_SONAR";
+    case H_RET_DSC: return "H_RET_DSC";
+    case H_RET_DSC_DOWN: return "H_RET_DSC_DOWN";
+    case H_RET_DSC_UP: return "H_RET_DSC_UP";
+    case H_RET_AUT: return "H_RET_AUT";
+    default: return "H_UNKNOWN";
+    }
+}
+
+void WolfDashboard::logHits()
+{
+    if (!sDashboard) { LL_INFOS("WolfHudKit") << "hits dashboard: no dashboard" << LL_ENDL; return; }
+    // Source: wolftraincab.cpp WolfTrainCabView::logHits - view-local UI units to window GL pixels (localPointToScreen, then the
+    // display scale). The hits are in picture units: x mHitScale (hitAt); the mini bar's mHitScale is 1.
+    const WolfDashboard* v = sDashboard;
+    const LLVector2 scale = gViewerWindow ? gViewerWindow->getDisplayScale() : LLVector2(1.f, 1.f);
+    const F32 k = v->mHitScale;
+    LL_INFOS("WolfHudKit") << "hits dashboard: " << v->mHits.size() << " (display scale " << scale.mV[VX] << ", zoom " << k << ")" << LL_ENDL;
+    for (const Hit& h : v->mHits)
+    {
+        S32 sx = 0, sy = 0, off = 0;
+        const char* name = hitName(h.mId, off);
+        v->localPointToScreen(ll_round((h.mL + h.mR) * 0.5f * k), ll_round((h.mB + h.mT) * 0.5f * k), &sx, &sy);
+        LL_INFOS("WolfHudKit") << "WolfHudKit hit dashboard " << name << (off ? llformat("+%d", off) : std::string()) << " gl "
+                               << ll_round((F32)sx * scale.mV[VX]) << "," << ll_round((F32)sy * scale.mV[VY]) << " size "
+                               << ll_round((h.mR - h.mL) * k * scale.mV[VX]) << "," << ll_round((h.mT - h.mB) * k * scale.mV[VY])
+                               << " tip " << h.mTip << LL_ENDL;
+    }
 }
 
 void WolfDashboard::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip)
@@ -712,8 +825,14 @@ void WolfDashboard::drawMiniBar(F32 bottom)
     mPanelB = bottom;
     mPanelT = t + 2.f;
 
-    roundRectF(l - 3.f, b - 3.f, r + 3.f, t + 3.f, 6.f, C_GREY, C_OFF);
-    roundRectF(l, b, r, t, 5.f, LLColor4(0.10f, 0.10f, 0.11f, 0.95f), LLColor4(0.03f, 0.03f, 0.04f, 0.95f));
+    // [HUD KIT 2026-11-25] Paul's Gunmetal Console look: a gunmetal bar, dark-glass readouts, backlit keys (the old flat bar until the
+    // kit's sheet has loaded)
+    const bool kit = WolfHudKit::part(WolfHudKitMap::P_PLATE, l - 3.f, b - 3.f, r + 3.f, t + 3.f, LLColor4::white, 0.5f);
+    if (!kit)
+    {
+        roundRectF(l - 3.f, b - 3.f, r + 3.f, t + 3.f, 6.f, C_GREY, C_OFF);
+        roundRectF(l, b, r, t, 5.f, LLColor4(0.10f, 0.10f, 0.11f, 0.95f), LLColor4(0.03f, 0.03f, 0.04f, 0.95f));
+    }
     const LLFontGL* vf = face("B612", LLFontGL::BOLD, h * 0.42f);
     const LLFontGL* lf = face("B612", LLFontGL::NORMAL, h * 0.24f);
     const LLFontGL* kf = face("B612", LLFontGL::BOLD, h * 0.34f);
@@ -725,13 +844,25 @@ void WolfDashboard::drawMiniBar(F32 bottom)
         if (c.key)
         {
             const bool pressed = mPressed == c.hit;
-            roundRectF(cl + 2.f, b + 5.f - (pressed ? 1.f : 0.f), cr - 2.f, t - 5.f - (pressed ? 1.f : 0.f), 3.f,
-                       LLColor4(0.22f, 0.23f, 0.25f, 1.f), LLColor4(0.12f, 0.12f, 0.14f, 1.f));
-            text(kf, c.value, (cl + cr) * 0.5f, (b + t) * 0.5f - (pressed ? 1.f : 0.f), c.col);
+            // lit (the cap's lamp, not its colour alone) while a rez is under way (REZ) or the inventory is open (INV)
+            const bool on = (c.hit == H_REZ && WolfVehicleRez::pending()) || (c.hit == H_INVENTORY && WolfHud::inventoryOpen());
+            if (kit && WolfHudKit::key(cl + 1.f, b + 2.f, cr - 1.f, t - 2.f, pressed ? WolfHudKit::CAP_DOWN : on ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP, 0.4f))
+            {
+                text(kf, c.value, (cl + cr) * 0.5f, (b + t) * 0.5f - (pressed ? 1.f : 0.f), on ? C_KEYLIT : C_KEYTEXT);
+            }
+            else
+            {
+                roundRectF(cl + 2.f, b + 5.f - (pressed ? 1.f : 0.f), cr - 2.f, t - 5.f - (pressed ? 1.f : 0.f), 3.f,
+                           LLColor4(0.22f, 0.23f, 0.25f, 1.f), LLColor4(0.12f, 0.12f, 0.14f, 1.f));
+                text(kf, c.value, (cl + cr) * 0.5f, (b + t) * 0.5f - (pressed ? 1.f : 0.f), c.col);
+            }
         }
         else
         {
-            rectF(cl, b + 4.f, cr, t - 4.f, C_BLACK);
+            if (!(kit && WolfHudKit::part(WolfHudKitMap::P_SCREEN, cl, b + 4.f, cr, t - 4.f, LLColor4::white, 0.4f)))
+            {
+                rectF(cl, b + 4.f, cr, t - 4.f, C_BLACK);
+            }
             text(lf, c.label, (cl + cr) * 0.5f, t - 4.f - h * 0.17f, C_GREY);
             text(vf, c.value, (cl + cr) * 0.5f, b + 4.f + h * 0.30f, c.col);
         }
@@ -777,6 +908,15 @@ namespace
                 const std::string& tip, F32 px = 13.f)
     {
         const bool down = c.pressed == id;
+        // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): a backlit key in its well - lit (with its lamp) while
+        // on, pressed while held - its words light on the cap; the key's 30 sheet pixels of bevel at 12 units (S(0.4)). Until the
+        // kit's sheet has loaded, the old flat key below.
+        if (WolfHudKit::key(l, b, r, t, down ? WolfHudKit::CAP_DOWN : lit ? WolfHudKit::CAP_LIT : WolfHudKit::CAP_UP, S(0.4f)))
+        {
+            T((l + r) * 0.5f, (b + t) * 0.5f - (down ? S(1.f) : 0.f), label, px, lit ? C_KEYLIT : C_KEYTEXT, true);
+            c.hit(l, b, r, t, id, tip);
+            return;
+        }
         roundRectF(l, b, r, t, (t - b) * 0.22f,
                    down ? LLColor4(0.09f, 0.09f, 0.10f, 0.96f) : LLColor4(0.227f, 0.239f, 0.263f, 0.96f),
                    down ? LLColor4(0.16f, 0.16f, 0.18f, 0.96f) : LLColor4(0.086f, 0.09f, 0.102f, 0.96f));
@@ -803,7 +943,7 @@ namespace
         const bool boat = ty == WolfDrive::TYPE_SPEEDBOAT || ty == WolfDrive::TYPE_SUBMARINE, ship = ty == WolfDrive::TYPE_SPACESHIP;
         std::vector<B> bs =
         {
-            { 30.f, "X", false, WolfDashboard::H_CLOSE, "Close the dashboard. Wolf World > Vehicles & Travel > Car Dashboard / Speedboat Helm / Spaceship HUD (or the toolbar icons) bring it back." },
+            { 42.f, "X", false, WolfDashboard::H_CLOSE, "Close the dashboard. Wolf World > Vehicles & Travel > Car Dashboard / Speedboat Helm / Spaceship HUD (or the toolbar icons) bring it back." },
             { 70.f, "MINI", false, WolfDashboard::H_MINI, "Shrink the dashboard to one small bar; FULL on it brings it back" },
             { 70.f, "HELP", false, WolfDashboard::H_HELP, "How the dashboard works, setting up a wheel and keys, and wolfDashboard for vehicle makers" },
             { 120.f, "CONTROLS", false, WolfDashboard::H_CONTROLS, "Driving Controls: a steering wheel, pedals or gamepad, and the keys for the horn, lamps, gears and the boat / spaceship buttons" },
@@ -837,7 +977,9 @@ namespace
             bs.push_back({ 92.f, "TRUCK", ty == WolfDrive::TYPE_TRUCK, WolfDashboard::H_TYPE_TRUCK, "Truck dashboard (long-haul truck style, 12-speed range-splitter: manual or automatic, air brakes)" });
             bs.push_back({ 92.f, "CAR", ty == WolfDrive::TYPE_CAR, WolfDashboard::H_TYPE_CAR, "Car dashboard (classic sports car style, 8 gears: manual or automatic)" });
         }
-        const F32 margin = S(14.f), gap = S(8.f), h = S(30.f), line = S(38.f);
+        // [HUD KIT 2026-11-25] the keys 42 units tall (and X 42 wide; was 30): 44 px or more at full size (wolfhudkit.h, at
+        // 1080 p and UI size 1.0 the strip's unit is 1.066 px)
+        const F32 margin = S(14.f), gap = S(8.f), h = S(42.f), line = S(50.f);
         F32 x = g.W - margin;
         F32 bot = g.panelTop + S(8.f);
         S32 lines = 1;
@@ -960,15 +1102,8 @@ namespace
                   : ty == WolfDrive::TYPE_BIKE ? "Gear down: one gear (Page Down, or your gear-down key or button)"
                                                : "Gear down: one gear; below first is N, then R (Page Down, or your gear-down key or button)", 20.f);
         T((bl + xr) * 0.5f, ybot - S(14.f), under, 10.f, C_GREY);
-        if (ty != WolfDrive::TYPE_BIKE)
-        {
-            // the gearbox mode, above the lever (Paul: "select automatic or manual gears default to manual")
-            const F32 mt = ytop + S(30.f), mb = ytop + S(6.f);
-            button(c, xl, mb, xr, mt, ab ? "AUTO" : "MANUAL", ab, WolfDashboard::H_BOX_MODE,
-                   ab ? "Gearbox: AUTOMATIC - it picks the gear from the speed; + / - take one yourself (M). Click for MANUAL."
-                      : "Gearbox: MANUAL - Page Up / Page Down (or + / -) step one gear; past top you stay in top, below 1 is N then R. Click for AUTOMATIC.",
-                   11.f);
-        }
+        // [HUD KIT 2026-11-25] (Shadow 25 Nov) the gearbox mode key that stood here was never drawn: it was for the car and truck,
+        // and only the bike has this selector (they have gearShifter, with its own AUTO / MANUAL). Removed.
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════
@@ -1002,6 +1137,12 @@ namespace
 
     void plate(F32 l, F32 b, F32 r, F32 t)
     {
+        // [HUD KIT 2026-11-25] the gear stick's plate machined gunmetal in a chrome frame (the old brushed plate until the sheet loads)
+        if (WolfHudKit::part(WolfHudKitMap::P_PLATE, l, b, r, t, LLColor4::white, S(0.4f)))
+        {
+            WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, l - S(3.f), b - S(3.f), r + S(3.f), t + S(3.f), LLColor4::white, S(0.25f));
+            return;
+        }
         roundRectF(l, b, r, t, S(10.f), LLColor4(0.20f, 0.21f, 0.23f, 1.f), LLColor4(0.08f, 0.085f, 0.095f, 1.f));
         // brushed lines
         for (F32 y = b + S(6.f); y < t - S(4.f); y += S(3.f))
@@ -1009,6 +1150,20 @@ namespace
             rectF(l + S(6.f), y, r - S(6.f), y + 1.f, LLColor4(1.f, 1.f, 1.f, 0.025f));
         }
         frameW(l, b, r, t, 1.2f, LLColor4(0.33f, 0.35f, 0.38f, 1.f));
+    }
+
+    // [HUD KIT 2026-11-25] Paul's Gunmetal Console look (wolfhudkit.h): the panel a machined gunmetal plate across the band; false
+    // (nothing drawn) until the kit's sheet has loaded, and the design draws its old background.
+    bool kitBand()
+    {
+        return WolfHudKit::part(WolfHudKitMap::P_PLATE, 0.f, g.bandB, g.W, g.panelTop, LLColor4::white, S(0.6f));
+    }
+    // a housing (the cluster's, the screen's): carbon, or dark glass, in a chrome frame; false until the sheet has loaded
+    bool kitHousing(F32 l, F32 b, F32 r, F32 t, bool glass)
+    {
+        if (!WolfHudKit::part(glass ? WolfHudKitMap::P_SCREEN : WolfHudKitMap::P_INLAY, l, b, r, t, LLColor4::white, S(0.5f))) return false;
+        WolfHudKit::part(WolfHudKitMap::P_FRAME_CHROME, l - S(4.f), b - S(4.f), r + S(4.f), t + S(4.f), LLColor4::white, S(0.3f));
+        return true;
     }
 
     // A slot cut in the plate, from (x0,y0) to (x1,y1): dark, with a light lip on one side.
@@ -1068,22 +1223,23 @@ namespace
         const S32 sel = d.selector();
         KnobPos& kp = sKnob[llclamp((S32)ty, 0, 2)];
 
-        // the gearbox mode button above (as before), the +/- below
-        const F32 mt = ytop + S(30.f), mb = ytop + S(6.f);
-        button(c, xl, mb, xr, mt, ab ? "AUTO" : "MANUAL", ab, WolfDashboard::H_BOX_MODE,
+        // [HUD KIT 2026-11-25] the gearbox mode key at the top of the stick's space (it was above it, 24 units tall), the - / + keys
+        // at the bottom (were 22 tall), both 42 units: 44 px or more at full size (wolfhudkit.h). The plate between them.
+        const F32 bh = S(42.f), kgap = S(4.f);
+        button(c, xl, ytop - bh, xr, ytop, ab ? "AUTO" : "MANUAL", ab, WolfDashboard::H_BOX_MODE,
                ab ? "Gearbox: AUTOMATIC - it picks the gear from the speed; + / - (or the M gate) take one yourself. Click for MANUAL."
                   : "Gearbox: MANUAL - click a gear in the gate, or Page Up / Page Down (+ / -) one gear at a time. Click for AUTOMATIC.",
                11.f);
-        const F32 bh = S(22.f);
-        const F32 pb = ybot + bh + S(6.f);     // the plate's bottom: the +/- row under it
+        const F32 pt = ytop - bh - kgap;       // the plate's top: the mode key over it
+        const F32 pb = ybot + bh + kgap;       // the plate's bottom: the - / + row under it
         const F32 mid = (xl + xr) * 0.5f;
         button(c, xl, ybot, mid - S(3.f), ybot + bh, "-", false, WolfDashboard::H_SHIFT_DOWN,
                "Gear down: one gear (Page Down, or your gear-down key or button)", 16.f);
         button(c, mid + S(3.f), ybot, xr, ybot + bh, "+", false, WolfDashboard::H_SHIFT_UP,
                "Gear up: one gear (Page Up, or your gear-up key or button)", 16.f);
-        plate(xl, pb, xr, ytop);
+        plate(xl, pb, xr, pt);
 
-        const F32 w = xr - xl, h = ytop - pb;
+        const F32 w = xr - xl, h = pt - pb;
         const F32 kr = llmin(w * 0.15f, S(15.f));
 
         if (ab)
@@ -1091,7 +1247,10 @@ namespace
             // AUTOMATIC: P R N D (truck R N A) in a straight gate; the M gate beside D.
             const std::vector<S32> pos = WolfDrive::selectorPositions(ty, true);
             const S32 n = (S32)pos.size();
-            const F32 gx = xl + w * 0.36f, top = ytop - h * 0.12f, bot = pb + h * 0.18f;
+            // [HUD KIT 2026-11-25] each position in the middle of its target (below): its share of the stick's height, the mode
+            // key's bottom to the - / + row's top
+            const F32 rh = (ytop - bh - (ybot + bh)) / (F32)llmax(1, n);
+            const F32 gx = xl + w * 0.36f, top = ytop - bh - rh * 0.5f, bot = ybot + bh + rh * 0.5f;
             slot(gx, top, gx, bot);
             const F32 mx = xl + w * 0.72f;
             slot(gx, bot, mx, bot);                                    // across to M
@@ -1099,19 +1258,27 @@ namespace
             F32 tx = gx, tyy = bot;
             for (S32 i = 0; i < n; ++i)
             {
-                const F32 y = top - (top - bot) * (F32)i / (F32)llmax(1, n - 1);
+                const F32 rt = ytop - bh - rh * (F32)i;
+                const F32 y = rt - rh * 0.5f;
                 const S32 gsel = pos[i];
                 const bool on = sel == gsel;
                 std::string label = WolfDrive::gearLabel(gsel);
                 if (gsel == WolfDrive::GEAR_D && truck) label = "A";
+                // [HUD KIT 2026-11-25] the position the lever is in: a lit lamp behind its letter and a ring round it (not its
+                // colour alone)
+                if (on) WolfHudKit::glow(xl + w * 0.13f, y, S(16.f), gsel == WolfDrive::GEAR_R ? C_RED : C_GREEN);
                 T(xl + w * 0.13f, y, label, 13.f, on ? (gsel == WolfDrive::GEAR_R ? C_RED : C_GREEN) : C_DIM, true);
+                if (on) frameW(xl + w * 0.13f - S(9.f), y - S(9.f), xl + w * 0.13f + S(9.f), y + S(9.f), S(1.5f), C_WHITE);
                 if (on) { tx = gx; tyy = y; }
-                c.hit(xl, y - h * 0.08f, gx + w * 0.12f, y + h * 0.08f, (WolfDashboard::EHit)(WolfDashboard::H_SEL_0 + i),
+                // [HUD KIT 2026-11-25] the target is the whole row, up to the M gate (was 0.16 of the plate: 32 x 34 px). There is
+                // no other way to these positions (in D, + / - and Page Up / Page Down take M gears), so they must be 44 px
+                // themselves: P R N D at 42 units each (the stick 252 tall).
+                c.hit(xl, rt - rh, mx - w * 0.1f, rt, (WolfDashboard::EHit)(WolfDashboard::H_SEL_0 + i),
                       "Put the lever in " + label + (gsel == WolfDrive::GEAR_D ? " - the automatic drives" : ""));
             }
             T(mx + w * 0.14f, bot + h * 0.16f, "+", 12.f, C_GREY, true);
             T(mx + w * 0.14f, bot - h * 0.04f, "-", 12.f, C_GREY, true);
-            T(mx, bot - h * 0.14f, "M", 11.f, C_GREY, true);
+            T(mx, bot + h * 0.30f, "M", 11.f, C_GREY, true);   // [HUD KIT 2026-11-25] over its gate (was under it: the - / + keys are there now)
             c.hit(mx - w * 0.1f, bot + h * 0.02f, mx + w * 0.22f, bot + h * 0.24f, WolfDashboard::H_SHIFT_UP, "M gate forward: a gear up, held by you");
             c.hit(mx - w * 0.1f, bot - h * 0.12f, mx + w * 0.22f, bot - h * 0.01f, WolfDashboard::H_SHIFT_DOWN, "M gate back: a gear down, held by you");
             glideKnob(kp, tx, tyy);
@@ -1121,7 +1288,7 @@ namespace
 
         // MANUAL
         const F32 rail = pb + h * 0.5f;
-        const F32 up = ytop - h * 0.14f, down = pb + h * 0.14f;
+        const F32 up = pt - h * 0.14f, down = pb + h * 0.14f;
         struct Gate { S32 sel; F32 x, y; };
         std::vector<Gate> gates;
         if (!truck)
@@ -1181,6 +1348,7 @@ namespace
             {
                 const F32 ly = gt.y + (gt.y > rail ? S(10.f) : -S(10.f));
                 T(gt.x, ly, label, 11.f, on ? (gt.sel == WolfDrive::GEAR_R ? C_RED : C_WHITE) : C_DIM, true);
+                if (on) frameW(gt.x - S(8.f), ly - S(8.f), gt.x + S(8.f), ly + S(8.f), S(1.5f), C_WHITE);   // [HUD KIT 2026-11-25/] not colour alone
             }
             const S32 idx = gt.sel == WolfDrive::GEAR_R ? 0 : gt.sel == WolfDrive::GEAR_N ? 1 : 1 + gt.sel;
             const F32 hw = llmax(S(8.f), w * 0.09f);
@@ -1239,7 +1407,9 @@ namespace
     {
         WolfDrive& d = WolfDrive::instance();
         const F32 w = xr - xl;
-        const F32 bh = S(20.f), gap = S(4.f);
+        // [HUD KIT 2026-11-25] AUT, DSC and the set speed's - / + 42 units tall (were 20): 44 px or more at full size (wolfhudkit.h).
+        // The stalk below gets what is left.
+        const F32 bh = S(42.f), gap = S(4.f);
         F32 y = ytop;
         button(c, xl, y - bh, xr, y, "AUT", d.retarderAut(), WolfDashboard::H_RET_AUT,
                std::string(d.retarderAut() ? "Retarder AUT: ON - pressing the brake pedal brings the retarder in first, before the wheel brakes. Click for OFF."
@@ -1316,14 +1486,14 @@ namespace
         const Anchor was = g.cur;
         const F32 k = llmax(was.u, g.us);
         const F32 rw = llmax((xr_in - xl_in) / was.u, LAMP_MIN_W);
-        const F32 bottom = ytop_in - S(30.f);
+        const F32 bottom = ytop_in - S(LAMP_H);
         Anchor lb;
         lb.u = k;
         lb.ox = xr_in - rw * k;
-        lb.top0 = bottom + 30.f * k;
+        lb.top0 = bottom + LAMP_H * k;
         use(lb);
         const F32 xl = X(0.f), xr = X(rw), ytop = YM(0.f);
-        const F32 gap = S(5.f), bw = (xr - xl - gap * (N - 1)) / N, h = S(30.f);
+        const F32 gap = S(5.f), bw = (xr - xl - gap * (N - 1)) / N, h = S(LAMP_H);
         const bool horn_builtin = WolfDrive::instance().actionCfg(WolfDrive::ACT_HORN).mOut == WolfDrive::OUT_NONE;
         struct B { std::string l; bool lit; WolfDashboard::EHit id; std::string tip; };
         const B bs[N] =
@@ -1610,7 +1780,7 @@ namespace
         const WolfDrive::Spec& sp = WolfDrive::spec(WolfDrive::TYPE_SPEEDBOAT);
         if (bg)
         {
-            rectG(0.f, g.bandB, g.W, g.panelTop, NAVY_HI, NAVY_LO);
+            if (!kitBand()) rectG(0.f, g.bandB, g.W, g.panelTop, NAVY_HI, NAVY_LO);   // [HUD KIT 2026-11-25/]
             rectF(0.f, g.panelTop - 2.f, g.W, g.panelTop, C_TEAL);
         }
 
@@ -1641,9 +1811,10 @@ namespace
             roundRectF(lx - S(20.f), hy - S(8.f), lx + S(12.f), hy + S(8.f), S(4.f), LLColor4(0.2f, 0.21f, 0.23f, 1.f), LLColor4(0.04f, 0.04f, 0.05f, 1.f));
             frameW(lx - S(20.f), hy - S(8.f), lx + S(12.f), hy + S(8.f), 1.f, C_TEAL);
             T(X(385.f), YM(836.f), llformat("%+d%%", (S32)llround(thr)), 11.f, s.mThrottleScripted ? C_TEAL : C_GREY, true, true);
-            button(c, X(322.f), YM(880.f), X(383.f), YM(848.f), "AHEAD", d.throttle() > 0.f, WolfDashboard::H_THROTTLE,
+            // [HUD KIT 2026-11-25] AHEAD / ASTERN 42 units tall (were 32), the speed step's - / + 42 wide (were 32): 44 px or more
+            button(c, X(322.f), YM(890.f), X(383.f), YM(848.f), "AHEAD", d.throttle() > 0.f, WolfDashboard::H_THROTTLE,
                    "Ahead: hold it (or Up / W, or your accelerator)", 9.f);
-            button(c, X(387.f), YM(880.f), X(448.f), YM(848.f), "ASTERN", d.brake() > 0.f, WolfDashboard::H_BRAKE,
+            button(c, X(387.f), YM(890.f), X(448.f), YM(848.f), "ASTERN", d.brake() > 0.f, WolfDashboard::H_BRAKE,
                    "Astern: hold it (or Down / S, or your brake)", 9.f);
         }
 
@@ -1669,9 +1840,9 @@ namespace
             box(492.f, 682.f, cell, NAVY_LINE);
             T(X(587.f), YM(728.f), s.mStepFromChat ? "SPEED STEP  (BOAT)" : "SPEED STEP", 10.f, C_TEAL, true);
             T(X(587.f), YM(762.f), stepText(s), 28.f, C_WHITE, true, true);
-            button(c, X(498.f), YM(788.f), X(530.f), YM(746.f), "-", false, WolfDashboard::H_SHIFT_DOWN,
+            button(c, X(498.f), YM(788.f), X(540.f), YM(746.f), "-", false, WolfDashboard::H_SHIFT_DOWN,
                    "A speed step down (Page Down, or your gear-down key or button)" + keyHint(WolfDrive::ACT_GEAR_DOWN), 16.f);
-            button(c, X(644.f), YM(788.f), X(676.f), YM(746.f), "+", false, WolfDashboard::H_SHIFT_UP,
+            button(c, X(634.f), YM(788.f), X(676.f), YM(746.f), "+", false, WolfDashboard::H_SHIFT_UP,
                    "A speed step up (Page Up, or your gear-up key or button)" + keyHint(WolfDrive::ACT_GEAR_UP), 16.f);
             // ON PLANE (the thresholds are wolfdrive.cpp's MODEL)
             const LLColor4 plane_col = s.mOnPlane ? C_GREEN : s.mPlaning ? C_AMBER : C_DIM;
@@ -1754,7 +1925,8 @@ namespace
         const LLColor4 glass(0.f, 0.02f, 0.04f, 0.55f);
         if (bg)
         {
-            rectG(0.f, g.bandB, g.W, g.panelTop, LLColor4(0.f, 0.03f, 0.06f, 0.55f), LLColor4(0.f, 0.01f, 0.03f, 0.75f));
+            if (!kitBand())   // [HUD KIT 2026-11-25/]
+                rectG(0.f, g.bandB, g.W, g.panelTop, LLColor4(0.f, 0.03f, 0.06f, 0.55f), LLColor4(0.f, 0.01f, 0.03f, 0.75f));
             rectF(0.f, g.panelTop - 1.5f, g.W, g.panelTop, alpha(SC_CYAN, 0.6f));
         }
 
@@ -2171,7 +2343,7 @@ namespace
         WolfDrive& d = WolfDrive::instance();
         if (bg)
         {
-            rectG(0.f, g.bandB, g.W, g.panelTop, SUB_HI, SUB_LO);
+            if (!kitBand()) rectG(0.f, g.bandB, g.W, g.panelTop, SUB_HI, SUB_LO);   // [HUD KIT 2026-11-25/]
             rectF(0.f, g.panelTop - 2.f, g.W, g.panelTop, C_TEAL);
         }
 
@@ -2261,11 +2433,12 @@ namespace
             rectF(llmin(mid, mid + (tr - mid) * thr / 100.f), tb, llmax(mid, mid + (tr - mid) * thr / 100.f), tt, thr < 0.f ? C_AMBER : SUB_GREEN);
             rectF(mid - 0.75f, tb - S(3.f), mid + 0.75f, tt + S(3.f), C_WHITE);
             frameW(tl, tb, tr, tt, 1.f, SUB_LINE);
-            button(c, X(924.f), YM(838.f), X(1018.f), YM(806.f), "AHEAD", d.throttle() > 0.f, WolfDashboard::H_THROTTLE,
+            // [HUD KIT 2026-11-25] 42 units tall (were 32): 44 px or more at full size
+            button(c, X(924.f), YM(848.f), X(1018.f), YM(806.f), "AHEAD", d.throttle() > 0.f, WolfDashboard::H_THROTTLE,
                    "Ahead: hold it (or Up / W, or your accelerator)", 10.f);
-            button(c, X(1024.f), YM(838.f), X(1118.f), YM(806.f), "ASTERN", d.brake() > 0.f, WolfDashboard::H_BRAKE,
+            button(c, X(1024.f), YM(848.f), X(1118.f), YM(806.f), "ASTERN", d.brake() > 0.f, WolfDashboard::H_BRAKE,
                    "Astern: hold it (or Down / S, or your brake)", 10.f);
-            T(X(1021.f), YM(860.f), "Page Up / Page Down: up / down", 8.f, C_GREY);
+            T(X(1021.f), YM(866.f), "Page Up / Page Down: up / down", 8.f, C_GREY);
         }
 
         // ---- right: speed, the buttons ----
@@ -2681,12 +2854,14 @@ void WolfDashboard::draw()
         // red needles and 330 km/h after the BMW M3 (F80).
         if (bg)
         {
-            rectG(0.f, g.bandB, W, g.panelTop, LLColor4(0.11f, 0.11f, 0.122f, 1.f), LLColor4(0.024f, 0.024f, 0.028f, 1.f));
+            // [HUD KIT 2026-11-25] the gunmetal plate, the stitching kept, the cluster's housing carbon in a chrome frame
+            if (!kitBand()) rectG(0.f, g.bandB, W, g.panelTop, LLColor4(0.11f, 0.11f, 0.122f, 1.f), LLColor4(0.024f, 0.024f, 0.028f, 1.f));
             for (F32 x = S(6.f); x < W; x += S(13.f))
             {
                 rectF(x, g.panelTop - S(10.f) - 0.8f, x + S(7.f), g.panelTop - S(10.f) + 0.8f, LLColor4(0.66f, 0.22f, 0.17f, 0.8f));
             }
-            roundRectF(X(455.f), YM(900.f), X(1145.f), YM(616.f), S(60.f), LLColor4(0.07f, 0.075f, 0.086f, 1.f), LLColor4(0.012f, 0.012f, 0.016f, 1.f));
+            if (!kitHousing(X(455.f), YM(896.f), X(1145.f), YM(616.f), false))
+                roundRectF(X(455.f), YM(900.f), X(1145.f), YM(616.f), S(60.f), LLColor4(0.07f, 0.075f, 0.086f, 1.f), LLColor4(0.012f, 0.012f, 0.016f, 1.f));
         }
         const F32 cy = YM(778.f);
         drawDial({ X(588.f), cy, S(82.f), s.mMaxSpeed, s.mMaxSpeed > 250.f ? 30.f : s.mMaxSpeed > 120.f ? 20.f : 10.f,
@@ -2731,9 +2906,9 @@ void WolfDashboard::draw()
         wheel(X(220.f), YM(761.f), S(124.f), d.steer(), false);
         addHit(X(96.f), YM(885.f), X(344.f), YM(637.f), H_WHEEL, "Steering wheel: drag left or right (or Left / Right, A / D, or your own wheel)");
         use(g.R);
-        gearShifter(c, X(1175.f), X(1267.f), YM(632.f), YM(832.f), ty);   // [GEAR STICK 2026-10-10]
+        gearShifter(c, X(1175.f), X(1267.f), YM(600.f), YM(852.f), ty);   // [HUD KIT 2026-11-25] was 632-832: room for 44 px keys   // [GEAR STICK 2026-10-10]
         pedals(c, X(1310.f), X(1580.f), YM(666.f), 172.f, d.brake(), d.throttle(), false);
-        lampButtons(c, X(1310.f), X(1580.f), YM(858.f), s, d.buttonsHeld());
+        lampButtons(c, X(1310.f), X(1580.f), YM(856.f), s, d.buttonsHeld());
     }
     else if (ty == WolfDrive::TYPE_TRUCK)
     {
@@ -2744,9 +2919,11 @@ void WolfDashboard::draw()
         const WolfDrive::Spec& sp = WolfDrive::spec(WolfDrive::TYPE_TRUCK);
         if (bg)
         {
-            rectG(0.f, g.bandB, W, g.panelTop, LLColor4(0.29f, 0.314f, 0.345f, 1.f), LLColor4(0.106f, 0.118f, 0.133f, 1.f));
+            // [HUD KIT 2026-11-25] the gunmetal plate, the cluster's housing carbon in a chrome frame
+            if (!kitBand()) rectG(0.f, g.bandB, W, g.panelTop, LLColor4(0.29f, 0.314f, 0.345f, 1.f), LLColor4(0.106f, 0.118f, 0.133f, 1.f));
             rectF(0.f, g.panelTop - S(8.f), W, g.panelTop, LLColor4(0.043f, 0.047f, 0.055f, 1.f));
-            roundRectF(X(400.f), YM(904.f), X(1230.f), YM(610.f), S(26.f), LLColor4(0.035f, 0.04f, 0.047f, 1.f), LLColor4(0.035f, 0.04f, 0.047f, 1.f));
+            if (!kitHousing(X(404.f), YM(896.f), X(1226.f), YM(614.f), false))
+                roundRectF(X(400.f), YM(904.f), X(1230.f), YM(610.f), S(26.f), LLColor4(0.035f, 0.04f, 0.047f, 1.f), LLColor4(0.035f, 0.04f, 0.047f, 1.f));
         }
         const F32 cy = YM(780.f);
         drawDial({ X(520.f), cy, S(98.f), s.mMaxRpm, 500.f, 0.f, 100.f, 100.f, s.mRedline, sp.mGreenLo, sp.mGreenHi, s.mRpm, 0.f,
@@ -2847,9 +3024,9 @@ void WolfDashboard::draw()
         // wheel's hit (to X 340) and the cluster (the centre anchor, from its X 400), free in both layouts
         retarderStalk(c, X(346.f), X(396.f), YM(606.f), YM(890.f), s);
         use(g.R);
-        gearShifter(c, X(1255.f), X(1347.f), YM(632.f), YM(812.f), ty);   // [GEAR STICK 2026-10-10]
+        gearShifter(c, X(1255.f), X(1347.f), YM(600.f), YM(852.f), ty);   // [HUD KIT 2026-11-25] was 632-812: room for 44 px keys   // [GEAR STICK 2026-10-10]
         pedals(c, X(1378.f), X(1580.f), YM(666.f), 172.f, d.brake(), d.throttle(), false);
-        lampButtons(c, X(1255.f), X(1580.f), YM(858.f), s, d.buttonsHeld());
+        lampButtons(c, X(1255.f), X(1580.f), YM(856.f), s, d.buttonsHeld());
     }
     else if (ty == WolfDrive::TYPE_SPEEDBOAT)
     {
@@ -2870,7 +3047,11 @@ void WolfDashboard::draw()
         // counter along the top ("the tachometer moves on a horizontal scale positioned in the
         // highest part of the instrument ... the gear engaged is in the center"), shift lights,
         // speed, lean angle. Handlebars, not a wheel.
-        if (bg)
+        if (bg && kitBand())
+        {
+            // [HUD KIT 2026-11-25] the gunmetal plate (the old look's carbon stripes and the fairing's dark inside are its own)
+        }
+        else if (bg)
         {
             rectF(0.f, g.bandB, W, g.panelTop, LLColor4(0.043f, 0.043f, 0.051f, 1.f));
             for (F32 x = 0.f; x < W; x += S(8.f))
@@ -2900,8 +3081,12 @@ void WolfDashboard::draw()
             gGL.end();
         }
         const F32 sl = X(530.f), sr = X(1070.f), st = YM(636.f), sb = YM(838.f);
-        roundRectF(sl - S(14.f), sb - S(14.f), sr + S(14.f), st + S(16.f), S(18.f), LLColor4(0.08f, 0.082f, 0.094f, 1.f), LLColor4(0.08f, 0.082f, 0.094f, 1.f));
-        frameW(sl - S(14.f), sb - S(14.f), sr + S(14.f), st + S(16.f), 1.f, LLColor4(0.165f, 0.173f, 0.192f, 1.f));
+        // [HUD KIT 2026-11-25] the TFT's surround carbon in a chrome frame; the screen itself as before
+        if (!kitHousing(sl - S(14.f), sb - S(14.f), sr + S(14.f), st + S(16.f), false))
+        {
+            roundRectF(sl - S(14.f), sb - S(14.f), sr + S(14.f), st + S(16.f), S(18.f), LLColor4(0.08f, 0.082f, 0.094f, 1.f), LLColor4(0.08f, 0.082f, 0.094f, 1.f));
+            frameW(sl - S(14.f), sb - S(14.f), sr + S(14.f), st + S(16.f), 1.f, LLColor4(0.165f, 0.173f, 0.192f, 1.f));
+        }
         rectG(sl, sb, sr, st, LLColor4(0.02f, 0.027f, 0.043f, bg ? 1.f : 0.88f), LLColor4(0.043f, 0.063f, 0.094f, bg ? 1.f : 0.88f));
         // shift lights: on through the last tenth below the red line, all flashing at it (design)
         const F32 frac_shift = (s.mRpm - s.mRedline * 0.90f) / llmax(1.f, s.mRedline * 0.10f);
@@ -2986,9 +3171,9 @@ void WolfDashboard::draw()
         handlebars(X(255.f), YM(761.f), 320.f, S(1.45f), d.steer(), d.brake(), d.clutch(), d.throttle());
         addHit(X(20.f), YM(840.f), X(490.f), YM(660.f), H_WHEEL, "Handlebars: drag left or right to steer (or Left / Right, A / D, or your controller)");
         use(g.R);
-        selector(c, X(1240.f), X(1332.f), YM(626.f), YM(826.f), ty, "shift");   // ends above the lamp row
+        selector(c, X(1240.f), X(1366.f), YM(626.f), YM(826.f), ty, "shift");   // ends above the lamp row. [HUD KIT 2026-11-25] was to 1332: - / + 51 px wide
         pedals(c, X(1372.f), X(1580.f), YM(666.f), 172.f, d.brake(), d.throttle(), true);
-        lampButtons(c, X(1372.f), X(1580.f), YM(858.f), s, d.buttonsHeld());
+        lampButtons(c, X(1372.f), X(1580.f), YM(856.f), s, d.buttonsHeld());
     }
     mPanelT = strip(c, s, ty, d.vehicleName()) * zoom;
     use(g.C);

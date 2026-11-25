@@ -242,6 +242,9 @@ public:
     bool handleScrollWheel(S32 x, S32 y, S32 clicks) override;
     bool handleToolTip(S32 x, S32 y, MASK mask) override;
     void onMouseCaptureLost() override;
+    /** [HUD KIT 2026-11-25] For LEAP rigs (UI call WolfHudKit.Hits "fishing"): this frame's press targets in window GL pixels with
+     *  their names, sizes and tips, in the form scripts/wolf/hudkit/check_inventory.py --log reads (as WolfDashboard). */
+    static void logHits();
 
     enum EHit { H_NONE = 0, H_CAST, H_REEL, H_STOP, H_BOARD, H_CHALLENGE, H_PANEL, H_CLOSE, H_TIP,
                 H_SCROLL_UP, H_SCROLL_DOWN, H_SCROLL_TRACK, H_SCROLL_THUMB };
@@ -276,6 +279,7 @@ private:
     struct MsgRect { F32 mL, mB, mR, mT; size_t mIndex; };   // the message's place in the log (its tooltip)
     std::vector<MsgRect> mMsgRects;   // picture units, this frame: a hovered line's tooltip is its whole text
 
+    static const char* hitName(EHit id, S32& offset);   // [HUD KIT 2026-11-25/] logHits: a ranged id is its first + offset
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;
     bool onPanel(S32 x, S32 y) const;

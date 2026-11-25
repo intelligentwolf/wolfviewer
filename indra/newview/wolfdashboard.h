@@ -70,6 +70,9 @@ public:
     bool handleScrollWheel(S32 x, S32 y, S32 clicks) override;   // [WOLF RETARDER 2026-10-12/] the stalk
     bool handleToolTip(S32 x, S32 y, MASK mask) override;
     void onMouseCaptureLost() override;
+    /** [HUD KIT 2026-11-25] For LEAP rigs (UI call WolfHudKit.Hits "dashboard"): this frame's press targets in window GL pixels
+     *  with their names, sizes and tips, in the form scripts/wolf/hudkit/check_inventory.py --log reads (as WolfTrainCabView). */
+    static void logHits();
 
     enum EHit
     {
@@ -120,6 +123,7 @@ private:
     bool mShowHelp = false;
     S32  mHelpCheckedType = -1;         // which design's first-time guide was last considered
 
+    static const char* hitName(EHit id, S32& offset);   // [HUD KIT 2026-11-25/] logHits: a ranged id is its first + offset
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;
     /** [WOLF RETARDER 2026-10-12] The stalk position under a view point while dragging (the nearest of the six,

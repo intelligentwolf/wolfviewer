@@ -18,7 +18,7 @@
     {"id": "H_HIDE", "kind": "button", "label": "HIDE", "when": "HUD shown", "tip": "Hide this HUD while you ride (Wolf World > Winter Fun... brings it back)", "action": "WolfSkis::showHud(false) (closed by hand)",
      "source": ["\"HIDE\", H_HIDE,", "\"Hide this HUD while you ride (Wolf World > Winter Fun... brings it back)\"", "case H_HIDE: sk.showHud(false); break;"]},
     {"name": "speedometer", "kind": "gauge", "label": "dial 0-90 mph / 0-140 km/h, ice/gold/red band, ticks and figures, gold tick at the run's top speed, needle eased to the speed, speed figure", "when": "HUD shown",
-     "source": ["const F32 full = mph ? 90.f : 140.f;", "// top speed this run: a gold tick on the dial", "T(cx, cy - S(40.f), llformat(\"%.0f\", v), 34.f, SNOW, true, true);"]},
+     "source": ["const F32 full = mph ? 90.f : 140.f;", "// top speed this run: a gold tick on the dial", "T(cx, cy - S(36.f), llformat(\"%.0f\", v), 34.f, SNOW, true, true);"]},
     {"name": "top-speed", "kind": "readout", "label": "TOP <n> MPH|KM/H / TOP --", "when": "HUD shown",
      "source": ["llformat(\"TOP %.0f %s\", s.mTop * k, unit) : std::string(\"TOP --\")"]},
     {"name": "steepness", "kind": "gauge", "label": "STEEPNESS: the slope drawn at its angle with a rider dot, degrees (or --), piste chip GENTLE / BLUE / RED / BLACK", "when": "HUD shown",

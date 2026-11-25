@@ -124,6 +124,7 @@
     <string name="preview_empty_1">The picture shows here</string>
     <string name="preview_empty_2">while you record</string>
     <string name="meter_loud">Loud</string>
+    <string name="meter_high">High</string>
     <string name="world_restart">Takes effect after restarting WolfViewer.</string>
     <string name="world_unavailable">This computer's sound system could not start the route the world sound is recorded from.</string>
     <string name="world_fmod">World sound can only be recorded with the OpenAL sound engine.</string>

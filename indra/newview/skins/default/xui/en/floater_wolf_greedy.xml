@@ -35,65 +35,65 @@
     <panel follows="left|top" height="680" layout="topleft" left="0" name="full_panel" top="20" width="520" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood" bg_opaque_image_overlay="White" bg_alpha_image_overlay="White">
         <icon follows="left|top" height="48" layout="topleft" left="10" name="f_logo" top="4" width="48" image_name="WolfGreedy_Logo" tool_tip="Greedy" />
         <icon follows="left|top" height="40" layout="topleft" left="62" name="f_wordmark" top="8" width="160" image_name="WolfGreedy_Wordmark" tool_tip="Greedy" />
-        <text follows="left|top" height="20" layout="topleft" left="232" name="f_view_label" top="20" width="64" font="SansSerifBold" halign="right" text_color="0.89 0.73 0.35 1">View:</text>
-        <button follows="left|top" height="28" layout="topleft" left="300" name="f_mode_full" top="16" width="68" label="Full" is_toggle="true" tool_tip="The whole game in this window" />
-        <button follows="left|top" height="28" layout="topleft" left="372" name="f_mode_table" top="16" width="68" label="Table" is_toggle="true" tool_tip="Just your controls, for when a Greedy table in-world shows the game" />
-        <button follows="left|top" height="28" layout="topleft" left="444" name="f_mode_strip" top="16" width="68" label="HUD" is_toggle="true" tool_tip="Play on the Greedy HUD along the bottom of the screen, while you walk, fly or sail (this window closes)" />
+        <text follows="left|top" height="20" layout="topleft" left="232" name="f_view_label" top="18" width="64" font="SansSerifBold" halign="right" text_color="0.89 0.73 0.35 1">View:</text>
+        <button follows="left|top" height="44" layout="topleft" left="300" name="f_mode_full" top="6" width="68" label="Full" is_toggle="true" tool_tip="The whole game in this window" />
+        <button follows="left|top" height="44" layout="topleft" left="372" name="f_mode_table" top="6" width="68" label="Table" is_toggle="true" tool_tip="Just your controls, for when a Greedy table in-world shows the game" />
+        <button follows="left|top" height="44" layout="topleft" left="444" name="f_mode_strip" top="6" width="68" label="HUD" is_toggle="true" tool_tip="Play on the Greedy HUD along the bottom of the screen, while you walk, fly or sail (this window closes)" />
 
-        <panel follows="left|top" height="30" layout="topleft" left="8" name="f_offer" top="56" width="504" visible="false" background_visible="true" bg_alpha_color="0.42 0.5 0.56 1" bg_opaque_color="0.42 0.5 0.56 1">
-            <text follows="left|top" height="20" layout="topleft" left="6" name="f_offer_text" top="6" width="270" wrap="false">You are at a Greedy table.</text>
-            <button follows="left|top" height="24" layout="topleft" left="282" name="f_offer_yes" top="3" width="110" label="Table view" tool_tip="Show just your controls; the table shows the game" />
-            <button follows="left|top" height="24" layout="topleft" left="396" name="f_offer_no" top="3" width="104" label="No thanks" />
+        <panel follows="left|top" height="46" layout="topleft" left="8" name="f_offer" top="54" width="504" visible="false" background_visible="true" bg_alpha_color="0.42 0.5 0.56 1" bg_opaque_color="0.42 0.5 0.56 1">
+            <text follows="left|top" height="20" layout="topleft" left="6" name="f_offer_text" top="13" width="270" wrap="false">You are at a Greedy table.</text>
+            <button follows="left|top" height="44" layout="topleft" left="282" name="f_offer_yes" top="1" width="110" label="Table view" tool_tip="Show just your controls; the table shows the game" />
+            <button follows="left|top" height="44" layout="topleft" left="396" name="f_offer_no" top="1" width="104" label="No thanks" />
         </panel>
 
-        <text follows="left|top" font="SansSerifLarge" font.style="BOLD" height="26" layout="topleft" left="12" name="f_status" top="90" width="496" text_color="Yellow">Greedy</text>
+        <text follows="left|top" font="SansSerifLarge" font.style="BOLD" height="26" layout="topleft" left="12" name="f_status" top="102" width="496" text_color="Yellow">Greedy</text>
         <!-- the scoreboard -->
         <!-- [GREEDY BOARD 2026-11-11] the scoreboard as a painted wooden score panel: a dark painted board with the plate's gold
              edge (contrast: white words on 0.15 0.10 0.07 = 16.2:1), and the dice tray's felt gets a stitched edge (WolfGreedy_Stitch) -->
-        <icon follows="left|top" height="158" layout="topleft" left="8" name="f_board_panel" top="114" width="504" image_name="WolfGreedy_Plate" color="0.2 0.13 0.08 1" mouse_opaque="false" />
-        <scroll_list follows="left|top" height="150" layout="topleft" left="12" name="f_board" top="118" width="496" draw_heading="true" column_padding="4" multi_select="false" bg_readonly_color="0.15 0.1 0.07 0.95" bg_writeable_color="0.15 0.1 0.07 0.95" fg_readonly_color="White" fg_unselected_color="White" heading_height="24">
+        <icon follows="left|top" height="118" layout="topleft" left="8" name="f_board_panel" top="128" width="504" image_name="WolfGreedy_Plate" color="0.2 0.13 0.08 1" mouse_opaque="false" />
+        <scroll_list follows="left|top" height="110" layout="topleft" left="12" name="f_board" top="132" width="496" draw_heading="true" column_padding="4" multi_select="false" bg_readonly_color="0.15 0.1 0.07 0.95" bg_writeable_color="0.15 0.1 0.07 0.95" fg_readonly_color="White" fg_unselected_color="White" heading_height="24">
             <scroll_list.columns label="" name="mark" width="28" />
             <scroll_list.columns label="Player" name="name" dynamic_width="true" />
             <scroll_list.columns label="Busts" name="busts" width="70" />
             <scroll_list.columns label="Score" name="score" width="100" />
         </scroll_list>
-        <text follows="left|top" font="SansSerifLarge" height="80" layout="topleft" left="24" name="f_board_empty" top="160" width="472" wrap="true" halign="center" text_color="0.95 0.92 0.85 1" visible="false">Start a new game below - others can join it from their Greedy window or a Greedy table - or join a game being played now. New here? Press How to play.</text>
-        <text_editor follows="left|top" font="SansSerif" height="34" layout="topleft" left="12" name="f_tips" top="270" width="496" read_only="true" word_wrap="true" enabled="false" visible="false" show_context_menu="false" bg_readonly_color="0.05 0.12 0.16 0.9" />
+        <text follows="left|top" font="SansSerifLarge" height="80" layout="topleft" left="24" name="f_board_empty" top="150" width="472" wrap="true" halign="center" text_color="0.95 0.92 0.85 1" visible="false">Start a new game below - others can join it from their Greedy window or a Greedy table - or join a game being played now. New here? Press How to play.</text>
+        <text_editor follows="left|top" font="SansSerif" height="34" layout="topleft" left="12" name="f_tips" top="246" width="496" read_only="true" word_wrap="true" enabled="false" visible="false" show_context_menu="false" bg_readonly_color="0.05 0.12 0.16 0.9" />
 
         <!-- this turn, big -->
-        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="14" name="f_turn_label" top="308" width="200" text_color="0.89 0.73 0.35 1">THIS TURN</text>
-        <text follows="left|top" font="SansSerifHuge" font.style="BOLD" height="38" layout="topleft" left="12" name="f_turn" top="324" width="260" text_color="1 0.84 0.3 1"> </text>
-        <text follows="left|top" font="SansSerifLarge" height="24" layout="topleft" left="280" name="f_dice_left" top="334" width="228" halign="right" text_color="0.95 0.92 0.85 1"> </text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="14" name="f_turn_label" top="284" width="200" text_color="0.89 0.73 0.35 1">THIS TURN</text>
+        <text follows="left|top" font="SansSerifHuge" font.style="BOLD" height="38" layout="topleft" left="12" name="f_turn" top="300" width="260" text_color="1 0.84 0.3 1"> </text>
+        <text follows="left|top" font="SansSerifLarge" height="24" layout="topleft" left="280" name="f_dice_left" top="310" width="228" halign="right" text_color="0.95 0.92 0.85 1"> </text>
         <!-- the guide's card lies under the dice, so a card's example dice show on it (drawn in this order) -->
-        <icon follows="left|top" height="404" layout="topleft" left="8" name="f_guide_card" top="56" width="504" image_name="WolfGreedy_Plate" color="0.12 0.1 0.08 0.96" visible="false" />
+        <icon follows="left|top" height="390" layout="topleft" left="8" name="f_guide_card" top="56" width="504" image_name="WolfGreedy_Plate" color="0.12 0.1 0.08 0.96" visible="false" />
         <!-- the dice on baize -->
-        <icon follows="left|top" height="80" layout="topleft" left="12" name="f_felt" top="366" width="496" image_name="WolfGreedy_Plate" color="0.16 0.52 0.3 1" />
-        <icon follows="left|top" height="80" layout="topleft" left="12" name="f_felt_stitch" top="366" width="496" image_name="WolfGreedy_Stitch" mouse_opaque="false" />
-        <icon follows="left|top" height="64" layout="topleft" left="38" name="f_die0" top="374" width="64" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="64" layout="topleft" left="114" name="f_die1" top="374" width="64" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="64" layout="topleft" left="190" name="f_die2" top="374" width="64" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="64" layout="topleft" left="266" name="f_die3" top="374" width="64" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="64" layout="topleft" left="342" name="f_die4" top="374" width="64" image_name="WolfGreedy_Die0" />
-        <icon follows="left|top" height="64" layout="topleft" left="418" name="f_die5" top="374" width="64" image_name="WolfGreedy_Die0" />
-        <text follows="left|top" font="SansSerifHuge" font.style="BOLD" height="48" layout="topleft" left="12" name="f_banner" top="382" width="496" halign="center" visible="false" mouse_opaque="false"> </text>
-        <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="12" name="f_event" top="450" width="496" halign="center"> </text>
-        <button follows="left|top" font="SansSerifLarge" height="46" layout="topleft" left="40" name="f_roll" image_color="0.13 0.55 0.29 1" label_color="White" top="474" width="210" label="Roll" />
-        <button follows="left|top" font="SansSerifLarge" height="46" layout="topleft" left="270" name="f_bank" image_color="0.77 0.55 0.09 1" label_color="White" top="474" width="210" label="Bank" />
+        <icon follows="left|top" height="80" layout="topleft" left="12" name="f_felt" top="342" width="496" image_name="WolfGreedy_Plate" color="0.16 0.52 0.3 1" />
+        <icon follows="left|top" height="80" layout="topleft" left="12" name="f_felt_stitch" top="342" width="496" image_name="WolfGreedy_Stitch" mouse_opaque="false" />
+        <icon follows="left|top" height="64" layout="topleft" left="38" name="f_die0" top="350" width="64" image_name="WolfGreedy_Die0" />
+        <icon follows="left|top" height="64" layout="topleft" left="114" name="f_die1" top="350" width="64" image_name="WolfGreedy_Die0" />
+        <icon follows="left|top" height="64" layout="topleft" left="190" name="f_die2" top="350" width="64" image_name="WolfGreedy_Die0" />
+        <icon follows="left|top" height="64" layout="topleft" left="266" name="f_die3" top="350" width="64" image_name="WolfGreedy_Die0" />
+        <icon follows="left|top" height="64" layout="topleft" left="342" name="f_die4" top="350" width="64" image_name="WolfGreedy_Die0" />
+        <icon follows="left|top" height="64" layout="topleft" left="418" name="f_die5" top="350" width="64" image_name="WolfGreedy_Die0" />
+        <text follows="left|top" font="SansSerifHuge" font.style="BOLD" height="48" layout="topleft" left="12" name="f_banner" top="358" width="496" halign="center" visible="false" mouse_opaque="false"> </text>
+        <text follows="left|top" font="SansSerif" height="20" layout="topleft" left="12" name="f_event" top="426" width="496" halign="center"> </text>
+        <button follows="left|top" font="SansSerifLarge" height="46" layout="topleft" left="40" name="f_roll" image_color="0.13 0.55 0.29 1" label_color="White" top="450" width="210" label="Roll" />
+        <button follows="left|top" font="SansSerifLarge" height="46" layout="topleft" left="270" name="f_bank" image_color="0.77 0.55 0.09 1" label_color="White" top="450" width="210" label="Bank" />
 
         <!-- not in a game: start one, join one, practise, learn -->
-        <text follows="left|top" height="20" layout="topleft" left="12" name="f_target_label" top="532" width="110">Points to win:</text>
-        <combo_box follows="left|top" height="26" layout="topleft" left="124" name="f_target" top="529" width="110" />
-        <button follows="left|top" height="30" layout="topleft" left="244" name="f_new" top="527" width="130" label="New game" tool_tip="Start a game; others can join it from their Greedy window or a table" />
-        <button follows="left|top" height="30" layout="topleft" left="380" name="f_practice" top="527" width="128" label="Practice" tool_tip="A game against Bramble, the computer, with tips at every step. Nothing is saved." />
-        <combo_box follows="left|top" height="26" layout="topleft" left="12" name="f_games" top="565" width="296" />
-        <button follows="left|top" height="30" layout="topleft" left="314" name="f_join" top="563" width="90" label="Join" />
-        <button follows="left|top" height="30" layout="topleft" left="410" name="f_refresh" top="563" width="98" label="Refresh" tool_tip="Look again for games being played now" />
+        <text follows="left|top" height="20" layout="topleft" left="12" name="f_target_label" top="512" width="110">Points to win:</text>
+        <combo_box follows="left|top" height="26" layout="topleft" left="124" name="f_target" top="509" width="110" />
+        <button follows="left|top" height="44" layout="topleft" left="244" name="f_new" top="500" width="130" label="New game" tool_tip="Start a game; others can join it from their Greedy window or a table" />
+        <button follows="left|top" height="44" layout="topleft" left="380" name="f_practice" top="500" width="128" label="Practice" tool_tip="A game against Bramble, the computer, with tips at every step. Nothing is saved." />
+        <combo_box follows="left|top" height="26" layout="topleft" left="12" name="f_games" top="557" width="296" />
+        <button follows="left|top" height="44" layout="topleft" left="314" name="f_join" top="548" width="90" label="Join" />
+        <button follows="left|top" height="44" layout="topleft" left="410" name="f_refresh" top="548" width="98" label="Refresh" tool_tip="Look again for games being played now" />
         <!-- in a game -->
-        <button follows="left|top" height="30" layout="topleft" left="12" name="f_leave" top="527" width="150" label="Leave this game" />
-        <button follows="left|top" height="30" layout="topleft" left="170" name="f_pass" top="527" width="170" label="Pass their turn" tool_tip="When the player whose turn it is has been away for a few minutes" />
-        <button follows="left|top" height="30" layout="topleft" left="12" name="f_help" top="599" width="150" label="How to play" />
+        <button follows="left|top" height="44" layout="topleft" left="12" name="f_leave" top="500" width="150" label="Leave this game" />
+        <button follows="left|top" height="44" layout="topleft" left="170" name="f_pass" top="500" width="170" label="Pass their turn" tool_tip="When the player whose turn it is has been away for a few minutes" />
+        <button follows="left|top" height="44" layout="topleft" left="12" name="f_help" top="596" width="150" label="How to play" />
         <!-- [GREEDY TABLE HERE 2026-11-11] Paul: "there's no button to rez a table" - the set-up helper (wolfgreedysetup.cpp) -->
-        <button follows="left|top" height="30" layout="topleft" left="170" name="f_setup" top="599" width="338" image_color="0.42 0.5 0.56 1" label_color="White" label="Put a Greedy table here" tool_tip="Put a Greedy table (and a board, if you like) on the land in front of you, one step at a time" />
+        <button follows="left|top" height="44" layout="topleft" left="170" name="f_setup" top="596" width="338" image_color="0.42 0.5 0.56 1" label_color="White" label="Put a Greedy table here" tool_tip="Put a Greedy table (and a board, if you like) on the land in front of you, one step at a time" />
 
         <!-- the guide: nine illustrated cards over the game (wolffloatergreedy.cpp GUIDE) -->
         <icon follows="left|top" height="40" layout="topleft" left="20" name="f_guide_logo" top="64" width="40" image_name="WolfGreedy_Logo" visible="false" />
@@ -142,27 +142,27 @@
         <icon follows="left|top" height="32" layout="topleft" left="185" name="f_combo5_d5" top="294" width="32" image_name="WolfGreedy_Die0" visible="false" />
         <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="222" name="f_combo5_t" top="292" width="284" wrap="true" visible="false"> </text>
         <text_editor follows="left|top" font="SansSerifLarge" height="40" layout="topleft" left="20" name="f_guide_note" top="330" width="480" read_only="true" word_wrap="true" enabled="false" visible="false" show_context_menu="false" border_visible="false" bg_readonly_color="0 0 0 0" />
-        <button follows="left|top" font="SansSerifLarge" height="44" layout="topleft" left="12" name="f_guide_back" top="474" width="120" label="Back" visible="false" />
-        <text follows="left|top" font="SansSerifLarge" height="28" layout="topleft" left="140" name="f_guide_dots" top="484" width="240" halign="center" text_color="1 0.84 0.3 1" visible="false"> </text>
-        <button follows="left|top" font="SansSerifLarge" height="44" layout="topleft" left="388" name="f_guide_next" top="474" width="120" image_color="0.13 0.55 0.29 1" label_color="White" label="Next" visible="false" />
-        <button follows="left|top" height="30" layout="topleft" left="300" name="f_guide_done" top="527" width="208" label="I've got it, let's play" visible="false" />
-        <button follows="left|top" height="30" layout="topleft" left="300" name="f_guide_practice" top="527" width="208" label="Practice game" visible="false" />
+        <button follows="left|top" font="SansSerifLarge" height="44" layout="topleft" left="12" name="f_guide_back" top="450" width="120" label="Back" visible="false" />
+        <text follows="left|top" font="SansSerifLarge" height="28" layout="topleft" left="140" name="f_guide_dots" top="460" width="240" halign="center" text_color="1 0.84 0.3 1" visible="false"> </text>
+        <button follows="left|top" font="SansSerifLarge" height="44" layout="topleft" left="388" name="f_guide_next" top="450" width="120" image_color="0.13 0.55 0.29 1" label_color="White" label="Next" visible="false" />
+        <button follows="left|top" height="44" layout="topleft" left="300" name="f_guide_done" top="500" width="208" label="I've got it, let's play" visible="false" />
+        <button follows="left|top" height="44" layout="topleft" left="300" name="f_guide_practice" top="500" width="208" label="Practice game" visible="false" />
 
-        <text_editor follows="left|top" height="44" layout="topleft" left="12" name="f_message" top="632" width="496" read_only="true" word_wrap="true" visible="false" show_context_menu="true" />
+        <text_editor follows="left|top" height="38" layout="topleft" left="12" name="f_message" top="642" width="496" read_only="true" word_wrap="true" visible="false" show_context_menu="true" />
     </panel>
 
     <!-- TABLE: controls only -->
-    <panel follows="left|top" height="230" layout="topleft" left="0" name="table_panel" top="20" width="380" visible="false" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood" bg_opaque_image_overlay="White" bg_alpha_image_overlay="White">
-        <button follows="left|top" height="24" layout="topleft" left="8" name="t_mode_full" top="4" width="116" label="Full" is_toggle="true" />
-        <button follows="left|top" height="24" layout="topleft" left="132" name="t_mode_table" top="4" width="116" label="Table" is_toggle="true" />
-        <button follows="left|top" height="24" layout="topleft" left="256" name="t_mode_strip" top="4" width="116" label="HUD" is_toggle="true" tool_tip="Play on the Greedy HUD along the bottom of the screen (this window closes)" />
-        <text follows="left|top" font="SansSerifLarge" height="26" layout="topleft" left="10" name="t_status" top="36" width="360" text_color="Yellow">Greedy</text>
-        <text follows="left|top" font="SansSerifLarge" height="24" layout="topleft" left="10" name="t_score" top="64" width="360">Your score: 0</text>
-        <button follows="left|top" font="SansSerifLarge" height="48" layout="topleft" left="10" name="t_roll" image_color="0.13 0.55 0.29 1" label_color="White" top="96" width="174" label="Roll" />
-        <button follows="left|top" font="SansSerifLarge" height="48" layout="topleft" left="196" name="t_bank" image_color="0.77 0.55 0.09 1" label_color="White" top="96" width="174" label="Bank" />
-        <button follows="left|top" height="26" layout="topleft" left="10" name="t_leave" top="152" width="174" label="Leave this game" />
-        <button follows="left|top" height="26" layout="topleft" left="196" name="t_help" top="152" width="174" label="How to play" />
-        <text_editor follows="left|top" height="36" layout="topleft" left="10" name="t_message" top="184" width="360" read_only="true" word_wrap="true" visible="false" />
+    <panel follows="left|top" height="248" layout="topleft" left="0" name="table_panel" top="20" width="380" visible="false" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood" bg_opaque_image_overlay="White" bg_alpha_image_overlay="White">
+        <button follows="left|top" height="44" layout="topleft" left="8" name="t_mode_full" top="4" width="116" label="Full" is_toggle="true" />
+        <button follows="left|top" height="44" layout="topleft" left="132" name="t_mode_table" top="4" width="116" label="Table" is_toggle="true" />
+        <button follows="left|top" height="44" layout="topleft" left="256" name="t_mode_strip" top="4" width="116" label="HUD" is_toggle="true" tool_tip="Play on the Greedy HUD along the bottom of the screen (this window closes)" />
+        <text follows="left|top" font="SansSerifLarge" height="26" layout="topleft" left="10" name="t_status" top="52" width="360" text_color="Yellow">Greedy</text>
+        <text follows="left|top" font="SansSerifLarge" height="24" layout="topleft" left="10" name="t_score" top="80" width="360">Your score: 0</text>
+        <button follows="left|top" font="SansSerifLarge" height="48" layout="topleft" left="10" name="t_roll" image_color="0.13 0.55 0.29 1" label_color="White" top="108" width="174" label="Roll" />
+        <button follows="left|top" font="SansSerifLarge" height="48" layout="topleft" left="196" name="t_bank" image_color="0.77 0.55 0.09 1" label_color="White" top="108" width="174" label="Bank" />
+        <button follows="left|top" height="44" layout="topleft" left="10" name="t_leave" top="160" width="174" label="Leave this game" />
+        <button follows="left|top" height="44" layout="topleft" left="196" name="t_help" top="160" width="174" label="How to play" />
+        <text_editor follows="left|top" height="36" layout="topleft" left="10" name="t_message" top="208" width="360" read_only="true" word_wrap="true" visible="false" />
     </panel>
 
 </floater>

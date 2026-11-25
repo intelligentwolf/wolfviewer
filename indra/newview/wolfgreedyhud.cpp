@@ -37,6 +37,7 @@
 #include "llwindow.h"
 #include "wolffloatergreedy.h"
 #include "wolfgrid.h"
+#include "wolfhudkit.h"
 
 static LLDefaultChildRegistry::Register<WolfGreedyHud> r_wolf_greedy_hud("wolf_greedy_hud");
 
@@ -654,6 +655,13 @@ void WolfGreedyHud::draw()
             else if (face > 0)
             {
                 image(llformat("WolfGreedy_Die%d", face).c_str(), l, b, S(dw), S(dw), k == '1' ? GOLD_DIE : k == 'x' ? RED_DIE : LLColor4::white);
+                // [HUD KIT 2026-11-25] scored and bust told by shape too, not by the tint alone (WCAG 1.4.1): a tick or a cross
+                // badge on the die's top right corner (WolfHudKit::markBadge)
+                if (k == '1' || k == 'x')
+                {
+                    WolfHudKit::markBadge(l + S(dw - 11.f), b + S(dw - 11.f), S(9.f), k == '1' ? WolfHudKit::MARK_TICK : WolfHudKit::MARK_CROSS,
+                                          k == '1' ? GOLD_DIE : RED_DIE);
+                }
             }
             else
             {

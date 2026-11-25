@@ -10,7 +10,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="500"
+ height="514"
  layout="topleft"
  name="wolf_greedy_setup"
  help_topic="wolf_greedy_setup"
@@ -18,7 +18,7 @@
  single_instance="true"
  title="Put a Greedy table here"
  width="460">
-    <panel follows="left|top" height="480" layout="topleft" left="0" name="gs_panel" top="20" width="460" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood" bg_opaque_image_overlay="White" bg_alpha_image_overlay="White">
+    <panel follows="left|top" height="494" layout="topleft" left="0" name="gs_panel" top="20" width="460" background_visible="true" background_opaque="true" bg_opaque_image="WolfGreedy_Wood" bg_alpha_image="WolfGreedy_Wood" bg_opaque_image_overlay="White" bg_alpha_image_overlay="White">
         <icon follows="left|top" height="48" layout="topleft" left="10" name="gs_logo" top="6" width="48" image_name="WolfGreedy_Logo" tool_tip="Greedy" />
         <text follows="left|top" font="SansSerifHuge" font.style="BOLD" height="34" layout="topleft" left="66" name="gs_title" top="12" width="384" text_color="1 0.84 0.3 1">Let's set up Greedy!</text>
         <icon follows="left|top" height="248" layout="topleft" left="8" name="gs_card" top="60" width="444" image_name="WolfGreedy_Plate" color="0.12 0.1 0.08 0.96" />
@@ -33,10 +33,10 @@
         <icon follows="left|top" height="40" layout="topleft" left="112" name="gs_die_b" top="210" width="40" image_name="WolfGreedy_Die1" visible="false" />
         <icon follows="left|top" height="40" layout="topleft" left="160" name="gs_die_c" top="210" width="40" image_name="WolfGreedy_Die6" visible="false" />
         <button follows="left|top" font="SansSerifLarge" height="46" layout="topleft" left="20" name="gs_put" image_color="0.13 0.55 0.29 1" label_color="White" top="318" width="420" label="Put the table here" tool_tip="It appears just in front of you, facing you, where you stand" />
-        <button follows="left|top" height="30" layout="topleft" left="20" name="gs_back" top="372" width="136" label="Back" />
-        <button follows="left|top" height="30" layout="topleft" left="162" name="gs_skip" top="372" width="136" label="Skip" />
-        <button follows="left|top" height="30" layout="topleft" left="304" name="gs_close" top="372" width="136" label="Close" />
+        <button follows="left|top" height="44" layout="topleft" left="20" name="gs_back" top="372" width="136" label="Back" />
+        <button follows="left|top" height="44" layout="topleft" left="162" name="gs_skip" top="372" width="136" label="Skip" />
+        <button follows="left|top" height="44" layout="topleft" left="304" name="gs_close" top="372" width="136" label="Close" />
         <!-- the message box: what is happening now, or what went wrong and what to do (read-only; it can be selected and copied) -->
-        <text_editor follows="left|top" font="SansSerif" height="62" layout="topleft" left="20" name="gs_message" top="410" width="420" read_only="true" word_wrap="true" visible="false" show_context_menu="true" />
+        <text_editor follows="left|top" font="SansSerif" height="62" layout="topleft" left="20" name="gs_message" top="424" width="420" read_only="true" word_wrap="true" visible="false" show_context_menu="true" />
     </panel>
 </floater>

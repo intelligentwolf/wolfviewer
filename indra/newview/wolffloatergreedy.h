@@ -205,6 +205,7 @@ private:
     void showNoGame();
     void showMessage();
     void applyDice(const LLSD& dice, const std::string& kept);
+    char mDieMark[6] = { '0', '0', '0', '0', '0', '0' };   // [HUD KIT 2026-11-25] per die: '1' scored, 'x' bust, '0' neither (draw())
     void animate();                 // every frame: the tumble and the banner
     void refreshButtons();
     void onRoll();

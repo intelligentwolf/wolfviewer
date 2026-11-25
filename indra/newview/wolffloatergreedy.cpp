@@ -47,6 +47,7 @@
 #include "llviewerobject.h"
 #include "llviewerobjectlist.h"
 #include "llviewerregion.h"
+#include "wolfhudkit.h"
 #include "llvoavatarself.h"
 #include "llui.h"
 #include "wolfdrive.h"   // [W104 FEATFIX review/] one bottom panel at a time (vehiclePanelUp)
@@ -979,6 +980,17 @@ void WolfFloaterGreedy::draw()
     }
     animate();   // [W104 FEATFIX 2026-11-11/] the tumble and the banner
     LLFloater::draw();
+    // [HUD KIT 2026-11-25] the scored / bust badges over the dice (applyDice), once they have landed, in the full view
+    if (isMinimized() || mGuidePage >= 0 || mMode != "full" || game.rolling()) return;
+    for (S32 i = 0; i < 6; ++i)
+    {
+        if (mDieMark[i] != '1' && mDieMark[i] != 'x') continue;
+        LLView* die = getChild<LLView>(llformat("f_die%d", i));
+        LLRect r;
+        if (!die->getVisible() || !die->localRectToOtherView(die->getLocalRect(), &r, this)) continue;
+        WolfHudKit::markBadge((F32)r.mRight - 11.f, (F32)r.mTop - 11.f, 10.f, mDieMark[i] == '1' ? WolfHudKit::MARK_TICK : WolfHudKit::MARK_CROSS,
+                              mDieMark[i] == '1' ? GOLD_DIE : RED_DIE);
+    }
 }
 
 void WolfFloaterGreedy::render()
@@ -1153,11 +1165,15 @@ void WolfFloaterGreedy::applyDice(const LLSD& dice, const std::string& kept)
         const S32 face = dice.isArray() && i < (S32)dice.size() ? llclamp(dice[i].asInteger(), 0, 6) : 0;
         const char k = i < (S32)kept.size() ? kept[i] : '0';
         const LLColor4 c = k == '1' ? GOLD_DIE : k == 'x' ? RED_DIE : LLColor4::white;
+        // [HUD KIT 2026-11-25] scored and bust told by shape and words too, not by the tint alone (WCAG 1.4.1): draw() puts a tick
+        // or cross badge on the die (mDieMark), and the die's tooltip says it
+        mDieMark[i] = face > 0 && (k == '1' || k == 'x') ? k : '0';
         for (const char* p : { "f_die" })
         {
             LLIconCtrl* icon = getChild<LLIconCtrl>(llformat("%s%d", p, i));
             icon->setValue(LLSD(llformat("WolfGreedy_Die%d", face)));
             icon->setColor(c);
+            icon->setToolTip(mDieMark[i] == '1' ? std::string("Scored") : mDieMark[i] == 'x' ? std::string("Bust") : LLStringUtil::null);
         }
     }
 }

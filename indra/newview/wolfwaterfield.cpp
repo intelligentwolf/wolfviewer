@@ -292,6 +292,48 @@ bool WolfWaterField::depthAt(const Field& f, F32 rx, F32 ry, F32 out[4])
     return true;
 }
 
+// [T1042 ONE SEA 2026-11-24] see wolfwaterfield.h.
+const WolfWaterField::Field* WolfWaterField::seaField(LLViewerRegion* regionp, LLViewerRegion** frame_out) const
+{
+    if (frame_out) *frame_out = regionp;
+    if (!regionp) return nullptr;
+    const Field* own = get(regionp);
+    LLViewerRegion* agent = gAgent.getRegion();
+    if (!agent || agent == regionp) return own;
+    const Field* af = get(agent);
+    if (!af || !af->mZoneTex || !af->mExpoTex) return own;
+    // the region's rect in the agent region's frame (the fields' coordinates are region-relative)
+    const LLVector3 rel = regionp->getOriginAgent() - agent->getOriginAgent();
+    const F32 x0 = rel.mV[VX], y0 = rel.mV[VY], w = regionp->getWidth();
+    // 0.5 m of slack: the origins are agent-space floats, and a neighbour of the same width ends exactly on the span's edge
+    const F32 SLACK = 0.5f;
+    auto inside = [&](F32 ox, F32 oy, F32 sx, F32 sy)
+    {
+        return x0 >= ox - SLACK && y0 >= oy - SLACK && x0 + w <= ox + sx + SLACK && y0 + w <= oy + sy + SLACK;
+    };
+    const bool covered = inside(af->mExpoX0, af->mExpoY0, af->mExpoSX, af->mExpoSY)
+                      && inside(af->mZoneX0, af->mZoneY0, af->mZoneSX, af->mZoneSY);
+    {
+        // logged when a region's answer changes (a teleport, a crossing, a field re-baked over another window)
+        static std::map<U64, bool> s_logged;
+        auto it = s_logged.find(regionp->getHandle());
+        if (it == s_logged.end() || it->second != covered)
+        {
+            if (s_logged.size() > 64) s_logged.clear();
+            s_logged[regionp->getHandle()] = covered;
+            LL_INFOS("WolfWaterField") << "sea field for " << regionp->getName() << ": "
+                                       << (covered ? "the agent region's (" : "its own (outside the span of ") << agent->getName() << ")"
+                                       << LL_ENDL;
+        }
+    }
+    if (!covered)
+    {
+        return own;
+    }
+    if (frame_out) *frame_out = agent;
+    return af;
+}
+
 const WolfWaterField::Field* WolfWaterField::get(const LLViewerRegion* regionp) const
 {
     if (!regionp)

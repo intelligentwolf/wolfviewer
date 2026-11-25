@@ -846,28 +846,44 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             }
             if (fld)
             {
+                // [T1042 ONE SEA 2026-11-24] The exposure and zone bakes (the surf train's weight, distances, optical path and
+                // k0, the swell's shelter, the painted zones) come from ONE field wherever it reaches: a neighbour's own plane
+                // lying wholly inside the agent field's span reads the agent region's (WolfWaterField::seaField), so it
+                // computes the same surf height and phase as the agent region's plane and the void planes at the shared edge
+                // (ticket 1042: two trains of up to 14.7 m out of step tore the sea along Indigo Blue Realm's border, the sky
+                // and the sea floor showing through). Its DEPTH field stays its own; every lookup is then in that one field's
+                // region frame (wolfRegionOrigin), the depth field's origin moved into it. The agent's own plane and the void /
+                // hole planes are unchanged (frame = their own region, the agent's).
+                LLViewerRegion* frame_rgn = rgn;
+                const WolfWaterField::Field* efld = own_plane ? WolfWaterField::instance().seaField(rgn, &frame_rgn) : fld;
+                if (!efld)
+                {
+                    efld = fld;
+                    frame_rgn = rgn;
+                }
+                const LLVector3 origin = frame_rgn->getOriginAgent();
+                const LLVector3 depth_off = rgn->getOriginAgent() - origin;   // the own depth field's origin in that frame
                 S32 ch = cur_shader->enableTexture(LLShaderMgr::WOLF_DEPTH_FIELD);
                 if (ch > -1) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, fld->mDepthTex);
                 ch = cur_shader->enableTexture(LLShaderMgr::WOLF_EXPOSURE_FIELD);
-                if (ch > -1) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, fld->mExpoTex);
-                const LLVector3 origin = rgn->getOriginAgent();
+                if (ch > -1) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, efld->mExpoTex);
                 cur_shader->uniform2f(s_region_origin, origin.mV[VX], origin.mV[VY]);
                 cur_shader->uniform2f(s_depth_region_size, fld->mSizeX, fld->mSizeY);
-                cur_shader->uniform2f(s_depth_origin, fld->mX0, fld->mY0);   // <WolfViewer 2026-09-20/>
+                cur_shader->uniform2f(s_depth_origin, fld->mX0 + depth_off.mV[VX], fld->mY0 + depth_off.mV[VY]);   // <WolfViewer 2026-09-20/>
                 cur_shader->uniform1f(s_depth_water_level, fld->mWaterLevel);
-                cur_shader->uniform2f(s_expo_origin, fld->mExpoX0, fld->mExpoY0);
-                cur_shader->uniform2f(s_expo_size, fld->mExpoSX, fld->mExpoSY);
+                cur_shader->uniform2f(s_expo_origin, efld->mExpoX0, efld->mExpoY0);
+                cur_shader->uniform2f(s_expo_size, efld->mExpoSX, efld->mExpoSY);
                 cur_shader->uniform1f(s_depth_ready, 1.f);
                 cur_shader->uniform1f(s_expo_ready, 1.f);
                 // <WolfViewer 2026-09-21> the k0 the exposure bake's A channel (the surf's
                 // optical path) was integrated with — waterV.glsl multiplies the path by it.
-                cur_shader->uniform1f(s_surf_path_k0, fld->mSurfK0);
+                cur_shader->uniform1f(s_surf_path_k0, efld->mSurfK0);
                 // [WAVES 2026-09-07] zone energy, same span as the exposure field.
                 ch = cur_shader->enableTexture(LLShaderMgr::WOLF_ZONE_FIELD);
-                if (ch > -1 && fld->mZoneTex) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, fld->mZoneTex);
-                cur_shader->uniform2f(s_zone_origin, fld->mZoneX0, fld->mZoneY0);
-                cur_shader->uniform2f(s_zone_size, fld->mZoneSX, fld->mZoneSY);
-                cur_shader->uniform1f(s_zone_ready, fld->mZoneTex ? 1.f : 0.f);
+                if (ch > -1 && efld->mZoneTex) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, efld->mZoneTex);
+                cur_shader->uniform2f(s_zone_origin, efld->mZoneX0, efld->mZoneY0);
+                cur_shader->uniform2f(s_zone_size, efld->mZoneSX, efld->mZoneSY);
+                cur_shader->uniform1f(s_zone_ready, efld->mZoneTex ? 1.f : 0.f);
             }
             else
             {

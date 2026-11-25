@@ -982,9 +982,26 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         ry = ay - o.mV[VY];
     }
     const WolfWaterField::Field* field = regionp ? WolfWaterField::instance().get(regionp) : nullptr;
-    auto exposure_at = [field](F32 x, F32 y) -> F32
+    // [T1042 ONE SEA 2026-11-24] the exposure and zone bakes the hull's water is DRAWN from (lldrawpoolwater.cpp, waterV.glsl
+    // wolfRegionOrigin): the agent region's when this region lies wholly inside its span (WolfWaterField::seaField), with
+    // (ex, ey) the hull in that field's region frame; the depth bake stays this region's own (field, rx, ry).
+    LLViewerRegion* sea_frame = regionp;
+    const WolfWaterField::Field* sfield = field ? WolfWaterField::instance().seaField(regionp, &sea_frame) : nullptr;
+    if (!sfield)
     {
-        return field ? WolfWaterField::exposureAt(*field, x, y) : 1.f;
+        sfield = field;
+        sea_frame = regionp;
+    }
+    F32 ex = rx, ey = ry;
+    if (regionp && sea_frame && sea_frame != regionp)
+    {
+        const LLVector3 off = regionp->getOriginAgent() - sea_frame->getOriginAgent();
+        ex = rx + off.mV[VX];
+        ey = ry + off.mV[VY];
+    }
+    auto exposure_at = [sfield](F32 x, F32 y) -> F32
+    {
+        return sfield ? WolfWaterField::exposureAt(*sfield, x, y) : 1.f;
     };
     auto smoothstep01 = [](F32 e0, F32 e1, F32 x)
     {
@@ -1005,7 +1022,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
     // (waterV.glsl zoneScale — WolfWaveZones::zoneScale is the one mapping): a boat on an OFF
     // cell sits still (the default everywhere inside a region now), on a small-wave cell it
     // rides smallScale of the open sea, on open / surf cells the full swell.
-    const F32 energy = field ? WolfWaterField::zoneAt(*field, rx, ry) : WolfWaveZones::OPEN_ENERGY;
+    const F32 energy = sfield ? WolfWaterField::zoneAt(*sfield, ex, ey) : WolfWaveZones::OPEN_ENERGY;   // [T1042 ONE SEA/]
     // <WolfViewer 2026-10-06> ...but never below HARBOUR_SLOP for the ROCKER. Paul at Madrigal marina:
     // "none of the boats appear to be rocking" / "i just dont see a lot of rocking" - the marina is
     // unpainted (OFF, zone 0), so the 09-10 zone rule multiplied every moored hull by 0 and undid the
@@ -1015,7 +1032,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
     const F32 HARBOUR_SLOP = 0.33f;
     const F32 zone_drawn = WolfWaveZones::zoneScale(energy, amp, sea.mCalm, sea.mSmall);
     const F32 zone_mul = rocker ? llmax(zone_drawn, HARBOUR_SLOP) : zone_drawn;
-    const F32 expo_scale = 0.15f + 1.15f * exposure_at(rx, ry);
+    const F32 expo_scale = 0.15f + 1.15f * exposure_at(ex, ey);   // [T1042 ONE SEA/]
     const F32 swell_scale = (rocker ? llmax(expo_scale, 0.7f) : expo_scale) * zone_mul;
     // [OPEN SEA SHORES 2026-10-26] The open-sea weight (WolfWaterClearance, waterV.glsl openW): breakers and the automatic
     // surf only where the water reaches the open sea, as the drawn water.
@@ -1141,11 +1158,11 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
                 // [FLOOR 2026-08-31] Same 0.7 rocker floor as the swell term above, for the
                 // same reason: at a marina the BREAKER is the dominant part of a moored
                 // hull's bob. The drawn water keeps the un-floored feed.
-                const F32 feed = exposure_at(rx - (g / conf) * 45.f, ry - (b / conf) * 45.f);
+                const F32 feed = exposure_at(ex - (g / conf) * 45.f, ey - (b / conf) * 45.f);   // [T1042 ONE SEA/]
                 F32 b_amp = llmin(0.10f + amp * 0.9f, 0.5f) * shoal
                           * (rocker ? llmax(0.35f + 0.65f * sqrtf(feed), 0.7f) : 0.35f + 0.65f * sqrtf(feed)) * open_w;
                 // [OPEN SEA SHORES 2026-10-26] sets, waterV.glsl bSet same (the automatic surf's 90 s set clock)
-                const F32 b_set = 6.2831853f * t / 90.f + rx * 0.013f + ry * 0.017f;
+                const F32 b_set = 6.2831853f * t / 90.f + ex * 0.013f + ey * 0.017f;   // [T1042 ONE SEA/] regionXY is the sea frame's
                 b_amp *= 0.45f + 0.55f * smoothstep01(0.1f, 1.f, 0.5f + 0.5f * sinf(b_set));
                 const F32 br = sinf(phase);
                 // [DRY BUILDS 2026-10-26] re-centred: the mean of br^2 over a period is 0.5, so (br + 0.35 br^2) sat
@@ -1171,11 +1188,11 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
     // Off / Calm / Small cells.
     const F32 auto_gate = smoothstep01(0.35f, 0.55f, energy) * open_w;
     const bool auto_surf_on = sea.mAutoOn && sea.mAutoH > 0.01f && auto_gate > 0.01f;
-    if (field && sea.mShoreOn && ((sea.mSurfH > 0.01f && field->mZoneTex) || auto_surf_on))
+    if (field && sea.mShoreOn && ((sea.mSurfH > 0.01f && sfield->mZoneTex) || auto_surf_on))
     {
         // surf cells only (waterV.glsl surfZone). <WolfViewer 2026-10-01/> from the surf WEIGHT, as the shader now reads it
-        F32 surf_zone = (sea.mSurfH > 0.01f && field->mZoneTex)
-            ? smoothstep01(0.62f, 0.95f, 0.55f + 0.45f * WolfWaterField::surfWeightAt(*field, rx, ry)) : 0.f;
+        F32 surf_zone = (sea.mSurfH > 0.01f && sfield->mZoneTex)
+            ? smoothstep01(0.62f, 0.95f, 0.55f + 0.45f * WolfWaterField::surfWeightAt(*sfield, ex, ey)) : 0.f;   // [T1042 ONE SEA/]
         const bool auto_s = surf_zone <= 0.01f && auto_surf_on;
         F32 surf_h = auto_s ? sea.mAutoH : sea.mSurfH;   // [HARBOUR STRIPES 2026-10-28/] scaled by the shelter feed below
         const F32 surf_set = auto_s ? 90.f : sea.mSurfSet;
@@ -1189,25 +1206,25 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             const F32 dW = 80.f, dH = 80.f;   // <WolfViewer 2026-09-20/> waterV.glsl: 80 m either side, not 1/32 of the span
             // <WolfViewer 2026-09-20> travel = UP the distance-from-the-open-sea gradient (landward),
             // the old distance-to-land rule only where no open sea is in reach (waterV.glsl same).
-            const F32 d_open = WolfWaterField::openDistanceAt(*field, rx, ry);
-            const F32 ox = WolfWaterField::openDistanceAt(*field, rx + dW, ry) - WolfWaterField::openDistanceAt(*field, rx - dW, ry);
-            const F32 oy = WolfWaterField::openDistanceAt(*field, rx, ry + dH) - WolfWaterField::openDistanceAt(*field, rx, ry - dH);
+            const F32 d_open = WolfWaterField::openDistanceAt(*sfield, ex, ey);
+            const F32 ox = WolfWaterField::openDistanceAt(*sfield, ex + dW, ey) - WolfWaterField::openDistanceAt(*sfield, ex - dW, ey);
+            const F32 oy = WolfWaterField::openDistanceAt(*sfield, ex, ey + dH) - WolfWaterField::openDistanceAt(*sfield, ex, ey - dH);
             const F32 ol = sqrtf(ox * ox + oy * oy);
-            const F32 dist = WolfWaterField::distanceAt(*field, rx, ry);
-            const F32 gx = WolfWaterField::distanceAt(*field, rx + dW, ry) - WolfWaterField::distanceAt(*field, rx - dW, ry);
-            const F32 gy = WolfWaterField::distanceAt(*field, rx, ry + dH) - WolfWaterField::distanceAt(*field, rx, ry - dH);
+            const F32 dist = WolfWaterField::distanceAt(*sfield, ex, ey);
+            const F32 gx = WolfWaterField::distanceAt(*sfield, ex + dW, ey) - WolfWaterField::distanceAt(*sfield, ex - dW, ey);
+            const F32 gy = WolfWaterField::distanceAt(*sfield, ex, ey + dH) - WolfWaterField::distanceAt(*sfield, ex, ey - dH);
             const F32 gl = sqrtf(gx * gx + gy * gy);
             // <WolfViewer 2026-09-21> The baked OPTICAL PATH and its gradient — the ray
             // direction and the wave phase, exactly as waterV.glsl reads them. A boat has to
             // rock on the sea that is drawn, so this block mirrors the shader term for term;
             // the shader's LATTICE BAND LIMIT is the one thing deliberately not mirrored,
             // because that is a drawing limit and the water really is under the hull.
-            const F32 d_path = WolfWaterField::openPathAt(*field, rx, ry);
-            const F32 px = WolfWaterField::openPathAt(*field, rx + dW, ry) - WolfWaterField::openPathAt(*field, rx - dW, ry);
-            const F32 py = WolfWaterField::openPathAt(*field, rx, ry + dH) - WolfWaterField::openPathAt(*field, rx, ry - dH);
+            const F32 d_path = WolfWaterField::openPathAt(*sfield, ex, ey);
+            const F32 px = WolfWaterField::openPathAt(*sfield, ex + dW, ey) - WolfWaterField::openPathAt(*sfield, ex - dW, ey);
+            const F32 py = WolfWaterField::openPathAt(*sfield, ex, ey + dH) - WolfWaterField::openPathAt(*sfield, ex, ey - dH);
             const F32 pl = sqrtf(px * px + py * py);
             const bool have_open = d_open < 3000.f && ol > 1.f;
-            const bool have_path = field->mSurfK0 > 0.f && d_open < 3000.f && pl > 1.f && !auto_s;
+            const bool have_path = sfield->mSurfK0 > 0.f && d_open < 3000.f && pl > 1.f && !auto_s;   // [T1042 ONE SEA/]
             const bool have_land = dist < 3000.f && gl > 1.f;
             F32 dx, dy, coord;
             if (have_path) { dx = px / pl; dy = py / pl; coord = d_open; }
@@ -1219,7 +1236,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
                 // normalize(depthOrigin + depthRegionSize * 0.5 - regionXY + vec2(0.001, 0.0)).
                 const F32 cx = field->mX0 + field->mSizeX * 0.5f - rx + 0.001f, cy = field->mY0 + field->mSizeY * 0.5f - ry;
                 F32 cl = sqrtf(cx * cx + cy * cy); if (cl <= 0.f) cl = 1.f;
-                dx = cx / cl; dy = cy / cl; coord = rx * dx + ry * dy;
+                dx = cx / cl; dy = cy / cl; coord = ex * dx + ey * dy;   // [T1042 ONE SEA/] the sea frame's regionXY
             }
             F32 path = have_path ? d_path : coord;
             if (auto_s)
@@ -1228,7 +1245,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
                 // [HARBOUR STRIPES 2026-10-28] waterV.glsl autoS SHELTER, same rule: no bigger than the swell drawn 150 m
                 // seaward (against the travel direction), mix(0.15, 1.3, exposure) / 1.3; 1 on an open coast and outside
                 // the exposure span (exposureAt returns 1 there), a fraction of it in a harbour.
-                const F32 feed_expo = exposure_at(rx - dx * 150.f, ry - dy * 150.f);
+                const F32 feed_expo = exposure_at(ex - dx * 150.f, ey - dy * 150.f);   // [T1042 ONE SEA/]
                 surf_h *= (0.15f + 1.15f * feed_expo) / 1.3f;
             }
             // depth: the smoothed height, continuing past the field's border and easing to 30 m
@@ -1254,7 +1271,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             const F32 g9 = 9.81f;
             const F32 lambda = llmax(surf_len, 12.f * surf_h);
             // <WolfViewer 2026-09-21/> k0 deep-water, omega0 CONSTANT, k local by Guo (2002)
-            const F32 k0 = (field->mSurfK0 > 0.f && !auto_s) ? field->mSurfK0 : 6.2831853f / llmax(lambda, 8.f);
+            const F32 k0 = (sfield->mSurfK0 > 0.f && !auto_s) ? sfield->mSurfK0 : 6.2831853f / llmax(lambda, 8.f);   // [T1042 ONE SEA/]
             // [OPEN SEA SHORES 2026-10-26] the beach slope along the travel direction and the automatic surf's shoaling
             // term, waterV.glsl same (the WKB path on a beach of slope s, shallow-water limit).
             if (auto_s)
@@ -1273,7 +1290,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             const F32 k = WolfWaterField::surfWavenumber(k0, h);
             const F32 set_ph = 6.2831853f * (t / llmax(surf_set, 10.f)) - path * (0.22f / lambda);
             const F32 set_env = 0.30f + 0.70f * smoothstep01(0.15f, 1.f, 0.5f + 0.5f * sinf(set_ph));
-            const F32 crest_var = 0.85f + 0.15f * sinf((rx * -dy + ry * dx) * (1.1f / lambda) + t * 0.1f);
+            const F32 crest_var = 0.85f + 0.15f * sinf((ex * -dy + ey * dx) * (1.1f / lambda) + t * 0.1f);   // [T1042 ONE SEA/]
             const F32 ksh = llclamp(WolfWaterField::surfShoalGain(k0, k, h), 1.f, 1.8f);   // <WolfViewer 2026-10-01/> floor 1, waterV.glsl same
             F32 crest_h = llmin(surf_h * surf_zone * set_env * ksh * crest_var, surf_h * 1.15f);
             const F32 h_max = 0.78f * h;   // <WolfViewer 2026-10-01/> McCowan on the surf depth (real or reef), waterV.glsl same

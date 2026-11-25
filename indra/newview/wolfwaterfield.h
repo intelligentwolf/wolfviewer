@@ -170,6 +170,17 @@ public:
     U32 lastSurfTexels() const { return mLastSurfTexels; }
     /** The field for a region, or nullptr before its first bake. */
     const Field* get(const LLViewerRegion* regionp) const;
+    /**
+     * [T1042 ONE SEA 2026-11-24] The field whose EXPOSURE and ZONE bakes (the swell's shelter, the painted zones, the surf
+     * train's weight, distances, optical path and k0) a region's own water plane reads: the AGENT region's when this region
+     * lies wholly inside the agent field's span (its 3x exposure / zone span - the same land, read through heightAt, and
+     * the same painted layouts, WolfWaveZones::fill), else the region's own. Every plane is then drawn from ONE bake
+     * wherever that bake reaches, so neighbouring planes compute the same surf height and phase at the same point and
+     * meet with no seam (ticket 1042: each region's own path, weight and depth put two trains of up to 14.7 m out of step
+     * at Indigo Blue Realm's border). The DEPTH field stays the region's own (the agent's covers its own window only).
+     * frame_out = the region the returned field's coordinates are relative to (shader wolfRegionOrigin). Null if neither.
+     */
+    const Field* seaField(LLViewerRegion* regionp, LLViewerRegion** frame_out) const;
 
     /**
      * Open-water exposure at region-relative (rx, ry) metres: the nearest texel of the

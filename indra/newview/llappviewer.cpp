@@ -6194,6 +6194,9 @@ void LLAppViewer::idle()
         // set theirs (wolfswim.h)
         WolfSwim::beforeAgentUpdate();
         // [/WOLF SWIM]
+        // [STARFOLD 2026-11-25] the movement this frame asks for, as it is sent: resetControlFlags below clears it before
+        // WolfStarfold::idle, whose hangar view ends on the user's movement (wolfstarfold.h noteAgentControls)
+        WolfStarfold::instance().noteAgentControls();
         send_agent_update(false);
 
         // After calling send_agent_update() in the mainloop we always clear

@@ -29,6 +29,7 @@
 #include "wolftooladventureplace.h"   // <WolfViewer 2026-10-16/> the Adventure Studio place overlay
 #include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> the Tunnel tool's outlines
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] Escape for the game's overlay, dialogs, effects
+#include "wolfstarfold.h"   // [STARFOLD 2026-11-25/] the cockpit's letter keys are not "letter keys start chat"
 #include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/> spread across all screens: do not save that size
 
 
@@ -3587,6 +3588,14 @@ bool LLViewerWindow::handleKey(KEY key, MASK mask)
     //  }
     //}
 
+    // [STARFOLD 2026-11-25] piloting a WolfTrek ship: W S Q E Z M, Space and Tab are the cockpit's (wolfstarfold.cpp noteScanKey),
+    // not "letter keys start chat" (Firestorm mode turns LetterKeysAffectsMovementNotFocusChatBar off) - not handled here, so
+    // they go on to the key scan. [rig 25 Nov 10:45:29Z: W during the automatic docking opened the chat bar and typed into it]
+    if (!keyboard_focus && WolfStarfold::instance().cockpitKey(key, mask))
+    {
+        return false;
+    }
+    // [/STARFOLD]
     static LLCachedControl<bool> LetterKeysAffectsMovementNotFocusChatBar(gSavedSettings, "LetterKeysAffectsMovementNotFocusChatBar");
     static LLCachedControl<bool> fsLetterKeysFocusNearbyChatBar(gSavedSettings, "FSLetterKeysFocusNearbyChatBar");
     static LLCachedControl<bool> fsNearbyChatbar(gSavedSettings, "FSNearbyChatbar");

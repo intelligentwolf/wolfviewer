@@ -41,6 +41,7 @@
 #include "wolfstarfolddeck.h"   // [STARBASES 2026-11-25] WolfStarfold.Do "hits"
 #include "wolfstarfold.h"   // [STARFOLD 2026-11-24/]
 #include "wolftraincab.h"   // [TRAIN CAB 2026-11-13] the Train Cab (Wolf Rail)
+#include "wolfflightdeck.h"   // [HUD KIT 2026-11-25/] WolfFlightDeck::logHits (WolfHudKit.Hits)
 #include "wolffloatertunnels.h"   // [T934 2026-11-19/] a taken or returned tunnel rock takes its holes with it
 #include "wolftunnelgone.h"
 // <WolfViewer 2026-09-06> Wolf Territories-only features
@@ -13140,11 +13141,12 @@ void initialize_menus()
     // [TRAIN CAB 2026-11-13] Wolf World > Vehicles & Travel > Train Cab: show / hide it (driving), or open its guide
     commit.add("WolfTrain.Toggle", [](LLUICtrl*, const LLSD&) { WolfTrain::instance().toggleShown(); });
     // [HUD KIT 2026-11-25] for LEAP rigs, read-only: "traincab" logs the Train Cab's press targets in window GL pixels with their
-    // sizes and hit names (WolfTrainCabView::logHits), for scripts/wolf/hudkit/check_inventory.py --log and the rig's clicks
+    // sizes and hit names (WolfTrainCabView::logHits; "flightdeck": WolfFlightDeck::logHits), for scripts/wolf/hudkit/check_inventory.py --log and the rig's clicks
     commit.add("WolfHudKit.Hits", [](LLUICtrl*, const LLSD& param)
     {
         const std::string hud = param.asString();
         if (hud == "traincab") WolfTrainCabView::logHits();
+        else if (hud == "flightdeck") WolfFlightDeck::logHits();   // [HUD KIT 2026-11-25/]
         else LL_INFOS("WolfHudKit") << "hits: no HUD called \"" << hud << "\"" << LL_ENDL;
     });
     enable.add("WolfTrain.IsShown", [](LLUICtrl*, const LLSD&) -> bool { return WolfTrain::instance().shown(); });

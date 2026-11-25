@@ -1308,16 +1308,8 @@ void WolfTrainCabView::draw()
             }
         }
     }
-    // [HUD KIT 2026-11-25] Paul: every press target 44 px or more. The smallest are 44 units (X, ?, the guide's Back / Next,
-    // the refusal's OK; the rest are larger): a unit is u x zoom x the UI size in window pixels, so the cab is never drawn
-    // smaller than 1 / (u x UI size). u at full size is this frame's layout below at zoom 1 (a narrower picture only makes u
-    // smaller, so this is the most it can shrink).
-    {
-        const F32 ui_x = llmax(0.1f, LLUI::getScaleFactor().mV[VX]);
-        const F32 want1 = llclamp(Hv * llmax(0.1f, LLUI::getScaleFactor().mV[VY]) * 0.30f, 170.f, 380.f);
-        const F32 u1 = llmin(llmin(want1, llmax(60.f, (Hv - screen_bottom) * 0.55f)) / 304.f, screen_w / 1600.f);
-        mResize.setFloor(1.f / llmax(0.01f, u1 * ui_x));
-    }
+    // [HUD KIT 2026-11-25] every press target is 44 px or more at full size (zoom 1.0, UI size 1.0); dragging the cab smaller is
+    // the resident's own choice (Shadow 25 Nov: the 44 px rule is at full and default size, never a floor on the drag)
     const F32 zoom = mResize.scale();
     const F32 W = screen_w / zoom;
     const F32 bottom = screen_bottom / zoom;

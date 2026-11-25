@@ -63,6 +63,10 @@ public:
     ~WolfFlightDeck() override;
 
     void draw() override;
+
+    /** [HUD KIT 2026-11-25] For LEAP rigs (UI call WolfHudKit.Hits "flightdeck"): log every press target of the shown deck in
+     *  window GL pixels with its size and hit name, as WolfTrainCabView::logHits. */
+    static void logHits();
     bool handleMouseDown(S32 x, S32 y, MASK mask) override;
     bool handleMouseUp(S32 x, S32 y, MASK mask) override;
     bool handleHover(S32 x, S32 y, MASK mask) override;
@@ -117,6 +121,10 @@ private:
     F32 mPanelTop = 0.f;       // top of the deck; above it is the world (and the HUD)
     F32 mPanelBottom = 0.f;
     std::vector<Hit> mHits;    // in the picture's units (see mHitScale)
+    // [HUD KIT 2026-11-25] the displays' glass this frame (drawBezel, the CDU's screen): the glass's glare goes over them
+    // once their contents are drawn
+    struct Glass { F32 mL, mB, mR, mT; };
+    std::vector<Glass> mGlass;
     // [HUD SIZE 2026-10-12] the size the pilot drags the top edge to (WolfFlightDeckScale), and the scale this frame's
     // picture was drawn at: a point on the view is (x, y) / mHitScale in mHits and the stick / lever geometry
     WolfHudResize mResize{ "WolfFlightDeckScale" };

@@ -10,6 +10,10 @@
  *   ITU-T H.264 (08/2021)                                      "H.264 x.y"
  *   Encapsulation of Opus in ISOBMFF 0.6.8, opus-codec.org/docs/opus_in_isobmff.html   "Opus x.y"
  *
+ * [W112 RECORDER CRASH-SAFE 2026-11-25] The fragmented form (12 8.8) is checked against the readers and writers that
+ * make and play such files: FFmpeg n9.0.2 libavformat/mov.c (reader) and movenc.c (writer, hybrid_fragmented), and
+ * OBS Studio's hybrid MP4 writer plugins/obs-outputs/mp4-mux.c.
+ *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer — Wolf Territories Grid
  * Copyright (C) 2026 IntelligentWolf Ltd.
@@ -36,9 +40,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <io.h>
+#include <io.h>   // _chsize_s, _commit, _fileno
 #else
-#include <unistd.h>
+#include <unistd.h>   // ftruncate, fsync
 #include <sys/types.h>
 #endif
 
@@ -468,6 +472,44 @@ namespace
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------
+// [W112 RECORDER CRASH-SAFE 2026-11-25] Movie fragments
+// ---------------------------------------------------------------------------------------------------------------
+namespace
+{
+    // A fragment is closed at a video key frame once it holds 1 s of pictures (the encoders here make an IDR every
+    // 2 s: wolfvr_openh264.cpp uiIntraPeriod = mFps * 2, wolfvrpipe_video.cpp gop-size, wolfvr_vth264.mm
+    // MaxKeyFrameInterval = mFps * 2), and at any picture once it holds 4 s (dropped frames stretch a GOP counted in
+    // pictures; an encoder that never sends a key frame still loses at most 4 s in a crash).
+    constexpr uint64_t kFragmentMinTicks = kVideoTimescale * 1;
+    constexpr uint64_t kFragmentMaxTicks = kVideoTimescale * 4;
+
+    // 12 8.8.3.1 sample_flags: reserved(4) is_leading(2) sample_depends_on(2) sample_is_depended_on(2)
+    // sample_has_redundancy(2) sample_padding_value(3) sample_is_non_sync_sample(1) sample_degradation_priority(16).
+    // sample_depends_on 2 = does not depend on others (an I picture), 1 = depends on others. The same words as
+    // FFmpeg's isom.h MOV_FRAG_SAMPLE_FLAG_DEPENDS_NO 0x02000000, DEPENDS_YES 0x01000000, IS_NON_SYNC 0x00010000.
+    constexpr uint32_t kFlagsSync = 0x02000000u;
+    constexpr uint32_t kFlagsNonSync = 0x01000000u | 0x00010000u;
+
+    void put32(uint8_t* p, uint32_t v)
+    {
+        p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v;
+    }
+    void put64(uint8_t* p, uint64_t v)
+    {
+        put32(p, (uint32_t)(v >> 32));
+        put32(p + 4, (uint32_t)v);
+    }
+    // a box header of 12 4.2 with a 64-bit size: size 1, type, largesize
+    void largeHeader(uint8_t* p, const char* type, uint64_t size)
+    {
+        put32(p, 1);
+        std::memcpy(p + 4, type, 4);
+        put64(p + 8, size);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // File I/O
 // ---------------------------------------------------------------------------------------------------------------
@@ -525,6 +567,21 @@ bool Mp4Writer::writeAt(uint64_t pos, const void* data, size_t len, std::string&
     return true;
 }
 
+bool Mp4Writer::syncFile(std::string& error)
+{
+    // Hands what the system holds for this file to the disk before finish() switches the file to its final form, so
+    // a power cut cannot leave the switch on the disk without what it points at. Microsoft "_commit" (flushes a file
+    // directly to disk; sets errno), POSIX fsync. The stream itself is unbuffered (open).
+    errno = 0;
+#if defined(_WIN32)
+    const bool ok = _commit(_fileno(mFile)) == 0;
+#else
+    const bool ok = fsync(fileno(mFile)) == 0;
+#endif
+    if (!ok) error = ioError(errno ? errno : EIO);
+    return ok;
+}
+
 bool Mp4Writer::open(const std::string& path_utf8, std::string& error)
 {
     closeFile();
@@ -543,30 +600,35 @@ bool Mp4Writer::open(const std::string& path_utf8, std::string& error)
     std::setvbuf(mFile, nullptr, _IONBF, 0);
 
     Buf head;
-    // ftyp 12 4.3.2: major_brand 'isom', minor_version 0x200, compatible brands isom, iso2 (Opus 4.1: roll groups
-    // need a brand that has them, 'iso2'), avc1, mp41 - what FFmpeg's mp4 muxer writes for H.264 + AAC
+    // ftyp 12 4.3.2: major_brand 'isom', minor_version 0x200, compatible brands isom, iso6, iso2, avc1, mp41 - what
+    // FFmpeg's mp4 muxer writes for H.264 when it fragments (byte for byte what ffmpeg -movflags
+    // frag_keyframe+empty_moov makes; libavformat/movenc.c n9.0.2 mov_write_ftyp_tag: "We add tfdt atoms when
+    // fragmenting, signal this with the iso6 compatible brand"), and what OBS's hybrid MP4 writes while it
+    // fragments (plugins/obs-outputs/mp4-mux.c mp4_write_ftyp). 'iso2' also covers Opus's roll groups (Opus 4.1).
+    // The same ftyp serves the finished, unfragmented file (FFmpeg's hybrid_fragmented keeps it too).
+    // No 'iso5': the fragments give each track's data offset in full instead of counting from the moof
+    // (movenc.c mov_write_ftyp_tag_internal: 'iso5' is "Required when using default-base-is-moof").
+    // No 'dash': this is one file, not a DASH segment (FFmpeg writes 'dash' only for its DASH output with a
+    // global sidx).
     const size_t ftyp = head.begin("ftyp");
     head.fourcc("isom");
     head.u32(0x200);
     head.fourcc("isom");
+    head.fourcc("iso6");
     head.fourcc("iso2");
     head.fourcc("avc1");
     head.fourcc("mp41");
     head.end(ftyp);
-    // free 12 8.1.2: the space finish() writes moov into. Zeros, so the disk blocks are taken now: a full disk later
-    // cannot stop the movie box being written here.
+    // free 12 8.1.2: the space finish() writes the full moov into. Zeros, so the disk blocks are taken now: a full
+    // disk later cannot stop the movie box being written here (on a copy-on-write file system it can: finish()
+    // then drops fragments from the end to free space).
     // mReserveSize (default 4 MB, wolfrec_mp4.h): moov costs about 20 bytes per sample (stsz 4, stts/stsc/stco
-    // runs, stss), so 4 MB holds an hour at 60 fps with AAC; a longer recording gets moov after mdat.
+    // runs, stss), so 4 MB holds an hour at 60 fps with AAC; a longer recording gets moov after the fragments.
     if (mReserveSize > 0xFFFFFFFFull) mReserveSize = 0xFFFFFFFFull;
     mReserveStart = head.b.size();
     head.u32((uint32_t)mReserveSize);
     head.fourcc("free");
     head.zeros((size_t)mReserveSize - 8);
-    // mdat 12 8.1.1 with a 64-bit size (12 4.2: size == 1 -> largesize follows the type); largesize patched by finish()
-    mMdatStart = head.b.size();
-    head.u32(1);
-    head.fourcc("mdat");
-    head.u64(16);
     if (!writeAt(0, head.b.data(), head.b.size(), error))
     {
         closeFile();
@@ -576,12 +638,23 @@ bool Mp4Writer::open(const std::string& path_utf8, std::string& error)
     mFailed = false;
     mFailure.clear();
     mSampleBytes = 0;
+    mInitWritten = false;
+    mInitEntryType = 0;
+    mInitAvc3 = false;
+    mSequence = 0;
+    mFragments.clear();
     mVideo = Track();
     mVideo.timescale = kVideoTimescale;
     mAudio = Track();
+    if (mHasAudio) mAudio.timescale = mAudioOpus ? 48000 : mAudioRate;
     mSps.clear();
     mPps.clear();
     mInBandParams = false;
+    mHaveVideo = false;
+    mFirstPts = mLastPts = 0;
+    mLastTick = 0;
+    mFirstAudioFrames = 0;
+    mInitRoll = false;
     return true;
 }
 
@@ -604,31 +677,22 @@ void Mp4Writer::setAudio(const AudioEncoder& enc)
     mAudio.timescale = mAudioOpus ? 48000 : mAudioRate;   // Opus 4.4: "typically set to 48000"; AAC: its rate
 }
 
-bool Mp4Writer::appendSample(Track& t, const std::vector<uint8_t>& data, uint32_t duration, bool sync,
-                             std::string& error)
+void Mp4Writer::addPending(Track& t, const std::vector<uint8_t>& data, uint32_t duration, bool sync)
 {
-    if (mFailed) { error = mFailure; return false; }
-    if (data.empty() || data.size() > 0xFFFFFFFFull) { error = "An empty or oversized sample was refused."; return false; }
-    if (!writeAt(mEnd, data.data(), data.size(), error))
-    {
-        mFailed = true;
-        mFailure = error;
-        return false;
-    }
     Sample s;
-    s.offset = mEnd;
+    s.offset = t.pending_bytes.size();
     s.size = (uint32_t)data.size();
     s.duration = duration;
     s.sync = sync;
-    t.samples.push_back(s);
-    mEnd += data.size();
+    t.pending.push_back(s);
+    t.pending_bytes.insert(t.pending_bytes.end(), data.begin(), data.end());
     mSampleBytes += data.size();
-    return true;
 }
 
 bool Mp4Writer::writeVideo(const std::vector<uint8_t>& au, int64_t pts_us, bool key, std::string& error)
 {
     if (!mFile) { error = "The video file is not open."; return false; }
+    if (mFailed) { error = mFailure; return false; }
     std::vector<uint8_t> sps, pps;
     std::vector<uint8_t> sample;
     sample.reserve(au.size() + 16);
@@ -652,7 +716,8 @@ bool Mp4Writer::writeVideo(const std::vector<uint8_t>& au, int64_t pts_us, bool 
         sample.push_back((uint8_t)(len >> 8)); sample.push_back((uint8_t)len);
         sample.insert(sample.end(), p, p + n);
     });
-    if (mVideo.samples.empty())
+    AvcSpsInfo first_info;
+    if (!mHaveVideo)
     {
         if (pts_us < 0)
         {
@@ -664,14 +729,11 @@ bool Mp4Writer::writeVideo(const std::vector<uint8_t>& au, int64_t pts_us, bool 
             error = "The first video picture is not a key frame with its SPS and PPS.";
             return false;
         }
-        if (!parseAvcSps(sps.data(), sps.size(), mSpsInfo))
+        if (!parseAvcSps(sps.data(), sps.size(), first_info))
         {
             error = "The video's sequence parameter set could not be read.";
             return false;
         }
-        mSps = sps;
-        mPps = pps;
-        mFirstPts = pts_us;
     }
     else if (pts_us <= mLastPts)
     {
@@ -679,17 +741,37 @@ bool Mp4Writer::writeVideo(const std::vector<uint8_t>& au, int64_t pts_us, bool 
         return false;
     }
     if (sample.empty()) { error = "The video picture had no slices."; return false; }
+    if (sample.size() > 0xFFFFFFFFull) { error = "An oversized video picture was refused."; return false; }
     // ticks from the absolute time since the first picture: durations never drift from the real clock
-    const uint64_t rel = (uint64_t)(pts_us - mFirstPts);
+    const int64_t first_pts = mHaveVideo ? mFirstPts : pts_us;
+    const uint64_t rel = (uint64_t)(pts_us - first_pts);
     const uint64_t tick = (rel * kVideoTimescale + 500000) / 1000000;
-    if (!mVideo.samples.empty() && tick <= mLastTick)
+    if (mHaveVideo)
     {
-        error = "Two video pictures were closer than one 90 kHz tick; the later one was not written.";
-        return false;
+        if (tick <= mLastTick)
+        {
+            error = "Two video pictures were closer than one 90 kHz tick; the later one was not written.";
+            return false;
+        }
+        // The picture before this one now has its duration. It is always waiting for its fragment: a fragment is
+        // only written just before a new picture is taken (below), or by finish().
+        mVideo.pending.back().duration = (uint32_t)std::min<uint64_t>(tick - mLastTick, 0xFFFFFFFFull);
+        // the waiting pictures start at the track's decode time (the sum of the written durations) and end here
+        const uint64_t span = tick - mVideo.decode_time;
+        if ((key && span >= kFragmentMinTicks) || span >= kFragmentMaxTicks)
+        {
+            if (!flushFragment(error)) return false;
+        }
     }
-    const size_t before = mVideo.samples.size();
-    if (!appendSample(mVideo, sample, 0, key, error)) return false;
-    if (before > 0) mVideo.samples[before - 1].duration = (uint32_t)std::min<uint64_t>(tick - mLastTick, 0xFFFFFFFFull);
+    else
+    {
+        mSps = sps;
+        mPps = pps;
+        mSpsInfo = first_info;
+        mFirstPts = pts_us;
+        mHaveVideo = true;
+    }
+    addPending(mVideo, sample, 0, key);
     mLastTick = tick;
     mLastPts = pts_us;
     if (params_kept) mInBandParams = true;
@@ -700,43 +782,261 @@ bool Mp4Writer::writeAudio(const AudioPacket& pkt, std::string& error)
 {
     if (!mFile) { error = "The video file is not open."; return false; }
     if (!mHasAudio) { error = "No sound track was set up."; return false; }
+    if (mFailed) { error = mFailure; return false; }
     if (pkt.frames == 0) { error = "An audio packet without duration was refused."; return false; }
+    if (pkt.data.empty() || pkt.data.size() > 0xFFFFFFFFull)
+    {
+        error = "An empty or oversized sample was refused.";
+        return false;
+    }
+    if (mFirstAudioFrames == 0) mFirstAudioFrames = pkt.frames;
     // every AAC and Opus packet can start decoding (Opus 4.3.6.1: every Opus sample is a sync sample; AAC frames
     // are independent apart from the overlap the priming / roll handles)
-    return appendSample(mAudio, pkt.data, pkt.frames, true, error);
+    addPending(mAudio, pkt.data, pkt.frames, true);
+    // A file without pictures (setVideo never called) is cut into fragments by the sound alone, every second. With
+    // pictures, writeVideo() cuts them (the sound waiting then goes into the same fragment).
+    if (mWidth == 0 && !mHaveVideo)
+    {
+        uint64_t span = 0;
+        for (const Sample& s : mAudio.pending) span += s.duration;
+        if (span >= mAudio.timescale) return flushFragment(error);
+    }
+    return true;
+}
+
+uint32_t Mp4Writer::movieTimescale(bool initial) const
+{
+    // Opus 4.4: movie timescale = media timescale; the same for AAC (the edit list's units are then exact samples)
+    const bool audio = initial ? mHasAudio : !mAudio.samples.empty();
+    return audio ? mAudio.timescale : kVideoTimescale;
+}
+
+bool Mp4Writer::flushFragment(std::string& error)
+{
+    if (mFailed) { error = mFailure; return false; }
+    if (mVideo.pending.empty() && mAudio.pending.empty()) return true;
+
+    Buf out;
+    size_t entry_type_at = 0, mehd_at = 0;
+    if (!mInitWritten)
+    {
+        // the moov with no samples goes in front of the first fragment (12 8.8.1: a movie with fragments has an
+        // mvex in its moov)
+        const std::vector<uint8_t> init = buildMoov(movieTimescale(true), true, &entry_type_at, &mehd_at);
+        out.bytes(init.data(), init.size());
+    }
+    const bool roll = mInitWritten ? mInitRoll : (mAudioOpus && mHasAudio && mFirstAudioFrames != 0);
+    const uint64_t moof_at = mEnd + out.b.size();
+    const uint64_t data_bytes = mVideo.pending_bytes.size() + mAudio.pending_bytes.size();
+    // mdat 12 8.1.1 / 12 4.2: an 8-byte header, or 16 (size 1 + largesize) when the box would reach 4 GB
+    const uint64_t mdat_header = data_bytes + 8 > 0xFFFFFFFFull ? 16 : 8;
+
+    // moof 12 8.8.4: mfhd, then one traf per track with samples waiting (video first, then the sound - the order
+    // of their data in the mdat)
+    auto buildMoof = [&](uint64_t data_start) {
+        Buf m;
+        const size_t moof = m.begin("moof");
+        // mfhd 12 8.8.5.2: sequence_number, 1 for the first fragment and rising by one with each
+        const size_t mfhd = m.beginFull("mfhd", 0, 0);
+        m.u32(mSequence + 1);
+        m.end(mfhd);
+        uint64_t base = data_start;
+        for (int i = 0; i < 2; ++i)
+        {
+            const bool video = i == 0;
+            const Track& t = video ? mVideo : mAudio;
+            if (t.pending.empty()) continue;
+            const uint32_t track_id = video ? 1u : (mHaveVideo ? 2u : 1u);   // as buildMoov numbers them
+            const size_t traf = m.begin("traf");
+            // tfhd 12 8.8.7.2: flags 0x000001 base-data-offset-present (base_data_offset = the file offset of the
+            // track's first sample here, as FFmpeg's and OBS's fragmented MP4 write it), 0x000020
+            // default-sample-flags-present (video: a picture that depends on others; sound: every packet a sync
+            // sample)
+            const size_t tfhd = m.beginFull("tfhd", 0, 0x000001 | 0x000020);
+            m.u32(track_id);
+            m.u64(base);
+            m.u32(video ? kFlagsNonSync : kFlagsSync);
+            m.end(tfhd);
+            // tfdt 12 8.8.12.2, version 1: baseMediaDecodeTime (64 bits) = the sum of the durations of every
+            // earlier sample of the track, so each fragment's time stands on its own
+            const size_t tfdt = m.beginFull("tfdt", 1, 0);
+            m.u64(t.decode_time);
+            m.end(tfdt);
+            // trun 12 8.8.8.2: flags 0x000001 data-offset-present, 0x000100 sample-duration-present, 0x000200
+            // sample-size-present, and for video 0x000400 sample-flags-present (the pictures' own sync flags: a
+            // fragment cut at 4 s can start between key frames, and an encoder may add an IDR anywhere);
+            // sample_count, data_offset (signed 32 bits, from base_data_offset: 0), then per sample duration,
+            // size [, flags]
+            const uint32_t flags = 0x000001 | 0x000100 | 0x000200 | (video ? 0x000400u : 0u);
+            const size_t trun = m.beginFull("trun", 0, flags);
+            m.u32((uint32_t)t.pending.size());
+            m.u32(0);
+            for (const Sample& s : t.pending)
+            {
+                m.u32(s.duration);
+                m.u32(s.size);
+                if (video) m.u32(s.sync ? kFlagsSync : kFlagsNonSync);
+            }
+            m.end(trun);
+            if (!video && roll)
+            {
+                // Opus 4.3.6.2 roll group (see buildMoov). sbgp 12 8.9.2.2 in a traf: group_description_index 1
+                // is the first entry of the track's own sgpd in the moov (12 8.9.4: indexes from 0x10001 would
+                // mean an sgpd in this fragment; Chromium media/formats/mp4/track_run_iterator.cc quotes it)
+                const size_t sbgp = m.beginFull("sbgp", 0, 0);
+                m.fourcc("roll");
+                m.u32(1);
+                m.u32((uint32_t)t.pending.size());
+                m.u32(1);
+                m.end(sbgp);
+            }
+            m.end(traf);
+            base += t.pending_bytes.size();
+        }
+        m.end(moof);
+        return m;
+    };
+    const uint64_t moof_size = buildMoof(0).b.size();   // the same size whatever the offsets
+    const uint64_t data_start = moof_at + moof_size + mdat_header;
+    out.append(buildMoof(data_start));
+    if (mdat_header == 16)
+    {
+        uint8_t h[16];
+        largeHeader(h, "mdat", data_bytes + 16);
+        out.bytes(h, 16);
+    }
+    else
+    {
+        out.u32((uint32_t)(data_bytes + 8));
+        out.fourcc("mdat");
+    }
+    out.bytes(mVideo.pending_bytes.data(), mVideo.pending_bytes.size());
+    out.bytes(mAudio.pending_bytes.data(), mAudio.pending_bytes.size());
+
+    // The moov with no samples was written as 'avc1' and a picture now carries a different SPS/PPS: its entry
+    // becomes 'avc3' (see writeVideo) before that picture's fragment is written. 4 bytes in place.
+    if (mInitWritten && mInBandParams && !mInitAvc3)
+    {
+        if (!writeAt(mInitEntryType, "avc3", 4, error))
+        {
+            mFailed = true;
+            mFailure = error;
+            return false;
+        }
+        mInitAvc3 = true;
+    }
+
+    // Crash safety: everything after the fragment's first 8 bytes is written first, then those 8 bytes (the size and
+    // type of its first box). Until they are written, the file ends with a box of size 0 ("the last one in the
+    // file, extends to the end of the file", 12 4.2) and type 0 - the 8 bytes at mEnd are still zeros, as the
+    // write past the end of the file left them - which readers skip, so a recording killed during this write
+    // plays up to the fragment before. (mEnd is the end of the file here: nothing is ever written after an
+    // unfinished fragment.)
+    if (!writeAt(mEnd + 8, out.b.data() + 8, out.b.size() - 8, error) || !writeAt(mEnd, out.b.data(), 8, error))
+    {
+        mFailed = true;
+        mFailure = error;
+        return false;
+    }
+
+    if (!mInitWritten)
+    {
+        mInitWritten = true;
+        mInitEntryType = mEnd + entry_type_at;
+        mMehdAt = mEnd + mehd_at;
+        mInitAvc3 = mInBandParams;
+        mInitRoll = roll;
+    }
+    Fragment f;
+    f.start = mEnd;
+    f.video_samples = mVideo.samples.size();
+    f.audio_samples = mAudio.samples.size();
+    mFragments.push_back(f);
+    uint64_t base = data_start;
+    for (Track* t : { &mVideo, &mAudio })
+    {
+        for (Sample s : t->pending)
+        {
+            s.offset += base;
+            t->decode_time += s.duration;
+            t->samples.push_back(s);
+        }
+        base += t->pending_bytes.size();
+        t->pending.clear();
+        t->pending_bytes.clear();
+    }
+    mEnd += out.b.size();
+    ++mSequence;
+    // The movie's length so far in the moov with no samples' mehd, after the fragment it counts is in the file (so
+    // it never says more than is there). GStreamer's qtdemux takes a fragmented file's length from it
+    // (qtdemux.c qtdemux_parse_mehd -> qtdemux->duration); without it, it shows the first fragment's.
+    uint8_t dur[8];
+    put64(dur, fragmentedDuration());
+    if (!writeAt(mMehdAt, dur, 8, error))
+    {
+        mFailed = true;
+        mFailure = error;
+        return false;
+    }
+    return true;
+}
+
+uint64_t Mp4Writer::fragmentedDuration() const
+{
+    // as buildMoov's mvhd: the pictures from their start (empty edit) to the end of the last written one, the sound
+    // without its priming (the edits), on the movie's clock of the moov with no samples
+    const uint32_t ts = movieTimescale(true);
+    const uint64_t v = mHaveVideo ? rescale((uint64_t)mFirstPts, 1000000, ts) +
+                                        rescale(mVideo.decode_time, kVideoTimescale, ts)
+                                  : 0;
+    const uint64_t a_media = mAudio.decode_time > mAudioPriming ? mAudio.decode_time - mAudioPriming : 0;
+    const uint64_t a = mHasAudio && mAudio.timescale ? rescale(a_media, mAudio.timescale, ts) : 0;
+    return std::max(v, a);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // moov
 // ---------------------------------------------------------------------------------------------------------------
-std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
+std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts, bool initial, size_t* entry_type_at, size_t* mehd_at) const
 {
+    // initial: the moov with no samples that starts the fragmented file (12 8.8.1): every duration 0 (12 8.8.1:
+    // the movie's samples are in the fragments; FFmpeg and OBS write 0 too), empty sample tables, an mvex.
+    // Otherwise the full moov of the finished file, every sample in its tables.
     const uint64_t now = mp4Now();
     Buf m;
     const size_t moov = m.begin("moov");
+    const bool has_video = initial ? mHaveVideo : !mVideo.samples.empty();
+    const bool has_audio = initial ? mHasAudio : !mAudio.samples.empty();
 
     // durations
     uint64_t v_media = 0;
-    for (const Sample& s : mVideo.samples) v_media += s.duration;
+    if (!initial) for (const Sample& s : mVideo.samples) v_media += s.duration;
     uint64_t a_media = 0;
-    for (const Sample& s : mAudio.samples) a_media += s.duration;
+    if (!initial) for (const Sample& s : mAudio.samples) a_media += s.duration;
     const uint64_t v_movie = rescale(v_media, kVideoTimescale, movie_ts);
     // the first picture's time on the movie's clock (the sound starts at 0); normally 0
-    const uint64_t v_start = mVideo.samples.empty() ? 0 : rescale((uint64_t)mFirstPts, 1000000, movie_ts);
+    const uint64_t v_start = has_video ? rescale((uint64_t)mFirstPts, 1000000, movie_ts) : 0;
     // Audio: the edit starts after the priming and lasts the valid samples (Opus 4.4: segment_duration = valid
     // samples, media_time = priming samples; the same edit trims AAC's encoder delay, 12 8.6.6.1)
     uint64_t a_valid = 0;
-    if (!mAudio.samples.empty())
+    if (!initial && has_audio)
     {
         const uint64_t coded = a_media > mAudioPriming ? a_media - mAudioPriming : 0;
         a_valid = mAudioEnc ? std::min<uint64_t>(mAudioEnc->inputFrames(), coded) : coded;
-        // samples dropped at the end (a full disk) shorten the edit to what is there
+        // fragments dropped at the end (a full disk) shorten the edit to what is there
     }
-    const uint64_t a_movie = mAudio.samples.empty() ? 0 : rescale(a_valid, mAudio.timescale, movie_ts);
+    const uint64_t a_movie = has_audio ? rescale(a_valid, mAudio.timescale, movie_ts) : 0;
+    // In the moov with no samples the edits only place the media: segment_duration 0. ISO/IEC 14496-12:2012
+    // elst semantics, quoted in W3C bug 26066: "Particularly in an empty initial movie of a fragmented movie file
+    // (when there are no media samples yet present), the segment_duration of this edit may be zero", the edit then
+    // giving the offset from media composition time to movie presentation time. FFmpeg (movenc.c
+    // mov_write_edts_tag: "For fragmented files ... Setting duration to 0 allows us to only specify the offset") and
+    // OBS write the same. FFmpeg's reader applies such an edit to every fragment (mov.c mov_build_index ->
+    // sc->time_offset, subtracted in mov_read_trun from each tfdt).
 
     // mvhd 12 8.2.2.2: rate 1.0, volume 1.0, reserved, matrix, pre_defined[6], next_track_ID
     {
-        const uint64_t dur = std::max(v_start + v_movie, a_movie);
+        const uint64_t dur = initial ? 0 : std::max(v_start + v_movie, a_movie);
         const bool v1 = dur > 0xFFFFFFFFull || now > 0xFFFFFFFFull;
         const size_t box = m.beginFull("mvhd", v1 ? 1 : 0, 0);
         if (v1) { m.u64(now); m.u64(now); m.u32(movie_ts); m.u64(dur); }
@@ -751,13 +1051,13 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
     }
 
     uint32_t track_id = 1;
-    if (!mVideo.samples.empty())
+    if (has_video)
     {
         const uint32_t w = mSpsInfo.width ? mSpsInfo.width : mWidth;
         const uint32_t h = mSpsInfo.height ? mSpsInfo.height : mHeight;
         const size_t trak = m.begin("trak");
-        trackHeader(m, now, track_id++, v_start + v_movie, false, w, h);
-        editList(m, v_start, v_movie, 0);
+        trackHeader(m, now, track_id++, initial ? 0 : v_start + v_movie, false, w, h);
+        editList(m, v_start, initial ? 0 : v_movie, 0);
         const size_t mdia = m.begin("mdia");
         mediaHeader(m, now, kVideoTimescale, v_media);
         handler(m, "vide", "WolfViewer video");
@@ -772,6 +1072,7 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
         dataInformation(m);
         Buf stbl;
         const size_t stbl_box = stbl.begin("stbl");
+        size_t entry = 0;
         {
             // stsd 12 8.5.2.2: entry_count 1
             const size_t stsd = stbl.beginFull("stsd", 0, 0);
@@ -780,7 +1081,7 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
             // reserved(16), pre_defined(32)[3], width(16), height(16), horizresolution 0x00480000 (72 dpi),
             // vertresolution 0x00480000, reserved(32), frame_count 1, compressorname[32] (Pascal string),
             // depth 0x0018, pre_defined(16) -1
-            const size_t entry = stbl.begin(mInBandParams ? "avc3" : "avc1");
+            entry = stbl.begin(mInBandParams ? "avc3" : "avc1");
             stbl.zeros(6);
             stbl.u16(1);
             stbl.u16(0);
@@ -847,22 +1148,28 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
         std::vector<std::pair<uint64_t, uint32_t>> at;
         std::vector<uint32_t> durations;
         std::vector<uint32_t> sync;
-        for (size_t i = 0; i < mVideo.samples.size(); ++i)
+        if (!initial)
         {
-            const Sample& s = mVideo.samples[i];
-            at.emplace_back(s.offset, s.size);
-            durations.push_back(s.duration);
-            if (s.sync) sync.push_back((uint32_t)i + 1);
+            for (size_t i = 0; i < mVideo.samples.size(); ++i)
+            {
+                const Sample& s = mVideo.samples[i];
+                at.emplace_back(s.offset, s.size);
+                durations.push_back(s.duration);
+                if (s.sync) sync.push_back((uint32_t)i + 1);
+            }
         }
-        sampleTables(stbl, at, durations, sync.size() == mVideo.samples.size() ? nullptr : &sync);
+        // no stss in the moov with no samples: the fragments flag their own sync samples (trun sample flags)
+        sampleTables(stbl, at, durations, initial || sync.size() == mVideo.samples.size() ? nullptr : &sync);
         stbl.end(stbl_box);
+        // where the sample entry's type sits in the moov: the stbl's bytes start here (+4: after its size)
+        if (entry_type_at) *entry_type_at = m.b.size() + entry + 4;
         m.append(stbl);
         m.end(minf);
         m.end(mdia);
         m.end(trak);
     }
 
-    if (!mAudio.samples.empty())
+    if (has_audio)
     {
         const size_t trak = m.begin("trak");
         trackHeader(m, now, track_id++, a_movie, true, 0, 0);
@@ -912,24 +1219,32 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
             }
             else
             {
-                // bit rates for the DecoderConfigDescriptor: average over the track, peak over any 1 s
+                // bit rates for the DecoderConfigDescriptor: average over the track, peak over any 1 s. In the moov
+                // with no samples neither is known: both the encoder's bit rate and bufferSizeDB 0, as FFmpeg
+                // writes for a fragmented file (movenc.c calculate_mpeg4_bit_rates: "if the average bit rate cannot
+                // be calculated at this point, such as in the case of fragmented MP4", the codec's bit rate;
+                // max_bit_rate = FFMAX(bit_rate, avg); buffer_size 0 without CPB properties)
                 uint64_t total = 0;
                 uint32_t largest = 0;
-                for (const Sample& s : mAudio.samples) { total += s.size; largest = std::max(largest, s.size); }
                 uint64_t peak = 0, window = 0, window_frames = 0;
-                for (size_t i = 0, j = 0; i < mAudio.samples.size(); ++i)
+                if (!initial)
                 {
-                    window += mAudio.samples[i].size;
-                    window_frames += mAudio.samples[i].duration;
-                    while (window_frames > mAudio.timescale && j < i)
+                    for (const Sample& s : mAudio.samples) { total += s.size; largest = std::max(largest, s.size); }
+                    for (size_t i = 0, j = 0; i < mAudio.samples.size(); ++i)
                     {
-                        window -= mAudio.samples[j].size;
-                        window_frames -= mAudio.samples[j].duration;
-                        ++j;
+                        window += mAudio.samples[i].size;
+                        window_frames += mAudio.samples[i].duration;
+                        while (window_frames > mAudio.timescale && j < i)
+                        {
+                            window -= mAudio.samples[j].size;
+                            window_frames -= mAudio.samples[j].duration;
+                            ++j;
+                        }
+                        peak = std::max(peak, window);
                     }
-                    peak = std::max(peak, window);
                 }
                 const uint64_t avg = a_media ? total * 8 * mAudio.timescale / a_media : mAudioBitrate;
+                const uint64_t max_rate = initial ? mAudioBitrate : peak * 8;
                 // esds 14 5.6.1: FullBox(version 0, flags 0) + ES_Descriptor
                 const size_t esds = stbl.beginFull("esds", 0, 0);
                 Buf dsi;   // 1 7.2.6.7 DecoderSpecificInfo (tag 0x05): the AudioSpecificConfig
@@ -938,7 +1253,7 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
                 dcd.u8(0x40);   // objectTypeIndication 0x40 = Audio ISO/IEC 14496-3 (1 Table 5)
                 dcd.u8((0x05 << 2) | 1);   // streamType 0x05 AudioStream (1 Table 6), upStream 0, reserved 1
                 dcd.u24(largest);   // bufferSizeDB
-                dcd.u32((uint32_t)std::min<uint64_t>(peak * 8, 0xFFFFFFFFull));   // maxBitrate
+                dcd.u32((uint32_t)std::min<uint64_t>(max_rate, 0xFFFFFFFFull));   // maxBitrate
                 dcd.u32((uint32_t)std::min<uint64_t>(avg, 0xFFFFFFFFull));        // avgBitrate
                 descriptor(dcd, 0x05, dsi);
                 Buf sl;   // 1 7.3.2.3.1 SLConfigDescriptor (tag 0x06): predefined 2 (14 3.1.2: "reserved for use
@@ -956,18 +1271,23 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
         }
         std::vector<std::pair<uint64_t, uint32_t>> at;
         std::vector<uint32_t> durations;
-        for (const Sample& s : mAudio.samples)
+        if (!initial)
         {
-            at.emplace_back(s.offset, s.size);
-            durations.push_back(s.duration);
+            for (const Sample& s : mAudio.samples)
+            {
+                at.emplace_back(s.offset, s.size);
+                durations.push_back(s.duration);
+            }
         }
         sampleTables(stbl, at, durations, nullptr);   // every audio sample is a sync sample: no stss
-        if (mAudioOpus)
+        // the first packet's length: from the samples, or (moov with no samples) the first packet taken
+        const uint32_t first_frames = !initial ? mAudio.samples.front().duration : mFirstAudioFrames;
+        if (mAudioOpus && first_frames != 0)
         {
             // Opus 4.3.6.2: at least 80 ms of pre-roll after a random access, signalled by a 'roll' sample group
             // (AudioRollRecoveryEntry, 12 10.1.1.2: roll_distance(16, signed), in samples - here packets - and
             // negative). 80 ms = 3840 samples at 48 kHz; packets of `d` samples -> ceil(3840 / d).
-            const uint32_t d = mAudio.samples.front().duration ? mAudio.samples.front().duration : 960;
+            const uint32_t d = first_frames;
             const int16_t roll = (int16_t)-(int32_t)((3840 + d - 1) / d);
             // sgpd 12 8.9.3.2 version 1: grouping_type, default_length 2, entry_count 1, roll_distance
             const size_t sgpd = stbl.beginFull("sgpd", 1, 0);
@@ -976,19 +1296,51 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
             stbl.u32(1);
             stbl.u16((uint16_t)roll);
             stbl.end(sgpd);
-            // sbgp 12 8.9.2.2 version 0: grouping_type, entry_count 1, { sample_count = all, group_description_index 1 }
-            const size_t sbgp = stbl.beginFull("sbgp", 0, 0);
-            stbl.fourcc("roll");
-            stbl.u32(1);
-            stbl.u32((uint32_t)mAudio.samples.size());
-            stbl.u32(1);
-            stbl.end(sbgp);
+            if (!initial)
+            {
+                // sbgp 12 8.9.2.2 version 0: grouping_type, entry_count 1, { sample_count = all,
+                // group_description_index 1 }. In the fragmented file each traf has its own (flushFragment).
+                const size_t sbgp = stbl.beginFull("sbgp", 0, 0);
+                stbl.fourcc("roll");
+                stbl.u32(1);
+                stbl.u32((uint32_t)mAudio.samples.size());
+                stbl.u32(1);
+                stbl.end(sbgp);
+            }
         }
         stbl.end(stbl_box);
         m.append(stbl);
         m.end(minf);
         m.end(mdia);
         m.end(trak);
+    }
+
+    if (initial)
+    {
+        // mvex 12 8.8.1.2: one trex per track (12 8.8.3.2: track_ID, default_sample_description_index 1,
+        // default_sample_duration, default_sample_size, default_sample_flags - all 0: every trun / tfhd here gives
+        // its own). First the mehd (12 8.8.2.2, version 1: fragment_duration, 64 bits - the whole movie's length,
+        // fragments included, on the movie's clock; qtdemux.c qtdemux_parse_mehd reads it so, into the duration it
+        // keeps in mvhd units): 0 here, and flushFragment() writes the length so far in its place after each
+        // fragment.
+        const size_t mvex = m.begin("mvex");
+        {
+            const size_t mehd = m.beginFull("mehd", 1, 0);
+            if (mehd_at) *mehd_at = m.b.size();
+            m.u64(0);
+            m.end(mehd);
+        }
+        for (uint32_t id = 1; id < track_id; ++id)
+        {
+            const size_t trex = m.beginFull("trex", 0, 0);
+            m.u32(id);
+            m.u32(1);
+            m.u32(0);
+            m.u32(0);
+            m.u32(0);
+            m.end(trex);
+        }
+        m.end(mvex);
     }
     m.end(moov);
     return m.b;
@@ -997,88 +1349,123 @@ std::vector<uint8_t> Mp4Writer::buildMoov(uint32_t movie_ts) const
 bool Mp4Writer::finish(int64_t last_video_duration_us, std::string& error)
 {
     if (!mFile) { error = "The video file is not open."; return false; }
+    std::string err;
+    if (!mFailed)
+    {
+        // the last picture's duration
+        if (!mVideo.pending.empty())
+        {
+            uint64_t d = 0;
+            if (last_video_duration_us > 0)
+            {
+                const uint64_t rel_end = (uint64_t)(mLastPts - mFirstPts) + (uint64_t)last_video_duration_us;
+                const uint64_t end_tick = (rel_end * kVideoTimescale + 500000) / 1000000;
+                d = end_tick > mLastTick ? end_tick - mLastTick : 1;
+            }
+            else if (mVideo.pending.size() > 1)
+            {
+                d = mVideo.pending[mVideo.pending.size() - 2].duration;
+            }
+            else if (!mVideo.samples.empty())
+            {
+                d = mVideo.samples.back().duration;
+            }
+            else
+            {
+                d = kVideoTimescale / 30;   // a single picture and no duration given: one frame at 30 fps
+            }
+            mVideo.pending.back().duration = (uint32_t)std::min<uint64_t>(d, 0xFFFFFFFFull);
+        }
+        flushFragment(err);   // a failure leaves these samples out (mFailed): the file ends at the fragment before
+    }
+    // samples that never reached a fragment written whole are not in the file
+    for (Track* t : { &mVideo, &mAudio })
+    {
+        t->pending.clear();
+        t->pending_bytes.clear();
+    }
     if (mVideo.samples.empty() && mAudio.samples.empty())
     {
         closeFile();
         error = mFailed ? mFailure : "Nothing was recorded.";
         return false;
     }
-    // the last picture's duration
-    if (!mVideo.samples.empty())
-    {
-        uint64_t d = 0;
-        if (last_video_duration_us > 0)
-        {
-            const uint64_t rel_end = (uint64_t)(mLastPts - mFirstPts) + (uint64_t)last_video_duration_us;
-            const uint64_t end_tick = (rel_end * kVideoTimescale + 500000) / 1000000;
-            d = end_tick > mLastTick ? end_tick - mLastTick : 1;
-        }
-        else if (mVideo.samples.size() > 1)
-        {
-            d = mVideo.samples[mVideo.samples.size() - 2].duration;
-        }
-        else
-        {
-            d = kVideoTimescale / 30;   // a single picture and no duration given: one frame at 30 fps
-        }
-        mVideo.samples.back().duration = (uint32_t)std::min<uint64_t>(d, 0xFFFFFFFFull);
-    }
-    const uint32_t movie_ts = mAudio.samples.empty() ? kVideoTimescale : mAudio.timescale;   // Opus 4.4: movie =
-                                                                                             // media timescale
-    std::string err;
-    // Up to a few rounds: when the disk is full and the movie box does not fit in the space kept for it, samples
-    // are dropped from the end until it fits where they were.
+
+    // The switch to an ordinary MP4 (the idea of FFmpeg's hybrid_fragmented, movenc.c mov_write_trailer, and OBS's
+    // hybrid MP4, mp4-mux.c mp4_mux_finalise: the fragmented form ends up inside one mdat, a full moov indexes the
+    // samples where they already are). Here the full moov goes into the space kept at the front, and the switch is
+    // ONE 8-byte write, so the file is a playable fragmented file before it and a playable ordinary one after it:
+    //  1. the full moov (all but its first 8 bytes) and an mdat header covering everything from the end of that moov
+    //     to the end of the file are written INSIDE the kept 'free' box, which still hides them;
+    //  2. everything is handed to the disk (syncFile);
+    //  3. the free box's 8-byte header is overwritten with the moov's size and type: the moov and the mdat appear,
+    //     the moov with no samples and the fragments become bytes inside the mdat.
+    // When the full moov does not fit in the kept space (more than about an hour), it goes after the last fragment
+    // (until step 3 the file then holds a second moov after the fragments - FFmpeg skips a later moov, mov.c
+    // mov_read_moov "found a moov box but already parsed one" - as FFmpeg's own hybrid_fragmented does), the mdat
+    // header goes in the last 16 bytes of the kept space, and step 3 shortens the free box to end at it.
+    const uint32_t movie_ts = movieTimescale(false);
     for (int round = 0; round < 64; ++round)
     {
-        // mdat largesize (12 4.2): header + every sample written whole
-        const uint64_t mdat_size = mEnd - mMdatStart;
-        uint8_t ls[8];
-        for (int i = 0; i < 8; ++i) ls[i] = (uint8_t)(mdat_size >> (56 - 8 * i));
-        if (!writeAt(mMdatStart + 8, ls, 8, err)) break;   // inside space already written: only an I/O fault fails here
-        const std::vector<uint8_t> moov = buildMoov(movie_ts);
-        bool front = moov.size() == mReserveSize || moov.size() + 8 <= mReserveSize;
-        // cut anything after the last whole sample (a sample half-written when the disk filled)
-        std::fflush(mFile);
+        // cut anything after the last whole fragment (one half-written when the disk filled)
+        errno = 0;
 #if defined(_WIN32)
-        const bool cut = _chsize_s(_fileno(mFile), (__int64)mEnd) == 0;
+        const int cut_err = (int)_chsize_s(_fileno(mFile), (__int64)mEnd);   // 0, or the error as an errno value
 #else
-        const bool cut = ftruncate(fileno(mFile), (off_t)mEnd) == 0;
+        const int cut_err = ftruncate(fileno(mFile), (off_t)mEnd) == 0 ? 0 : (errno ? errno : EIO);
 #endif
-        if (front)
+        if (cut_err != 0) { err = ioError(cut_err); break; }
+        const std::vector<uint8_t> moov = buildMoov(movie_ts, false, nullptr, nullptr);
+        const bool front = moov.size() + 16 <= mReserveSize;
+        const uint64_t mdat_at = front ? mReserveStart + moov.size() : mReserveStart + mReserveSize - 16;
+        uint8_t mdat[16];
+        largeHeader(mdat, "mdat", mEnd - mdat_at);   // 12 4.2: size 1, largesize 64 bits
+        bool ok = writeAt(mdat_at, mdat, 16, err);
+        if (ok && front) ok = writeAt(mReserveStart + 8, moov.data() + 8, moov.size() - 8, err);
+        // after the fragments: header last, as for a fragment (a box of size 0 and type 0 until then)
+        if (ok && !front)
         {
-            if (!cut) { err = ioError(errno); break; }
-            if (!writeAt(mReserveStart, moov.data(), moov.size(), err)) break;
-            const uint64_t rest = mReserveSize - moov.size();
-            if (rest >= 8)
+            ok = writeAt(mEnd + 8, moov.data() + 8, moov.size() - 8, err) && writeAt(mEnd, moov.data(), 8, err);
+        }
+        if (ok) ok = syncFile(err);
+        if (ok)
+        {
+            uint8_t sw[8];
+            if (front)
             {
-                uint8_t fh[8] = {(uint8_t)(rest >> 24), (uint8_t)(rest >> 16), (uint8_t)(rest >> 8), (uint8_t)rest,
-                                 'f', 'r', 'e', 'e'};
-                if (!writeAt(mReserveStart + moov.size(), fh, 8, err)) break;
+                std::memcpy(sw, moov.data(), 8);   // the moov's own size and 'moov'
             }
-            closeFile();
-            return true;
+            else
+            {
+                put32(sw, (uint32_t)(mReserveSize - 16));   // the free box now ends where the mdat starts
+                std::memcpy(sw + 4, "free", 4);
+            }
+            if (writeAt(mReserveStart, sw, 8, err) && syncFile(err))
+            {
+                closeFile();
+                return true;
+            }
+            break;   // the file stays a playable fragmented file; say why it was not finished
         }
-        if (cut && writeAt(mEnd, moov.data(), moov.size(), err))
-        {
-            closeFile();
-            return true;
-        }
-        if (!cut) err = ioError(errno);
         if (err.rfind("The disk is full", 0) != 0) break;
-        // Drop samples from the end of the file until their bytes make room for the movie box (+64 KB margin).
-        uint64_t need = moov.size() + 65536, freed = 0;
-        while (freed < need && (!mVideo.samples.empty() || !mAudio.samples.empty()))
+        // The disk is full (the moov after the fragments, or a copy-on-write file system needing new blocks even for
+        // the kept space): drop whole fragments from the end until their bytes make room for the moov (+64 KB).
+        // Nothing of step 3 has happened, so the file is still the fragmented one, now shorter.
+        const uint64_t need = moov.size() + 65536;
+        uint64_t freed = 0;
+        while (freed < need && mFragments.size() > 1)
         {
-            const bool v = !mVideo.samples.empty() &&
-                           (mAudio.samples.empty() || mVideo.samples.back().offset > mAudio.samples.back().offset);
-            Track& t = v ? mVideo : mAudio;
-            freed += t.samples.back().size;
-            mEnd = t.samples.back().offset;
-            t.samples.pop_back();
+            const Fragment f = mFragments.back();
+            mFragments.pop_back();
+            freed += mEnd - f.start;
+            mEnd = f.start;
+            mVideo.samples.resize(f.video_samples);
+            mAudio.samples.resize(f.audio_samples);
         }
-        if (mVideo.samples.empty() && mAudio.samples.empty()) break;
-        // a video track must still start with its key frame (it does: the first sample is never dropped while
-        // later ones remain); the new last picture keeps its own duration
+        // the first fragment holds the moov with no samples that the file needs while it is fragmented: it is never
+        // dropped, and when it is all that is left there is nothing more to free
+        if (freed == 0) break;
+        // the new last picture keeps its own duration
     }
     closeFile();
     error = err.empty() ? "The video file could not be finished." : err;

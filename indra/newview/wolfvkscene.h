@@ -210,8 +210,6 @@ private:
     float mPoseView[16] = {};
     bool mPoseViewSet = false;
     uint64_t mPoseBatches = 0, mPoseGlMatrixChecks = 0, mPoseMatrixMismatch = 0, mPoseViewMismatch = 0;
-    uint64_t mPoseVertexSampled = 0, mPoseVertexMismatch = 0, mPoseIndexMismatch = 0;
-    uint64_t mPoseMovingSampled = 0, mPoseMovingMismatch = 0, mPoseMovingBatches = 0;
     float mPoseMatrixMaxDiff = 0.f;
     std::string mPoseFirstMismatch;
     F64 mPoseLast = 0.0;

@@ -42,13 +42,13 @@ WORK="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/wolfcore-${WOLFCORE_VERSION}"
 rm -rf "$WORK"
 mkdir -p "$WORK/dl" "$WORK/out"
 
+cd "$WORK/dl"
 GH_TOKEN="$WOLFCORE_READ_TOKEN" gh release download "$WOLFCORE_VERSION" \
   --repo "$WOLFCORE_REPO" \
-  --dir "$WORK/dl" \
+  --dir . \
   --pattern "$ASSET" \
   --pattern "SHA256SUMS.txt"
 
-cd "$WORK/dl"
 WANT=$(awk -v a="$ASSET" '$2 == a || $2 == ("*" a) { print $1 }' SHA256SUMS.txt)
 if [ -z "$WANT" ]; then
   echo "::error::install-wolfcore.sh: $ASSET not listed in SHA256SUMS.txt"
@@ -64,28 +64,29 @@ if [ "$GOT" != "$WANT" ]; then
   exit 1
 fi
 
-tar -xzf "$ASSET" -C "$WORK/out"
-test -s "$WORK/out/$LIB" || { echo "::error::install-wolfcore.sh: archive missing $LIB"; exit 1; }
+# Relative paths avoid GNU tar on Git-for-Windows treating "D:\..." in RUNNER_TEMP as HOST:ARCHIVE.
+(cd ../out && tar -xzf "../dl/$ASSET")
+test -s "../out/$LIB" || { echo "::error::install-wolfcore.sh: archive missing $LIB"; exit 1; }
 
 if [ "${RUNNER_OS:-$(uname -s)}" = "macOS" ] || [ "$(uname -s)" = "Darwin" ]; then
-  ARCHS=$(lipo -archs "$WORK/out/$LIB")
+  ARCHS=$(lipo -archs "../out/$LIB")
   for a in arm64 x86_64; do
     case " $ARCHS " in
       *" $a "*) ;;
       *) echo "::error::install-wolfcore.sh: $LIB has slices '$ARCHS', missing $a"; exit 1 ;;
     esac
   done
-  EXPORTS=$(nm -gU "$WORK/out/$LIB")
+  EXPORTS=$(nm -gU "../out/$LIB")
   case "$EXPORTS" in
     *" _wolfcore_get_api"*) ;;
     *) echo "::error::install-wolfcore.sh: $LIB exports no _wolfcore_get_api"; exit 1 ;;
   esac
 fi
 
-OUT_PATH="$WORK/out"
+OUT_PATH=$(cd ../out && pwd)
 if command -v cygpath >/dev/null 2>&1; then
   case "${RUNNER_OS:-}" in
-    Windows) OUT_PATH=$(cygpath -w "$WORK/out") ;;
+    Windows) OUT_PATH=$(cygpath -w "$OUT_PATH") ;;
   esac
 fi
 

@@ -37,6 +37,7 @@
 #include "llfile.h"
 #include "llframetimer.h"
 #include "llglslshader.h"
+#include "wolftkgl.h"   // [W114-VULKAN S8 2026-11-26] rawUniformToVk
 #include "llimage.h"
 #include "llkeyboard.h"
 #include "llrender.h"
@@ -615,7 +616,8 @@ void WolfStarfold::bindSpaceSky(LLGLSLShader& shader, S32 unit)
     {
         return;   // a program without the space (only the Wolf dome has it)
     }
-    glUniform1i(loc, unit);
+    if (!gGLManager.mIsNativeVulkan) glUniform1i(loc, unit);
+    WolfTk::rawUniformToVk(shader, "sf_space_map", WolfVkShaderMirror::Kind::I1, 1, &unit);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
     // not in a reflection-probe face: the probes light the scene, and starlight is no light to see by (as the sun's disc there)
     const F32 fade = gCubeSnapshot ? 0.f : spaceFade();
     if (fade > 0.f && mSpaceMap.isNull())

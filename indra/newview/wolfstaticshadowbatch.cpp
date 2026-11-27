@@ -34,6 +34,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include "wolfvkbridge.h"   // [W114-VULKAN S5 2026-11-26] shadowPassOnVulkan
+#include "wolfvknative.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -202,6 +204,7 @@ namespace
         GLuint mIndexBuffer = 0;
         GLuint mVao = 0;
         GLuint mVaoProgram = 0;      // the program object whose attribute locations mVao was set up for
+        S32 mVkPage = -1;
         RangeAllocator mVertices;
         RangeAllocator mIndices;
         U32 mGroups = 0;             // records with storage in this page
@@ -280,6 +283,15 @@ namespace
     void deletePage(S32 index)
     {
         Page* page = sPages[index].get();
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (page->mVkPage >= 0)
+            {
+                WolfVkNative::destroyShadowBatchPage(page->mVkPage);
+            }
+            sPages[index].reset();
+            return;
+        }
         if (page->mVao)
         {
             glDeleteVertexArrays(1, &page->mVao);
@@ -360,20 +372,32 @@ namespace
                 return -1;
             }
         }
-        while (glGetError() != GL_NO_ERROR) { }   // only the two allocations below are judged
-        glGenBuffers(1, &page->mVertexBuffer);
-        glBindBuffer(GL_COPY_WRITE_BUFFER, page->mVertexBuffer);
-        glBufferData(GL_COPY_WRITE_BUFFER, (GLsizeiptr)vertex_capacity * POSITION_BYTES, nullptr, GL_DYNAMIC_DRAW);
-        glGenBuffers(1, &page->mIndexBuffer);
-        glBindBuffer(GL_COPY_WRITE_BUFFER, page->mIndexBuffer);
-        glBufferData(GL_COPY_WRITE_BUFFER, (GLsizeiptr)index_capacity * INDEX_BYTES, nullptr, GL_DYNAMIC_DRAW);
-        glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
-        if (glGetError() != GL_NO_ERROR)
-        {   // no video memory for a page (GL_OUT_OF_MEMORY): nothing is kept, the group stays on the stock path
-            glDeleteBuffers(1, &page->mVertexBuffer);
-            glDeleteBuffers(1, &page->mIndexBuffer);
-            LL_WARNS_ONCE("WolfShadows") << "static shadow batch: a buffer page could not be allocated; those shadow casters are drawn the stock way" << LL_ENDL;
-            return -1;
+        if (gGLManager.mIsNativeVulkan)
+        {
+            page->mVkPage = WolfVkNative::createShadowBatchPage(vertex_capacity * POSITION_BYTES, index_capacity * INDEX_BYTES);
+            if (page->mVkPage < 0)
+            {
+                LL_WARNS_ONCE("WolfShadows") << "static shadow batch: a Vulkan buffer page could not be allocated; those shadow casters are drawn the stock way" << LL_ENDL;
+                return -1;
+            }
+        }
+        else
+        {
+            while (glGetError() != GL_NO_ERROR) { }   // only the two allocations below are judged
+            glGenBuffers(1, &page->mVertexBuffer);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, page->mVertexBuffer);
+            glBufferData(GL_COPY_WRITE_BUFFER, (GLsizeiptr)vertex_capacity * POSITION_BYTES, nullptr, GL_DYNAMIC_DRAW);
+            glGenBuffers(1, &page->mIndexBuffer);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, page->mIndexBuffer);
+            glBufferData(GL_COPY_WRITE_BUFFER, (GLsizeiptr)index_capacity * INDEX_BYTES, nullptr, GL_DYNAMIC_DRAW);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+            if (glGetError() != GL_NO_ERROR)
+            {   // no video memory for a page (GL_OUT_OF_MEMORY): nothing is kept, the group stays on the stock path
+                glDeleteBuffers(1, &page->mVertexBuffer);
+                glDeleteBuffers(1, &page->mIndexBuffer);
+                LL_WARNS_ONCE("WolfShadows") << "static shadow batch: a buffer page could not be allocated; those shadow casters are drawn the stock way" << LL_ENDL;
+                return -1;
+            }
         }
         page->mVertices.init(vertex_capacity);
         page->mIndices.init(index_capacity);
@@ -587,14 +611,24 @@ namespace
             gltf.mCommand.mBaseVertex += (GLint)rec.mVertexOffset;
         }
 
-        // GL_COPY_WRITE_BUFFER: a binding point nothing else in the viewer uses, so no cached binding goes stale
-        glBindBuffer(GL_COPY_WRITE_BUFFER, page->mVertexBuffer);
-        glBufferSubData(GL_COPY_WRITE_BUFFER, (GLintptr)rec.mVertexOffset * POSITION_BYTES,
-                        (GLsizeiptr)vertices * POSITION_BYTES, sPositionScratch.data());
-        glBindBuffer(GL_COPY_WRITE_BUFFER, page->mIndexBuffer);
-        glBufferSubData(GL_COPY_WRITE_BUFFER, (GLintptr)rec.mIndexOffset * INDEX_BYTES,
-                        (GLsizeiptr)indices * INDEX_BYTES, sIndexScratch.data());
-        glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            WolfVkNative::writeShadowBatchPage(
+                page->mVkPage,
+                rec.mVertexOffset * POSITION_BYTES, sPositionScratch.data(), vertices * POSITION_BYTES,
+                rec.mIndexOffset * INDEX_BYTES, sIndexScratch.data(), indices * INDEX_BYTES);
+        }
+        else
+        {
+            // GL_COPY_WRITE_BUFFER: a binding point nothing else in the viewer uses, so no cached binding goes stale
+            glBindBuffer(GL_COPY_WRITE_BUFFER, page->mVertexBuffer);
+            glBufferSubData(GL_COPY_WRITE_BUFFER, (GLintptr)rec.mVertexOffset * POSITION_BYTES,
+                            (GLsizeiptr)vertices * POSITION_BYTES, sPositionScratch.data());
+            glBindBuffer(GL_COPY_WRITE_BUFFER, page->mIndexBuffer);
+            glBufferSubData(GL_COPY_WRITE_BUFFER, (GLintptr)rec.mIndexOffset * INDEX_BYTES,
+                            (GLsizeiptr)indices * INDEX_BYTES, sIndexScratch.data());
+            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+        }
 
         const U32 bytes = vertices * POSITION_BYTES + indices * INDEX_BYTES;
         sBudgetBytes += bytes;
@@ -664,6 +698,10 @@ namespace
     // The attribute locations of the program as it is now linked (a shader reload makes a new program object).
     bool programReady()
     {
+        if (gGLManager.mIsNativeVulkan)
+        {
+            return WolfVkNative::shadowBatchProgramReady(&gWolfShadowBatchProgram);
+        }
         const GLuint program = gWolfShadowBatchProgram.mProgramObject;
         if (!program)
         {
@@ -712,6 +750,10 @@ namespace
 
 bool WolfStaticShadowBatch::supported()
 {
+    if (gGLManager.mIsNativeVulkan)
+    {
+        return WolfVkNative::shadowBatchSupported();
+    }
     // Source: llgl.cpp LLGLManager::initExtensions() - glMultiDrawElementsIndirect is loaded in the GL_VERSION_4_3
     // section, reached only when mGLVersion >= 4.29f (base instance: the GL_VERSION_4_2 section before it);
     // glVertexAttribDivisor in the GL_VERSION_3_3 section
@@ -736,7 +778,10 @@ void WolfStaticShadowBatch::beginPass()
         releaseAll();
         return;
     }
-    if (sForceStock || !supported() || !programReady())
+    // [W114-VULKAN S5 2026-11-26] Vulkan is recording this pass's draw calls (wolfvkbridge.h shadowPassOnVulkan): the
+    // batch's glMultiDrawElementsIndirect calls (drawPass below) are not LLVertexBuffer draws, so the casters take the
+    // stock path, which Vulkan records - the same triangles (the batch's self test compares exactly these two paths)
+    if (sForceStock || !supported() || !programReady() || WolfVkBridge::shadowPassOnVulkan())
     {
         return;
     }
@@ -829,7 +874,11 @@ void WolfStaticShadowBatch::drawPass(PassCounts& counts)
 
     sMatrices.clear();
     sDrawPages.clear();
-    const glm::mat4 projection = gGL.getProjectionMatrix();
+    glm::mat4 projection = gGL.getProjectionMatrix();
+    if (gGLManager.mIsNativeVulkan)
+    {
+        WolfVkNative::shadowBatchAdjustProjection(glm::value_ptr(projection));
+    }
     bool drew_stock = false;
     for (LLSpatialGroup* group : sTaken)
     {
@@ -876,6 +925,42 @@ void WolfStaticShadowBatch::drawPass(PassCounts& counts)
     }
     if (sDrawPages.empty())
     {
+        return;
+    }
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        std::vector<S32> vk_pages;
+        vk_pages.reserve(sDrawPages.size());
+        for (Page* page : sDrawPages) vk_pages.push_back(page->mVkPage);
+        WolfVkNative::flushShadowBatchPages(vk_pages.data(), static_cast<U32>(vk_pages.size()));
+
+        U64 matrix_token = UINT64_MAX;
+        if (WolfVkNative::uploadShadowBatchMatrices(sMatrices.data(), static_cast<U32>(sMatrices.size()), matrix_token))
+        {
+            for (Page* page : sDrawPages)
+            {
+                const U32 cull_on = static_cast<U32>(page->mCullOn.size());
+                const U32 cull_off = static_cast<U32>(page->mCullOff.size());
+                page->mCullOn.insert(page->mCullOn.end(), page->mCullOff.begin(), page->mCullOff.end());
+                counts.mCalls += WolfVkNative::drawShadowBatchPage(
+                    &gWolfShadowBatchProgram, page->mVkPage, matrix_token,
+                    page->mCullOn.data(), cull_on, cull_off);
+                page->mCullOn.clear();
+                page->mCullOff.clear();
+                page->mQueued = false;
+            }
+        }
+        else
+        {
+            for (Page* page : sDrawPages)
+            {
+                page->mCullOn.clear();
+                page->mCullOff.clear();
+                page->mQueued = false;
+            }
+        }
+        sDrawPages.clear();
         return;
     }
 
@@ -967,13 +1052,13 @@ void WolfStaticShadowBatch::releaseAll()
         }
     }
     sPages.clear();
-    if (sMatrixBuffer)
+    if (sMatrixBuffer && !gGLManager.mIsNativeVulkan)
     {
         glDeleteBuffers(1, &sMatrixBuffer);
         glDeleteBuffers(1, &sCommandBuffer);
-        sMatrixBuffer = 0;
-        sCommandBuffer = 0;
     }
+    sMatrixBuffer = 0;
+    sCommandBuffer = 0;
     // every record's storage is gone with the pages: a record of an older epoch is not usable() and frees nothing
     ++sEpoch;
     sPassActive = false;
@@ -1028,6 +1113,10 @@ void WolfStaticShadowBatch::selfTestForceStock(bool force)
 
 bool WolfStaticShadowBatch::selfTestReadDepth(U32 width, U32 height, std::vector<F32>& out)
 {
+    if (gGLManager.mIsNativeVulkan)
+    {
+        return false;
+    }
     out.assign((size_t)width * height, 0.f);
     if (out.empty())
     {

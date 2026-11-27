@@ -34,6 +34,7 @@
 
 #include "SDL2/SDL.h"
 #include "SDL2/SDL_endian.h"
+#include "SDL2/SDL_vulkan.h"
 
 #if LL_X11
 // get X11-specific headers for use in low-level stuff like copy-and-paste support

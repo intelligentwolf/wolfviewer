@@ -259,6 +259,11 @@ set_source_files_properties(llurlentry.cpp
 list(APPEND llui_SOURCE_FILES ${llui_HEADER_FILES})
 
 add_library (llui ${llui_SOURCE_FILES})
+# GCC 16 diagnoses the existing recursive LLInitParam declarations in
+# llxuiparser.cpp as sfinae-incomplete; the diagnostic does not affect codegen.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  target_compile_options(llui PRIVATE -Wno-sfinae-incomplete)
+endif ()
 target_include_directories( llui  INTERFACE   ${CMAKE_CURRENT_SOURCE_DIR})
 # Libraries on which this library depends, needed for Linux builds
 # Sort by high-level to low-level

@@ -33,13 +33,13 @@ env:
   # BuildVersion.cmake:14 reads ENV{revision} for the 4th version field (must be
   # numeric — viewerRes.rc:145 FILEVERSION). Pin to the wolf revision number so the
   # viewer reports 7.2.4.1 instead of a meaningless git commit count.
-  revision: "113"
+  revision: "114"
   # [2026-09-12] From here on a release has a NAME, and that is what residents see. The number
   # stays because it has to — viewerRes.rc:145 FILEVERSION must be numeric, and wolfupdate.cpp
   # compares it with the signed latest.json's "revision" — but it is no longer the thing anyone is
   # asked to quote. Tags were v7.2.4-wN up to w112 and are v7.2.5-wN from w113 (Firestorm 7.2.5): w28-w52 viewers read
   # the GitHub tag but take only the digits after its last "-w" (wolfupdate.cpp revisionFromTag), so the prefix is free.
-  release_name: "Space Dragon"
+  release_name: "Fairy Wings"
   # [2026-09-29] Windows code signing (Azure Artifact Signing, account in Paul's Azure subscription,
   # resource group wolfviewer-signing). None of these are secrets. The endpoint must be the one for
   # the account's region, North Europe (how-to-signing-integrations endpoint table), and the
@@ -196,6 +196,22 @@ jobs:
       - name: glslang (Vulkan SPIR-V and the shader check)
         shell: bash
         run: bash .github/scripts/install-glslang.sh
+
+      # [W114-VULKAN MAC 2026-11-26] MoltenVK, the Mac's Vulkan driver, pinned with its sha256: exports WOLF_MOLTENVK_DIR,
+      # from which viewer_manifest.py (Darwin) puts libMoltenVK.dylib in Contents/Frameworks, MoltenVK_icd.json in
+      # Contents/Resources/vulkan/icd.d and the licence in Contents/Resources; on CI a Mac package without it fails.
+      - name: MoltenVK (macOS Vulkan driver)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash .github/scripts/install-moltenvk.sh
+
+      # [WOLFCORE 2026-11-27] Optional proprietary WolfCore runtime library from private intelligentwolf/wolfcore.
+      # When secrets.WOLFCORE_READ_TOKEN is absent (forks / open-source clones), exits 0 and builds open-source fallbacks.
+      - name: WolfCore (optional runtime acceleration)
+        shell: bash
+        env:
+          WOLFCORE_READ_TOKEN: ${{ secrets.WOLFCORE_READ_TOKEN }}
+        run: bash .github/scripts/install-wolfcore.sh
 
       - name: Configure
         shell: bash

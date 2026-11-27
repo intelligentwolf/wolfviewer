@@ -298,6 +298,7 @@ void LLSceneMonitor::capture()
     }
 
     if(mEnabled
+        && !gGLManager.mIsNativeVulkan
         && (mRecordingTimer.getElapsedTimeF32() > scene_load_sample_time()
             || force_capture)
         && last_capture_frame != gFrameCount)
@@ -337,6 +338,7 @@ static LLStaticHashedString sDitherScaleT("dither_scale_t");
 
 void LLSceneMonitor::compare()
 {
+    if (gGLManager.mIsNativeVulkan) return;
 #ifdef LL_WINDOWS
     if(mDiffState != NEED_DIFF)
     {
@@ -472,6 +474,7 @@ void LLSceneMonitor::calcDiffAggregate()
 static LLTrace::EventStatHandle<> sFramePixelDiff("FramePixelDifference");
 void LLSceneMonitor::fetchQueryResult()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     // also throttle timing here, to avoid going below sample time due to phasing with frame capture
     static LLCachedControl<F32>  scene_load_sample_time_control(gSavedSettings, "SceneLoadingMonitorSampleTime");
     F32Seconds scene_load_sample_time = (F32Seconds)scene_load_sample_time_control();

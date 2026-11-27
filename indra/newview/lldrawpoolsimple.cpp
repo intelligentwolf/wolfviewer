@@ -37,7 +37,7 @@
 #include "llviewershadermgr.h"
 #include "llrender.h"
 #include "gltfscenemanager.h"
-#include "wolfvkbridge.h"   // [VULKAN G-BUFFER 2026-11-08] the static simple pass may be drawn by Vulkan
+#include "wolfvkbridge.h"   // [VULKAN G-BUFFER 2026-11-08] dumpGBufferIfAsked
 
 static LLTrace::BlockTimerStatHandle FTM_RENDER_SIMPLE_DEFERRED("Deferred Simple");
 static LLTrace::BlockTimerStatHandle FTM_RENDER_GRASS_DEFERRED("Deferred Grass");
@@ -103,15 +103,11 @@ void LLDrawPoolSimple::renderDeferred(S32 pass)
     LLGLDisable blend(GL_BLEND);
 
     //render static
-    // [VULKAN G-BUFFER 2026-11-08] in Vulkan mode with a shared G-buffer, Vulkan draws these batches into the same
-    // attachments at this point of the frame (WolfVkBridge::drawPassSimple); pushBatches then skips exactly the
-    // batches Vulkan drew (LLRenderPass::pushBatches) and GL draws the rest - every batch by one renderer
-    WolfVkBridge::drawPassSimple();
-    {
-        WolfVkBridge::ScopedSkipDrawn skip_vulkan_drawn;   // only here: the shadow and probe passes draw every batch
-        gDeferredDiffuseProgram.bind();
-        pushBatches(LLRenderPass::PASS_SIMPLE, true, true);
-    }
+    // [VULKAN G-BUFFER S2 2026-11-26] in Vulkan mode each draw call below is recorded by Vulkan into the shared G-buffer
+    // (the draw interceptor, WolfVkBridge::setGBufferPhase in LLPipeline::renderGeomDeferred) or drawn by OpenGL - one
+    // renderer per draw call, decided where the call is made
+    gDeferredDiffuseProgram.bind();
+    pushBatches(LLRenderPass::PASS_SIMPLE, true, true);
     WolfVkBridge::dumpGBufferIfAsked();   // [G-BUFFER COMPARE 2026-11-08] the attachments after this pass, when asked
 
     //render rigged

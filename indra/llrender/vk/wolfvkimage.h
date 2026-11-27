@@ -104,7 +104,23 @@ public:
     static Format formatFor(uint32_t gl_internal_format, uint32_t gl_pixel_type);
     static const char* formatName(VkFormat format);
 
-    enum class Kind { TEXTURE_2D, TEXTURE_CUBE, TEXTURE_2D_ARRAY, TEXTURE_3D };
+    // [VK S6 2026-11-26] TEXTURE_CUBE_ARRAY: layers = 6 x the number of cubes (layer-faces, as OpenGL counts a
+    // GL_TEXTURE_CUBE_MAP_ARRAY's depth); needs WolfVkDevice::cubeArrays().
+    enum class Kind { TEXTURE_2D, TEXTURE_CUBE, TEXTURE_2D_ARRAY, TEXTURE_3D, TEXTURE_CUBE_ARRAY };
+
+    // [VK S6 2026-11-26] The depth format of an image SHARED with OpenGL that both renderers render into and sample
+    // (the shadow maps), with the OpenGL storage format that is the same bits (gl_internal_format, for createKind /
+    // glTexStorageMem*EXT):
+    //   GL_DEPTH_COMPONENT24 over VK_FORMAT_X8_D24_UNORM_PACK32 when this device can render to it, sample it with
+    //     linear filtering (the shadow comparison samplers) and export its memory for this kind and usage - the format
+    //     OpenGL's shadow maps have, so depth values and biases stay as they are;
+    //   GL_DEPTH_COMPONENT32F over VK_FORMAT_D32_SFLOAT otherwise (RADV offers no D24 format at all, vkglshare probe
+    //     2026-11-08): is_d24 false tells the caller its biases must be recalculated for a float depth.
+    // Shared exactly on NVIDIA 615.78 both ways, dedicated and plain allocation, 2D and 2D array (probe 2026-11-26,
+    // vk-s6/probe/results/nvidia-E-d24-run1.log). Such an image is rendered, never uploaded (upload() refuses D24).
+    // In a copy between the image and a buffer each texel is one 32-bit word with the depth in its low 24 bits; the
+    // upper 8 bits are NOT zero on a read (same probe: non-zero on every texel) and must be masked off.
+    static Format sharedDepthFormat(WolfVkDevice& device, Kind kind, VkImageUsageFlags usage, uint32_t& gl_internal_format, bool& is_d24);
 
     WolfVkImage() = default;
     ~WolfVkImage();
@@ -119,6 +135,25 @@ public:
     // (vulkan_core.h:5951) with the platform handle type, optimal tiling, one dedicated exportable allocation. The
     // format/usage must be exportable: externalFormatSupported() first.
     bool createExternal(WolfVkDevice& device, const Format& format, uint32_t width, uint32_t height, VkImageUsageFlags usage, std::string& error);
+    // [VK S6 2026-11-26] The same for any kind, with layers (6 for a cube, N for a 2D array, 6 x cubes for a cube
+    // array, the depth for a 3D image) and mip levels: what OpenGL then imports with glTexStorageMem2DEXT (2D, cube) or
+    // glTexStorageMem3DEXT (2D array, cube array, 3D). externalFormatSupported(kind ...) first.
+    bool createExternal(WolfVkDevice& device, Kind kind, const Format& format, uint32_t width, uint32_t height, uint32_t layers,
+                        uint32_t mip_levels, VkImageUsageFlags usage, std::string& error);
+    static bool externalFormatSupported(WolfVkDevice& device, Kind kind, const Format& format, VkImageUsageFlags usage, bool& dedicated_only, std::string& error);
+    // A further view of part of the image (one mip level and layer as a 2D view to render into, a cube of a cube array
+    // ...): view_type is a VK_IMAGE_VIEW_TYPE_* (vulkan_core.h:2327-2333). The image owns it and destroys it with
+    // itself; VK_NULL_HANDLE with error when it cannot be made. A 3D image (always created with
+    // VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT) also gives VK_IMAGE_VIEW_TYPE_2D views of single slices and
+    // VK_IMAGE_VIEW_TYPE_2D_ARRAY views of slice ranges, to render into: base_layer/layer_count are then slices of
+    // the one level base_mip (mip_count must be 1).
+    // attachment: the view is rendered into, so it gets the identity swizzle whatever the format's sampling swizzle is
+    // (an image standing in for GL_RGB8 / GL_RGB16F samples alpha as one; an attachment view may not swizzle).
+    VkImageView createView(VkImageViewType view_type, uint32_t base_mip, uint32_t mip_count, uint32_t base_layer, uint32_t layer_count, std::string& error,
+                           bool attachment = false);
+    // The memory this image is bound to, for an OpenGL import at an offset (WolfVkShare).
+    const WolfVkAllocation& allocation() const { return mAllocation; }
+    bool dedicatedAllocation() const { return mDedicatedAllocation; }
     // vkGetPhysicalDeviceImageFormatProperties2 (:6181) with VkPhysicalDeviceExternalImageFormatInfo (:5915): true when the
     // external memory for this format/tiling/usage can be exported (VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT :5610).
     static bool externalFormatSupported(WolfVkDevice& device, const Format& format, VkImageUsageFlags usage, bool& dedicated_only, std::string& error);
@@ -134,6 +169,12 @@ public:
     // a one-time buffer when cmd is null (then waits). The staging memory is freed frames-in-flight later.
     bool upload(VkCommandBuffer cmd, uint32_t mip, uint32_t layer, uint32_t width, uint32_t height, const void* data,
                 uint32_t gl_pixel_type, bool swap_bytes, std::string& error);
+    // [NATIVE VULKAN 2026-11-26] Dirty-rectangle upload (used by LLImageGL::setSubImage, font glyph atlases, and CEF
+    // media paint updates). src_row_pixels = 0 means tightly packed width (GL_UNPACK_ALIGNMENT 1); gl_pixel_format handles
+    // GL_BGRA -> RGBA8 swizzle when needed.
+    bool uploadSubRect(VkCommandBuffer cmd, uint32_t mip, uint32_t layer, uint32_t x_offset, uint32_t y_offset,
+                       uint32_t width, uint32_t height, uint32_t src_row_pixels, const void* data,
+                       uint32_t gl_pixel_format, uint32_t gl_pixel_type, bool swap_bytes, std::string& error);
     // Builds mip levels 1..n-1 from level 0 with vkCmdBlitImage (linear), as glGenerateMipmap does (llimagegl.cpp:876).
     void generateMipmaps(VkCommandBuffer cmd);
     // Transitions the whole image to layout for the given stages; records the barrier on cmd.
@@ -164,6 +205,8 @@ private:
     uint32_t mWidth = 0, mHeight = 0, mLayers = 1, mMipLevels = 1;
     VkImage mImage = VK_NULL_HANDLE;
     VkImageView mView = VK_NULL_HANDLE;
+    std::vector<VkImageView> mExtraViews;   // [VK S6 2026-11-26] createView
+    bool mDedicatedAllocation = false;      // the memory was allocated with VkMemoryDedicatedAllocateInfo naming this image
     VkImageUsageFlags mUsage = 0;
     WolfVkAllocation mAllocation;
     VkImageLayout mLayout = VK_IMAGE_LAYOUT_UNDEFINED;

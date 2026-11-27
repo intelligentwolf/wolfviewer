@@ -951,10 +951,16 @@ set(viewer_SOURCE_FILES
     wolfvrstream.cpp   # [VR PIPE 2026-11-03] the setting, certificate, start/stop
     wolfvrscreen.cpp   # [VR BIG SCREEN 2026-11-03] the viewer window to the headset, its pointer and keys back
     wolfvkbridge.cpp   # [VULKAN BACKEND 2026-11-08] the Vulkan renderer: settings, swapchain, present, fall-back
+    wolfvknative.cpp   # [NATIVE VULKAN 2026-11-26] native Vulkan renderer (zero OpenGL context)
     wolfvkscene.cpp    # [VULKAN BACKEND 2026-11-08] what Vulkan draws each frame
+    wolfvkavatar.cpp    # [W114-VULKAN S4 2026-11-26] avatar draws of the G-buffer phase
     wolfvkmirror.cpp   # [VULKAN BACKEND 2026-11-08] Vulkan copies of the GL vertex buffers and textures it draws
+    wolfvkresources.cpp   # [VK S6a 2026-11-26] Vulkan-owned vertex and index buffers, imported into OpenGL
+    wolfvktextures.cpp   # [VK S6 2026-11-26] Vulkan-owned memory of the textures held by a raw OpenGL name
     wolfvkshare.cpp    # [SHARED IMAGES 2026-11-08] layers and semaphores shared between OpenGL and Vulkan
     wolfvkgbuffer.cpp  # [VULKAN G-BUFFER 2026-11-08] the G-buffer shared with Vulkan, geometry passes drawn by Vulkan
+    wolfvkbrackettarget.cpp  # [W114-VULKAN S5 2026-11-26] the interceptor bracket's target interface; its sampled images
+    wolfvkshadow.cpp  # [W114-VULKAN S5 2026-11-26] the shadow maps as Vulkan-owned depth images, shadow passes drawn by Vulkan
     wolfvraudio.cpp   # [VR AUDIO 2026-11-04] the viewer's sound to the headset, the headset mic into voice
     wolfvrui.cpp   # [VR CONTROLS 2026-11-04] the in-VR action bar: toolbar commands from the headset, their state back
     wolffloatervrstream.cpp   # [VR PIPE 2026-11-03] Wolf World > VR in Your Headset Browser
@@ -2039,11 +2045,17 @@ set(viewer_HEADER_FILES
     wolfvrstream.h   # [VR PIPE 2026-11-03]
     wolfvrscreen.h   # [VR BIG SCREEN 2026-11-03]
     wolfvkbridge.h   # [VULKAN BACKEND 2026-11-08]
+    wolfvknative.h   # [NATIVE VULKAN 2026-11-26]
     wolfvkretryrule.h   # [W106 VKRETRY 2026-11-13] when an automatic OpenGL switch is retried (pure functions)
     wolfvkscene.h    # [VULKAN BACKEND 2026-11-08]
+    wolfvkavatar.h    # [W114-VULKAN S4 2026-11-26]
     wolfvkmirror.h   # [VULKAN BACKEND 2026-11-08]
+    wolfvkresources.h   # [VK S6a 2026-11-26]
+    wolfvktextures.h   # [VK S6 2026-11-26]
     wolfvkshare.h    # [SHARED IMAGES 2026-11-08]
     wolfvkgbuffer.h  # [VULKAN G-BUFFER 2026-11-08]
+    wolfvkbrackettarget.h  # [W114-VULKAN S5 2026-11-26]
+    wolfvkshadow.h  # [W114-VULKAN S5 2026-11-26]
     wolfvraudio.h   # [VR AUDIO 2026-11-04]
     wolfvrui.h   # [VR CONTROLS 2026-11-04]
     wolffloatervrstream.h   # [VR PIPE 2026-11-03]
@@ -2772,6 +2784,16 @@ add_executable(${VIEWER_BINARY_NAME}
     MACOSX_BUNDLE
     ${viewer_SOURCE_FILES}
     )
+
+# GCC 16.2's interprocedural array-bounds analysis reports virtual destructor
+# calls as overrunning unrelated base-class allocations in these sources:
+# LLViewerAssetRequest/LLAssetRequest (llviewerassetstorage.cpp:169, 390) and
+# ParticleScriptCreationCallback/LLInventoryCallback (particleeditor.cpp:562).
+# Limit the compiler workaround to those translation units.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  set_source_files_properties(llviewerassetstorage.cpp particleeditor.cpp
+    PROPERTIES COMPILE_OPTIONS "-Wno-array-bounds")
+endif ()
 
 # <WolfViewer 2026-11-08> Every shader program variant is compiled and linked with glslangValidator before
 # the viewer binary builds (indra/cmake/ShaderCheck.cmake, scripts/shader_check.py): a shader that will not

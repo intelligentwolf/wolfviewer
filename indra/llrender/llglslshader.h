@@ -341,6 +341,18 @@ public:
     class WolfVkShaderMirror* mWolfVk = nullptr;
     void wolfVkSet(U32 index, int kind, U32 count, const void* data, bool transpose = false);   // by reserved uniform index
     void wolfVkSet(const LLStaticHashedString& uniform, int kind, U32 count, const void* data, bool transpose = false);
+    // [VULKAN G-BUFFER S2 2026-11-26] Hooks for the Vulkan draw interceptor (newview/wolfvkbridge.cpp; null in OpenGL mode).
+    // sWolfVkOnLinked: a program has just linked and mapped its uniforms (createShader), before any of its uniforms is
+    // set, so its Vulkan mirror sees every value the viewer sets from then on (a mirror made later would miss the values
+    // set once after linking). The uniform-buffer pair keeps a copy of the bytes of the viewer's own std140 blocks
+    // (UniformBlock below): every glBufferData / glBufferSubData on a GL_UNIFORM_BUFFER the viewer binds to a block point,
+    // and every glBindBufferBase(GL_UNIFORM_BUFFER, point, buffer), is reported through these two calls at its call site.
+    static void (*sWolfVkOnLinked)(LLGLSLShader* shader);
+    static void (*sWolfVkOnUniformBufferData)(GLuint buffer, U32 offset, U32 size, const void* data, bool respecify);
+    static void (*sWolfVkOnUniformBufferBind)(GLuint point, GLuint buffer);
+    static void wolfVkUniformBufferData(GLuint buffer, U32 offset, U32 size, const void* data, bool respecify)
+    { if (sWolfVkOnUniformBufferData) sWolfVkOnUniformBufferData(buffer, offset, size, data, respecify); }
+    static void wolfVkUniformBufferBind(GLuint point, GLuint buffer) { if (sWolfVkOnUniformBufferBind) sWolfVkOnUniformBufferBind(point, buffer); }
     std::string mName;
     typedef std::map<std::string, std::string> defines_map_t; //NOTE: this must be an ordered map to maintain hash consistency
     defines_map_t mDefines;

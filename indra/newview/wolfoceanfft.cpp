@@ -209,13 +209,8 @@ void WolfOceanFFT::buildH0(S32 c)
             mScratchData[o * 4 + 3] = -mScratchH0[om * 2 + 1];
         }
     }
-    if (!cas.mH0Tex)
-    {
-        LLImageGL::generateTextures(1, &cas.mH0Tex);
-    }
-    gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, cas.mH0Tex);
-    LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGBA32F,
-                              n, n, GL_RGBA, GL_FLOAT, mScratchData.data(), false);
+    // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+    LLImageGL::wolfVkManualImage2D(cas.mH0Tex, GL_RGBA32F, n, n, GL_RGBA, GL_FLOAT, mScratchData.data());
     gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_POINT);
     gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
@@ -295,18 +290,33 @@ bool WolfOceanFFT::allocate()
             }
             for (U32 a = 0; a < 2; ++a)
             {
-                gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, cas.mFin[i].getTexture(a), true);
+                const U32 fin_tex = cas.mFin[i].getTexture(a);
+                gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, fin_tex, true);
                 gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_TRILINEAR);
                 gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_WRAP);
                 gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
                 // Mip storage for the trilinear filter: allocate the chain once, empty.
-                gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, cas.mFin[i].getTexture(a), true);
-                glGenerateMipmap(GL_TEXTURE_2D);
+                gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, fin_tex, true);
+                if (gGLManager.mIsNativeVulkan)
+                {
+                    if (LLImageGL::sWolfVkNativeStore)
+                    {
+                        LLImageGL::sWolfVkNativeStore->uploadImage2D(fin_tex, 0, GL_RGBA16F, N, N, GL_RGBA, GL_HALF_FLOAT, nullptr, false, true);
+                    }
+                    if (LLRenderTarget::sWolfVkNativeOwner)
+                    {
+                        LLRenderTarget::sWolfVkNativeOwner->onTargetChanged(cas.mFin[i]);
+                    }
+                }
+                else
+                {
+                    glGenerateMipmap(GL_TEXTURE_2D);
+                }
                 gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
             }
             // Clear the finished targets so the first foam read is zero.
             cas.mFin[i].bindTarget();
-            glClearColor(0.f, 0.f, 0.f, 0.f);
+            LLGLState::wolfClearColor(0.f, 0.f, 0.f, 0.f);
             cas.mFin[i].clear(GL_COLOR_BUFFER_BIT);
             cas.mFin[i].flush();
         }
@@ -434,8 +444,16 @@ void WolfOceanFFT::update(F32 time)
             // only with TMG_AUTO).
             for (U32 a = 0; a < 2; ++a)
             {
-                gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, dst.getTexture(a), true);
-                glGenerateMipmap(GL_TEXTURE_2D);
+                const U32 fin_tex = dst.getTexture(a);
+                gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, fin_tex, true);
+                if (gGLManager.mIsNativeVulkan)
+                {
+                    if (LLImageGL::sWolfVkNativeStore) LLImageGL::sWolfVkNativeStore->generateMipmaps(fin_tex);
+                }
+                else
+                {
+                    glGenerateMipmap(GL_TEXTURE_2D);
+                }
                 gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
             }
             cas.mCur = 1 - cas.mCur;

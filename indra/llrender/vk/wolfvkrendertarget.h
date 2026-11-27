@@ -42,7 +42,7 @@ class WolfVkDevice;
 class WolfVkRenderTarget
 {
 public:
-    static constexpr uint32_t MAX_COLOR_ATTACHMENTS = 4;   // llrendertarget.h:92 "limit of 4 color attachments per render target"
+    static constexpr uint32_t MAX_COLOR_ATTACHMENTS = 8;   // up to 8 MRT layers (e.g. cloud shadow cascades x 2)
 
     WolfVkRenderTarget() = default;
     ~WolfVkRenderTarget();
@@ -71,10 +71,15 @@ public:
     WolfVkImage* image(uint32_t i) { return i < mColorRefs.size() ? mColorRefs[i] : nullptr; }
     // [VULKAN G-BUFFER 2026-11-08] A colour attachment owned elsewhere (a G-buffer image shared with OpenGL); not destroyed here.
     bool addExternalColorAttachment(WolfVkImage* image, std::string& error);
+    // Single layer / 3D z-slice of an external image as a colour attachment (WolfTk atmosphere & clouds).
+    bool addExternalLayerAttachment(WolfVkImage* image, uint32_t layer, std::string& error);
     // The layout the colour attachments are in when a LOAD pass begins and are left in by end(): SHADER_READ_ONLY_OPTIMAL
     // (sampled by the next pass, the default) or COLOR_ATTACHMENT_OPTIMAL (handed to/from OpenGL as attachments).
     void setColorLayout(VkImageLayout layout) { if (layout != mColorLayout) { mColorLayout = layout; destroyPass(); } }
     WolfVkImage* depthImage() { return mExternalDepth ? mExternalDepth : mDepth.get(); }
+    // Source: wolfvkrendertarget.cpp:172-285 rebuildPass() constructs the render-pass variants.
+    // Pipeline creation needs the compatible pass before begin() records the first draw.
+    bool ensurePass(std::string& error);
     VkRenderPass renderPass() const { return mPasses[3]; }
     VkFramebuffer framebuffer() const { return mFramebuffers[3]; }
     VkFormat colorFormat(uint32_t i) const { return i < mColorRefs.size() ? mColorRefs[i]->format().mFormat : VK_FORMAT_UNDEFINED; }
@@ -85,7 +90,9 @@ public:
     // Sets the viewport and scissor to the whole target (LLRenderTarget::bindTarget sets glViewport, llrendertarget.cpp:447).
     // viewport: when given, the viewport and scissor are this rectangle (x, y from the BOTTOM-left as glViewport takes
     // them) instead of the whole target - the world view rect inside the window (pipeline.cpp renderFinalize gGLViewport).
-    void begin(VkCommandBuffer cmd, bool clear_color, bool clear_depth, const float clear_rgba[4], float depth_value, const VkRect2D* viewport = nullptr);
+    void begin(VkCommandBuffer cmd, bool clear_color, bool clear_depth, const float clear_rgba[4], float depth_value,
+               const VkRect2D* viewport = nullptr, bool secondary_contents = false,
+               VkRenderPass* out_active_pass = nullptr, VkFramebuffer* out_active_fb = nullptr);
     // LLRenderTarget::flush: ends the render pass; the attachments are then readable by shaders.
     void end(VkCommandBuffer cmd);
 
@@ -101,6 +108,7 @@ private:
     bool mShared = false;
     std::vector<std::unique_ptr<WolfVkImage>> mColor;   // the attachments this target owns
     std::vector<WolfVkImage*> mColorRefs;                // every colour attachment in order (owned or external)
+    std::vector<uint32_t> mColorLayers;                  // layer / z-slice for each entry in mColorRefs
     VkImageLayout mColorLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     std::vector<uint32_t> mGLColorFormats;
     std::unique_ptr<WolfVkImage> mDepth;

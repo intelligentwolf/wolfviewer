@@ -43,6 +43,7 @@
 #include "wolfboatrock.h"
 #include "wolfframegovernor.h"
 #include "wolfgrid.h"
+#include "vk/wolfcoreloader.h"
 #include "wolfregionweather.h"
 
 // Every figure below is either sourced in its comment or CHOSEN (a look or a budget, docs/UNDERSEA_LIFE.md).
@@ -370,6 +371,7 @@ void WolfUnderSea::reset()
     mSharkDecided = false;
     mSharkWanted = false;
     mNextDirect = 0.0;
+    mNextScanAt = 0.0;
 }
 
 void WolfUnderSea::rebase(const LLVector3& delta)
@@ -538,6 +540,16 @@ void WolfUnderSea::scanObjects(const LLVector3& cam)
         mScanIndex = 0;
         mScanDone = true;
         ++mScanGeneration;
+        F64 cooldown = 0.0;
+        if (const WolfCoreApi* wc = WolfCoreLoader::api())
+        {
+            WolfCoreFrameInputs in{};
+            in.is_native_vulkan = gGLManager.mIsNativeVulkan ? 1u : 0u;
+            WolfCoreFramePlan plan{};
+            wc->plan_frame_pacing(&in, &plan);
+            cooldown = plan.undersea_scan_cooldown_sec;
+        }
+        mNextScanAt = LLFrameTimer::getElapsedSeconds() + cooldown;
     }
 }
 
@@ -2620,7 +2632,10 @@ void WolfUnderSea::idle()
     mFishActive = under || height < FISH_ABOVE_M;
     if (mPlantsActive || mFishActive)
     {
-        scanObjects(cam);
+        if (!mScanDone || mScanIndex > 0 || now >= mNextScanAt)
+        {
+            scanObjects(cam);
+        }
         atlasReady();
     }
     // [T733/] before the garden and the fish read them. [W104 FEATFIX 2026-11-11 B3] only while plants or fish are about: high

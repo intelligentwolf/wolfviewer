@@ -1541,6 +1541,27 @@ def version_line(prof, stage):
     return ver, extra
 
 
+def used_defines(files, path, defines):
+    """The defines the file at path can see: a name counts as used when it appears as a whole word anywhere in the
+    file (after "#wolf_include"), or in the value of another define that is used. [SPV KEY 2026-11-26] also the
+    defines of the Vulkan recipe key (shader_vulkan.unit_recipe), which the viewer prunes the same way
+    (WolfVkShaderMirror::usedDefines over LLShaderMgr::mWolfVkFileWords)."""
+    used = {k for k in defines if files.names(path, k)}
+    while True:
+        more = {k for k in defines if k not in used and any(_name_in(k, defines[u]) for u in used)}
+        if not more:
+            break
+        used |= more
+    return {k: v for k, v in defines.items() if k in used}
+
+
+def recipe_defines(files, filename, found_level, defines):
+    """[SPV KEY 2026-11-26] The defines a unit's Vulkan recipe key carries: the used ones (used_defines), whatever
+    --no-prune says, so the key is the viewer's."""
+    path = os.path.join(files.root, "class%d" % found_level, filename)
+    return used_defines(files, path, defines)
+
+
 def stitch(files, prof, filename, level, stage, defines, texture_index_channels):
     """LLShaderMgr::loadShaderFile (llshadermgr.cpp:547-1094) without the GL calls."""
     defines = dict(defines)
@@ -1601,15 +1622,8 @@ def stitch(files, prof, filename, level, stage, defines, texture_index_channels)
         # A macro the file never names cannot change what the compiler sees, so leaving its "#define"
         # line out gives a compile with exactly the same meaning - and collapses the thousands of
         # otherwise distinct unit texts (every program x every setting that changes a define it does
-        # not use) into the few hundred that differ. A name counts as used when it appears anywhere in
-        # the file (after "#wolf_include"), or in the value of another define that is used.
-        used = {k for k in defines if files.names(path, k)}
-        while True:
-            more = {k for k in defines if k not in used and any(_name_in(k, defines[u]) for u in used)}
-            if not more:
-                break
-            used |= more
-        defines = {k: v for k, v in defines.items() if k in used}
+        # not use) into the few hundred that differ.
+        defines = used_defines(files, path, defines)
     extra[define_slot:define_slot + 1] = [("#define " + k + " " + defines[k] + "\n", "<injected>", "define")
                                           for k in sorted(defines)]   # std::map iteration order (:730-737)
     # :842-984: the extra block goes where the first "[EXTRA_CODE_HERE]" piece is (that piece is dropped),
@@ -1687,8 +1701,10 @@ class Builder:
         return u
 
     def scenario(self, prof, st, name_filter=None):
-        en = Enumerator(prof, st).run()
-        scen = "%s/%s" % (prof.name, st.name)
+        self.scenario_enum(prof, Enumerator(prof, st).run(), "%s/%s" % (prof.name, st.name), name_filter)
+
+    def scenario_enum(self, prof, en, scen, name_filter=None):
+        """scenario() for an Enumerator result (or an object with its programs, shared and attribs)."""
         # loadBasicShaders: the shared objects, keyed by (filename, stage)
         shared = {}
         for filename, level, stage, ich in en.shared:
@@ -1713,22 +1729,22 @@ class Builder:
                     if u.missing:
                         ok = False
                     else:
-                        recipes.append(shader_vulkan.unit_recipe(stage, filename, u.found_level, version_line(prof, stage)[0], p.defines, channels, prof.is_amd, prof.old_select))
+                        recipes.append(shader_vulkan.unit_recipe(stage, filename, u.found_level, version_line(prof, stage)[0], recipe_defines(self.files, filename, u.found_level, p.defines), channels, prof.is_amd, prof.old_select))
                 for name in vobj:
                     u = shared[(name, VERT)]
                     units.append(u)
                     if not u.missing:
-                        recipes.append(shader_vulkan.unit_recipe(VERT, name, u.found_level, version_line(prof, VERT)[0], en.attribs, [ich for f, l, st, ich in en.shared if f == name and st == VERT][0], prof.is_amd, prof.old_select))
+                        recipes.append(shader_vulkan.unit_recipe(VERT, name, u.found_level, version_line(prof, VERT)[0], recipe_defines(self.files, name, u.found_level, en.attribs), [ich for f, l, st, ich in en.shared if f == name and st == VERT][0], prof.is_amd, prof.old_select))
                 for name in fobj:
                     u = shared[(name, FRAG)]
                     units.append(u)
                     if not u.missing:
-                        recipes.append(shader_vulkan.unit_recipe(FRAG, name, u.found_level, version_line(prof, FRAG)[0], en.attribs, [ich for f, l, st, ich in en.shared if f == name and st == FRAG][0], prof.is_amd, prof.old_select))
+                        recipes.append(shader_vulkan.unit_recipe(FRAG, name, u.found_level, version_line(prof, FRAG)[0], recipe_defines(self.files, name, u.found_level, en.attribs), [ich for f, l, st, ich in en.shared if f == name and st == FRAG][0], prof.is_amd, prof.old_select))
                 for name in tail_vobj:   # llshadermgr.cpp:283-294, attached last
                     u = shared[(name, VERT)]
                     units.append(u)
                     if not u.missing:
-                        recipes.append(shader_vulkan.unit_recipe(VERT, name, u.found_level, version_line(prof, VERT)[0], en.attribs, [ich for f, l, st, ich in en.shared if f == name and st == VERT][0], prof.is_amd, prof.old_select))
+                        recipes.append(shader_vulkan.unit_recipe(VERT, name, u.found_level, version_line(prof, VERT)[0], recipe_defines(self.files, name, u.found_level, en.attribs), [ich for f, l, st, ich in en.shared if f == name and st == VERT][0], prof.is_amd, prof.old_select))
                 key = tuple(u.sha if not u.missing else "MISSING:" + u.filename for u in units)
                 if key in seen:
                     continue   # no class file changes below this level: the same program again
@@ -1891,6 +1907,13 @@ def main(argv=None):
     ap.add_argument("--vulkan-min-ratio", type=float, default=0.0,
                     help="[G7 2026-11-11] with --vulkan-out: exit 1 (even with --no-fail) when fewer than this share of the linked "
                          "programs get SPIR-V; the share and counts go to DIR/summary.json for the packaging check (scripts/spv_store_check.py)")
+    ap.add_argument("--vulkan-strip-unused", action="store_true",
+                    help="[W114-VULKAN spv2 2026-11-26] with --vulkan-out: remove the samplers and uniform blocks a stage module declares "
+                         "but does not statically use (scripts/spv_reflect.py strip_unused); bindings of the kept ones do not change")
+    ap.add_argument("--vulkan-fresh", metavar="DIR",
+                    help="[STORE STAMP 2026-11-26] no check, no compile: exit 0 when DIR/stamp.json says the store there was made from "
+                         "these scripts, this shader tree, this glslang and these options (--quick, --vulkan-strip-unused, "
+                         "--profile, --scenario, --filter), else say why and exit 3. The build runs it first and regenerates on 3.")
     ap.add_argument("--no-fail", action="store_true",
                     help="[VULKAN BACKEND 2026-11-08] exit 0 whatever the GL results (the Vulkan SPIR-V output step runs this way, so a GL failure is reported by the check target, not twice)")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -1903,6 +1926,30 @@ def main(argv=None):
     if not os.path.isdir(os.path.join(args.shaders, "class1")):
         print("shader_check: no class1/ under %s" % args.shaders, file=sys.stderr)
         return 2
+
+    # [STORE STAMP 2026-11-26] the options that change what a --vulkan-out run writes
+    vk_options = {"quick": bool(args.quick), "strip_unused": bool(args.vulkan_strip_unused), "profiles": sorted(args.profile or []),
+                  "scenarios": sorted(args.scenario or []), "filter": args.filter or ""}
+    if args.vulkan_fresh:
+        glslang, glslang_version = find_glslang(args.glslang)
+        if not glslang:
+            print("shader_check: glslangValidator not found", file=sys.stderr)
+            return 2
+        want = shader_vulkan.store_stamp(args.shaders, glslang_version, vk_options)
+        stamp_path = os.path.join(args.vulkan_fresh, "stamp.json")
+        try:
+            with open(stamp_path, encoding="utf-8") as fh:
+                have = json.load(fh)
+        except (OSError, ValueError) as e:
+            print("shader_check: SPIR-V store %s is not usable (%s): it will be made again" % (args.vulkan_fresh, e))
+            return 3
+        diff = [k for k in want if have.get(k) != want[k]]
+        if diff or not have.get("complete"):
+            print("shader_check: SPIR-V store %s is STALE (%s): it will be made again"
+                  % (args.vulkan_fresh, ", ".join("%s differs" % k for k in diff) or "its run did not finish"))
+            return 3
+        print("shader_check: SPIR-V store %s is current (transform %s, shaders %s)" % (args.vulkan_fresh, want["transform"], want["shaders"]))
+        return 0
 
     profiles = GPU_PROFILES
     scenarios = settings_scenarios()
@@ -2000,6 +2047,21 @@ def main(argv=None):
         vk_dir = os.path.abspath(args.vulkan_out)
         vk_work = os.path.join(cache_dir, "vulkan")
         manifest = {}
+        # [STORE STAMP 2026-11-26] An old store must not survive under a new one: every file of the previous run goes
+        # first (keys change with the scripts; a left-over <key>.spv of another transform would load in a viewer whose
+        # key happens to match). stamp.json is written last, with "complete", so a cut-short run is never taken as fresh.
+        os.makedirs(vk_dir, exist_ok=True)
+        for old in os.listdir(vk_dir):
+            if old.endswith(".spv") and not old.startswith("wolfvk_") or old in ("manifest.json", "summary.json", "stamp.json"):
+                os.remove(os.path.join(vk_dir, old))
+        # Two links may share a recipe key: the same recipe gives a different text only through what the recipe leaves
+        # out on purpose - the vendor's diffuseLookup() form (llshadermgr.cpp:744-837: an if-chain on NVIDIA, a switch
+        # elsewhere; same result). The first link in profile order owns the files, so the store does not depend on
+        # which thread finished last; the others are compiled into a scratch directory to prove they compile too.
+        owner = {}
+        for j in good:
+            for rkey in j.recipes:
+                owner.setdefault(rkey, j.key)
         def vk_one(j):
             key = next(iter(j.recipes)) if j.recipes else None
             if key is None:
@@ -2007,8 +2069,11 @@ def main(argv=None):
             t = shader_vulkan.transform(glslang, cache_dir, j, unit_path)
             if t.error:
                 return j.key, (False, "  transform: " + t.error, None)
-            ok, output = shader_vulkan.compile_program(glslang, vk_work, key, t, vk_dir)
-            return j.key, (ok, output, (key, t))
+            mine = owner[key] == j.key
+            ok, output = shader_vulkan.compile_program(glslang, vk_work, key if mine else key + "_dup%d" % good_index[j.key], t,
+                                                       vk_dir if mine else os.path.join(vk_work, "dup"), args.vulkan_strip_unused)
+            return j.key, (ok, output, (key, t) if mine else None)
+        good_index = {j.key: n for n, j in enumerate(good)}
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
             for fut in concurrent.futures.as_completed([ex.submit(vk_one, j) for j in good]):
                 k, (ok, output, extra) = fut.result()
@@ -2019,7 +2084,11 @@ def main(argv=None):
                     names = sorted({i[1] for i in j.instances})
                     for rkey, recipes in j.recipes.items():
                         manifest[rkey] = {"spv": key, "names": names, "units": recipes, "samplers": t.samplers, "defaults": t.defaults,
-                                          "uniforms_vert": sorted(t.uniforms["vert"]), "uniforms_frag": sorted(t.uniforms["frag"])}
+                                          "uniforms_vert": sorted(t.uniforms["vert"]), "uniforms_frag": sorted(t.uniforms["frag"]),
+                                          "spec_constants": t.spec_constants,
+                                          # [W114-VULKAN spv2 2026-11-26] per stage: the samplers (name: descriptor count) and
+                                          # blocks the module statically uses, and what --vulkan-strip-unused removed
+                                          "used": t.used, "stripped": t.stripped}
         shader_vulkan.write_manifest(os.path.join(vk_dir, "manifest.json"), manifest)
         n_ok = sum(1 for ok, _ in vk_results.values() if ok)
         print("shader_check: Vulkan SPIR-V output: %d of %d linked programs transformed and compiled, %d recipe keys in %s/manifest.json (%.1fs)"
@@ -2029,6 +2098,13 @@ def main(argv=None):
         with open(os.path.join(vk_dir, "summary.json"), "w", encoding="utf-8") as fh:
             json.dump({"programs": len(good), "compiled": n_ok, "spv_programs": len({v["spv"] for v in manifest.values()}),
                        "recipes": len(manifest), "min_ratio": args.vulkan_min_ratio, "quick": bool(args.quick)}, fh, indent=1, sort_keys=True)
+        # [STORE STAMP 2026-11-26] what the store was made from; the viewer reads it at start-up (WolfVkShaderMirror::
+        # checkStore) and the build's freshness test (--vulkan-fresh) compares it
+        stamp = shader_vulkan.store_stamp(args.shaders, glslang_version, vk_options)
+        stamp["complete"] = True
+        stamp["programs"], stamp["compiled"], stamp["recipes"] = len(good), n_ok, len(manifest)
+        with open(os.path.join(vk_dir, "stamp.json"), "w", encoding="utf-8") as fh:
+            json.dump(stamp, fh, indent=1, sort_keys=True)
         if vk_ratio < args.vulkan_min_ratio:
             vk_too_few = "only %d of %d linked programs got SPIR-V (%.0f%%, --vulkan-min-ratio %.0f%%)" % (n_ok, len(good), vk_ratio * 100, args.vulkan_min_ratio * 100)
             print("shader_check: ERROR: " + vk_too_few)

@@ -43,6 +43,8 @@
 #include "wolfvkloader.h"
 #include "wolfvkallocator.h"
 #include <functional>
+
+class WolfVkStagingRing;
 #include <string>
 #include <vector>
 #include <deque>
@@ -76,6 +78,14 @@ struct WolfVkPhysicalDeviceInfo
     // "VK_KHR_get_physical_device_properties2,VK_VERSION_1_1") is offered, with its imageCompressionControl feature (:20957)
     bool mHasImageCompressionControl = false;
     bool mImageCompressionControlFeature = false;
+    // [W114-VULKAN MAC 2026-11-26] VK_KHR_portability_subset (MoltenVK): VkPhysicalDevicePortabilitySubsetFeaturesKHR
+    // ::triangleFans (vulkan_beta.h:42) - false only on a portability device that lacks it; without the subset triangle
+    // fans are core Vulkan. And VkPhysicalDevicePortabilitySubsetPropertiesKHR::minVertexInputBindingStrideAlignment
+    // (vulkan_beta.h:49): every vertex binding stride must be a multiple of it (VUID-VkVertexInputBindingDescription-
+    // stride-04456); 1 without the subset. Every feature the device offers is enabled at createDevice.
+    bool mTriangleFans = true;
+    uint32_t mMinVertexStrideAlignment = 1;
+    bool mHasHostQueryReset = false;                     // Vulkan 1.2 hostQueryReset or VK_EXT_host_query_reset
     uint32_t mGraphicsPresentFamily = UINT32_MAX;        // chosen queue family, set by createDevice
 
     std::string name() const { return mProperties.deviceName; }
@@ -111,6 +121,8 @@ public:
     {
         VkCommandPool mPool = VK_NULL_HANDLE;
         VkCommandBuffer mCmd = VK_NULL_HANDLE;
+        VkCommandBuffer mPreCmd = VK_NULL_HANDLE;   // pre-pass transfer stream submitted right before mCmd in endFrame
+        bool mPreCmdActive = false;
         VkFence mFence = VK_NULL_HANDLE;            // signalled when this frame's submit finished
         VkSemaphore mAcquire = VK_NULL_HANDLE;      // swapchain image acquired (binary)
         uint64_t mTimelineValue = 0;                // value the timeline reaches when this frame finished
@@ -161,8 +173,20 @@ public:
     uint32_t queueFamily() const { return mChosen.mGraphicsPresentFamily; }
     const WolfVkPhysicalDeviceInfo& chosen() const { return mChosen; }
     const VkPhysicalDeviceLimits& limits() const { return mChosen.mProperties.limits; }
+    // [W114-VULKAN MAC 2026-11-26] see WolfVkPhysicalDeviceInfo::mTriangleFans / mMinVertexStrideAlignment
+    bool triangleFans() const { return mChosen.mTriangleFans; }
+    uint32_t minVertexStrideAlignment() const { return mChosen.mMinVertexStrideAlignment; }
     uint32_t apiVersion() const { return mChosen.mProperties.apiVersion; }
     bool hasTimeline() const { return mTimeline != VK_NULL_HANDLE; }
+    bool cubeArrays() const { return mCubeArrays; }   // [VK S6 2026-11-26] the imageCubeArray feature is on
+    // [W114-VULKAN S5 2026-11-26] the depthClamp feature is on (vulkan_core.h VkPhysicalDeviceFeatures::depthClamp):
+    // VkPipelineRasterizationStateCreateInfo::depthClampEnable may be VK_TRUE only then
+    // (VUID-VkPipelineRasterizationStateCreateInfo-depthClampEnable-00782)
+    bool depthClamp() const { return mDepthClamp; }
+    bool multiDrawIndirect() const { return mMultiDrawIndirect && mDevice != VK_NULL_HANDLE; }
+    bool hostQueryReset() const { return mHostQueryReset && mDevice != VK_NULL_HANDLE && gVk.vkResetQueryPool != nullptr; }
+    void setStagingRing(WolfVkStagingRing* ring) { mStagingRing = ring; }
+    WolfVkStagingRing* stagingRing() const { return mStagingRing; }
     bool validationEnabled() const { return mValidationEnabled; }
     WolfVkAllocator& allocator() { return mAllocator; }
     uint32_t framesInFlight() const { return static_cast<uint32_t>(mFrames.size()); }
@@ -202,6 +226,9 @@ public:
     // [GL DEPTH 2026-11-08] VK_EXT_depth_clip_control is enabled: every pipeline uses negativeOneToOne (GL's z range) and
     // the shader mirrors pass GL's projection unchanged (WolfVkShaderMirror::applyProjectionFix does nothing)
     bool glDepthRange() const { return mGlDepthRange && mDevice != VK_NULL_HANDLE; }
+    // [GEOMETRY 2026-11-26] the geometryShader feature is enabled (the card has it): programs with a GL_GEOMETRY_SHADER
+    // file (gNormalDebugProgram, llviewershadermgr.cpp:4078) can be made (WolfVkProgram::create)
+    bool geometryShaders() const { return mGeometryShaders && mDevice != VK_NULL_HANDLE; }
     // [AMD PERF 2026-11-09] Debug only (WolfVulkanDebugCompressionQuery, set before createDevice): enable
     // VK_EXT_image_compression_control when offered, so WolfVkImage can log each attachment image's
     // VkImageCompressionPropertiesEXT through vkGetImageSubresourceLayout2. Off, the device is created as before.
@@ -229,6 +256,7 @@ public:
     // buffer comes from the slot's pool and is reset with it; the submit signals the timeline with the next value, so
     // beginFrame's wait on the slot's last value covers it. Between beginFrame and endFrame only.
     VkCommandBuffer beginMidFrame();
+    VkCommandBuffer prePassTransferCmd();
     bool submitMidFrame(VkCommandBuffer cmd, const ExtraSync& extra, std::string& error);
     // A mid-frame command buffer that will not be submitted (the GL side could not hand its images over): ended and left
     // to the slot's pool, which beginFrame resets. Nothing recorded in it reaches the queue.
@@ -236,6 +264,12 @@ public:
     // A submit with no command buffer (or one one-time command buffer, ended by this call and freed after it ran),
     // for the semaphore protocol alone: waits, signals, then returns (waits for completion when wait is set).
     bool submitSync(VkCommandBuffer cmd, const ExtraSync& extra, bool wait, std::string& error);
+
+    // [VK S6a 2026-11-26] A submit nobody waits for here (the resource store's upload batches): cmd (ended by the
+    // caller; may be null) with extra's waits and signals. fence (may be null) is signalled when the batch has run; the
+    // caller owns cmd and fence and frees them only after that. With a timeline the batch also takes the timeline's next
+    // value, so waitIdle covers it; without one the caller must wait its own fence before the device goes.
+    bool submitTracked(VkCommandBuffer cmd, const ExtraSync& extra, VkFence fence, std::string& error);
 
     // Waits for the device to go idle and runs every deferred destruction (shutdown, swapchain recreate).
     void waitIdleAndFlushDeferred();
@@ -297,6 +331,12 @@ private:
     bool mSurfaceMaintenanceKHR = false, mSurfaceMaintenanceEXT = false;
     bool mPresentFences = false;   // the device was created with a swapchain_maintenance1 and its feature
     bool mGlDepthRange = false;    // the device was created with VK_EXT_depth_clip_control and its feature
+    bool mCubeArrays = false;      // [VK S6 2026-11-26] the device was created with the imageCubeArray feature
+    bool mDepthClamp = false;      // [W114-VULKAN S5 2026-11-26] the device was created with the depthClamp feature
+    bool mGeometryShaders = false; // [GEOMETRY 2026-11-26] the device was created with VkPhysicalDeviceFeatures::geometryShader
+    bool mMultiDrawIndirect = false; // multiDrawIndirect + drawIndirectFirstInstance enabled
+    bool mHostQueryReset = false;    // hostQueryReset enabled
+    WolfVkStagingRing* mStagingRing = nullptr;
     bool mCompressionQuery = false;   // the device was created with VK_EXT_image_compression_control (debug query only)
     static bool sCompressionQueryWanted;
     std::vector<WolfVkPhysicalDeviceInfo> mPhysicalDevices;

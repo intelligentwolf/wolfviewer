@@ -231,9 +231,9 @@ NSWindowRef createNSWindow(int x, int y, int width, int height)
     return window;
 }
 
-GLViewRef createOpenGLView(NSWindowRef window, unsigned int samples, bool vsync)
+GLViewRef createOpenGLView(NSWindowRef window, unsigned int samples, bool vsync, bool with_gl)
 {
-    LLOpenGLView *glview = [[LLOpenGLView alloc]initWithFrame:[(LLNSWindow*)window frame] withSamples:samples andVsync:vsync];
+    LLOpenGLView *glview = [[LLOpenGLView alloc]initWithFrame:[(LLNSWindow*)window frame] withSamples:samples andVsync:vsync withGL:(with_gl ? YES : NO)];
     [(LLNSWindow*)window setContentView:glview];
     return glview;
 }

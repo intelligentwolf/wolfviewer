@@ -54,6 +54,53 @@ void check_framebuffer_status()
 bool LLRenderTarget::sUseFBO = false;
 U32 LLRenderTarget::sCurFBO = 0;
 LLRenderTarget::WolfVkProvider* LLRenderTarget::sWolfVkProvider = nullptr;   // [VULKAN G-BUFFER 2026-11-08/]
+void (*LLRenderTarget::sWolfVkBeforeTargetChange)() = nullptr;   // [VULKAN G-BUFFER S2 2026-11-26/]
+LLRenderTarget::WolfVkNativeOwner* LLRenderTarget::sWolfVkNativeOwner = nullptr;   // [NATIVE VULKAN 2026-11-26/]
+
+// [VK S6 REGISTRY 2026-11-26] the targets that name a provider of their own or hold textures from one, so a provider
+// that goes away can be taken out of all of them (llrendertarget.h)
+namespace
+{
+    std::vector<LLRenderTarget*>& wolfVkTargets()
+    {
+        static std::vector<LLRenderTarget*> targets;
+        return targets;
+    }
+    void wolfVkTrack(LLRenderTarget* target)
+    {
+        auto& targets = wolfVkTargets();
+        if (std::find(targets.begin(), targets.end(), target) == targets.end()) targets.push_back(target);
+    }
+    void wolfVkUntrack(LLRenderTarget* target)
+    {
+        auto& targets = wolfVkTargets();
+        targets.erase(std::remove(targets.begin(), targets.end(), target), targets.end());
+    }
+}
+
+//static
+void LLRenderTarget::wolfVkRegister(LLRenderTarget& target, WolfVkProvider* provider)
+{
+    target.mWolfVkProvider = provider;
+    if (provider || target.mWolfVkProvidedBy) wolfVkTrack(&target);
+    else wolfVkUntrack(&target);
+}
+
+//static
+void LLRenderTarget::wolfVkUnregisterProvider(WolfVkProvider* provider)
+{
+    if (!provider) return;
+    auto& targets = wolfVkTargets();
+    for (auto it = targets.begin(); it != targets.end(); )
+    {
+        LLRenderTarget* target = *it;
+        if (target->mWolfVkProvider == provider) target->mWolfVkProvider = nullptr;
+        if (target->mWolfVkProvidedBy == provider) target->mWolfVkProvidedBy = nullptr;
+        if (!target->mWolfVkProvider && !target->mWolfVkProvidedBy) it = targets.erase(it);
+        else ++it;
+    }
+    if (sWolfVkProvider == provider) sWolfVkProvider = nullptr;
+}
 bool LLRenderTarget::sWolfDepth32F = false;   // [AMD PERF 2026-11-08/] testing, llrendertarget.h
 
 
@@ -75,6 +122,7 @@ LLRenderTarget::LLRenderTarget() :
 LLRenderTarget::~LLRenderTarget()
 {
     release();
+    wolfVkUntrack(this);   // [VK S6 REGISTRY 2026-11-26] a target with a provider of its own stays listed until it goes
 }
 
 void LLRenderTarget::resize(U32 resx, U32 resy)
@@ -142,6 +190,15 @@ bool LLRenderTarget::allocate(U32 resx, U32 resy, U32 color_fmt, bool depth, LLT
         }
     }
 
+    if (gGLManager.mIsNativeVulkan)
+    {
+        static U32 sNativeFBO = 1;
+        mFBO = sNativeFBO++;
+        bool ok = addColorAttachment(color_fmt);
+        if (ok && sWolfVkNativeOwner) sWolfVkNativeOwner->onTargetChanged(*this);
+        return ok;
+    }
+
     glGenFramebuffers(1, (GLuint *) &mFBO);
 
     if (mDepth)
@@ -165,6 +222,17 @@ void LLRenderTarget::setColorAttachment(LLImageGL* img, LLGLuint use_name)
     llassert(mTex.empty()); // mTex must be empty with this mode (binding target should be done via LLImageGL)
     llassert(!isBoundInStack());
 
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (mFBO == 0) { static U32 sNativeFBO2 = 0x10000; mFBO = sNativeFBO2++; }
+        mResX = img->getWidth();
+        mResY = img->getHeight();
+        mUsage = img->getTarget();
+        if (use_name == 0) use_name = img->getTexName();
+        mTex.push_back(use_name);
+        if (sWolfVkNativeOwner) sWolfVkNativeOwner->onTargetChanged(*this);
+        return;
+    }
     if (mFBO == 0)
     {
         glGenFramebuffers(1, (GLuint*)&mFBO);
@@ -197,6 +265,13 @@ void LLRenderTarget::releaseColorAttachment()
     llassert(!isBoundInStack());
     llassert(mTex.size() == 1); //cannot use releaseColorAttachment with LLRenderTarget managed color targets
     llassert(mFBO != 0);  // mFBO must be valid
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        mTex.clear();
+        if (sWolfVkNativeOwner) sWolfVkNativeOwner->onTargetChanged(*this);
+        return;
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, mFBO);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, LLTexUnit::getInternalType(mUsage), 0, 0);
@@ -231,11 +306,19 @@ bool LLRenderTarget::addColorAttachment(U32 color_fmt)
 
     U32 tex = 0;
     bool provided = false;
-    if (mWolfVkShared && sWolfVkProvider && mUsage == LLTexUnit::TT_TEXTURE)
+    WolfVkProvider* wolf_provider = wolfVkProvider();   // [VK S6 REGISTRY 2026-11-26] this target's own, or the shared one
+    // one provider per target at a time: textures already held from another are not mixed with a new one's
+    if (wolf_provider && mWolfVkProvidedBy && mWolfVkProvidedBy != wolf_provider) wolf_provider = nullptr;
+    if (wolf_provider && mUsage == LLTexUnit::TT_TEXTURE)
     {
         // [VULKAN G-BUFFER 2026-11-08] a texture over memory the Vulkan renderer exported (llrendertarget.h WolfVkProvider)
-        provided = sWolfVkProvider->colorTexture(*this, offset, color_fmt, tex);
-        if (provided) mWolfVkProvidedNames.push_back(tex);   // [G8 2026-11-11]
+        provided = wolf_provider->colorTexture(*this, offset, color_fmt, tex);
+        if (provided)
+        {
+            mWolfVkProvidedNames.push_back(tex);   // [G8 2026-11-11]
+            mWolfVkProvidedBy = wolf_provider;
+            wolfVkTrack(this);
+        }
     }
     if (!provided)
     {
@@ -249,8 +332,15 @@ bool LLRenderTarget::addColorAttachment(U32 color_fmt)
     if (!provided)
     {
         clear_glerror();
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(mUsage), 0, color_fmt, mResX, mResY, GL_RGBA, GL_UNSIGNED_BYTE, NULL, false);
-        if (glGetError() != GL_NO_ERROR)
+        if (gGLManager.mIsNativeVulkan && mGenerateMipMaps != LLTexUnit::TMG_NONE && LLImageGL::sWolfVkNativeStore)
+        {
+            LLImageGL::sWolfVkNativeStore->uploadImage2D(tex, 0, color_fmt, mResX, mResY, GL_RGBA, GL_UNSIGNED_BYTE, nullptr, false, true);
+        }
+        else
+        {
+            LLImageGL::setManualImage(LLTexUnit::getInternalType(mUsage), 0, color_fmt, mResX, mResY, GL_RGBA, GL_UNSIGNED_BYTE, NULL, false);
+        }
+        if (!gGLManager.mIsNativeVulkan && glGetError() != GL_NO_ERROR)
         {
             LL_WARNS() << "Could not allocate color buffer for render target." << LL_ENDL;
             return false;
@@ -285,7 +375,7 @@ bool LLRenderTarget::addColorAttachment(U32 color_fmt)
         stop_glerror();
     }
 
-    if (mFBO)
+    if (mFBO && !gGLManager.mIsNativeVulkan)
     {
         glBindFramebuffer(GL_FRAMEBUFFER, mFBO);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0+offset,
@@ -298,8 +388,9 @@ bool LLRenderTarget::addColorAttachment(U32 color_fmt)
 
     mTex.push_back(tex);
     mInternalFormat.push_back(color_fmt);
+    if (gGLManager.mIsNativeVulkan && sWolfVkNativeOwner) sWolfVkNativeOwner->onTargetChanged(*this);
 
-    if (gDebugGL)
+    if (gDebugGL && !gGLManager.mIsNativeVulkan)
     { //bind and unbind to validate target
         bindTarget();
         flush();
@@ -312,14 +403,18 @@ bool LLRenderTarget::addColorAttachment(U32 color_fmt)
 bool LLRenderTarget::allocateDepth()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_DISPLAY;
-    if (mWolfVkShared && sWolfVkProvider && mUsage == LLTexUnit::TT_TEXTURE)
+    WolfVkProvider* wolf_provider = wolfVkProvider();   // [VK S6 REGISTRY 2026-11-26]
+    if (wolf_provider && mWolfVkProvidedBy && mWolfVkProvidedBy != wolf_provider) wolf_provider = nullptr;
+    if (wolf_provider && mUsage == LLTexUnit::TT_TEXTURE)
     {
         // [VULKAN G-BUFFER 2026-11-08] the shared depth (GL_DEPTH_COMPONENT32F over a Vulkan D32_SFLOAT image)
         U32 tex = 0;
-        if (sWolfVkProvider->depthTexture(*this, tex))
+        if (wolf_provider->depthTexture(*this, tex))
         {
             mDepth = tex;
             mWolfVkProvidedNames.push_back(tex);   // [G8 2026-11-11]
+            mWolfVkProvidedBy = wolf_provider;
+            wolfVkTrack(this);
             gGL.getTexUnit(0)->bindManual(mUsage, mDepth);
             gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_POINT);
             sBytesAllocated += mResX*mResY*4;
@@ -337,7 +432,7 @@ bool LLRenderTarget::allocateDepth()
 
     sBytesAllocated += mResX*mResY*4;
 
-    if (glGetError() != GL_NO_ERROR)
+    if (!gGLManager.mIsNativeVulkan && glGetError() != GL_NO_ERROR)
     {
         LL_WARNS() << "Unable to allocate depth buffer for render target." << LL_ENDL;
         return false;
@@ -367,6 +462,12 @@ void LLRenderTarget::shareDepthBuffer(LLRenderTarget& target)
 
     if (mDepth)
     {
+        if (gGLManager.mIsNativeVulkan)
+        {
+            target.mUseDepth = true;
+            if (sWolfVkNativeOwner) sWolfVkNativeOwner->onShareDepth(*this, target);
+            return;
+        }
         glBindFramebuffer(GL_FRAMEBUFFER, target.mFBO);
 
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, LLTexUnit::getInternalType(mUsage), mDepth, 0);
@@ -389,9 +490,16 @@ void LLRenderTarget::release()
     std::vector<U32> provided_names;
     provided_names.swap(mWolfVkProvidedNames);
     const auto provided = [&provided_names](U32 tex) { return std::find(provided_names.begin(), provided_names.end(), tex) != provided_names.end(); };
-    if (!provided_names.empty() && sWolfVkProvider)
+    // [VK S6 REGISTRY 2026-11-26] the provider they came from hears of it (null when it has unregistered itself since)
+    WolfVkProvider* provided_by = mWolfVkProvidedBy;
+    mWolfVkProvidedBy = nullptr;
+    if (!mWolfVkProvider) wolfVkUntrack(this);
+    // a provider reached through the static pointer is told only while that pointer still names it, as before the
+    // registry: WolfVkBridge clears the pointer and deletes the G-buffer provider before the target is released
+    if (provided_by && provided_by != mWolfVkProvider && provided_by != sWolfVkProvider) provided_by = nullptr;
+    if (!provided_names.empty() && provided_by)
     {
-        sWolfVkProvider->released(*this);
+        provided_by->released(*this);
     }
 
     if (mDepth)
@@ -402,45 +510,63 @@ void LLRenderTarget::release()
 
         sBytesAllocated -= mResX*mResY*4;
     }
-    // else if (mFBO)
-    if (mFBO)
+    if (gGLManager.mIsNativeVulkan)
     {
-        glBindFramebuffer(GL_FRAMEBUFFER, mFBO);
-
-        if (mUseDepth)
-        { //detach shared depth buffer
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, LLTexUnit::getInternalType(mUsage), 0, 0);
-            mUseDepth = false;
-        }
-
-        glBindFramebuffer(GL_FRAMEBUFFER, sCurFBO);
-    }
-
-    // Detach any extra color buffers (e.g. SRGB spec buffers)
-    //
-    if (mFBO && (mTex.size() > 1))
-    {
-        glBindFramebuffer(GL_FRAMEBUFFER, mFBO);
-        size_t z;
-        for (z = mTex.size() - 1; z >= 1; z--)
+        mUseDepth = false;
+        for (size_t z = mTex.size(); z > 1; --z)
         {
             sBytesAllocated -= mResX*mResY*4;
-            glFramebufferTexture2D(GL_FRAMEBUFFER, static_cast<GLenum>(GL_COLOR_ATTACHMENT0+z), LLTexUnit::getInternalType(mUsage), 0, 0);
-            if (!provided(mTex[z])) LLImageGL::deleteTextures(1, &mTex[z]);
+            if (!provided(mTex[z - 1])) LLImageGL::deleteTextures(1, &mTex[z - 1]);
         }
-        glBindFramebuffer(GL_FRAMEBUFFER, sCurFBO);
-    }
-
-    if (mFBO)
-    {
-        if (mFBO == sCurFBO)
+        if (mFBO)
         {
-            sCurFBO = 0;
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            if (mFBO == sCurFBO) sCurFBO = 0;
+            if (sWolfVkNativeOwner) sWolfVkNativeOwner->onReleaseTarget(*this);
+            mFBO = 0;
+        }
+    }
+    else
+    {
+        // else if (mFBO)
+        if (mFBO)
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, mFBO);
+
+            if (mUseDepth)
+            { //detach shared depth buffer
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, LLTexUnit::getInternalType(mUsage), 0, 0);
+                mUseDepth = false;
+            }
+
+            glBindFramebuffer(GL_FRAMEBUFFER, sCurFBO);
         }
 
-        glDeleteFramebuffers(1, (GLuint *) &mFBO);
-        mFBO = 0;
+        // Detach any extra color buffers (e.g. SRGB spec buffers)
+        //
+        if (mFBO && (mTex.size() > 1))
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, mFBO);
+            size_t z;
+            for (z = mTex.size() - 1; z >= 1; z--)
+            {
+                sBytesAllocated -= mResX*mResY*4;
+                glFramebufferTexture2D(GL_FRAMEBUFFER, static_cast<GLenum>(GL_COLOR_ATTACHMENT0+z), LLTexUnit::getInternalType(mUsage), 0, 0);
+                if (!provided(mTex[z])) LLImageGL::deleteTextures(1, &mTex[z]);
+            }
+            glBindFramebuffer(GL_FRAMEBUFFER, sCurFBO);
+        }
+
+        if (mFBO)
+        {
+            if (mFBO == sCurFBO)
+            {
+                sCurFBO = 0;
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            }
+
+            glDeleteFramebuffers(1, (GLuint *) &mFBO);
+            mFBO = 0;
+        }
     }
 
     if (mTex.size() > 0)
@@ -457,9 +583,21 @@ void LLRenderTarget::release()
 
 void LLRenderTarget::bindTarget()
 {
+    if (sWolfVkBeforeTargetChange) sWolfVkBeforeTargetChange();   // [VULKAN G-BUFFER S2 2026-11-26/] llrendertarget.h
     LL_PROFILE_GPU_ZONE("bindTarget");
     llassert(mFBO);
     llassert(!isBoundInStack());
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        sCurFBO = mFBO;
+        sCurResX = mResX;
+        sCurResY = mResY;
+        mPreviousRT = sBoundTarget;
+        sBoundTarget = this;
+        if (sWolfVkNativeOwner) sWolfVkNativeOwner->onBindTarget(*this);
+        return;
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, mFBO);
     sCurFBO = mFBO;
@@ -492,6 +630,7 @@ void LLRenderTarget::bindTarget()
 
 void LLRenderTarget::clear(U32 mask_in)
 {
+    if (sWolfVkBeforeTargetChange) sWolfVkBeforeTargetChange();   // [VULKAN G-BUFFER S2 2026-11-26/] llrendertarget.h
     LL_PROFILE_GPU_ZONE("clear");
     llassert(mFBO);
     U32 mask = GL_COLOR_BUFFER_BIT;
@@ -499,6 +638,11 @@ void LLRenderTarget::clear(U32 mask_in)
     {
         mask |= GL_DEPTH_BUFFER_BIT;
 
+    }
+    if (gGLManager.mIsNativeVulkan)
+    {
+        LLGLState::wolfClear(mask & mask_in);
+        return;
     }
     if (mFBO)
     {
@@ -540,11 +684,41 @@ void LLRenderTarget::bindTexture(U32 index, S32 channel, LLTexUnit::eTextureFilt
 
 void LLRenderTarget::flush()
 {
+    if (sWolfVkBeforeTargetChange) sWolfVkBeforeTargetChange();   // [VULKAN G-BUFFER S2 2026-11-26/] llrendertarget.h
     LL_PROFILE_GPU_ZONE("rt flush");
     gGL.flush();
     llassert(mFBO);
     llassert(sCurFBO == mFBO);
     llassert(sBoundTarget == this);
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        LLRenderTarget* prev = mPreviousRT;
+        if (sWolfVkNativeOwner)
+        {
+            sWolfVkNativeOwner->onFlushTarget(*this, prev);
+        }
+        if (mGenerateMipMaps == LLTexUnit::TMG_AUTO && !mTex.empty() && LLImageGL::sWolfVkNativeStore)
+        {
+            S32 cur_filter = 0, cur_addr = LLTexUnit::TAM_MIRROR;
+            LLImageGL::sWolfVkNativeStore->getSamplerOptions(mTex[0], cur_filter, cur_addr);
+            LLImageGL::sWolfVkNativeStore->setSamplerOptions(mTex[0], LLTexUnit::TFO_TRILINEAR, cur_addr);
+            LLImageGL::sWolfVkNativeStore->generateMipmaps(mTex[0]);
+        }
+        if (prev)
+        {
+            sBoundTarget = prev->mPreviousRT;
+            prev->bindTarget();
+        }
+        else
+        {
+            sBoundTarget = nullptr;
+            sCurFBO = 0;
+            sCurResX = gGLViewport[2];
+            sCurResY = gGLViewport[3];
+        }
+        return;
+    }
 
     if (mGenerateMipMaps == LLTexUnit::TMG_AUTO)
     {
@@ -624,4 +798,9 @@ void LLRenderTarget::swapFBORefs(LLRenderTarget& other)
 
     std::swap(mFBO, other.mFBO);
     std::swap(mTex, other.mTex);
+    if (gGLManager.mIsNativeVulkan && sWolfVkNativeOwner)
+    {
+        sWolfVkNativeOwner->onTargetChanged(*this);
+        sWolfVkNativeOwner->onTargetChanged(other);
+    }
 }

@@ -69,6 +69,18 @@ class ViewerManifest(LLManifest,FSViewerManifest):
         # and copy_l_viewer_manifest targets)
         return 'package' in self.args['actions']
 
+    def wolf_wolfcore_dir(self, expected_lib):
+        # [WOLFCORE 2026-11-27] Optional proprietary WolfCore runtime library (.github/scripts/install-wolfcore.sh).
+        # Absent on public/fork builds (returns ""); when WOLF_WOLFCORE_DIR is set, the expected library must exist.
+        d = os.environ.get("WOLF_WOLFCORE_DIR", "").strip()
+        if not d:
+            print("WOLF_WOLFCORE_DIR not set: packaging open-source viewer without optional %s" % expected_lib)
+            return ""
+        full = os.path.join(d, expected_lib)
+        if not os.path.isfile(full):
+            raise ManifestError("WOLF_WOLFCORE_DIR=%r is set, but %s is missing" % (d, full))
+        return d
+
     def construct(self):
         super(ViewerManifest, self).construct()
         self.path(src="../../scripts/messages/message_template.msg", dst="app_settings/message_template.msg")
@@ -716,6 +728,10 @@ class Windows_x86_64_Manifest(ViewerManifest):
             ):
                 self.path(libfile)
 
+            wc_dir = self.wolf_wolfcore_dir("wolfcore.dll")
+            if wc_dir:
+                self.path2basename(wc_dir, "wolfcore.dll")
+
             if self.args['discord'] == 'ON':
                 self.path("discord_partner_sdk.dll")
 
@@ -1283,6 +1299,19 @@ class Darwin_x86_64_Manifest(ViewerManifest):
         # darwin requires full app bundle packaging even for debugging.
         return True
 
+    def wolf_moltenvk_dir(self):
+        # [W114-VULKAN MAC 2026-11-26] The folder .github/scripts/install-moltenvk.sh fills (pinned MoltenVK release,
+        # sha256-checked): libMoltenVK.dylib, MoltenVK_icd.json, LICENSE. Every Mac package carries MoltenVK - Paul
+        # 2026-11-26 "ALL builds move to Vulkan completely" - so a package without it is refused, like one without the
+        # SPIR-V store above. A local Mac build runs the same script first (WOLF_MOLTENVK_DIR=<its out folder>).
+        d = os.environ.get("WOLF_MOLTENVK_DIR", "")
+        missing = [f for f in ("libMoltenVK.dylib", "MoltenVK_icd.json", "LICENSE")
+                   if not d or not os.path.isfile(os.path.join(d, f))]
+        if missing:
+            raise ManifestError("MoltenVK (the Mac's Vulkan driver) is missing: WOLF_MOLTENVK_DIR=%r lacks %s "
+                                "(run .github/scripts/install-moltenvk.sh first)" % (d, ", ".join(missing)))
+        return d
+
 # <FS:Ansariel> construct method VMP trampoline crazy VMP launcher juggling shamelessly replaced with old version
     # def is_rearranging(self):
         # # That said, some stuff should still only be performed once.
@@ -1572,6 +1601,14 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                     ):
                         self.path(libfile)
 
+                # [W114-VULKAN MAC 2026-11-26] MoltenVK, the Vulkan driver wolfvkloader.cpp opens directly
+                # (@executable_path/../Frameworks/libMoltenVK.dylib); its manifest and licence go to Resources below
+                self.path2basename(self.wolf_moltenvk_dir(), "libMoltenVK.dylib")
+
+                wc_dir = self.wolf_wolfcore_dir("libwolfcore.dylib")
+                if wc_dir:
+                    self.path2basename(wc_dir, "libwolfcore.dylib")
+
             with self.prefix(dst="MacOS"):
                 # The bundle executable is named after the CMake product (CMakeLists.txt
                 # set(product "WolfViewer") / MACOSX_EXECUTABLE_NAME / OUTPUT_NAME "${product}"),
@@ -1652,6 +1689,28 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                 self.path("LGPL-license.txt")
                 with self.prefix(src=pkgdir,dst=""):
                     self.path("ca-bundle.crt")
+
+                # [W114-VULKAN MAC 2026-11-26] MoltenVK's driver manifest where a Vulkan loader looks first on macOS
+                # (Vulkan-Loader docs/LoaderDriverInterface.md "Example macOS Driver Search Path":
+                # <bundle>/Contents/Resources/vulkan/icd.d), used only by a validation run with the Vulkan SDK's loader
+                # (wolfvkloader.cpp names it in VK_DRIVER_FILES); a normal start opens the dylib without a loader.
+                # "library_path" relative to the manifest file (LoaderDriverInterface.md, Driver Manifest File Format),
+                # so it reaches Contents/Frameworks; api_version and is_portability_driver as MoltenVK's own manifest says.
+                moltenvk_dir = self.wolf_moltenvk_dir()
+                with open(os.path.join(moltenvk_dir, "MoltenVK_icd.json")) as f:
+                    upstream = json.load(f)
+                icd = {
+                    "file_format_version": upstream["file_format_version"],
+                    "ICD": {
+                        "library_path": "../../../Frameworks/libMoltenVK.dylib",
+                        "api_version": upstream["ICD"]["api_version"],
+                        "is_portability_driver": upstream["ICD"]["is_portability_driver"],
+                    },
+                }
+                self.put_in_file((json.dumps(icd, indent=4) + "\n").encode("utf-8"),
+                                 os.path.join("vulkan", "icd.d", "MoltenVK_icd.json"))
+                # Apache-2.0 section 4(a): recipients of the binary get a copy of the licence
+                self.path(os.path.join(moltenvk_dir, "LICENSE"), "MoltenVK-LICENSE.txt")
 
                 icon_path = self.icon_path()
                 with self.prefix(src=icon_path) :
@@ -1991,6 +2050,11 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                         plain_sign += glob.glob(resources + "*.dylib")
                         plain_sign += glob.glob(resources + "llplugin/lib/*.dylib")
                         plain_sign += glob.glob(resources + "SLPlugin.app/Contents/Frameworks/Chromium Embedded Framework.framework/Libraries/*.dylib")
+                        # [W114-VULKAN MAC 2026-11-26] MoltenVK arrives signed by its own CI; it is signed again with this
+                        # build's identity before the app that holds it (nested code first, as above for CEF), and
+                        # codesign --verify --deep --strict below checks it with the rest
+                        plain_sign += glob.glob(tmp_app_path + "/Contents/Frameworks/libMoltenVK.dylib")
+                        plain_sign += glob.glob(tmp_app_path + "/Contents/Frameworks/libwolfcore.dylib")
 
                         deep_sign = [
                             # <FS:ND> Firestorm does not ship SLVersionChecker
@@ -2577,6 +2641,11 @@ class Linux_x86_64_Manifest(LinuxManifest):
                 except:
                     print ("Skipping libfmod.so - not found")
                     pass
+
+        wc_dir = self.wolf_wolfcore_dir("libwolfcore.so")
+        if wc_dir:
+            with self.prefix(src=wc_dir, dst="lib"):
+                self.path("libwolfcore.so")
 
         with self.prefix(dst="bin"):
             self.path2basename("../llplugin/slplugin", "SLPlugin")

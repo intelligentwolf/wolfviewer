@@ -13484,6 +13484,7 @@ bool LLVOAvatar::isTextureVisible(LLAvatarAppearanceDefines::ETextureIndex type,
 
 void LLVOAvatar::placeProfileQuery()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     if (mGPUTimerQuery == 0)
     {
         glGenQueries(1, &mGPUTimerQuery);
@@ -13494,6 +13495,7 @@ void LLVOAvatar::placeProfileQuery()
 
 void LLVOAvatar::readProfileQuery(S32 retries)
 {
+    if (gGLManager.mIsNativeVulkan) return;
     if (!mGPUProfilePending)
     {
         glEndQuery(GL_TIME_ELAPSED);

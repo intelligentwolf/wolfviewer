@@ -680,14 +680,19 @@ bool WolfVkGBuffer::glHandToVulkan()
     // (VUID-vkQueueSubmit-pSubmits-02207) and drew into them while GL could still be writing them.
     if (!mAvailable || broken() || mGlSignalled) return false;   // mGlSignalled: a second signal of a signalled binary semaphore
     if (!prepare()) return false;   // the five images and the Vulkan target over them must all be there
-    GLuint textures[5]; GLenum layouts[5]; GLuint n = 0;
-    glLayouts(textures, layouts, n);
+    GLuint own_textures[5]; GLenum own_layouts[5]; GLuint n = 0;
+    glLayouts(own_textures, own_layouts, n);
+    // [W114-VULKAN S5 2026-11-26] the attachments, then the images the pass's draws sample (extras())
+    std::vector<GLuint> textures(own_textures, own_textures + n);
+    std::vector<GLenum> layouts(own_layouts, own_layouts + n);
+    mExtras.appendForSignal(textures, layouts);
     glErrorsHere();   // the check below must see this call's errors only
     // GL_EXT_semaphore: SignalSemaphoreEXT transitions the textures to the layouts and flushes "as if Flush"
-    sSignalSemaphoreEXT(mGlSemGlPassDone, 0, nullptr, n, textures, layouts);
+    sSignalSemaphoreEXT(mGlSemGlPassDone, 0, nullptr, static_cast<GLuint>(textures.size()), textures.data(), layouts.data());
     const std::string e = glErrorsHere();
     if (!e.empty())
     {
+        mExtras.cancel();
         // a signal GL refused must not be waited on by Vulkan (VUID-vkQueueSubmit-pWaitSemaphores-03238): the wait would
         // never complete and GL's later wait on vk_pass_done would stall behind it (8.2j)
         mBrokenReason = "glSignalSemaphoreEXT (gl_pass_done): GL error " + e;
@@ -701,10 +706,13 @@ bool WolfVkGBuffer::glHandToVulkan()
 bool WolfVkGBuffer::glTakeBack()
 {
     if (!mAvailable || !mVkSignalled) return true;   // nothing Vulkan signalled is waiting to be taken
-    GLuint textures[5]; GLenum layouts[5]; GLuint n = 0;
-    glLayouts(textures, layouts, n);
+    GLuint own_textures[5]; GLenum own_layouts[5]; GLuint n = 0;
+    glLayouts(own_textures, own_layouts, n);
+    std::vector<GLuint> textures(own_textures, own_textures + n);   // [W114-VULKAN S5 2026-11-26] as glHandToVulkan
+    std::vector<GLenum> layouts(own_layouts, own_layouts + n);
+    mExtras.appendForWait(textures, layouts);
     glErrorsHere();
-    sWaitSemaphoreEXT(mGlSemVkPassDone, 0, nullptr, n, textures, layouts);
+    sWaitSemaphoreEXT(mGlSemVkPassDone, 0, nullptr, static_cast<GLuint>(textures.size()), textures.data(), layouts.data());
     mVkSignalled = false;
     const std::string e = glErrorsHere();
     if (!e.empty())
@@ -758,6 +766,7 @@ void WolfVkGBuffer::acquire(VkCommandBuffer cmd)
     };
     for (WolfVkSharedImage& c : mColor) barrier(c.image(), false);
     barrier(mDepth.image(), true);
+    mExtras.acquire(cmd);   // [W114-VULKAN S5 2026-11-26/]
 }
 
 void WolfVkGBuffer::release(VkCommandBuffer cmd)
@@ -786,4 +795,5 @@ void WolfVkGBuffer::release(VkCommandBuffer cmd)
     };
     for (WolfVkSharedImage& c : mColor) barrier(c.image(), false);
     barrier(mDepth.image(), true);
+    mExtras.release(cmd);   // [W114-VULKAN S5 2026-11-26/]
 }

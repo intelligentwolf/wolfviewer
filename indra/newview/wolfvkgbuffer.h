@@ -40,6 +40,7 @@
 
 #include "llrendertarget.h"
 #include "wolfvkshare.h"
+#include "wolfvkbrackettarget.h"   // [W114-VULKAN S5 2026-11-26] WolfVkBracketExtras
 #include "vk/wolfvkrendertarget.h"
 #include "vk/wolfvkbuffer.h"
 #include <memory>
@@ -114,12 +115,17 @@ public:
     WolfVkDevice::ExtraSync sync();
     void acquire(VkCommandBuffer cmd);
     void release(VkCommandBuffer cmd);
+    // [W114-VULKAN S5 2026-11-26] the images the pass's recorded draws sample travel with the pass (wolfvkbrackettarget.h
+    // wantSampled / sampledImage): named in glHandToVulkan's signal and glTakeBack's wait, acquired and released with
+    // the attachments
+    WolfVkBracketExtras& extras() { return mExtras; }
 
 private:
     bool createImage(WolfVkSharedImage& out, uint32_t width, uint32_t height, const WolfVkImage::Format& format, uint32_t gl_internal_format, bool depth, std::string& error);
     void destroyImages();
     bool buildTarget(std::string& error);
     void glLayouts(uint32_t textures[5], uint32_t layouts[5], uint32_t& count) const;
+    WolfVkBracketExtras mExtras;   // [W114-VULKAN S5 2026-11-26]
     // [HANG GUARD 2026-11-08 8.2k] before shared images are destroyed or remade: Vulkan and GL both finished with them
     // (bounded waits; false = the device is now hung and the images are left alone)
     bool idleBothAPIs(const char* what);

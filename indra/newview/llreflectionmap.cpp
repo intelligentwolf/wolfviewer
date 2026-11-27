@@ -32,6 +32,7 @@
 #include "llviewerregion.h"
 #include "llworld.h"
 #include "llshadermgr.h"
+#include "wolfvknative.h"
 
 extern F32SecondsImplicit gFrameTimeSeconds;
 
@@ -365,6 +366,45 @@ void LLReflectionMap::doOcclusion(const LLVector4a& eye)
     if (o.getLength3().getF32() < dist)
     { // eye is inside radius, don't attempt to occlude
         mOccluded = false;
+        return;
+    }
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (!WolfVkNative::occlusionSupported())
+        {
+            mOccluded = false;
+            return;
+        }
+        if (mOcclusionQuery == 0)
+        {
+            mOcclusionQuery = gPipeline.mReflectionMapManager.allocateQuery();
+            do_query = (mOcclusionQuery != 0);
+        }
+        else
+        {
+            bool avail = false;
+            U32 passed = 1;
+            WolfVkNative::getOcclusionQueryResult(mOcclusionQuery, avail, passed);
+            if (avail || mOcclusionPendingFrames > 4)
+            {
+                do_query = true;
+                mOccluded = avail ? (passed == 0) : false;
+                mOcclusionPendingFrames = 0;
+            }
+            else
+            {
+                mOcclusionPendingFrames++;
+            }
+        }
+        if (do_query && WolfVkNative::beginOcclusionQuery(mOcclusionQuery))
+        {
+            LLGLSLShader* shader = LLGLSLShader::sCurBoundShaderPtr;
+            shader->uniform3fv(LLShaderMgr::BOX_CENTER, 1, mOrigin.getF32ptr());
+            shader->uniform3f(LLShaderMgr::BOX_SIZE, mRadius, mRadius, mRadius);
+            gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, get_box_fan_indices(LLViewerCamera::getInstance(), mOrigin));
+            WolfVkNative::endOcclusionQuery();
+        }
         return;
     }
 

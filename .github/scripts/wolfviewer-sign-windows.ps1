@@ -136,14 +136,19 @@ switch ($Stage) {
 
     'sign-binaries' {
         $b = Get-Build
-        # The same set Firestorm signs, fs_viewer_manifest.py:67-73 fs_sign_win_binaries().
-        Invoke-Sign @(
+        # The same set Firestorm signs, fs_viewer_manifest.py:67-73 fs_sign_win_binaries(), plus wolfcore.dll when bundled.
+        $toSign = @(
             (Join-Path $b.Dir 'slplugin.exe'),
             (Join-Path $b.Dir 'SLVoice.exe'),
             (Join-Path $b.Dir 'llwebrtc.dll'),
             (Join-Path $b.Dir 'llplugin\dullahan_host.exe'),
             (Join-Path $b.Dir $b.Exe)
         )
+        $wolfcoreDll = Join-Path $b.Dir 'wolfcore.dll'
+        if (Test-Path -LiteralPath $wolfcoreDll -PathType Leaf) {
+            $toSign += $wolfcoreDll
+        }
+        Invoke-Sign $toSign
     }
 
     'repack' {

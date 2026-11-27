@@ -297,9 +297,17 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             && gGLViewport[3] == (S32)gPipeline.mRT->deferredScreen.getHeight();
         if (reject_ok)
         {
-            GLint func = 0;
-            glGetIntegerv(GL_DEPTH_FUNC, &func);
-            reject_ok = glIsEnabled(GL_DEPTH_TEST) && (func == GL_LEQUAL || func == GL_LESS);
+            if (gGLManager.mIsNativeVulkan)
+            {
+                const GLenum func = LLGLDepthTest::wolfVkDepthFunc();
+                reject_ok = LLGLDepthTest::wolfVkDepthEnabled() && (func == GL_LEQUAL || func == GL_LESS);
+            }
+            else
+            {
+                GLint func = 0;
+                glGetIntegerv(GL_DEPTH_FUNC, &func);
+                reject_ok = glIsEnabled(GL_DEPTH_TEST) && (func == GL_LEQUAL || func == GL_LESS);
+            }
         }
         shader->uniform1f(s_early_reject, reject_ok ? 1.f : 0.f);
     }

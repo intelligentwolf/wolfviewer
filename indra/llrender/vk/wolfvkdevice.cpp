@@ -17,6 +17,9 @@
 
 #include "linden_common.h"
 #include "wolfvkdevice.h"
+// [W114-VULKAN MAC 2026-11-26] VkPhysicalDevicePortabilitySubsetFeaturesKHR / PropertiesKHR (vulkan_beta.h:26, :46): the
+// beta header is not pulled in by vulkan.h without VK_ENABLE_BETA_EXTENSIONS (vulkan.h:95), and only this file needs it
+#include "third_party/vulkan-headers/include/vulkan/vulkan_beta.h"
 #include <chrono>   // [AMD PERF] endOneTimeAndWait timing
 #include <future>   // [W2 2026-11-11] queueWaitIdleBounded
 #include <memory>
@@ -54,6 +57,40 @@ namespace
     // Source: vulkan_beta.h:23 VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME "VK_KHR_portability_subset" (a beta header,
     // behind VK_ENABLE_BETA_EXTENSIONS in vulkan.h, so the literal is repeated here).
     const char* const sPortabilitySubset = "VK_KHR_portability_subset";
+    // [W114-VULKAN MAC 2026-11-26] the subset's two structures (vulkan_beta.h:26 features, :46 properties) take sTypes
+    // that vulkan_core.h only names under VK_ENABLE_BETA_EXTENSIONS (vulkan_core.h:724
+    // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR = 1000163000, :727 ..._PROPERTIES_KHR = 1000163001),
+    // so the values are written out here; the structures come from vulkan_beta.h, included above for this file only.
+    const VkStructureType sPortabilityFeaturesSType = static_cast<VkStructureType>(1000163000);
+    const VkStructureType sPortabilityPropertiesSType = static_cast<VkStructureType>(1000163001);
+
+    // [W114-VULKAN MAC 2026-11-26] The subset's features and properties of one device (Vulkan 1.1 queries, so only with
+    // vkGetPhysicalDeviceFeatures2/Properties2; a portability device without them reports nothing and keeps the zeroes,
+    // i.e. every subset feature off and alignment 1 - then createDevice enables none of them).
+    void queryPortability(VkPhysicalDevice handle, VkPhysicalDevicePortabilitySubsetFeaturesKHR& features,
+                          VkPhysicalDevicePortabilitySubsetPropertiesKHR& properties)
+    {
+        features = VkPhysicalDevicePortabilitySubsetFeaturesKHR{};
+        features.sType = sPortabilityFeaturesSType;
+        properties = VkPhysicalDevicePortabilitySubsetPropertiesKHR{};
+        properties.sType = sPortabilityPropertiesSType;
+        if (gVk.vkGetPhysicalDeviceFeatures2)
+        {
+            VkPhysicalDeviceFeatures2 f2{};
+            f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;   // vulkan_core.h:273
+            f2.pNext = &features;
+            gVk.vkGetPhysicalDeviceFeatures2(handle, &f2);
+            features.pNext = nullptr;
+        }
+        if (gVk.vkGetPhysicalDeviceProperties2)
+        {
+            VkPhysicalDeviceProperties2 p2{};
+            p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+            p2.pNext = &properties;
+            gVk.vkGetPhysicalDeviceProperties2(handle, &p2);
+            properties.pNext = nullptr;
+        }
+    }
     // [SHARED IMAGES 2026-11-08] the platform's export extensions (wolfvkdevice.h mHasExternalSharing)
 #if LL_WINDOWS
     const char* const sExternalMemoryExt = "VK_KHR_external_memory_win32";        // vulkan_win32.h:58
@@ -154,7 +191,8 @@ bool WolfVkDevice::createInstance(const Config& config, std::string& error)
     }
     mConfig = config;
 
-    if (!WolfVkLoader::loadLibrary(error))
+    // [W114-VULKAN MAC 2026-11-26] on macOS validation needs the SDK's loader in front of MoltenVK (wolfvkloader.cpp)
+    if (!WolfVkLoader::loadLibrary(error, config.mValidation))
     {
         return false;
     }
@@ -454,6 +492,35 @@ bool WolfVkDevice::queryPhysicalDevices(std::string& error)
             gVk.vkGetPhysicalDeviceFeatures2(handle, &f2);
             d.mHasTimelineSemaphore = tl.timelineSemaphore == VK_TRUE;
         }
+        const bool hqr_ext = api12 || hasExtension(exts, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME);
+        if (hqr_ext && gVk.vkGetPhysicalDeviceFeatures2 && (api11 || mInstanceVersion >= VK_API_VERSION_1_1))
+        {
+            VkPhysicalDeviceHostQueryResetFeatures hqr{};
+            hqr.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+            VkPhysicalDeviceFeatures2 f2{};
+            f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            f2.pNext = &hqr;
+            gVk.vkGetPhysicalDeviceFeatures2(handle, &f2);
+            d.mHasHostQueryReset = hqr.hostQueryReset == VK_TRUE;
+        }
+
+        // [W114-VULKAN MAC 2026-11-26] VK_KHR_portability_subset (MoltenVK): what the device leaves out of full Vulkan
+        if (d.mHasPortabilitySubset)
+        {
+            VkPhysicalDevicePortabilitySubsetFeaturesKHR pf{};
+            VkPhysicalDevicePortabilitySubsetPropertiesKHR pp{};
+            queryPortability(handle, pf, pp);
+            d.mTriangleFans = pf.triangleFans == VK_TRUE;
+            d.mMinVertexStrideAlignment = pp.minVertexInputBindingStrideAlignment ? pp.minVertexInputBindingStrideAlignment : 1u;
+            LL_INFOS("Vulkan") << "Device " << mPhysicalDevices.size() << " portability subset: triangleFans " << pf.triangleFans
+                               << ", imageViewFormatSwizzle " << pf.imageViewFormatSwizzle << ", imageViewFormatReinterpretation "
+                               << pf.imageViewFormatReinterpretation << ", mutableComparisonSamplers " << pf.mutableComparisonSamplers
+                               << ", constantAlphaColorBlendFactors " << pf.constantAlphaColorBlendFactors << ", separateStencilMaskRef "
+                               << pf.separateStencilMaskRef << ", samplerMipLodBias " << pf.samplerMipLodBias << ", events " << pf.events
+                               << ", pointPolygons " << pf.pointPolygons << ", vertexAttributeAccessBeyondStride "
+                               << pf.vertexAttributeAccessBeyondStride << ", minVertexInputBindingStrideAlignment "
+                               << pp.minVertexInputBindingStrideAlignment << LL_ENDL;
+        }
 
         LL_INFOS("Vulkan") << "Device " << mPhysicalDevices.size() << ": " << d.name() << " (" << d.typeString()
                            << ", vendor 0x" << std::hex << d.mProperties.vendorID << std::dec << "), driver " << d.driverString()
@@ -632,6 +699,22 @@ bool WolfVkDevice::choosePhysicalDevice(VkSurfaceKHR surface, std::string& error
         LL_INFOS("Vulkan") << "Device chosen by OpenGL's renderer name \"" << mConfig.mGLRenderer << "\": " << mChosen.name() << LL_ENDL;
         return true;
     }
+    if (!mConfig.mHaveGLDeviceUUID && mConfig.mGLVendorID == 0 && mConfig.mGLRenderer.empty())
+    {
+        // [NATIVE VULKAN 2026-11-26] No OpenGL context exists to match: prefer discrete GPU over integrated.
+        const WolfVkPhysicalDeviceInfo* best = &candidates.front();
+        for (const WolfVkPhysicalDeviceInfo& d : candidates)
+        {
+            if (d.mProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+            {
+                best = &d;
+                break;
+            }
+        }
+        mChosen = *best;
+        LL_INFOS("Vulkan") << "Native Vulkan device chosen: " << mChosen.name() << " (" << mChosen.typeString() << ")" << LL_ENDL;
+        return true;
+    }
     if (mConfig.mGLVendorID && same_vendor.empty())
     {
         // [V7 2026-11-11] OpenGL's maker is known and none of the Vulkan graphics cards is by that maker
@@ -676,6 +759,10 @@ bool WolfVkDevice::createDevice(VkSurfaceKHR surface, std::string& error)
     {
         extensions.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
     }
+    if (!api12 && mChosen.mHasHostQueryReset)
+    {
+        extensions.push_back(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME);
+    }
     if (!api11 && mChosen.mHasDedicatedAllocation)
     {
         extensions.push_back(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME);
@@ -709,11 +796,24 @@ bool WolfVkDevice::createDevice(VkSurfaceKHR surface, std::string& error)
     features.textureCompressionBC = supported.textureCompressionBC;
     features.independentBlend = supported.independentBlend;
     features.depthClamp = supported.depthClamp;
+    mDepthClamp = supported.depthClamp == VK_TRUE;   // [W114-VULKAN S5 2026-11-26/] wolfvkdevice.h depthClamp()
+    // [VK S6 2026-11-26] cube map array images and views (vulkan_core.h:3529 imageCubeArray; :2333 VK_IMAGE_VIEW_TYPE_CUBE_ARRAY
+    // needs it): the reflection probes are one cube map array (GL_TEXTURE_CUBE_MAP_ARRAY, llcubemaparray.cpp)
+    features.imageCubeArray = supported.imageCubeArray;
+    mCubeArrays = supported.imageCubeArray == VK_TRUE;
+    // [GEOMETRY 2026-11-26] geometryShader (vulkan_core.h:3531) for the programs with a geometry stage (WolfVkProgram::create)
+    features.geometryShader = supported.geometryShader;
+    features.multiDrawIndirect = supported.multiDrawIndirect;
+    features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
+    mMultiDrawIndirect = (supported.multiDrawIndirect == VK_TRUE && supported.drawIndirectFirstInstance == VK_TRUE);
 
     // Source: vulkan_core.h:6651 VkPhysicalDeviceTimelineSemaphoreFeatures; enabling the feature on the device
     VkPhysicalDeviceTimelineSemaphoreFeatures timeline{};
     timeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
     timeline.timelineSemaphore = VK_TRUE;
+    VkPhysicalDeviceHostQueryResetFeatures host_query_reset{};
+    host_query_reset.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+    host_query_reset.hostQueryReset = VK_TRUE;
     // [PRESENT FENCES 2026-11-08] the feature must be enabled for a present to carry a fence
     // (VUID-VkPresentInfoKHR-swapchainMaintenance1-10158). Source: vulkan_core.h:13441, :1196
     VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR maintenance{};
@@ -732,8 +832,25 @@ bool WolfVkDevice::createDevice(VkSurfaceKHR surface, std::string& error)
     void* feature_chain = nullptr;
     if (compression_query && mChosen.mImageCompressionControlFeature) { compression.pNext = feature_chain; feature_chain = &compression; }
     if (mChosen.mHasTimelineSemaphore) { timeline.pNext = feature_chain; feature_chain = &timeline; }
+    if (mChosen.mHasHostQueryReset) { host_query_reset.pNext = feature_chain; feature_chain = &host_query_reset; }
     if (mChosen.mSwapchainMaintenance1) { maintenance.pNext = feature_chain; feature_chain = &maintenance; }
     if (mChosen.mHasDepthClipControl) { depth_clip.pNext = feature_chain; feature_chain = &depth_clip; }
+    // [W114-VULKAN MAC 2026-11-26] VK_KHR_portability_subset: the features the device offers, enabled. The spec's valid
+    // usage tests each subset feature as enabled on the device (e.g. VUID-VkPipelineInputAssemblyStateCreateInfo-
+    // triangleFans-04452 for VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN; MoltenVK 1.4.2 offers triangleFans = true,
+    // MVKDevice.mm:610), so without this structure in the chain nothing beyond the subset could be used at all. vk.xml
+    // (Vulkan-Headers v1.4.363 registry): VkPhysicalDevicePortabilitySubsetFeaturesKHR structextends
+    // "VkPhysicalDeviceFeatures2,VkDeviceCreateInfo".
+    // Everything offered is enabled because the viewer's GL renderer relies on GL behaviour these features restore
+    // (format swizzles, comparison samplers, LOD bias, constant-alpha blend factors).
+    VkPhysicalDevicePortabilitySubsetFeaturesKHR portability{};
+    if (mChosen.mHasPortabilitySubset)
+    {
+        VkPhysicalDevicePortabilitySubsetPropertiesKHR subset_properties{};   // read at queryPhysicalDevices
+        queryPortability(mChosen.mHandle, portability, subset_properties);
+        portability.pNext = feature_chain;
+        feature_chain = &portability;
+    }
 
     // Source: vulkan_core.h:3727 VkDeviceQueueCreateInfo { sType, pNext, flags, queueFamilyIndex, queueCount, pQueuePriorities }
     const float priority = 1.0f;
@@ -763,6 +880,8 @@ bool WolfVkDevice::createDevice(VkSurfaceKHR surface, std::string& error)
     }
     mPresentFences = mChosen.mSwapchainMaintenance1 != nullptr;
     mGlDepthRange = mChosen.mHasDepthClipControl;
+    mGeometryShaders = features.geometryShader == VK_TRUE;
+    mHostQueryReset = mChosen.mHasHostQueryReset;
     mCompressionQuery = compression_query;
     if (!WolfVkLoader::loadDeviceFunctions(mDevice, error))
     {
@@ -974,6 +1093,7 @@ WolfVkDevice::Frame& WolfVkDevice::beginFrame()
     // the pool first: a recorded command buffer keeps every object it names "in use" until it is reset
     gVk.vkResetCommandPool(mDevice, f.mPool, 0);
     f.mMidUsed = 0;
+    f.mPreCmdActive = false;
 
     // Source: vulkan_core.h:3976 VkCommandBufferBeginInfo { sType, pNext, flags, pInheritanceInfo }; :3177 ONE_TIME_SUBMIT
     VkCommandBufferBeginInfo begin{};
@@ -1020,6 +1140,22 @@ bool WolfVkDevice::endFrame(bool wait_acquire, VkSemaphore render_done, const Ex
 {
     Frame& f = mFrames[mFrameIndex];
     if (mHung) { error = "the device is hung or lost (" + mHungReason + ")"; return false; }   // [DEVICE LOST 8.2k] nothing submits again
+    VkCommandBuffer submit_cmds[2] = { VK_NULL_HANDLE, f.mCmd };
+    uint32_t submit_cmd_count = 1;
+    if (f.mPreCmdActive && f.mPreCmd != VK_NULL_HANDLE)
+    {
+        f.mPreCmdActive = false;
+        VkResult r_pre = gVk.vkEndCommandBuffer(f.mPreCmd);
+        if (r_pre != VK_SUCCESS)
+        {
+            lost(r_pre, "vkEndCommandBuffer (pre-pass)");
+            error = std::string("vkEndCommandBuffer (pre-pass): ") + WolfVkLoader::resultString(r_pre);
+            return false;
+        }
+        submit_cmds[0] = f.mPreCmd;
+        submit_cmds[1] = f.mCmd;
+        submit_cmd_count = 2;
+    }
     VkResult res = gVk.vkEndCommandBuffer(f.mCmd);
     if (res != VK_SUCCESS)
     {
@@ -1035,7 +1171,7 @@ bool WolfVkDevice::endFrame(bool wait_acquire, VkSemaphore render_done, const Ex
     if (wait_acquire)
     {
         waits.push_back(f.mAcquire);
-        wait_stages.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+        wait_stages.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT);
     }
     for (size_t i = 0; i < extra.mWaits.size(); ++i)
     {
@@ -1071,8 +1207,8 @@ bool WolfVkDevice::endFrame(bool wait_acquire, VkSemaphore render_done, const Ex
     submit.waitSemaphoreCount = static_cast<uint32_t>(waits.size());
     submit.pWaitSemaphores = waits.empty() ? nullptr : waits.data();
     submit.pWaitDstStageMask = wait_stages.empty() ? nullptr : wait_stages.data();
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &f.mCmd;
+    submit.commandBufferCount = submit_cmd_count;
+    submit.pCommandBuffers = (submit_cmd_count == 2) ? submit_cmds : &f.mCmd;
     submit.signalSemaphoreCount = static_cast<uint32_t>(signals.size());
     submit.pSignalSemaphores = signals.empty() ? nullptr : signals.data();
 
@@ -1095,6 +1231,35 @@ bool WolfVkDevice::endFrame(bool wait_acquire, VkSemaphore render_done, const Ex
     mRecording = false;
     mFrameIndex = (mFrameIndex + 1) % static_cast<uint32_t>(mFrames.size());
     return true;
+}
+
+VkCommandBuffer WolfVkDevice::prePassTransferCmd()
+{
+    if (!mRecording || mFrames.empty() || mHung) return VK_NULL_HANDLE;
+    Frame& f = mFrames[mFrameIndex];
+    if (f.mPreCmdActive) return f.mPreCmd;
+    if (f.mPreCmd == VK_NULL_HANDLE)
+    {
+        VkCommandBufferAllocateInfo alloc{};
+        alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc.commandPool = f.mPool;
+        alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc.commandBufferCount = 1;
+        if (gVk.vkAllocateCommandBuffers(mDevice, &alloc, &f.mPreCmd) != VK_SUCCESS)
+        {
+            f.mPreCmd = VK_NULL_HANDLE;
+            return VK_NULL_HANDLE;
+        }
+    }
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (gVk.vkBeginCommandBuffer(f.mPreCmd, &begin) != VK_SUCCESS)
+    {
+        return VK_NULL_HANDLE;
+    }
+    f.mPreCmdActive = true;
+    return f.mPreCmd;
 }
 
 VkCommandBuffer WolfVkDevice::beginMidFrame()
@@ -1439,6 +1604,48 @@ void WolfVkDevice::deferDestroy(std::function<void()> destroy)
     mFrames[slot].mDeferred.push_back(std::move(destroy));
 }
 
+// [VK S6a 2026-11-26] see wolfvkdevice.h. The submit itself is submitSync's (vulkan_core.h:3763 VkSubmitInfo, :6670
+// VkTimelineSemaphoreSubmitInfo, :4548 vkQueueSubmit(queue, submitCount, pSubmits, fence)) without its wait.
+bool WolfVkDevice::submitTracked(VkCommandBuffer cmd, const ExtraSync& extra, VkFence fence, std::string& error)
+{
+    if (mDevice == VK_NULL_HANDLE) { error = "no device"; return false; }
+    if (mHung) { error = "the device is hung or lost (" + mHungReason + ")"; return false; }
+    std::vector<VkPipelineStageFlags> stages = extra.mWaitStages;
+    while (stages.size() < extra.mWaits.size()) stages.push_back(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+    std::vector<VkSemaphore> signals = extra.mSignals;
+    std::vector<uint64_t> values(signals.size(), 0);
+    const uint64_t timeline_value = mTimelineNext + 1;
+    VkTimelineSemaphoreSubmitInfo timeline_info{};
+    timeline_info.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    if (mTimeline != VK_NULL_HANDLE)
+    {
+        signals.push_back(mTimeline);
+        values.push_back(timeline_value);
+        timeline_info.signalSemaphoreValueCount = static_cast<uint32_t>(values.size());
+        timeline_info.pSignalSemaphoreValues = values.data();
+        // the waits are binary semaphores (the hand-over ones): no wait values, exactly as submitSync
+    }
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.pNext = (mTimeline != VK_NULL_HANDLE) ? &timeline_info : nullptr;
+    submit.waitSemaphoreCount = static_cast<uint32_t>(extra.mWaits.size());
+    submit.pWaitSemaphores = extra.mWaits.empty() ? nullptr : extra.mWaits.data();
+    submit.pWaitDstStageMask = extra.mWaits.empty() ? nullptr : stages.data();
+    submit.commandBufferCount = cmd != VK_NULL_HANDLE ? 1u : 0u;
+    submit.pCommandBuffers = cmd != VK_NULL_HANDLE ? &cmd : nullptr;
+    submit.signalSemaphoreCount = static_cast<uint32_t>(signals.size());
+    submit.pSignalSemaphores = signals.empty() ? nullptr : signals.data();
+    const VkResult res = gVk.vkQueueSubmit(mQueue, 1, &submit, fence);
+    if (res != VK_SUCCESS)
+    {
+        lost(res, "vkQueueSubmit (tracked)");
+        error = std::string("vkQueueSubmit (tracked): ") + WolfVkLoader::resultString(res);
+        return false;
+    }
+    if (mTimeline != VK_NULL_HANDLE) mTimelineNext = timeline_value;
+    return true;
+}
+
 VkCommandBuffer WolfVkDevice::beginOneTime()
 {
     if (mHung || mDevice == VK_NULL_HANDLE) return VK_NULL_HANDLE;   // [HANG GUARD 8.2k] its submit could only time out again
@@ -1671,6 +1878,7 @@ void WolfVkDevice::destroyDeviceObjects()
     mQueue = VK_NULL_HANDLE;
     mPresentFences = false;
     mGlDepthRange = false;
+    mGeometryShaders = false;
     mCompressionQuery = false;
 }
 
@@ -1689,6 +1897,7 @@ void WolfVkDevice::destroy()
 {
     mPresentFences = false;
     mGlDepthRange = false;
+    mGeometryShaders = false;
     mCompressionQuery = false;
     if (mDevice != VK_NULL_HANDLE && mHung)
     {

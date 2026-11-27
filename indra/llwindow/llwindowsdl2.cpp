@@ -596,17 +596,23 @@ LLWindowSDL::LLWindowSDL(LLWindowCallbacks* callbacks,
     else
         mWindowTitle = title;
 
-    // Create the GL context and set it up for windowed or fullscreen, as appropriate.
+    // Create the window (Vulkan-only when sWolfNativeVulkan, else OpenGL context).
     if(createContext(x, y, width, height, 32, fullscreen, enable_vsync))
     {
-        gGLManager.initGL();
+        if (!LLWindow::sWolfNativeVulkan)
+        {
+            gGLManager.initGL();
+        }
 
         //start with arrow cursor
         initCursors(useLegacyCursors); // <FS:LO> Legacy cursor setting from main program
         setCursor( UI_CURSOR_ARROW );
     }
 
-    stop_glerror();
+    if (!LLWindow::sWolfNativeVulkan)
+    {
+        stop_glerror();
+    }
 
     // Stash an object pointer for OSMessageBox()
     gWindowImplementation = this;
@@ -965,7 +971,7 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
 
     mFullscreen = fullscreen;
 
-    int sdlflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+    int sdlflags = (LLWindow::sWolfNativeVulkan ? SDL_WINDOW_VULKAN : SDL_WINDOW_OPENGL) | SDL_WINDOW_RESIZABLE;
     // <WolfViewer 2026-09-26> On Wayland, draw at the output's real resolution (fractional
     // scale included, wp_fractional_scale_v1) rather than at the scaled-down window size that
     // the compositor would then stretch. X11 ignores the flag.
@@ -988,6 +994,67 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
     }
 
     mSDLFlags = sdlflags;
+
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        // [NATIVE VULKAN 2026-11-26] Create an SDL Vulkan window with NO OpenGL context and NO SDL_GL_* calls.
+        mContext = {};
+        mWindow = SDL_CreateWindow( mWindowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, mSDLFlags );
+        if (mWindow)
+        {
+            refreshPixelSize();
+            LL_INFOS() << "Native Vulkan SDL window " << mPixelW << "x" << mPixelH << ", " << mPixelScaleX << " pixels per window unit" << LL_ENDL;
+        }
+        if (mFullscreen)
+        {
+            if (mWindow)
+            {
+                mFullscreen = true;
+                mFullscreenWidth = mPixelW;
+                mFullscreenHeight = mPixelH;
+                mFullscreenRefresh = -1;
+            }
+            else
+            {
+                LL_WARNS() << "createContext (native Vulkan): fullscreen creation failure. SDL: " << SDL_GetError() << LL_ENDL;
+                mFullscreen = false;
+                mFullscreenWidth = -1;
+                mFullscreenHeight = -1;
+                mFullscreenRefresh = -1;
+                return false;
+            }
+        }
+        else if (!mWindow)
+        {
+            LL_WARNS() << "createContext (native Vulkan): window creation failure. SDL: " << SDL_GetError() << LL_ENDL;
+            setupFailure("Window creation error", "Error", OSMB_OK);
+            return false;
+        }
+
+        SDL_Surface *bmpsurface = Load_BMP_Resource("firestorm_icon.BMP");
+        if (bmpsurface)
+        {
+            SDL_SetWindowIcon(mWindow, bmpsurface);
+            SDL_FreeSurface(bmpsurface);
+        }
+
+#if LL_X11
+        SDL_SysWMinfo info;
+        SDL_VERSION(&info.version);
+        if (SDL_GetWindowWMInfo(mWindow, &info) && info.subsystem == SDL_SYSWM_X11)
+        {
+            mSDL_Display = info.info.x11.display;
+            mSDL_XWindowID = info.info.x11.window;
+            setX11TitleUTF8(mWindowTitle);
+        }
+#endif // LL_X11
+
+        if (!mIMEEnabled)
+        {
+            SDL_StartTextInput();
+        }
+        return true;
+    }
 
     GLint redBits{8}, greenBits{8}, blueBits{8}, alphaBits{8};
 
@@ -1231,14 +1298,17 @@ bool LLWindowSDL::switchContext(bool fullscreen, const LLCoordScreen &size, bool
     bool result = true;
 
     LL_INFOS() << "switchContext, fullscreen=" << fullscreen << LL_ENDL;
-    stop_glerror();
+    if (!LLWindow::sWolfNativeVulkan) stop_glerror();
     if(needsRebuild)
     {
         destroyContext();
         result = createContext(0, 0, size.mX, size.mY, 0, fullscreen, enable_vsync);
         if (result)
         {
-            gGLManager.initGL();
+            if (!LLWindow::sWolfNativeVulkan)
+            {
+                gGLManager.initGL();
+            }
 
             //start with arrow cursor
             initCursors(mUseLegacyCursors); // <FS:LO> Legacy cursor setting from main program
@@ -1246,7 +1316,7 @@ bool LLWindowSDL::switchContext(bool fullscreen, const LLCoordScreen &size, bool
         }
     }
 
-    stop_glerror();
+    if (!LLWindow::sWolfNativeVulkan) stop_glerror();
 
     return result;
 }
@@ -1264,8 +1334,11 @@ void LLWindowSDL::destroyContext()
 #endif // LL_X11
 
     // Clean up remaining GL state before blowing away window
-    LL_INFOS() << "shutdownGL begins" << LL_ENDL;
-    gGLManager.shutdownGL();
+    if (!LLWindow::sWolfNativeVulkan)
+    {
+        LL_INFOS() << "shutdownGL begins" << LL_ENDL;
+        gGLManager.shutdownGL();
+    }
     LL_INFOS() << "SDL_QuitSS/VID begins" << LL_ENDL;
     SDL_QuitSubSystem(SDL_INIT_VIDEO);  // *FIX: this might be risky...
 
@@ -1427,7 +1500,14 @@ void LLWindowSDL::refreshPixelSize()
     if (!mWindow) return;
     int ww = 0, wh = 0, pw = 0, ph = 0;
     SDL_GetWindowSize(mWindow, &ww, &wh);
-    SDL_GL_GetDrawableSize(mWindow, &pw, &ph);
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        SDL_Vulkan_GetDrawableSize(mWindow, &pw, &ph);
+    }
+    else
+    {
+        SDL_GL_GetDrawableSize(mWindow, &pw, &ph);
+    }
     mPixelW = pw > 0 ? pw : ww;
     mPixelH = ph > 0 ? ph : wh;
     mPixelScaleX = (ww > 0 && pw > 0) ? (F32)pw / (F32)ww : 1.f;
@@ -1675,7 +1755,7 @@ bool LLWindowSDL::setSizeImpl(const LLCoordWindow size)
 
 void LLWindowSDL::swapBuffers()
 {
-    if (mWindow)
+    if (mWindow && !LLWindow::sWolfNativeVulkan)
     {
         SDL_GL_SwapWindow( mWindow );
     }
@@ -3712,6 +3792,10 @@ namespace
 
 void* LLWindowSDL::createSharedContext()
 {
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        return nullptr;
+    }
     // <WolfViewer 2026-09-26> Without surfaceless EGL the upload thread could never be made
     // current on Wayland; no shared context makes LLImageGLThread upload on the main thread.
     if (mWayland && !wolf_wayland_egl_init())
@@ -3747,6 +3831,10 @@ void* LLWindowSDL::createSharedContext()
 
 void LLWindowSDL::makeContextCurrent(void* context)
 {
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        return;
+    }
     LL_PROFILER_GPU_CONTEXT;
     // <WolfViewer 2026-09-26> Native Wayland: the worker goes current without a surface, through
     // EGL directly (see WolfWaylandEGL above for why not through SDL).
@@ -3765,6 +3853,10 @@ void LLWindowSDL::makeContextCurrent(void* context)
 
 void LLWindowSDL::destroySharedContext(void* context)
 {
+    if (LLWindow::sWolfNativeVulkan || !context)
+    {
+        return;
+    }
     sharedContext* sc = (sharedContext*)context;
 
     SDL_GL_DeleteContext(sc->mContext);
@@ -3774,6 +3866,10 @@ void LLWindowSDL::destroySharedContext(void* context)
 
 void LLWindowSDL::toggleVSync(bool enable_vsync)
 {
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        return;
+    }
     if (enable_vsync)
     {
         // try adaptive vsync first (-1) and if that fails, try regular vsync (1)

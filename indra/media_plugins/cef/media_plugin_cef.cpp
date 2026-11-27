@@ -54,7 +54,113 @@
 
 #if LL_LINUX
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <pwd.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <fstream>
 #include <iostream>
+
+// [NATIVE VULKAN / LINUX CEF 2026-11-26] CEF 152 (dullahan) on Linux validates HTTPS certificates via NSS
+// (~/.pki/nssdb) inside its network utility subprocess without Chrome Root Store. On fresh Linux installations
+// where ~/.pki/nssdb lacks libnssckbi.so / p11-kit-trust.so, CDN and grid HTTPS requests fail with
+// ERR_CERT_AUTHORITY_INVALID (-202), leaving the login page unstyled. Ensure the user's NSS database loads
+// the OS root CA module before CefInitialize spawns the network service (locked across concurrent SLPlugins).
+static void wolfEnsureLinuxNssRootCerts()
+{
+    const char* home = nullptr;
+    struct passwd* pw = getpwuid(getuid());
+    if (pw && pw->pw_dir && pw->pw_dir[0])
+    {
+        home = pw->pw_dir;
+    }
+    if (!home)
+    {
+        home = getenv("HOME");
+    }
+    if (!home || !home[0]) return;
+
+    static const char* const kCandidateModules[] = {
+        "/usr/lib/libnssckbi.so",
+        "/usr/lib64/libnssckbi.so",
+        "/usr/lib/x86_64-linux-gnu/nss/libnssckbi.so",
+        "/usr/lib/p11-kit-trust.so",
+        "/usr/lib64/pkcs11/p11-kit-trust.so",
+        "/usr/lib/x86_64-linux-gnu/pkcs11/p11-kit-trust.so"
+    };
+    const char* root_module = nullptr;
+    for (const char* cand : kCandidateModules)
+    {
+        if (access(cand, R_OK) == 0)
+        {
+            root_module = cand;
+            break;
+        }
+    }
+    if (!root_module) return;
+
+    const std::string pki_dir = std::string(home) + "/.pki";
+    const std::string nss_dir = pki_dir + "/nssdb";
+    mkdir(pki_dir.c_str(), 0700);
+    mkdir(nss_dir.c_str(), 0700);
+
+    const std::string lock_path = nss_dir + "/.wolf_nss_init.lock";
+    int lock_fd = open(lock_path.c_str(), O_CREAT | O_RDWR, 0600);
+    if (lock_fd >= 0)
+    {
+        flock(lock_fd, LOCK_EX);
+    }
+
+    const std::string cert9_path = nss_dir + "/cert9.db";
+    if (access(cert9_path.c_str(), F_OK) != 0)
+    {
+        if (void* nss = dlopen("libnss3.so", RTLD_LAZY | RTLD_LOCAL))
+        {
+            using NssInitFn = int (*)(const char*);
+            using NssShutdownFn = int (*)();
+            auto init_fn = reinterpret_cast<NssInitFn>(dlsym(nss, "NSS_InitReadWrite"));
+            auto shut_fn = reinterpret_cast<NssShutdownFn>(dlsym(nss, "NSS_Shutdown"));
+            if (init_fn)
+            {
+                const std::string sql_spec = "sql:" + nss_dir;
+                if (init_fn(sql_spec.c_str()) == 0 && shut_fn)
+                {
+                    shut_fn();
+                }
+            }
+            dlclose(nss);
+        }
+    }
+
+    const std::string pkcs11_path = nss_dir + "/pkcs11.txt";
+    std::string existing;
+    {
+        std::ifstream in(pkcs11_path, std::ios::in | std::ios::binary);
+        if (in)
+        {
+            existing.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        }
+    }
+    if (existing.find("libnssckbi.so") == std::string::npos &&
+        existing.find("p11-kit-trust.so") == std::string::npos)
+    {
+        std::ofstream out(pkcs11_path, std::ios::out | std::ios::app | std::ios::binary);
+        if (out)
+        {
+            if (!existing.empty() && existing.back() != '\n')
+            {
+                out << "\n";
+            }
+            out << "\nlibrary=" << root_module << "\nname=Root Certs\nNSS=trustOrder=100\n";
+        }
+    }
+
+    if (lock_fd >= 0)
+    {
+        flock(lock_fd, LOCK_UN);
+        close(lock_fd);
+    }
+}
 
 // [T982 2026-11-21] Copy from a web page reached nothing on Linux: the browser's X connection was never read.
 // Source: dullahan v1.50.0 src/dullahan_impl.cpp:303,306 - external_message_pump = true, multi_threaded_message_loop = false;
@@ -837,6 +943,7 @@ void MediaPluginCEF::receiveMessage(const char* message_string)
                 // before their output - tested on Linux 24 Nov: no sound on the local sink, all of it here). Decided by the viewer
                 // in "init" before any browser exists, as dullahan reads audio_to_host only in init(). When off, nothing
                 // changes: no audio handler, CEF plays the sound itself and the volume catcher works as before.
+                #if defined(WOLF_DULLAHAN_AUDIO_TO_HOST)
                 if (wolfAudioThroughViewer())
                 {
                     settings.audio_to_host = true;
@@ -845,7 +952,11 @@ void MediaPluginCEF::receiveMessage(const char* message_string)
                     mCEFLib->setOnAudioStreamStoppedCallback(std::bind(&MediaPluginCEF::onWolfAudioStreamStopped, this));
                     mCEFLib->setOnAudioStreamErrorCallback(std::bind(&MediaPluginCEF::onWolfAudioStreamError, this, std::placeholders::_1));
                 }
+                #endif
 
+#if LL_LINUX
+                wolfEnsureLinuxNssRootCerts();
+#endif
                 bool result = mCEFLib->init(settings);
                 if (!result)
                 {

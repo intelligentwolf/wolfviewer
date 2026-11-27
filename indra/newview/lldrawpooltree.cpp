@@ -39,6 +39,7 @@
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
 #include "llenvironment.h"
+#include "vk/wolfvkstate.h"
 
 S32 LLDrawPoolTree::sDiffTex = 0;
 static LLGLSLShader* shader = NULL;
@@ -116,7 +117,7 @@ void LLDrawPoolTree::beginShadowPass(S32 pass)
 
     static LLCachedControl<F32> shadow_offset(gSavedSettings, "RenderDeferredTreeShadowOffset");
     static LLCachedControl<F32> shadow_bias(gSavedSettings, "RenderDeferredTreeShadowBias");
-    glPolygonOffset(shadow_offset(), shadow_bias());
+    WolfVkState::polygonOffset(shadow_offset(), shadow_bias());
 
     LLEnvironment& environment = LLEnvironment::instance();
 
@@ -139,7 +140,7 @@ void LLDrawPoolTree::endShadowPass(S32 pass)
     //                  gSavedSettings.getF32("RenderDeferredSpotShadowBias"));
     static LLCachedControl<F32> RenderDeferredSpotShadowOffset(gSavedSettings, "RenderDeferredSpotShadowOffset");
     static LLCachedControl<F32> RenderDeferredSpotShadowBias(gSavedSettings, "RenderDeferredSpotShadowBias");
-    glPolygonOffset(RenderDeferredSpotShadowOffset, RenderDeferredSpotShadowBias);
+    WolfVkState::polygonOffset(RenderDeferredSpotShadowOffset, RenderDeferredSpotShadowBias);
     // </FS:PP>
 
     gDeferredTreeShadowProgram.unbind();

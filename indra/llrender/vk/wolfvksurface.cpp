@@ -483,7 +483,7 @@ void destroy(VkInstance instance, VkSurfaceKHR surface)
     sWin32Child = nullptr;
     sWin32Post = nullptr;
 #else
-    // [V2 2026-11-11] the GL view gets its own layer back (after the surface made on the Metal layer)
+    // [W114-VULKAN MAC 2026-11-26] the Metal child view goes, after the surface made on its layer
     metalLayerDetach();
 #endif
     sKind.clear();
@@ -521,8 +521,10 @@ void abandon()
     sWin32Child = nullptr;
     sWin32Post = nullptr;
 #else
-    // the CAMetalLayer goes off the GL view (MoltenVK keeps its own reference for the live swapchain)
-    metalLayerDetach();
+    // [W114-VULKAN MAC 2026-11-26] the Metal child view is hidden and left (MoltenVK keeps its layer for the live
+    // swapchain); the GL view beneath shows again
+    metalLayerHide();
+    LL_INFOS("Vulkan") << "Metal child view hidden and left (the surface could not be destroyed)" << LL_ENDL;
 #endif
     sKind.clear();
 }
@@ -551,6 +553,12 @@ void resize(uint32_t width, uint32_t height)
             if (IsWindow(child)) SetWindowPos(child, nullptr, 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
         });
     }
+#elif LL_DARWIN
+    // [W114-VULKAN MAC 2026-11-26] width x height is the GL view's backing size (LLWindowMacOSX::getSize); the child takes
+    // the GL view's bounds and the backing scale, so MoltenVK's currentExtent (bounds x contentsScale) is that size
+    (void)width;
+    (void)height;
+    metalLayerResize();
 #else
     (void)width;
     (void)height;

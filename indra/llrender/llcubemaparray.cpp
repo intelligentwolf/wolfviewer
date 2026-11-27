@@ -147,7 +147,24 @@ void LLCubeMapArray::allocate(U32 resolution, U32 components, U32 count, bool us
 
     mHDR = hdr;
 
-    LLImageGL::generateTextures(1, &texname);
+    // [VK S6 2026-11-26] the format and the mip chain, decided before the texture is made (they were set further down):
+    // in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkCreateStorage: OpenGL copies the probes'
+    // faces and mips into it and samples it by this name as before; the Vulkan passes find the image by the name);
+    // GL_RGB8 is then RGBA8 storage sampled with alpha one. Else OpenGL's own, as before.
+    U32 format = components == 4 ? GL_RGBA16F : GL_R11F_G11F_B10F;
+    if (!hdr)
+    {
+        format = components == 4 ? GL_RGBA8 : GL_RGB8;
+    }
+    // the loop below allocates levels resolution, resolution / 2 ... 1: that many
+    S32 levels = 1;
+    if (use_mips)
+    {
+        for (U32 r = resolution / 2; r >= 1; r /= 2) ++levels;
+    }
+    texname = LLImageGL::wolfVkCreateStorage(GL_TEXTURE_CUBE_MAP_ARRAY, levels, format, (S32)resolution, (S32)resolution, (S32)(count * 6), true);
+    const bool owned = texname != 0;
+    if (!owned) LLImageGL::generateTextures(1, &texname);
 
     mImage = new LLImageGL(resolution, resolution, components, use_mips);
     mImage->setTexName(texname);
@@ -159,14 +176,9 @@ void LLCubeMapArray::allocate(U32 resolution, U32 components, U32 count, bool us
     bind(0);
     free_cur_tex_image();
 
-    U32 format = components == 4 ? GL_RGBA16F : GL_R11F_G11F_B10F;
-    if (!hdr)
-    {
-        format = components == 4 ? GL_RGBA8 : GL_RGB8;
-    }
     U32 mip = 0;
     U32 mip_resolution = resolution;
-    while (mip_resolution >= 1)
+    while (!owned && !gGLManager.mIsNativeVulkan && mip_resolution >= 1)   // [VK S6 2026-11-26/] an owned texture has its (immutable) storage already
     {
         glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, mip, format, mip_resolution, mip_resolution, count * 6, 0,
             GL_RGBA, GL_UNSIGNED_BYTE, nullptr);

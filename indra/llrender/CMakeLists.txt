@@ -35,6 +35,7 @@ set(llrender_SOURCE_FILES
     lluiimage.cpp
     llvertexbuffer.cpp
     llglcommonfunc.cpp
+    vk/wolfcoreloader.cpp
     vk/wolfvkloader.cpp
     vk/wolfvkallocator.cpp
     vk/wolfvkdevice.cpp
@@ -83,12 +84,15 @@ set(llrender_HEADER_FILES
     lluiimage.inl
     llvertexbuffer.h
     llglcommonfunc.h
+    vk/wolfcore_api.h
+    vk/wolfcoreloader.h
     vk/wolfvkloader.h
     vk/wolfvkallocator.h
     vk/wolfvkdevice.h
     vk/wolfvksurface.h
     vk/wolfvkswapchain.h
     vk/wolfvkspirv.h
+    vk/wolfvkstate.h
     vk/wolfvkbuffer.h
     vk/wolfvkimage.h
     vk/wolfvkrendertarget.h

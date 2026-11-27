@@ -29,6 +29,7 @@
 #include "llfasttimer.h"
 #include "llsys.h"
 #include "llvertexbuffer.h"
+#include <unordered_set>   // [VK S6a] sWolfVkOwned
 // #include "llrender.h"
 #include "llglheaders.h"
 #include "llrender.h"
@@ -607,6 +608,14 @@ public:
 
 static LLVBOPool* sVBOPool = nullptr;
 
+// [VK S6a 2026-11-26] the Vulkan-owned store (llvertexbuffer.h WolfVkStore) and the buffers that hold ranges of it
+namespace
+{
+    LLVertexBuffer::WolfVkStore* sWolfVkStore = nullptr;
+    std::unordered_set<LLVertexBuffer*> sWolfVkOwned;
+    bool sWolfVkBatchOpen = false;   // a write() went to the store since its last batchEnd()
+}
+
 void LLVertexBufferData::drawWithMatrix()
 {
     if (!mVB)
@@ -672,7 +681,8 @@ void LLVertexBufferData::draw()
 //static
 U64 LLVertexBuffer::getBytesAllocated()
 {
-    return sVBOPool ? sVBOPool->getVramBytesUsed() : 0;
+    // [VK S6a 2026-11-26] plus the bytes the Vulkan-owned store handed out
+    return (sVBOPool ? sVBOPool->getVramBytesUsed() : 0) + (sWolfVkStore ? sWolfVkStore->bytesUsed() : 0);
 }
 
 //============================================================================
@@ -682,8 +692,9 @@ U32 LLVertexBuffer::sGLRenderBuffer = 0;
 U32 LLVertexBuffer::sGLRenderIndices = 0;
 U32 LLVertexBuffer::sLastMask = 0;
 U32 LLVertexBuffer::sVertexCount = 0;
-void (*LLVertexBuffer::sWolfVkOnFlush)(LLVertexBuffer*, bool, U32, U32, const U8*) = nullptr;   // [VULKAN BACKEND 2026-11-08/]
 void (*LLVertexBuffer::sWolfVkOnDestroy)(LLVertexBuffer*) = nullptr;                             // [VULKAN BACKEND 2026-11-08/]
+bool (*LLVertexBuffer::sWolfVkInterceptDraw)(const LLVertexBuffer*, U32, U32, U32, U32, U32, bool) = nullptr;   // [VULKAN G-BUFFER S2 2026-11-26/]
+void (*LLVertexBuffer::sWolfVkBeforeWrite)(const LLVertexBuffer*) = nullptr;                                 // [VULKAN G-BUFFER S2 2026-11-26/]
 
 // <WolfViewer 2026-11-07 tickets 589/619> the buffer and the shader attribute mask the vertex attribute pointers were
 // last specified for (setupVertexBuffer). sGLRenderBuffer only says which buffer is bound to GL_ARRAY_BUFFER: the pool's
@@ -946,6 +957,8 @@ void LLVertexBuffer::drawRange(U32 mode, U32 start, U32 end, U32 count, U32 indi
     llassert(mGLBuffer == sGLRenderBuffer);
     llassert(mGLIndices == sGLRenderIndices);
     gGL.syncMatrices();
+    // [VULKAN G-BUFFER S2 2026-11-26] llvertexbuffer.h sWolfVkInterceptDraw
+    if (sWolfVkInterceptDraw && sWolfVkInterceptDraw(this, mode, start, end, count, indices_offset, true)) return;
     STOP_GLERROR;
     glDrawRangeElements(sGLMode[mode], start, end, count, mIndicesType,
         (GLvoid*) (indices_offset * (size_t) mIndicesStride));
@@ -954,6 +967,8 @@ void LLVertexBuffer::drawRange(U32 mode, U32 start, U32 end, U32 count, U32 indi
 
 void LLVertexBuffer::drawRangeFast(U32 mode, U32 start, U32 end, U32 count, U32 indices_offset) const
 {
+    // [VULKAN G-BUFFER S2 2026-11-26] llvertexbuffer.h sWolfVkInterceptDraw (this fast path syncs no matrices: the caller did)
+    if (sWolfVkInterceptDraw && sWolfVkInterceptDraw(this, mode, start, end, count, indices_offset, true)) return;
     glDrawRangeElements(sGLMode[mode], start, end, count, mIndicesType,
         (GLvoid*)(indices_offset * (size_t)mIndicesStride));
 }
@@ -972,6 +987,8 @@ void LLVertexBuffer::drawArrays(U32 mode, U32 first, U32 count) const
     llassert(mGLIndices == sGLRenderIndices);
 
     gGL.syncMatrices();
+    // [VULKAN G-BUFFER S2 2026-11-26] llvertexbuffer.h sWolfVkInterceptDraw
+    if (sWolfVkInterceptDraw && sWolfVkInterceptDraw(this, mode, first, first + count - 1, count, first, false)) return;
     STOP_GLERROR;
     glDrawArrays(sGLMode[mode], first, count);
     STOP_GLERROR;
@@ -980,6 +997,11 @@ void LLVertexBuffer::drawArrays(U32 mode, U32 first, U32 count) const
 //static
 void LLVertexBuffer::initClass(LLWindow* window)
 {
+    if (gGLManager.mIsNativeVulkan)
+    {
+        LL_INFOS() << "LLVertexBuffer: native Vulkan mode (no GL VBO pool or GL worker threads)" << LL_ENDL;
+        return;
+    }
     llassert(sVBOPool == nullptr);
 
     if (gGLManager.mIsApple)
@@ -1007,12 +1029,83 @@ void LLVertexBuffer::initClass(LLWindow* window)
 //static
 void LLVertexBuffer::unbind()
 {
+    if (gGLManager.mIsNativeVulkan)
+    {
+        sGLRenderBuffer = 0;
+        sGLRenderIndices = 0;
+        return;
+    }
     STOP_GLERROR;
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     STOP_GLERROR;
     sGLRenderBuffer = 0;
     sGLRenderIndices = 0;
+}
+
+// [VK S6a 2026-11-26]
+//static
+void LLVertexBuffer::setWolfVkStore(WolfVkStore* store)
+{
+    llassert(store == nullptr || sWolfVkOwned.empty());
+    sWolfVkStore = store;
+    if (!store)
+    {
+        sWolfVkBatchOpen = false;
+        sWolfVkOwned.clear();
+    }
+}
+
+// [VK S6a 2026-11-26] The fall-back to OpenGL: each buffer the store holds gets storage from the OpenGL pool and its
+// whole client copy is sent with glBufferSubData (LLDefaultVBOPool::allocate made the store with glBufferData
+// GL_DYNAMIC_DRAW; a pooled name keeps it). The pool's allocate leaves a new name bound and noted in sGLRenderBuffer /
+// sGLRenderIndices; a re-used name is bound here. Mapped regions still pending are covered by the whole-buffer copy.
+//static
+void LLVertexBuffer::wolfVkReleaseAllToGL()
+{
+    if (!sVBOPool) return;
+    std::unordered_set<LLVertexBuffer*> owned;
+    owned.swap(sWolfVkOwned);
+    for (LLVertexBuffer* buffer : owned)
+    {
+        if (buffer->mWolfVkVertexHandle)
+        {
+            if (buffer->mGLBuffer == sAttribBuffer) { sAttribBuffer = 0; sAttribMask = 0; }
+            if (sGLRenderBuffer == buffer->mGLBuffer) { glBindBuffer(GL_ARRAY_BUFFER, 0); sGLRenderBuffer = 0; }
+            if (sWolfVkStore) sWolfVkStore->free(buffer->mWolfVkVertexHandle);
+            buffer->mWolfVkVertexHandle = nullptr;
+            U8* client = buffer->mMappedData;
+            buffer->mGLBuffer = 0;
+            buffer->mMappedData = nullptr;
+            sVBOPool->allocate(GL_ARRAY_BUFFER, buffer->mSize, buffer->mGLBuffer, buffer->mMappedData);
+            memcpy(buffer->mMappedData, client, buffer->mSize);
+            ll_aligned_free_16(client);
+            glBindBuffer(GL_ARRAY_BUFFER, buffer->mGLBuffer);
+            sGLRenderBuffer = buffer->mGLBuffer;
+            if (gGLManager.mIsApple) buffer->_mapBuffer();   // the Apple path sends the client copy at its next unmap
+            else glBufferSubData(GL_ARRAY_BUFFER, 0, buffer->mSize, buffer->mMappedData);
+            buffer->mMappedVertexRegions.clear();
+        }
+        if (buffer->mWolfVkIndexHandle)
+        {
+            if (sGLRenderIndices == buffer->mGLIndices) { glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); sGLRenderIndices = 0; }
+            if (sWolfVkStore) sWolfVkStore->free(buffer->mWolfVkIndexHandle);
+            buffer->mWolfVkIndexHandle = nullptr;
+            U8* client = buffer->mMappedIndexData;
+            buffer->mGLIndices = 0;
+            buffer->mMappedIndexData = nullptr;
+            sVBOPool->allocate(GL_ELEMENT_ARRAY_BUFFER, buffer->mIndicesSize, buffer->mGLIndices, buffer->mMappedIndexData);
+            memcpy(buffer->mMappedIndexData, client, buffer->mIndicesSize);
+            ll_aligned_free_16(client);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->mGLIndices);
+            sGLRenderIndices = buffer->mGLIndices;
+            if (gGLManager.mIsApple) buffer->_mapBuffer();
+            else glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, buffer->mIndicesSize, buffer->mMappedIndexData);
+            buffer->mMappedIndexRegions.clear();
+        }
+    }
+    sWolfVkStore = nullptr;
+    sWolfVkBatchOpen = false;
 }
 
 //static
@@ -1068,6 +1161,18 @@ void LLVertexBuffer::flushBuffers()
     }
 
     sMappedBuffers.resize(0);
+    wolfVkEndBatch();   // [VK S6a 2026-11-26] the bytes handed to the Vulkan-owned store in this batch become drawable
+}
+
+// [VK S6a 2026-11-26]
+//static
+void LLVertexBuffer::wolfVkEndBatch()
+{
+    if (sWolfVkBatchOpen)
+    {
+        sWolfVkBatchOpen = false;
+        if (sWolfVkStore) sWolfVkStore->batchEnd();
+    }
 }
 
 //static
@@ -1138,6 +1243,19 @@ LLVertexBuffer::~LLVertexBuffer()
 void LLVertexBuffer::genBuffer(U32 size)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_VERTEX;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        llassert(mSize == 0);
+        llassert(mGLBuffer == 0);
+        llassert(mMappedData == nullptr);
+        mSize = size;
+        if (sWolfVkStore && sWolfVkStore->allocate(false, mSize, mGLBuffer, mWolfVkVertexHandle))
+        {
+            mMappedData = (U8*)ll_aligned_malloc_16(mSize);
+            sWolfVkOwned.insert(this);
+        }
+        return;
+    }
     llassert(sVBOPool);
 
     if (sVBOPool)
@@ -1147,6 +1265,13 @@ void LLVertexBuffer::genBuffer(U32 size)
         llassert(mMappedData == nullptr);
 
         mSize = size;
+        // [VK S6a 2026-11-26] the Vulkan-owned store first; the client copy is this buffer's own, as the pool's is
+        if (sWolfVkStore && !mWolfGLOnly && sWolfVkStore->allocate(false, mSize, mGLBuffer, mWolfVkVertexHandle))
+        {
+            mMappedData = (U8*)ll_aligned_malloc_16(mSize);
+            sWolfVkOwned.insert(this);
+            return;
+        }
         sVBOPool->allocate(GL_ARRAY_BUFFER, mSize, mGLBuffer, mMappedData);
     }
 }
@@ -1154,6 +1279,19 @@ void LLVertexBuffer::genBuffer(U32 size)
 void LLVertexBuffer::genIndices(U32 size)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_VERTEX;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        llassert(mIndicesSize == 0);
+        llassert(mGLIndices == 0);
+        llassert(mMappedIndexData == nullptr);
+        mIndicesSize = size;
+        if (sWolfVkStore && sWolfVkStore->allocate(true, mIndicesSize, mGLIndices, mWolfVkIndexHandle))
+        {
+            mMappedIndexData = (U8*)ll_aligned_malloc_16(mIndicesSize);
+            sWolfVkOwned.insert(this);
+        }
+        return;
+    }
     llassert(sVBOPool);
 
     if (sVBOPool)
@@ -1162,6 +1300,13 @@ void LLVertexBuffer::genIndices(U32 size)
         llassert(mGLIndices == 0);
         llassert(mMappedIndexData == nullptr);
         mIndicesSize = size;
+        // [VK S6a 2026-11-26] as genBuffer
+        if (sWolfVkStore && !mWolfGLOnly && sWolfVkStore->allocate(true, mIndicesSize, mGLIndices, mWolfVkIndexHandle))
+        {
+            mMappedIndexData = (U8*)ll_aligned_malloc_16(mIndicesSize);
+            sWolfVkOwned.insert(this);
+            return;
+        }
         sVBOPool->allocate(GL_ELEMENT_ARRAY_BUFFER, mIndicesSize, mGLIndices, mMappedIndexData);
     }
 }
@@ -1226,6 +1371,20 @@ void LLVertexBuffer::destroyGLBuffer()
         }
         // </WolfViewer>
         //llassert(sVBOPool);
+        if (mWolfVkVertexHandle)
+        {
+            // [VK S6a 2026-11-26] the range goes back to the Vulkan-owned store (which deletes the imported GL name)
+            if (!gGLManager.mIsNativeVulkan && sGLRenderBuffer == mGLBuffer)
+            {
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                sGLRenderBuffer = 0;
+            }
+            if (sWolfVkStore) sWolfVkStore->free(mWolfVkVertexHandle);
+            mWolfVkVertexHandle = nullptr;
+            ll_aligned_free_16(mMappedData);
+            if (sWolfVkStore && !mWolfVkIndexHandle) sWolfVkOwned.erase(this);
+        }
+        else
         if (sVBOPool)
         {
             sVBOPool->free(GL_ARRAY_BUFFER, mSize, mGLBuffer, mMappedData);
@@ -1243,6 +1402,20 @@ void LLVertexBuffer::destroyGLIndices()
     {
         LL_PROFILE_ZONE_SCOPED_CATEGORY_VERTEX;
         //llassert(sVBOPool);
+        if (mWolfVkIndexHandle)
+        {
+            // [VK S6a 2026-11-26] as destroyGLBuffer
+            if (!gGLManager.mIsNativeVulkan && sGLRenderIndices == mGLIndices)
+            {
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+                sGLRenderIndices = 0;
+            }
+            if (sWolfVkStore) sWolfVkStore->free(mWolfVkIndexHandle);
+            mWolfVkIndexHandle = nullptr;
+            ll_aligned_free_16(mMappedIndexData);
+            if (sWolfVkStore && !mWolfVkVertexHandle) sWolfVkOwned.erase(this);
+        }
+        else
         if (sVBOPool)
         {
             sVBOPool->free(GL_ELEMENT_ARRAY_BUFFER, mIndicesSize, mGLIndices, mMappedIndexData);
@@ -1408,10 +1581,23 @@ U8* LLVertexBuffer::mapIndexBuffer(U32 index, S32 count)
 //  dst -- mMappedData or mMappedIndexData
 void LLVertexBuffer::flush_vbo(GLenum target, U32 start, U32 end, void* data, U8* dst)
 {
-    // [VULKAN BACKEND 2026-11-08] the Vulkan copy of this buffer gets the same bytes (end inclusive, as below)
-    if (sWolfVkOnFlush && (end != 0 || gGLManager.mIsApple))
+    // [VULKAN G-BUFFER S2 2026-11-26] llvertexbuffer.h sWolfVkBeforeWrite: before the bytes change. [W114-VULKAN merge
+    // 2026-11-26] This also holds for a buffer in the S6a store: the store's copy is its own queue submit (batchEnd), so
+    // the bracket that recorded draws from the old bytes must be submitted first.
+    if (sWolfVkBeforeWrite) sWolfVkBeforeWrite(this);
+    // [VK S6a 2026-11-26] a buffer the Vulkan-owned store holds: the bytes go to the store, which is the only writer of
+    // that memory (OpenGL reads it through the imported name). end is inclusive; end 0 = nothing to send, as below.
+    if (void* wolf_handle = (target == GL_ELEMENT_ARRAY_BUFFER) ? mWolfVkIndexHandle : mWolfVkVertexHandle)
     {
-        sWolfVkOnFlush(this, target == GL_ELEMENT_ARRAY_BUFFER, start, end, (const U8*)data);
+        if (end != 0 && sWolfVkStore)
+        {
+            sWolfVkStore->write(wolf_handle, start, end - start + 1, (const U8*)data);
+            sWolfVkBatchOpen = true;
+            // the setXxxData callers pass their own array: the client copy takes it too, so it always holds the whole
+            // buffer (wolfVkReleaseAllToGL refills an OpenGL buffer from it)
+            if ((const U8*)data != dst + start) memcpy(dst + start, data, end - start + 1);
+        }
+        return;
     }
     if (gGLManager.mIsApple)
     {
@@ -1533,7 +1719,7 @@ void LLVertexBuffer::_unmapBuffer()
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_VERTEX("unmapBuffer - vertex");
 
-            if (sGLRenderBuffer != mGLBuffer)
+            if (!gGLManager.mIsNativeVulkan && sGLRenderBuffer != mGLBuffer)
             {
                 glBindBuffer(GL_ARRAY_BUFFER, mGLBuffer);
                 sGLRenderBuffer = mGLBuffer;
@@ -1567,7 +1753,7 @@ void LLVertexBuffer::_unmapBuffer()
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_VERTEX("unmapBuffer - index");
 
-            if (mGLIndices != sGLRenderIndices)
+            if (!gGLManager.mIsNativeVulkan && mGLIndices != sGLRenderIndices)
             {
                 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mGLIndices);
                 sGLRenderIndices = mGLIndices;
@@ -1734,6 +1920,9 @@ void LLVertexBuffer::setBuffer()
         LL_WARNS_ONCE() << "Missing call to unmapBuffer or flushBuffers" << LL_ENDL;
         _unmapBuffer();
     }
+    // [VK S6a 2026-11-26] bytes sent to the Vulkan-owned store since its last batch (the unmap above, or a setXxxData
+    // call, which goes to flush_vbo directly) must be drawable before the draw that follows
+    wolfVkEndBatch();
 
     // no data may be pending
     llassert(mMappedVertexRegions.empty());
@@ -1748,6 +1937,13 @@ void LLVertexBuffer::setBuffer()
     llassert_msg((data_mask & mTypeMask) == data_mask,
         "Attribute mask mismatch! mTypeMask should be a superset of data_mask.  data_mask: 0x"
                 << std::hex << data_mask << " mTypeMask: 0x" << mTypeMask << " Missing: 0x" << (data_mask & ~mTypeMask) <<  std::dec);
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        sGLRenderBuffer = mGLBuffer;
+        sGLRenderIndices = mGLIndices;
+        return;
+    }
 
     if (sGLRenderBuffer != mGLBuffer)
     {

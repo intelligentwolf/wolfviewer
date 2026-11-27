@@ -108,7 +108,7 @@ void WolfWakeField::clear()
     for (S32 i = 0; i < 2; ++i)
     {
         mRT[i].bindTarget();
-        glClearColor(0.f, 0.f, 0.f, 0.f);
+        LLGLState::wolfClearColor(0.f, 0.f, 0.f, 0.f);
         mRT[i].clear(GL_COLOR_BUFFER_BIT);
         mRT[i].flush();
     }

@@ -1046,7 +1046,7 @@ void LLWindowWin32::close()
     }
 
     // Clean up remaining GL state
-    if (gGLManager.mInited)
+    if (!LLWindow::sWolfNativeVulkan && gGLManager.mInited)
     {
         LL_INFOS("Window") << "Cleaning up GL" << LL_ENDL;
         gGLManager.shutdownGL();
@@ -1359,7 +1359,10 @@ bool LLWindowWin32::switchContext(bool fullscreen, const LLCoordScreen& size, bo
     }
     mRefreshRate = current_refresh;
 
-    gGLManager.shutdownGL();
+    if (!LLWindow::sWolfNativeVulkan && gGLManager.mInited)
+    {
+        gGLManager.shutdownGL();
+    }
     //destroy gl context
     if (mhRC)
     {
@@ -1488,6 +1491,34 @@ bool LLWindowWin32::switchContext(bool fullscreen, const LLCoordScreen& size, bo
     else
     {
         LL_WARNS("Window") << "Window creation failed, code: " << GetLastError() << LL_ENDL;
+    }
+
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        // [NATIVE VULKAN 2026-11-27] Pure Win32 window for Vulkan — never load WGL, SetPixelFormat, or OpenGL ICDs.
+        if (!mWindowHandle || !mhDC)
+        {
+            close();
+            OSMessageBox(mCallbacks->translateString("MBDevContextErr"),
+                mCallbacks->translateString("MBError"), OSMB_OK);
+            return false;
+        }
+        mhRC = 0;
+        SetWindowLongPtr(mWindowHandle, GWLP_USERDATA, (LONG_PTR)this);
+        DragAcceptFiles(mWindowHandle, TRUE);
+        mDragDrop->init(mWindowHandle);
+        SetTimer(mWindowHandle, 0, 1000 / 30, NULL);
+        mPostQuit = true;
+        mWindowThread->post([=]()
+        {
+            mWindowThread->glReady();
+        });
+        if (auto_show)
+        {
+            show();
+        }
+        LL_INFOS("Window") << "Native Vulkan Win32 window ready (no OpenGL context)." << LL_ENDL;
+        return true;
     }
 
     //-----------------------------------------------------------------------
@@ -2045,6 +2076,10 @@ void LLWindowWin32::recreateWindow(RECT window_rect, DWORD dw_ex_style, DWORD dw
 
 void* LLWindowWin32::createSharedContext()
 {
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        return nullptr;
+    }
     mMaxGLVersion = llclamp(mMaxGLVersion, 3.f, 4.6f);
 
     S32 version_major = llfloor(mMaxGLVersion);
@@ -2101,17 +2136,29 @@ void* LLWindowWin32::createSharedContext()
 
 void LLWindowWin32::makeContextCurrent(void* contextPtr)
 {
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        return;
+    }
     wglMakeCurrent(mhDC, (HGLRC) contextPtr);
 
 }
 
 void LLWindowWin32::destroySharedContext(void* contextPtr)
 {
+    if (LLWindow::sWolfNativeVulkan || !contextPtr)
+    {
+        return;
+    }
     wglDeleteContext((HGLRC)contextPtr);
 }
 
 void LLWindowWin32::toggleVSync(bool enable_vsync)
 {
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        return;
+    }
     if (wglSwapIntervalEXT == nullptr)
     {
         LL_INFOS("Window") << "VSync: wglSwapIntervalEXT not initialized" << LL_ENDL;
@@ -4068,6 +4115,10 @@ bool LLWindowWin32::resetDisplayResolution()
 
 void LLWindowWin32::swapBuffers()
 {
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        return;
+    }
     {
         LL_PROFILE_ZONE_SCOPED_CATEGORY_WIN32;
         SwapBuffers(mhDC);

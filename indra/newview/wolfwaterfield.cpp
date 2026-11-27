@@ -646,13 +646,8 @@ void WolfWaterField::upload(U32& tex, S32 w, S32 h, U32 internal_format, U32 for
 {
     // Source: pipeline.cpp:1613-1618 (light function texture) — a raw GL texture from
     // float data via LLImageGL::setManualImage, bound through the tex unit.
-    if (!tex)
-    {
-        LLImageGL::generateTextures(1, &tex);
-    }
-    gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, tex);
-    LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, internal_format,
-                              w, h, format, GL_FLOAT, data, false);
+    // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+    LLImageGL::wolfVkManualImage2D(tex, internal_format, w, h, format, GL_FLOAT, data);
     gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
     gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
@@ -1906,10 +1901,11 @@ void WolfWaterClearance::endPass()
 // beach is held per pixel in waterF.glsl instead, so its waves can run up it.
 // [FAR DRAW PERF 2026-11-14] The prims are the last finished pass's (visit() above did the filter and the box); each is
 // placed with the agent origin of the frame it was read in, which is the agent origin the old loop read it with.
-void WolfWaterClearance::rasterObjects()
+void WolfWaterClearance::rasterObjects(U32 levels)
 {
     for (S32 k = 0; k < LEVELS; ++k)
     {
+        if (!(levels & (1u << k))) continue;   // [W114 2026-11-26/]
         mSrcAll[k] = mLand[k];
         mSrcDry[k] = mLand[k];
         const size_t NN = (size_t)N * N;
@@ -1927,6 +1923,7 @@ void WolfWaterClearance::rasterObjects()
         const F32 cap = src.mCap;
         for (S32 k = 0; k < LEVELS; ++k)
         {
+            if (!(levels & (1u << k))) continue;   // [W114 2026-11-26/]
             const F32 t = TEXEL_M[k];
             const F64 ox = mOrigin[k].mdV[VX] - agent_origin.mdV[VX], oy = mOrigin[k].mdV[VY] - agent_origin.mdV[VY];
             const S32 ti0 = llmax(0, (S32)floor((src.mLoX - ox) / t)), ti1 = llmin(N - 1, (S32)floor((src.mHiX - ox) / t));
@@ -2041,30 +2038,42 @@ void WolfWaterClearance::solve(S32 k, const std::vector<F32>& src, std::vector<F
 // terrain only when it changed. waterV.glsl / waterF.glsl wolfClearSample and the terrain read.
 void WolfWaterClearance::uploadRows(S32 row0, S32 rows, const F32* data)
 {
-    if (!mTex)
+    if (!mTex) mTexAllocated = false;
+    if (mTexAllocated)
     {
-        LLImageGL::generateTextures(1, &mTex);
-        mTexAllocated = false;
+        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mTex);
     }
-    gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mTex);
-    if (!mTexAllocated)
+    else
     {
         std::vector<F32> zero((size_t)N * ROWS * 4, 0.f);
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGBA32F,
-                                  N, ROWS, GL_RGBA, GL_FLOAT, zero.data(), false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D makes
+        // the name when there is none and leaves the texture bound on unit 0), else as before
+        LLImageGL::wolfVkManualImage2D(mTex, GL_RGBA32F, N, ROWS, GL_RGBA, GL_FLOAT, zero.data());
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
         gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
         mTexAllocated = true;
     }
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row0, N, rows, GL_RGBA, GL_FLOAT, data);
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (LLImageGL::sWolfVkNativeStore)
+        {
+            LLImageGL::sWolfVkNativeStore->uploadSubImage2D(mTex, 0, 0, row0, N, rows, N, GL_RGBA32F, GL_RGBA, GL_FLOAT, data, false);
+        }
+    }
+    else
+    {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row0, N, rows, GL_RGBA, GL_FLOAT, data);
+    }
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
 }
 
-void WolfWaterClearance::uploadLevels()
+void WolfWaterClearance::uploadLevels(U32 levels)
 {
     mUpload.resize((size_t)N * N * LEVELS * 4);
+    if (!mTex || !mTexAllocated) levels = ALL_LEVELS;   // [W114 2026-11-26/] the first upload is every level
     for (S32 k = 0; k < LEVELS; ++k)
     {
+        if (!(levels & (1u << k))) continue;   // [W114 2026-11-26/] its rows on the texture stand
         F32* dst = &mUpload[(size_t)k * N * N * 4];
         for (size_t i = 0; i < (size_t)N * N; ++i)
         {
@@ -2074,7 +2083,15 @@ void WolfWaterClearance::uploadLevels()
             dst[i * 4 + 3] = mOpenW[k][i];
         }
     }
-    uploadRows(0, N * LEVELS, mUpload.data());
+    if (levels == ALL_LEVELS)
+    {
+        uploadRows(0, N * LEVELS, mUpload.data());
+        return;
+    }
+    for (S32 k = 0; k < LEVELS; ++k)   // [W114 2026-11-26] level k is rows k N .. k N + N - 1 (as laid out above)
+    {
+        if (levels & (1u << k)) uploadRows(k * N, N, &mUpload[(size_t)k * N * N * 4]);
+    }
 }
 
 void WolfWaterClearance::uploadTerrain(S32 b)
@@ -2109,6 +2126,7 @@ void WolfWaterClearance::idle()
 
     const U64 stamp = terrainStamp();
     bool changed = false;
+    U32 relaid = 0;   // [W114 2026-11-26/] a bit per level whose land was re-rastered this frame
     // Coarsest first: each level's open-sea classification starts from the coarser one's.
     for (S32 k = LEVELS - 1; k >= 0; --k)
     {
@@ -2135,6 +2153,7 @@ void WolfWaterClearance::idle()
             mTerrainStamp[k] = stamp;
             mTerrainAt[k] = now + TERRAIN_INTERVAL_SECS;
             changed = true;
+            relaid |= 1u << k;
         }
     }
     // [FAR DRAW PERF 2026-11-14] The prims come from the shared object pass (OBJECT_INTERVAL_SECS in wolfwaterfield.h). A
@@ -2148,7 +2167,23 @@ void WolfWaterClearance::idle()
     {
         WolfObjectSweep::instance().walkNow(this);
     }
-    if (changed || !mObjectsValid || walk)
+    // [W114 FRAME RATE 2026-11-26] (the Aurora review, 26 Nov: a recentre rebuilt every level in one frame, a hitch when flying.)
+    // When only some levels were re-laid (a recentre or land change reaches a level and the finer ones; the finest, moved most
+    // often, alone) over the prims the levels already show - no fresh pass waiting, no staged rebuild under way, no walk -
+    // only those levels are rastered, solved and uploaded: the others' sources (land, open sea, prims, origin) are unchanged,
+    // and solve() makes its output from its source alone, so they would come out the same.
+    if (changed && relaid != ALL_LEVELS && mObjectsValid && !walk && mStage < 0 && !mPrimsFresh && mLevelsHavePass)
+    {
+        rasterObjects(relaid);
+        for (S32 k = 0; k < LEVELS; ++k)
+        {
+            if (!(relaid & (1u << k))) continue;
+            solve(k, mSrcAll[k], mS[k], &mD[k]);
+            solve(k, mSrcDry[k], mSDry[k], nullptr);
+        }
+        uploadLevels(relaid);
+    }
+    else if (changed || !mObjectsValid || walk)
     {
         mStage = -1;
         rasterObjects();

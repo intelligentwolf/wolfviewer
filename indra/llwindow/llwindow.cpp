@@ -107,6 +107,7 @@ S32 OSMessageBox(const std::string& text, const std::string& caption, U32 type)
 //
 
 bool LLWindow::sWolfAvoidNativeWayland = false;   // [VULKAN WAYLAND 2026-11-09] (llwindow.h)
+bool LLWindow::sWolfNativeVulkan = false;         // [NATIVE VULKAN 2026-11-26] (llwindow.h)
 
 LLWindow::LLWindow(LLWindowCallbacks* callbacks, bool fullscreen, U32 flags)
     : mCallbacks(callbacks),

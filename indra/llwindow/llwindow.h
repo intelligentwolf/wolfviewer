@@ -246,6 +246,10 @@ public:
     // On XWayland, GLX and the Vulkan Xlib surface share an X window (every Vulkan test so far ran that way).
     static bool sWolfAvoidNativeWayland;
 
+    // [NATIVE VULKAN 2026-11-26] Set by WolfVkBridge::decideBackend (before the window exists) when this start uses
+    // the native Vulkan renderer: LLWindow creates a Vulkan-capable window with NO OpenGL context and never calls GL.
+    static bool sWolfNativeVulkan;
+
     // Provide native key event data
     virtual LLSD getNativeKeyData() { return LLSD::emptyMap(); }
 

@@ -17,9 +17,14 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "wolfvkbridge.h"
+#include "wolfvknative.h"   // [NATIVE VULKAN 2026-11-26]
+#include "wolfvkavatar.h"   // [W114-VULKAN S4 2026-11-26/] leftToGL
 #include "wolfvkscene.h"
 #include "wolfvkgbuffer.h"   // [VULKAN G-BUFFER 2026-11-08]
+#include "wolfvkshadow.h"    // [W114-VULKAN S5 2026-11-26] the shadow maps; WolfVkBracketTarget
 #include "wolfvkmirror.h"
+#include "wolfvkresources.h"   // [VK S6a 2026-11-26]
+#include "wolfvktextures.h"    // [VK S6 2026-11-26]
 #include "lldir.h"
 #include "llviewerdisplay.h"  // gResizeScreenTexture
 #include "pipeline.h"
@@ -32,6 +37,9 @@
 #include "llgl.h"
 #include "llglheaders.h"
 #include "llglslshader.h"     // every program's Vulkan mirror goes before the device
+#include "llvertexbuffer.h"   // [VULKAN G-BUFFER S2 2026-11-26] the draw interceptor hooks
+#include "llrendertarget.h"
+#include "llviewershadermgr.h" // [S2] the per-family debug switches name the programs
 #include "vk/wolfvkshader.h"
 #include "llwindow.h"
 #include "llappviewer.h"   // [RUN-TIME STOP 2026-11-09] requestQuit
@@ -49,6 +57,8 @@
 #include "lltimer.h"
 #include <algorithm> // [G2 2026-11-11] std::find, std::max
 #include <chrono>   // [AMD PERF] frame step timing
+#include <map>      // [S2] the interceptor's gap counts
+#include <set>
 #include <cstring>  // [VULKAN WAYLAND 2026-11-09] memcmp
 #if LL_WINDOWS
 #include <windows.h>          // GetThreadTimes (main loop timing)
@@ -61,6 +71,9 @@
 #elif LL_WINDOWS
 #include <windows.h>          // wglGetProcAddress
 #endif
+
+// [VULKAN G-BUFFER S2 2026-11-26] defined with the draw interceptor further down; tearDown and shutdown take it down
+namespace WolfVkBridge { namespace { void abandonBracket(); void installShaderHooks(bool on); } }
 
 namespace
 {
@@ -193,9 +206,25 @@ namespace
     WolfVkSwapchain sSwapchain;
     WolfVkScene* sScene = nullptr;
     WolfVkGBuffer* sGBuffer = nullptr;   // [VULKAN G-BUFFER 2026-11-08] the shared G-buffer, null when not shareable
+    // [W114-VULKAN S5 2026-11-26] the shadow maps' provider and bracket target (wolfvkshadow.h), null when not shareable;
+    // the phase LLPipeline::renderShadow turns on (setShadowPhase); the target of the open bracket
+    WolfVkShadow* sShadow = nullptr;
+    std::string sShadowNotSharedWhy;
+    bool sShadowPhase = false;
+    WolfVkBracketTarget* sBracketTarget = nullptr;
     bool sFrameBegun = false;            // the device frame slot is open (begun mid-frame by a pass, or at present)
     uint32_t sGBufferDraws = 0;
-    int sSkipDrawnDepth = 0;             // > 0 while GL draws the leftovers of a pass Vulkan drew (ScopedSkipDrawn)
+    // [VULKAN G-BUFFER S2 2026-11-26] the draw interceptor's phase and bracket (wolfvkbridge.h setGBufferPhase)
+    bool sPhase = false;                         // Vulkan may record G-buffer draws now
+    bool sBracketOpen = false;                   // the shared G-buffer is Vulkan's, sBracketCmd is recording
+    VkCommandBuffer sBracketCmd = VK_NULL_HANDLE;
+    bool sBracketPassOpen = false;               // the render pass over the G-buffer is begun on sBracketCmd
+    bool sBracketStamped = false;                // [AMD PERF] this bracket carries the frame's GPU pass timestamps
+    U32 sBracketSerial = 0;                      // LLVertexBuffer::mWolfVkBracket of the buffers this bracket drew from
+    // per second (WolfLogFrameRate): draws recorded / left to OpenGL, brackets, closes forced by a buffer write
+    uint64_t sStatRecorded = 0, sStatGL = 0, sStatBrackets = 0, sStatWriteCloses = 0;
+    std::map<std::string, uint64_t> sGapsThisSecond;   // "program: why" -> draws OpenGL made in the phase
+    std::set<std::string> sGapsLogged;                 // each "program: why" is logged once per session at INFO
 
     // present() timing: wall-clock milliseconds, averaged per second
     F64 sPresentAccum = 0.0;
@@ -586,6 +615,8 @@ namespace
     {
         if (sTornDown) return;
         sTornDown = true;
+        WolfVkBridge::abandonBracket();          // [S2 2026-11-26] no bracket outlives Vulkan; the interceptor and its hooks come off
+        WolfVkBridge::installShaderHooks(false);
         logSessionSummary("teardown");
         sBlack.mStage = BlackCheck::DONE;
         sGBufferGLOnly = false;
@@ -606,9 +637,19 @@ namespace
             gResizeScreenTexture = true;   // the G-buffer is re-allocated with GL's own textures
         }
         sGBuffer = nullptr;
+        // [W114-VULKAN S5 2026-11-26] the shadow maps go back to OpenGL's own textures (WolfVkShadow::destroy releases the
+        // targets and unregisters). On a hung device the provider is abandoned with it: the targets forget it at once and
+        // keep the textures they hold, which stay valid in OpenGL (wolfvkshare.h releaseVulkanHalf's note) and are never
+        // deleted - a leak, as every object of a hung device is.
+        if (sShadow)
+        {
+            if (!gWolfVkDevice.hung()) { delete sShadow; gResizeScreenTexture = true; }
+            else LLRenderTarget::wolfVkUnregisterProvider(sShadow);
+            sShadow = nullptr;
+        }
         if (!gWolfVkDevice.hung()) destroyShaderMirrors();
         if (!gWolfVkDevice.hung() && sScene) delete sScene;   // WolfVkScene::destroy abandons in turn if its own wait runs out
-        else WolfVkMirror::shutdown();                        // the scene owns the mirror's shutdown when it is deleted
+        else { WolfVkResources::shutdown(); WolfVkTextures::shutdown(); WolfVkMirror::shutdown(); }   // the scene owns both shutdowns when it is deleted
         sScene = nullptr;
         prof::destroyStamps(!gWolfVkDevice.hung() && gWolfVkDevice.waitIdle());   // [AMD PERF] no submit may still write them
         prof::sGlCapture.destroy();
@@ -781,6 +822,35 @@ namespace
     // from the next allocation, which gResizeScreenTexture forces at the next frame (LLPipeline::resizeScreenTexture).
     // [BLACK WORLD 2026-11-10] a function: the world check gives the G-buffer back to OpenGL (unshareGBuffer) and, when
     // that proved nothing, shares it again. why: for the log ("start", "restored after the world check").
+    // [W114-VULKAN S5 2026-11-26] The shadow maps become Vulkan-owned depth images that both renderers draw into
+    // (wolfvkshadow.h): made once per session, with the G-buffer's sharing (the same GL_EXT_memory_object import and the
+    // same self-test setting). The caller sets gResizeScreenTexture, which re-allocates every map.
+    // WolfVulkanDebugNoShadowMaps (read here): the maps stay OpenGL's own GL_DEPTH_COMPONENT24 textures and OpenGL draws
+    // every shadow pass - the reference for the A/B pictures.
+    void shareShadowMaps()
+    {
+        if (sShadow) return;
+        sShadowNotSharedWhy.clear();
+        if (gSavedSettings.getBOOL("WolfVulkanDebugNoShadowMaps"))
+        {
+            sShadowNotSharedWhy = "WolfVulkanDebugNoShadowMaps";
+            LL_INFOS("Vulkan") << "Shadow map sharing off (WolfVulkanDebugNoShadowMaps): OpenGL draws the shadow passes" << LL_ENDL;
+            return;
+        }
+        std::string error;
+        sShadow = new WolfVkShadow();
+        if (sShadow->init(gWolfVkDevice, gSavedSettings.getBOOL("WolfVulkanShareSelfTest"), error))
+        {
+            sShadow->registerTargets();
+            LL_INFOS("Vulkan") << "Shadow map sharing on: the sun, projector and probe shadow maps are remade over Vulkan memory (" << sShadow->formatName() << ") at the next frame" << LL_ENDL;
+            return;
+        }
+        LL_INFOS("Vulkan") << "Shadow map sharing unavailable, the shadow passes stay on OpenGL: " << error << LL_ENDL;
+        sShadowNotSharedWhy = error;
+        delete sShadow;
+        sShadow = nullptr;
+    }
+
     bool shareGBuffer(const char* why)
     {
         if (sGBuffer) return true;
@@ -838,6 +908,7 @@ namespace
             gPipeline.mMainRT.deferredScreen.setWolfVkShared(true);
             gResizeScreenTexture = true;
             LL_INFOS("Vulkan") << "G-buffer sharing on (" << why << "): the main G-buffer is remade over Vulkan memory at the next frame" << LL_ENDL;
+            shareShadowMaps();   // [W114-VULKAN S5 2026-11-26/] with the same import, the same frame's re-allocation
             return true;
         }
         LL_INFOS("Vulkan") << "G-buffer sharing unavailable, geometry passes stay on OpenGL: " << error << LL_ENDL;
@@ -1212,7 +1283,9 @@ void decideBackend()
     if (!stopped.empty()) rememberNotice("WolfVulkanStoppedLastRun", stopped);
     // [MAC OPENGL 2026-11-10] Paul: "Macs default to OpenGL with no Vulkan box". The bundle carries no MoltenVK
     // (vk/wolfvkloader.cpp), so a Vulkan start on a Mac can only fall back and show WolfVulkanFellBack - W102 did that at
-    // every Mac start. The platform default is made here, where the setting is read, the way the per-platform globals
+    // every Mac start. [W114-VULKAN MAC 2026-11-26] The bundle now carries MoltenVK, but there is no hybrid on a Mac
+    // (Apple's GL has no GL_EXT_memory_object): this stays until the full-Vulkan frame runs - the exact conditions are in
+    // docs/VULKAN_BACKEND.md 7.1. The platform default is made here, where the setting is read, the way the per-platform globals
     // are set from settings in LLAppViewer (llappviewer.cpp:666-698 "#if LL_DARWIN ... gSavedSettings"): the control's
     // default becomes "opengl" (llcontrol.cpp:276-293 LLControlVariable::setDefaultValue: the value is reset to the
     // default first, then the default replaced - a value still at the old default follows it; defaults are never saved,
@@ -1370,6 +1443,8 @@ void decideBackend()
     // Vulkan session leaves no evidence decideBackend can see: only LLError / out-of-memory exec markers count here
     LL_WARNS("Vulkan") << "BugSplat build: crashes in Vulkan sessions are not counted (no crash stack), only LLError/out-of-memory markers" << LL_ENDL;
 #endif
+    // [NATIVE VULKAN 2026-11-26] Request a pure Vulkan SDL window with NO OpenGL context.
+    LLWindow::sWolfNativeVulkan = true;
     // [VULKAN WAYLAND 2026-11-09] the window this start makes goes through XWayland, not native Wayland (llwindow.h)
     LLWindow::sWolfAvoidNativeWayland = true;
     // Like RenderInitError (llappviewer.cpp:3952): the marker is false until the login screen has been drawn, and
@@ -1408,6 +1483,20 @@ void noteLayerSelfTestStarting()
 void initAfterGL(LLWindow* window)
 {
     sWindow = window;
+    if (WolfVkNative::isActive())
+    {
+        // [NATIVE VULKAN 2026-11-26] Native Vulkan is already active (zero OpenGL context): never enter the hybrid bridge.
+        sState = State::VULKAN_ACTIVE;
+        sVulkanDeviceLine = WolfVkNative::vulkanLine();
+        if (!LLAppViewer::instance()->isSecondInstance())
+        {
+            const std::string folder = WolfCrashReport::thisRunFolder();
+            gSavedSettings.setString("WolfVulkanSessionRun", folder.empty() ? std::string("no-dump-folder") : folder);
+            gSavedSettings.setString("WolfVulkanLayerSelfTestRun", "");
+            gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+        }
+        return;
+    }
     // [G5 2026-11-11] the OpenGL driver of this start, for the retry rule's stamp (decideBackend runs before OpenGL is up)
     gSavedSettings.setString("WolfVulkanLastGLDriver", gGLManager.mGLVendor + " / " + gGLManager.mGLRenderer + " / " + gGLManager.mGLVersionString);
     if (!sRequested || sState != State::VULKAN_STARTING)
@@ -1528,15 +1617,21 @@ void initAfterGL(LLWindow* window)
     prof::initStamps();   // [AMD PERF 2026-11-08] Vulkan timestamps for the WolfLogFrameRate breakdown (none when the queue has no timestamps)
 
     sGBufferSharedAtStart = shareGBuffer("start");   // [round 4 W3]
+    installShaderHooks(true);   // [VULKAN G-BUFFER S2 2026-11-26] every program's mirror, and the uniform blocks' bytes
 }
 
 bool isActive()
 {
-    return sState == State::VULKAN_ACTIVE;
+    return WolfVkNative::isActive() || sState == State::VULKAN_ACTIVE;
 }
 
 void onResize()
 {
+    if (WolfVkNative::isActive())
+    {
+        WolfVkNative::onResize();
+        return;
+    }
     sResizePending = true;
     // [VK RESIZE 2026-11-10] OpenGL's never-swapped back buffer takes the new size only when the drawable is refreshed
     // (LLWindow::refreshGLDrawable, llwindow.h): before this frame's GL drawing (reshape runs from gatherInput), and once
@@ -1552,6 +1647,7 @@ void onResize()
 
 void captureWorld()
 {
+    if (WolfVkNative::isActive()) return;   // [NATIVE VULKAN 2026-11-26] no GL readback or composite in native mode
     if (sState == State::VULKAN_ACTIVE && sScene)
     {
         sScene->poseCheckVertices();   // [POSE CHECK 2026-11-08] (WolfVulkanDebugPoseCheck) every pass of the frame is drawn now
@@ -1563,7 +1659,7 @@ void captureWorld()
     }
 }
 
-// The frame slot is opened once per frame: by the first mid-frame pass (drawPassSimple) or, failing that, at present().
+// The frame slot is opened once per frame: by the first mid-frame pass (a G-buffer bracket) or, failing that, at present().
 // Opening it twice would reset this slot's descriptor pools under a submit already on the queue.
 bool ensureFrameBegun()
 {
@@ -1588,7 +1684,6 @@ bool ensureFrameBegun()
     prof::sPassThisFrame = false;
     sScene->beginFrame();            // this slot's descriptor pools reset
     gWolfVkDevice.flushDeferred();   // then its deferred destructions (wolfvkdevice.h flushDeferred)
-    sScene->clearDrawnByVulkan();    // a new frame: nothing drawn by Vulkan yet
     sFrameBegun = true;
     return true;
 }
@@ -1613,13 +1708,14 @@ void dumpGBufferIfAsked()
     if (sState != State::VULKAN_ACTIVE || !sScene || !sGBuffer) return;
     if (!gSavedSettings.getBOOL("WolfVulkanDebugDumpGBuffer")) return;
     if (!mainGBufferBound()) return;   // not consumed: the next main pass dumps
+    closeGBufferBracket();   // [S2 2026-11-26] the pass's recorded draws are submitted and the images are OpenGL's again
     gSavedSettings.setBOOL("WolfVulkanDebugDumpGBuffer", false);
     if (!sGBuffer->prepare()) return;
     if (!ensureFrameBegun()) return;
     VkCommandBuffer cmd = gWolfVkDevice.beginMidFrame();
     if (cmd == VK_NULL_HANDLE) return;
     std::string error;
-    // [HAND-OVER 2026-11-08 8.2k] the same rules as drawPassSimple: nothing recorded or submitted unless GL really
+    // [HAND-OVER 2026-11-08 8.2k] the same rules as the G-buffer bracket: nothing recorded or submitted unless GL really
     // signalled; a failed submit or hand-back falls back (before, a failed submit returned with sync() having marked
     // vk_pass_done "signalled" - the next glTakeBack would have made GL wait on a signal that was never submitted)
     if (!sGBuffer->glHandToVulkan())
@@ -1649,13 +1745,6 @@ void dumpGBufferIfAsked()
     else LL_WARNS("Vulkan") << "G-buffer GL-view dump: " << error << LL_ENDL;
 }
 
-bool batchDrawnByVulkan(const LLDrawInfo* params)
-{
-    // only while GL draws the leftovers of the very pass Vulkan drew (ScopedSkipDrawn): the same draw infos go through
-    // pushBatches again for the shadow maps, reflection probes and impostors, where GL must draw them all
-    return sSkipDrawnDepth > 0 && sState == State::VULKAN_ACTIVE && sScene && params && sScene->drawnByVulkan(params);
-}
-
 void poseCheckModelMatrix(const LLMatrix4* model_matrix)
 {
     static LLCachedControl<bool> pose_check(gSavedSettings, "WolfVulkanDebugPoseCheck", false);
@@ -1672,6 +1761,7 @@ bool timingOn()
 
 void glFrameStamp()
 {
+    if (WolfVkNative::isActive()) return;
     if (!timingOn() || !gGLManager.mInited) return;
     // a ring of GL_TIMESTAMP queries (glQueryCounter, OpenGL 4.6 4.3 "Time Queries"); each read only once
     // GL_QUERY_RESULT_AVAILABLE says so, oldest first, so nothing here waits for the GPU
@@ -1807,101 +1897,392 @@ void loopFrameEnd()
     sLoopFrames = 0;
 }
 
-ScopedSkipDrawn::ScopedSkipDrawn() { sSkipDrawnDepth++; }
-ScopedSkipDrawn::~ScopedSkipDrawn() { if (sSkipDrawnDepth > 0) sSkipDrawnDepth--; }
+// ---------------------------------------------------------------------------------------------------------------
+// [VULKAN G-BUFFER S2 2026-11-26] the draw interceptor (wolfvkbridge.h setGBufferPhase, wolfvkscene.h recordGBufferDraw)
 
-bool drawPassSimple()
+namespace
 {
-    if (sState != State::VULKAN_ACTIVE || !sScene || !sGBuffer) return false;
-    static LLCachedControl<bool> no_gbuffer(gSavedSettings, "WolfVulkanDebugNoGBuffer", false);
-    if (no_gbuffer) return false;
-    // only the main G-buffer is shared (reflection probes, mirrors, impostors and shadow maps render into other targets)
-    if (!mainGBufferBound() || !sGBuffer->prepare()) return false;
-    // [G-BUFFER COMPARE 2026-11-08] GL draws the pass into the shared buffers instead (the dump then shows GL's result)
-    static LLCachedControl<bool> gl_only(gSavedSettings, "WolfVulkanDebugGBufferGLOnly", false);
-    if (gl_only) return false;
-    if (sGBufferGLOnly) return false;   // [BLACK WORLD 2026-11-10] world check stage 1/2: no Vulkan pass, no depth rewrite
-    if (!ensureFrameBegun()) return false;
-    VkCommandBuffer cmd = gWolfVkDevice.beginMidFrame();
-    if (cmd == VK_NULL_HANDLE) return false;
-    // GL -> Vulkan: the five attachments with everything GL drew so far.
-    // [HAND-OVER 2026-11-08 8.2k] Only a real signal lets the pass go on: on false nothing is recorded, the command buffer
-    // is discarded unsubmitted and GL draws the whole pass (this function returns false), so the Vulkan queue never
-    // waits on a gl_pass_done that was not signalled and GL never waits on a vk_pass_done that was not submitted. The
-    // GPU-side waits (the submit's wait on gl_pass_done, GL's glWaitSemaphoreEXT on vk_pass_done) take no timeout; they
-    // complete by this construction alone: one signal, then one wait, each submitted before its wait.
-    bool handed = false;
-    const bool time_hand_over = prof::on();
+    bool interceptDraw(const LLVertexBuffer* buffer, U32 mode, U32 start, U32 end, U32 count, U32 first, bool indexed);
+    void beforeBufferWrite(const LLVertexBuffer* buffer);
+    void beforeTargetChange();
+
+    // [W114-VULKAN S5 2026-11-26] the shared G-buffer as a bracket target (wolfvkshadow.h WolfVkBracketTarget): the calls
+    // openBracket / closeBracket made on sGBuffer before, unchanged
+    struct GBufferBracket final : public WolfVkBracketTarget
     {
-        prof::Scope t(prof::PASS_HAND);   // [AMD PERF]
-        if (time_hand_over) prof::sGlHandOver.begin();
-        handed = sGBuffer->glHandToVulkan();
-    }
-    if (!handed)
-    {
-        if (time_hand_over) prof::sGlHandOver.cancel();
-        gWolfVkDevice.discardMidFrame(cmd);
-        if (sGBuffer->broken())
+        const char* bracketName() const override { return "G-buffer"; }
+        bool prepare() override { return sGBuffer && sGBuffer->prepare(); }
+        bool glHandToVulkan() override { return sGBuffer && sGBuffer->glHandToVulkan(); }
+        void acquire(VkCommandBuffer cmd) override { if (sGBuffer) sGBuffer->acquire(cmd); }
+        WolfVkRenderTarget* target() override { return sGBuffer ? sGBuffer->target() : nullptr; }
+        void release(VkCommandBuffer cmd) override { if (sGBuffer) sGBuffer->release(cmd); }
+        WolfVkDevice::ExtraSync sync() override { return sGBuffer ? sGBuffer->sync() : WolfVkDevice::ExtraSync(); }
+        bool glTakeBack() override { return !sGBuffer || sGBuffer->glTakeBack(); }
+        // [BLUE DASHES 2026-11-08] OpenGL rewrites the shared depth itself before it draws again (wolfvkgbuffer.h
+        // glRewriteDepth; proven necessary by run nv-dz1, docs 8.2n)
+        void glAfterTakeBack() override
         {
-            stopAtRunTime("G-buffer hand-over: " + sGBuffer->brokenReason());
+            static LLCachedControl<bool> gl_depth_rewrite(gSavedSettings, "WolfVulkanGLDepthRewrite", true);
+            if (!gl_depth_rewrite || !sGBuffer) return;
+            prof::Scope t(prof::PASS_REWRITE);
+            sGBuffer->glRewriteDepth();
         }
-        return false;
-    }
-    // [AMD PERF] the first pass of the frame is timed on the GPU (a VR frame has two)
-    const bool stamp_pass = prof::on() && prof::sPool != VK_NULL_HANDLE && !prof::sPassThisFrame;
+        bool boundInGL() override { return mainGBufferBound(); }
+        void wantSampled(uint32_t gl_texture) override { if (sGBuffer) sGBuffer->extras().want(gl_texture); }
+        WolfVkImage* sampledImage(uint32_t gl_texture) override { return sGBuffer ? sGBuffer->extras().inBracket(gl_texture) : nullptr; }
+        bool broken() const override { return sGBuffer && sGBuffer->broken(); }
+        const std::string& brokenReason() const override { static const std::string none; return sGBuffer ? sGBuffer->brokenReason() : none; }
+    };
+    GBufferBracket sGBufferBracket;
+
+    // [W114-VULKAN S5 2026-11-26] the target OpenGL is about to draw into, when it is one Vulkan can record into now:
+    // the shared G-buffer in the G-buffer phase, the bound shadow map in the shadow phase; null = OpenGL draws
+    WolfVkBracketTarget* recordableTarget()
     {
-        prof::Scope t(prof::PASS_RECORD);
-        if (stamp_pass) prof::stamp(cmd, 0, true);
-        sGBuffer->acquire(cmd);
-        sGBufferDraws = sScene->drawGBufferSimple(cmd, *sGBuffer->target());
-        sGBuffer->release(cmd);
-        if (stamp_pass)
-        {
-            prof::stamp(cmd, 0, false);
-            prof::sPassWritten[gWolfVkDevice.frameIndex()] = 1;
-            prof::sPassThisFrame = true;
-        }
-    }
-    std::string error;
-    bool submitted = false;
-    {
-        prof::Scope t(prof::PASS_SUBMIT);
-        submitted = gWolfVkDevice.submitMidFrame(cmd, sGBuffer->sync(), error);
-    }
-    if (!submitted)
-    {
-        stopAtRunTime("G-buffer pass: " + error);
-        return false;
-    }
-    // Vulkan -> GL: GL's queue waits for the pass before the next pool draws
-    bool taken = false;
-    {
-        prof::Scope t(prof::PASS_TAKEBACK);
-        taken = sGBuffer->glTakeBack();
-        if (time_hand_over) prof::sGlHandOver.end();
-    }
-    if (!taken)
-    {
-        // GL did not wait: it must not draw into images Vulkan may still be writing, and the semaphore state is unknown
-        stopAtRunTime("G-buffer hand-back: " + sGBuffer->brokenReason());
-        return false;
-    }
-    // [BLUE DASHES 2026-11-08] OpenGL rewrites the shared depth itself before its later passes (wolfvkgbuffer.h glRewriteDepth).
-    // Proven necessary by run nv-dz1: GL's reads of the depth were byte-identical to what Vulkan wrote (viewcheck, nv-fz2),
-    // yet GL's later depth-TESTED passes let the water and sky through the ships in short runs ("blue dashes"); with this
-    // rewrite the first Vulkan grab was clean and switching it off brought the dashes back. EXT_external_objects 4.2.3 offers
-    // only the layout passed to the wait (already DEPTH_STENCIL_ATTACHMENT <-> VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    // Table 4.4) to "initialize internal GL state"; that did not reset the driver's depth-test state here.
-    static LLCachedControl<bool> gl_depth_rewrite(gSavedSettings, "WolfVulkanGLDepthRewrite", true);
-    if (gl_depth_rewrite)
-    {
-        prof::Scope t(prof::PASS_REWRITE);
-        sGBuffer->glRewriteDepth();
+        if (sPhase && sGBuffer && mainGBufferBound()) return &sGBufferBracket;
+        if (sShadowPhase && sShadow && LLPipeline::sShadowRender && sShadow->selectBound()) return sShadow;
+        return nullptr;
     }
 
-    // an incomplete pass (a batch skipped: its buffer copy still uploading, the uniform ring full) is drawn again by GL in
-    // full - the same geometry into the same attachments, so nothing is missing and nothing shows twice
-    return sScene->gbufferPassComplete();
+    // The per-family debug switches (settings.xml, HideFromEditor, off = Vulkan records): OpenGL draws that family's
+    // programs, so each family can be compared GL against Vulkan in one session
+    bool familyLeftToGL(const LLGLSLShader* shader)
+    {
+        static LLCachedControl<bool> gl_simple(gSavedSettings, "WolfVulkanDebugGLSimple", false);
+        static LLCachedControl<bool> gl_bump(gSavedSettings, "WolfVulkanDebugGLBump", false);
+        static LLCachedControl<bool> gl_materials(gSavedSettings, "WolfVulkanDebugGLMaterials", false);
+        static LLCachedControl<bool> gl_pbr(gSavedSettings, "WolfVulkanDebugGLPBR", false);
+        if (WolfVkAvatar::leftToGL(shader)) return true;   // [W114-VULKAN S4 2026-11-26/] WolfVulkanDebugGLRigged / WolfVulkanDebugGLAvatar
+        // [W114-VULKAN S5 2026-11-26] every draw call of a shadow pass, whatever its program
+        static LLCachedControl<bool> gl_shadow(gSavedSettings, "WolfVulkanDebugGLShadow", false);
+        if (gl_shadow && LLPipeline::sShadowRender) return true;
+        if (gl_simple && shader == &gDeferredDiffuseProgram) return true;
+        if (gl_bump && shader == &gDeferredBumpProgram) return true;
+        if (gl_pbr && shader == &gDeferredPBROpaqueProgram) return true;
+        if (gl_materials)
+        {
+            for (U32 i = 0; i < LLMaterial::SHADER_COUNT * 2; ++i) if (shader == &gDeferredMaterialProgram[i]) return true;
+        }
+        return false;
+    }
+
+    void noteGap(const LLGLSLShader* shader, const char* why)
+    {
+        sStatGL++;
+        const std::string key = (shader ? shader->mName : std::string("no program")) + ": " + why;
+        if (timingOn()) sGapsThisSecond[key]++;
+        if (sGapsLogged.insert(key).second)
+        {
+            // every gap named once a session: these draw calls are OpenGL's (no silent fall-back)
+            LL_INFOS("Vulkan") << "G-buffer draw left to OpenGL - " << key << LL_ENDL;
+        }
+    }
+
+    void installBracketHooks(bool on)
+    {
+        LLVertexBuffer::sWolfVkBeforeWrite = on ? beforeBufferWrite : nullptr;
+        LLRenderTarget::sWolfVkBeforeTargetChange = on ? beforeTargetChange : nullptr;
+    }
+
+    // GL -> Vulkan: the five attachments with everything GL drew so far.
+    // [HAND-OVER 2026-11-08 8.2k] Only a real signal opens the bracket: on false nothing is recorded, the command buffer is
+    // discarded unsubmitted and OpenGL draws, so the Vulkan queue never waits on a gl_pass_done that was not signalled and
+    // GL never waits on a vk_pass_done that was not submitted. The GPU-side waits (the submit's wait on gl_pass_done, GL's
+    // glWaitSemaphoreEXT on vk_pass_done) take no timeout; they complete by this construction alone.
+    bool openBracket(WolfVkBracketTarget* target)   // [W114-VULKAN S5 2026-11-26/] the target: recordableTarget()
+    {
+        if (!target || !target->prepare()) return false;
+        if (!ensureFrameBegun()) return false;
+        VkCommandBuffer cmd = gWolfVkDevice.beginMidFrame();
+        if (cmd == VK_NULL_HANDLE) return false;
+        bool handed = false;
+        const bool time_hand_over = prof::on();
+        {
+            prof::Scope t(prof::PASS_HAND);   // [AMD PERF]
+            if (time_hand_over) prof::sGlHandOver.begin();
+            handed = target->glHandToVulkan();
+        }
+        if (!handed)
+        {
+            if (time_hand_over) prof::sGlHandOver.cancel();
+            gWolfVkDevice.discardMidFrame(cmd);
+            if (target->broken()) stopAtRunTime(std::string(target->bracketName()) + " hand-over: " + target->brokenReason());
+            return false;
+        }
+        // [AMD PERF] the frame's first bracket is timed on the GPU (a VR frame has two eyes)
+        sBracketStamped = prof::on() && prof::sPool != VK_NULL_HANDLE && !prof::sPassThisFrame;
+        if (sBracketStamped) prof::stamp(cmd, 0, true);
+        target->acquire(cmd);
+        sScene->beginGBufferBracket();
+        sBracketTarget = target;
+        sBracketCmd = cmd;
+        sBracketPassOpen = false;
+        sBracketOpen = true;
+        if (++sBracketSerial == 0) sBracketSerial = 1;   // 0 = "no bracket" in LLVertexBuffer::mWolfVkBracket
+        sStatBrackets++;
+        installBracketHooks(true);
+        return true;
+    }
+
+    // Vulkan -> GL. On any failure the run-time stop: GL must not draw into images Vulkan may still be writing, and the
+    // semaphore state is unknown.
+    void closeBracket()
+    {
+        if (!sBracketOpen) return;
+        sBracketOpen = false;          // first: the GL calls below must not re-enter through the hooks
+        installBracketHooks(false);
+        VkCommandBuffer cmd = sBracketCmd;
+        sBracketCmd = VK_NULL_HANDLE;
+        WolfVkBracketTarget* target = sBracketTarget;   // [W114-VULKAN S5 2026-11-26/] set by openBracket, never null while open
+        sBracketTarget = nullptr;
+        if (!target) { gWolfVkDevice.discardMidFrame(cmd); stopAtRunTime("a bracket without a target"); return; }
+        {
+            prof::Scope t(prof::PASS_RECORD);
+            if (sBracketPassOpen && target->target()) target->target()->end(cmd);
+            sBracketPassOpen = false;
+            target->release(cmd);
+            if (sBracketStamped)
+            {
+                prof::stamp(cmd, 0, false);
+                prof::sPassWritten[gWolfVkDevice.frameIndex()] = 1;
+                prof::sPassThisFrame = true;
+                sBracketStamped = false;
+            }
+        }
+        std::string error;
+        bool submitted = false;
+        {
+            prof::Scope t(prof::PASS_SUBMIT);
+            submitted = gWolfVkDevice.submitMidFrame(cmd, target->sync(), error);
+        }
+        if (!submitted)
+        {
+            stopAtRunTime(std::string(target->bracketName()) + " pass: " + error);
+            return;
+        }
+        bool taken = false;
+        {
+            prof::Scope t(prof::PASS_TAKEBACK);
+            taken = target->glTakeBack();
+            if (prof::on()) prof::sGlHandOver.end();
+        }
+        if (!taken)
+        {
+            stopAtRunTime(std::string(target->bracketName()) + " hand-back: " + target->brokenReason());
+            return;
+        }
+        // What OpenGL must do before it draws into the target again (the G-buffer's depth rewrite, 8.2n; the shadow map's,
+        // wolfvkshadow.cpp glAfterTakeBack). It draws into the bound target, which is the bracket's whenever a bracket
+        // closes inside its phase (every close but the safety nets at present / frame end, which find the phase already
+        // over and no bracket open).
+        if (target->boundInGL())
+        {
+            target->glAfterTakeBack();
+        }
+        else
+        {
+            LL_WARNS_ONCE("Vulkan") << target->bracketName() << " bracket closed with another target bound: OpenGL's depth rewrite skipped" << LL_ENDL;
+        }
+    }
+
+    // A bracket that can never be submitted (tear-down, a hung device): the command buffer goes unsubmitted and the hooks
+    // come off. GL signalled gl_pass_done and nobody will wait on it; the shared images go with the tear-down.
+    void abandonBracket()
+    {
+        sPhase = false;
+        sShadowPhase = false;   // [W114-VULKAN S5 2026-11-26/]
+        LLVertexBuffer::sWolfVkInterceptDraw = nullptr;
+        installBracketHooks(false);
+        sBracketTarget = nullptr;
+        if (!sBracketOpen) return;
+        sBracketOpen = false;
+        sBracketPassOpen = false;
+        sBracketStamped = false;
+        if (sBracketCmd != VK_NULL_HANDLE && !gWolfVkDevice.hung()) gWolfVkDevice.discardMidFrame(sBracketCmd);
+        sBracketCmd = VK_NULL_HANDLE;
+    }
+
+    bool interceptDraw(const LLVertexBuffer* buffer, U32 mode, U32 start, U32 end, U32 count, U32 first, bool indexed)
+    {
+        if ((!sPhase && !sShadowPhase) || sState != State::VULKAN_ACTIVE || !sScene || !buffer) return false;
+        // only into a target Vulkan shares: the main camera's G-buffer in its phase (reflection probes, mirrors and
+        // impostors draw elsewhere), [W114-VULKAN S5 2026-11-26] the bound shadow map in the shadow phase
+        WolfVkBracketTarget* target = recordableTarget();
+        if (!target)
+        {
+            closeBracket();
+            return false;
+        }
+        // a bracket is on one target: bindTarget closes it (sWolfVkBeforeTargetChange), so this only guards the invariant
+        if (sBracketOpen && sBracketTarget != target) closeBracket();
+        LLGLSLShader* shader = LLGLSLShader::sCurBoundShaderPtr;
+        if (familyLeftToGL(shader))
+        {
+            closeBracket();
+            noteGap(shader, "debug switch WolfVulkanDebugGL* on");
+            return false;
+        }
+        // [W114-VULKAN merge 2026-11-26] WolfVkResources::vertexBuffer (the S6a store) flushes LLVertexBuffer's mapped
+        // buffers before it hands out a range. A flush calls beforeBufferWrite, which closes the bracket when a recorded
+        // draw read the buffer - that must not happen while recordGBufferDraw is recording into the bracket's command
+        // buffer. So the flush is made here, where a close is safe, and the bracket is opened (again) after it.
+        // Source: llvertexbuffer.cpp _unmapBuffer() binds the buffers it writes (GL_ARRAY_BUFFER / GL_ELEMENT_ARRAY_BUFFER,
+        // sGLRenderBuffer / sGLRenderIndices). The caller bound this draw's buffers with setBuffer() just before the draw
+        // call, so when the flush moved a binding, setBuffer() puts back exactly that state: a draw that is then refused
+        // and left to OpenGL draws from its own buffers.
+        LLVertexBuffer::flushBuffers();
+        if (LLVertexBuffer::sGLRenderBuffer != buffer->getGLBuffer() || LLVertexBuffer::sGLRenderIndices != buffer->getGLIndices())
+        {
+            const_cast<LLVertexBuffer*>(buffer)->setBuffer();
+        }
+        if (!sBracketOpen && !openBracket(target))
+        {
+            noteGap(shader, "the render target could not be handed to Vulkan");
+            return false;
+        }
+        const char* why = "";
+        WolfVkScene::InterceptedDraw d{ const_cast<LLVertexBuffer*>(buffer), mode, start, end, count, first, indexed };
+        bool recorded = false;
+        {
+            prof::Scope t(prof::PASS_RECORD);
+            WolfVkRenderTarget* vk_target = target->target();
+            if (vk_target) recorded = sScene->recordGBufferDraw(sBracketCmd, *vk_target, sBracketPassOpen, d, why);
+            else why = "the render target has no Vulkan target";
+        }
+        if (recorded)
+        {
+            buffer->mWolfVkBracket = sBracketSerial;
+            sStatRecorded++;
+            return true;
+        }
+        closeBracket();   // OpenGL draws this one into images that are its own again
+        noteGap(shader, why);
+        return false;
+    }
+
+    void beforeBufferWrite(const LLVertexBuffer* buffer)
+    {
+        // a recorded draw read this buffer: it is submitted with the bytes it was recorded with before they change
+        if (sBracketOpen && buffer && buffer->mWolfVkBracket == sBracketSerial)
+        {
+            sStatWriteCloses++;
+            closeBracket();
+        }
+    }
+
+    void beforeTargetChange()
+    {
+        closeBracket();
+    }
+
+    // [S2] LLGLSLShader's hooks: every program gets its mirror when it links; the viewer's uniform-block bytes
+    void onShaderLinked(LLGLSLShader* shader) { if (sScene && sState == State::VULKAN_ACTIVE) sScene->onShaderLinked(shader); }
+    void onUniformBufferData(GLuint buffer, U32 offset, U32 size, const void* data, bool respecify) { if (sScene) sScene->uniformBufferData(buffer, offset, size, data, respecify); }
+    void onUniformBufferBind(GLuint point, GLuint buffer) { if (sScene) sScene->uniformBufferBind(point, buffer); }
+
+    void installShaderHooks(bool on)
+    {
+        LLGLSLShader::sWolfVkOnLinked = on ? onShaderLinked : nullptr;
+        LLGLSLShader::sWolfVkOnUniformBufferData = on ? onUniformBufferData : nullptr;
+        LLGLSLShader::sWolfVkOnUniformBufferBind = on ? onUniformBufferBind : nullptr;
+        if (!on || !sScene) return;
+        // the programs linked before Vulkan started (the window's first setShaders runs before initAfterGL,
+        // llviewerwindow.cpp) get theirs now, from the values their GL programs hold (WolfVkShaderMirror::syncFromGL)
+        for (LLGLSLShader* shader : LLGLSLShader::sInstances)
+        {
+            if (shader && shader->isComplete() && !shader->mWolfVk) sScene->onShaderLinked(shader);
+        }
+        // and the uniform buffers already bound to the block points, read back once (OpenGL 4.6 6.6 "Buffer Object
+        // Queries": GL_UNIFORM_BUFFER_BINDING indexed by the point; glGetBufferSubData)
+        GLint saved = 0;
+        glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &saved);
+        for (GLuint point = 0; point < LLGLSLShader::NUM_UNIFORM_BLOCKS; ++point)
+        {
+            GLint buffer = 0;
+            glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, point, &buffer);
+            if (buffer <= 0) continue;
+            glBindBuffer(GL_UNIFORM_BUFFER, static_cast<GLuint>(buffer));
+            GLint size = 0;
+            glGetBufferParameteriv(GL_UNIFORM_BUFFER, GL_BUFFER_SIZE, &size);
+            if (size > 0)
+            {
+                std::vector<uint8_t> bytes(static_cast<size_t>(size));
+                glGetBufferSubData(GL_UNIFORM_BUFFER, 0, size, bytes.data());
+                sScene->uniformBufferData(static_cast<uint32_t>(buffer), 0, static_cast<uint32_t>(size), bytes.data(), true);
+            }
+            sScene->uniformBufferBind(point, static_cast<uint32_t>(buffer));
+        }
+        glBindBuffer(GL_UNIFORM_BUFFER, static_cast<GLuint>(saved));
+    }
+}
+
+void setGBufferPhase(bool on)
+{
+    if (WolfVkNative::isActive()) return;
+    if (!on)
+    {
+        closeGBufferBracket();
+        sPhase = false;
+        if (!sShadowPhase) LLVertexBuffer::sWolfVkInterceptDraw = nullptr;
+        return;
+    }
+    if (sState != State::VULKAN_ACTIVE || !sScene || !sGBuffer) return;
+    static LLCachedControl<bool> no_gbuffer(gSavedSettings, "WolfVulkanDebugNoGBuffer", false);
+    // [G-BUFFER COMPARE 2026-11-08] GL draws the pools into the shared buffers instead (the dump then shows GL's result)
+    static LLCachedControl<bool> gl_only(gSavedSettings, "WolfVulkanDebugGBufferGLOnly", false);
+    if (no_gbuffer || gl_only || sGBufferGLOnly) return;   // [BLACK WORLD 2026-11-10] world check stage 1/2: no Vulkan pass
+    sPhase = true;
+    LLVertexBuffer::sWolfVkInterceptDraw = interceptDraw;
+}
+
+void closeGBufferBracket()
+{
+    closeBracket();
+}
+
+ScopedGLOnly::ScopedGLOnly() : mWasOn(sPhase), mShadowWasOn(sShadowPhase)
+{
+    if (mWasOn) setGBufferPhase(false);
+    if (mShadowWasOn) setShadowPhase(false);
+}
+
+ScopedGLOnly::~ScopedGLOnly()
+{
+    if (mWasOn) setGBufferPhase(true);
+    if (mShadowWasOn) setShadowPhase(true);
+}
+
+// [W114-VULKAN S5 2026-11-26] wolfvkbridge.h setShadowPhase
+void setShadowPhase(bool on)
+{
+    if (WolfVkNative::isActive()) return;
+    if (!on)
+    {
+        if (!sShadowPhase) return;
+        closeGBufferBracket();
+        sShadowPhase = false;
+        if (!sPhase) LLVertexBuffer::sWolfVkInterceptDraw = nullptr;
+        return;
+    }
+    if (sState != State::VULKAN_ACTIVE || !sScene || !sShadow || !sShadow->available()) return;
+    static LLCachedControl<bool> no_gbuffer(gSavedSettings, "WolfVulkanDebugNoGBuffer", false);
+    static LLCachedControl<bool> gl_only(gSavedSettings, "WolfVulkanDebugGBufferGLOnly", false);
+    if (no_gbuffer || gl_only || sGBufferGLOnly) return;   // the switches and the world check that keep every Vulkan pass off
+    // the map OpenGL has bound must be one of the shared ones (a map that kept OpenGL's own texture is OpenGL's to draw)
+    if (!sShadow->selectBound()) return;
+    sShadowPhase = true;
+    LLVertexBuffer::sWolfVkInterceptDraw = interceptDraw;
+}
+
+WolfVkBracketTarget* bracketTarget()
+{
+    return sBracketOpen ? sBracketTarget : nullptr;
+}
+
+bool shadowPassOnVulkan()
+{
+    static LLCachedControl<bool> gl_shadow(gSavedSettings, "WolfVulkanDebugGLShadow", false);
+    return sShadowPhase && !gl_shadow;
 }
 
 // [HAND-OVER / HANG GUARD 2026-11-08 8.2k] A frame that reaches no swapchain image (acquire out of date, or a swapchain
@@ -1928,6 +2309,11 @@ bool presentFrame();
 
 void endUnshownFrame()
 {
+    if (WolfVkNative::isActive())
+    {
+        WolfVkNative::endUnshownFrame();
+        return;
+    }
     // [VR 3D POOL 2026-11-09] the VR 3D Mode crash (Paul, 2026-11-09; the VR agent's finding, reproduced twice at
     // Community Hub): with the desktop paused (WolfVRScreen::displayFrame, WolfVRPauseDesktop) swap() never reaches
     // present(), so the slot that the eye passes opened (drawPassSimple -> ensureFrameBegun) was never submitted or
@@ -1936,6 +2322,7 @@ void endUnshownFrame()
     // closed the way a frame without a swapchain image is (closeFrameWithoutImage: the GL semaphores balanced, the frame
     // fence handed to the queue).
     if (sState != State::VULKAN_ACTIVE || !sScene || !sFrameBegun) return;
+    setGBufferPhase(false);   // [S2 2026-11-26] safety net, as in presentFrame
     sFrameBegun = false;
     sScene->poseCheckFrameEnd();   // the frame's records end here, as in presentFrame
     std::string error;
@@ -1948,6 +2335,10 @@ void endUnshownFrame()
 
 bool present()
 {
+    if (WolfVkNative::isActive())
+    {
+        return WolfVkNative::present();
+    }
     // [RUN-TIME STOP 2026-11-09] after a run-time failure nothing more reaches the window, by Vulkan or by OpenGL's own
     // swap (the caller swaps only on false), until the viewer has quit (stopAtRunTime) - also for the frame in which the
     // failure happened: every path out of presentFrame that stopped Vulkan returns false, which here becomes true
@@ -1981,6 +2372,11 @@ bool presentFrame()
     // is that flush. It is issued once per present, after this frame's gl_done signal (recordFrame below), on every
     // path out of here; it only submits GL's queued work, so the Vulkan/GL semaphore protocol is unchanged.
     struct EndOfFrameFlush { ~EndOfFrameFlush() { if (gGLManager.mInited && !gWolfVkDevice.hung()) glFlush(); } } end_of_frame_flush;
+    // [VULKAN G-BUFFER S2 2026-11-26] safety net: the phase ends inside renderGeomDeferred, so no bracket is open here; if
+    // one were, its draws are submitted and the images handed back before this frame's own submit
+    setGBufferPhase(false);
+    sGBufferDraws = sScene->gbufferDrawsLastFrame();
+    sScene->setGBufferDraws(0);
     const F64 t0 = LLTimer::getTotalSeconds();
     std::string error;
     finishUnshare();   // [BLACK WORLD 2026-11-10] a G-buffer given back last frame: the provider goes once the target released it
@@ -2264,12 +2660,28 @@ bool presentFrame()
             // [FLASH EVIDENCE 2026-11-08] what Vulkan drew and skipped last frame, and the mirror churn (buffers and textures
             // made or remade), once a second alongside WolfFrameRate
             const WolfVkMirror::Stats& st = WolfVkMirror::stats();
+            const WolfVkResources::Stats rs = WolfVkResources::stats();   // [VK S6a 2026-11-26]
             const double rewrite_ms = sGBuffer ? sGBuffer->rewriteMsAndReset() : -1.0;
             LL_INFOS("WolfVulkanFrame") << "GL depth rewrite " << (rewrite_ms < 0.0 ? std::string("not timed") : llformat("%.3f ms (GPU)", rewrite_ms)) << "; "
                                         << "gbuffer draws " << sGBufferDraws << ", overlay draws " << sScene->drawsLastFrame()
                                         << ", skipped " << sScene->skippedLastFrameTotal()
-                                        << "; mirrors: buffers " << st.mBuffersMade << " made " << st.mBuffersRemade << " remade " << st.mBufferBytesWritten / 1024 << " KB written, textures "
-                                        << st.mTexturesMade << " made " << st.mTexturesRemade << " remade " << st.mTexturesDropped << " dropped (totals)" << LL_ENDL;
+                                        << "; store: " << (WolfVkResources::active() ? "on" : "off") << ", " << rs.mRanges << " buffers " << rs.mBytesUsed / 1048576 << " MiB in "
+                                        << rs.mBlocks << " blocks (" << rs.mBlockBytes / 1048576 << " MiB), upload batches " << rs.mBatchesLastFrame << " last frame "
+                                        << rs.mBatches << " total, " << rs.mBytesUploaded / 1024 << " KB uploaded, staging " << rs.mStagingBytes / 1048576 << " MiB"
+                                        << "; owned textures " << WolfVkTextures::stats().mTextures << " (" << WolfVkTextures::stats().mBytes / 1048576 << " MiB), "
+                                        << WolfVkTextures::stats().mRefused << " refused"
+                                        << "; texture mirrors: " << st.mTexturesMade << " made " << st.mTexturesRemade << " remade " << st.mTexturesDropped << " dropped (totals)" << LL_ENDL;
+            // [VULKAN G-BUFFER S2 2026-11-26] the draw interceptor over the last second: draw calls recorded by Vulkan, draw
+            // calls OpenGL made in the phase and why (by program), brackets, and closes forced by a vertex-buffer write
+            {
+                std::string gaps;
+                for (const auto& g : sGapsThisSecond) gaps += llformat("%s x%llu; ", g.first.c_str(), static_cast<unsigned long long>(g.second));
+                LL_INFOS("WolfVulkanFrame") << "G-buffer interceptor (last second): " << sStatRecorded << " draws recorded, " << sStatGL << " left to OpenGL, "
+                                            << sStatBrackets << " brackets, " << sStatWriteCloses << " closed by a buffer write"
+                                            << (gaps.empty() ? std::string() : "; OpenGL drew: " + gaps) << LL_ENDL;
+                sStatRecorded = sStatGL = sStatBrackets = sStatWriteCloses = 0;
+                sGapsThisSecond.clear();
+            }
             // [AMD PERF 2026-11-08] the per-frame breakdown of the last second (see prof above): CPU ms per step, GPU ms
             if (prof::sFrames > 0)
             {
@@ -2313,6 +2725,15 @@ bool presentFrame()
 
 void onLoginScreenShown()
 {
+    if (WolfVkNative::isActive())
+    {
+        if (sRequested && !gSavedSettings.getBOOL("WolfVulkanStartOK") && !LLAppViewer::instance()->isSecondInstance())
+        {
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+        }
+        return;
+    }
     if (sLoginShown)
     {
         return;
@@ -2339,6 +2760,19 @@ void onLoginScreenShown()
 
 void shutdown()
 {
+    if (WolfVkNative::isActive())
+    {
+        if (sRequested && !LLAppViewer::instance()->isSecondInstance())
+        {
+            gSavedSettings.setString("WolfVulkanSessionRun", "");
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+        }
+        WolfVkNative::shutdown();
+        sState = State::OPENGL;
+        sWindow = nullptr;
+        return;
+    }
     if (sState == State::VULKAN_ACTIVE) logSessionSummary("shutdown");   // [BLACK WORLD 2026-11-10]
     // [B1/W4 2026-11-11] a clean quit with Vulkan still running (stopAtRunTime and fallBack leave VULKAN_ACTIVE first).
     // shutdownGL runs after LLAppViewer::cleanup saved the settings (llappviewer.cpp:2240/2433), so they are saved here.
@@ -2364,13 +2798,15 @@ void shutdown()
         }
         gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
     }
+    abandonBracket();          // [S2 2026-11-26] as tearDown
+    installShaderHooks(false);
     LLRenderTarget::sWolfVkProvider = nullptr;
     // [HANG GUARD 2026-11-08 8.2k] as fallBack: from the first step that finds the card hung, the rest is abandoned
     if (sGBuffer && !gWolfVkDevice.hung()) delete sGBuffer;
     sGBuffer = nullptr;
     if (!gWolfVkDevice.hung()) destroyShaderMirrors();
     if (sScene && !gWolfVkDevice.hung()) delete sScene;
-    else WolfVkMirror::shutdown();
+    else { WolfVkResources::shutdown(); WolfVkTextures::shutdown(); WolfVkMirror::shutdown(); }
     sScene = nullptr;
     prof::destroyStamps(gWolfVkDevice.hasDevice() && !gWolfVkDevice.hung() && gWolfVkDevice.waitIdle());   // [AMD PERF]
     prof::sGlCapture.destroy();
@@ -2388,6 +2824,10 @@ void shutdown()
 
 std::string rendererLine()
 {
+    if (WolfVkNative::isActive())
+    {
+        return WolfVkNative::rendererLine();
+    }
     if (sState == State::VULKAN_ACTIVE)
     {
         return "Vulkan on " + gWolfVkDevice.chosen().name();

@@ -198,7 +198,9 @@ private:
     // </WolfViewer>
     // [WOLF BUG REPORT 2026-10-24] the bug icon left of the Wolf Grid button: Report a Problem (wolffloaterbugreport.cpp),
     // shown on Wolf Territories only (the report is a Wolf ticket, sent with this login's session).
+    // [COFFEE 2026-11-27] and the coffee cup icon left of the bug icon: Buy us a coffee (wolf-grid.com ?f=coffee).
     LLButton* mWolfBugBtn = nullptr;
+    LLButton* mWolfCoffeeBtn = nullptr;
     void updateWolfBugButton();
     // [WOLF AI CREDITS 2026-10-24] "AI 2304" left of the money in balance_bg, from WolfAI::avail() (its 120 s poll,
     // refreshNow after the viewer's own AI charges, refreshSoon when the window gets focus back after buying).

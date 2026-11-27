@@ -36,8 +36,8 @@
 
 class LLWindow;
 
-class LLDrawInfo;
 class LLMatrix4;
+struct WolfVkBracketTarget;   // wolfvkbrackettarget.h
 
 namespace WolfVkBridge
 {
@@ -113,13 +113,34 @@ namespace WolfVkBridge
     F32 presentMillis();
     // How many batches the Vulkan pass drew last frame, and the validation layer's message count this session.
     U32 sceneDrawsLastFrame();
-    // [VULKAN G-BUFFER 2026-11-08] LLDrawPoolSimple::renderDeferred asks before drawing its static PASS_SIMPLE batches: true =
-    // Vulkan drew them into the shared G-buffer (GL skips them), false = GL draws them as always.
-    bool drawPassSimple();
-    // True when Vulkan drew this draw info this frame AND GL is drawing the leftovers of that pass (inside a
-    // ScopedSkipDrawn); LLRenderPass::pushBatches then leaves it to Vulkan. Everywhere else (shadow maps, probes,
-    // impostors) GL draws every batch as always.
-    bool batchDrawnByVulkan(const LLDrawInfo* params);
+    // [VULKAN G-BUFFER S2 2026-11-26] The draw interceptor's phase. LLPipeline::renderGeomDeferred turns it on for the pools
+    // whose draws Vulkan records (the opaque deferred pools before terrain: simple, fullbright, bump, materials, GLTF PBR)
+    // and off after them (and before occlusion culling). While it is on and the main G-buffer is bound, every
+    // LLVertexBuffer draw call is offered to Vulkan (llvertexbuffer.h sWolfVkInterceptDraw): recorded into the shared
+    // G-buffer from OpenGL's current state, or - when it cannot be recorded exactly - drawn by OpenGL after the bracket
+    // has been closed. The bracket (the shared G-buffer handed to Vulkan, one mid-frame command buffer, one render pass)
+    // opens at the first recorded draw and closes, submitted and taken back by OpenGL, before OpenGL next draws, binds or
+    // clears a render target, writes a vertex buffer a recorded draw uses, or when the phase ends. Turning the phase off
+    // always closes it, so OpenGL is never left waiting on a signal that was not submitted (docs 8.2k).
+    void setGBufferPhase(bool on);
+    // Closes the bracket if one is open (also used before GL-only work inside the phase).
+    void closeGBufferBracket();
+    // [S2] a scope in which OpenGL draws everything itself (the phase is suspended and the bracket closed), e.g. the GLTF
+    // scene manager's own draws inside the GLTF PBR pool
+    struct ScopedGLOnly { ScopedGLOnly(); ~ScopedGLOnly(); bool mWasOn; bool mShadowWasOn; };
+    // [W114-VULKAN S5 2026-11-26] The interceptor's phase for one shadow map. LLPipeline::renderShadow turns it on after
+    // the map has been bound and cleared, and off before it returns. While it is on, every LLVertexBuffer draw call of
+    // the pass is offered to Vulkan exactly as in the G-buffer phase, the target being the bound shadow map (a
+    // Vulkan-owned depth image, wolfvkshadow.h); a draw Vulkan cannot record exactly is drawn by OpenGL after the
+    // bracket has been closed. It stays off when the bound map is not shared (OpenGL draws the pass as before).
+    void setShadowPhase(bool on);
+    // True while the shadow phase is on and its draws are Vulkan's (not sent back by WolfVulkanDebugGLShadow):
+    // WolfStaticShadowBatch steps aside then - it draws with glMultiDrawElementsIndirect from buffers of its own
+    // (wolfstaticshadowbatch.cpp drawPass), which the interceptor cannot see - and the casters take the stock path.
+    bool shadowPassOnVulkan();
+    // [W114-VULKAN S5 2026-11-26] The target of the open bracket (wolfvkbrackettarget.h), null when none is open: the
+    // recorder asks it for the images its draws sample that OpenGL also owns (sampledImage(gl_texture_name)).
+    WolfVkBracketTarget* bracketTarget();
     // [AMD PERF 2026-11-08] WolfLogFrameRate: an OpenGL GL_TIMESTAMP at every swap/present (llviewerdisplay.cpp swap()), in BOTH
     // renderers; the interval between consecutive stamps is how long OpenGL's GPU work of a frame took to get through
     // (when GPU-bound). One "GL GPU frame" line a second, log tag WolfVulkanFrame.
@@ -143,7 +164,6 @@ namespace WolfVkBridge
     // [POSE CHECK 2026-11-08] WolfVulkanDebugPoseCheck: a model matrix GL applies (LLRenderPass::applyModelMatrix); compared
     // with what the Vulkan pass used for the same matrix this frame while the main G-buffer is bound
     void poseCheckModelMatrix(const LLMatrix4* model_matrix);
-    struct ScopedSkipDrawn { ScopedSkipDrawn(); ~ScopedSkipDrawn(); };
     // After the simple pass: writes the shared G-buffer to the logs folder when WolfVulkanDebugDumpGBuffer is set.
     void dumpGBufferIfAsked();
     U32 gbufferDrawsLastFrame();

@@ -17,7 +17,10 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "wolfvkscene.h"
+#include "wolfvkavatar.h"   // [W114-VULKAN S4 2026-11-26/] paletteMirrored
 #include "wolfvkmirror.h"
+#include "wolfvkresources.h"   // [VK S6a 2026-11-26] the Vulkan-owned vertex and index buffers
+#include "wolfvktextures.h"    // [VK S6 2026-11-26] the Vulkan-owned memory of raw-name textures
 #include "vk/wolfvkdevice.h"
 #include "vk/wolfvkswapchain.h"
 #include "vk/wolfvkbuffer.h"
@@ -38,6 +41,8 @@
 #include "llmatrix4a.h"
 #include "llappviewer.h"   // gUseWireframe
 #include "llfile.h"        // [BLACK WORLD 2026-11-10] LLFile::stat of manifest.json
+#include "llglstates.h"    // [VULKAN G-BUFFER S2 2026-11-26] LLGLDepthTest
+#include "llrender.h"      // [S2] LLTexUnit, LLRender
 
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -48,7 +53,6 @@
 namespace
 {
     constexpr VkDeviceSize UNIFORM_RING_BYTES = 64u * 1024u * 1024u;   // per frame: ~3 KB per draw -> ~20,000 draws (the G-buffer pass draws thousands)
-    constexpr VkDeviceSize STAGING_RING_BYTES = 64u * 1024u * 1024u;   // per frame: the vertex bytes rewritten by GL in one frame (streaming bursts)
 
     bool readSpvFile(const std::string& path, std::vector<uint32_t>& words)
     {
@@ -92,18 +96,29 @@ bool WolfVkScene::init(WolfVkDevice& device, WolfVkSwapchain& swapchain, std::st
 {
     mDevice = &device;
     mSpvDir = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "shaders", "spv");
-    mPipelines.init(device);
+    // [W114-VULKAN S7 2026-11-26] the driver's compiled pipelines are kept between runs (Mac gap (i); wolfvkpipeline.h)
+    mPipelines.init(device, gDirUtilp->getExpandedFilename(LL_PATH_CACHE, "wolfvk_pipelines.bin"));
     if (!mUniforms.init(device, UNIFORM_RING_BYTES, error))
     {
         return false;
     }
     mSamplers.init(device, gGLManager.mMaxAnisotropy);
-    if (!mStaging.init(device, STAGING_RING_BYTES, error))
-    {
-        return false;
-    }
     WolfVkMirror::init(device, mSamplers);
-    WolfVkMirror::setStagingRing(&mStaging);
+    {
+        // [VK S6a 2026-11-26] vertex and index buffers move into Vulkan memory that OpenGL imports. Without the store the
+        // Vulkan passes have no buffers to draw from and OpenGL draws the geometry (one plain line says so).
+        std::string store_why;
+        if (!WolfVkResources::init(device, store_why))
+        {
+            LL_WARNS("Vulkan") << "Resource store not started: " << store_why << ". Vertex buffers stay OpenGL's own and OpenGL draws the geometry." << LL_ENDL;
+        }
+        // [VK S6 2026-11-26] textures held by a raw OpenGL name are made in Vulkan memory from here on
+        std::string textures_why;
+        if (!WolfVkTextures::init(device, textures_why))
+        {
+            LL_WARNS("Vulkan") << "Texture owner not started: " << textures_why << ". Raw-name textures stay OpenGL's own." << LL_ENDL;
+        }
+    }
 
     // 1x1 white: what a missing texture samples (LLTexUnit::sWhiteTexture plays that part in GL); 1x1 transparent black:
     // a layer that contributes nothing to the composite
@@ -125,7 +140,9 @@ bool WolfVkScene::init(WolfVkDevice& device, WolfVkSwapchain& swapchain, std::st
         out->transition(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
         return device.endOneTimeAndWait(cmd, error);
     };
-    if (!make_pixel(mWhite, 255, 255, 255, 255) || !make_pixel(mTransparent, 0, 0, 0, 0))
+    // [VULKAN G-BUFFER S2 2026-11-26] mOpaqueBlack: what OpenGL samples from texture name 0 (the default texture object has no
+    // image, so it is incomplete, and an incomplete texture returns (0, 0, 0, 1): OpenGL 4.6 core 11.1.3.5 "Texture Access")
+    if (!make_pixel(mWhite, 255, 255, 255, 255) || !make_pixel(mTransparent, 0, 0, 0, 0) || !make_pixel(mOpaqueBlack, 0, 0, 0, 255))
     {
         return false;
     }
@@ -140,7 +157,9 @@ bool WolfVkScene::init(WolfVkDevice& device, WolfVkSwapchain& swapchain, std::st
             return false;
         }
         mComposite.reset(new WolfVkProgram());
-        if (!mComposite->create(device, "WolfVk composite", vert, frag, error))
+        // [W114-VULKAN merge 2026-11-26] Source: wolfvkpipeline.h:95 WolfVkProgram::create(device, name, vert, geom, frag, error);
+        // the composite has no geometry stage (an empty vector = none, wolfvkpipeline.cpp create: `!geom.empty() && ...`)
+        if (!mComposite->create(device, "WolfVk composite", vert, std::vector<uint32_t>(), frag, error))
         {
             return false;
         }
@@ -208,6 +227,16 @@ bool WolfVkScene::init(WolfVkDevice& device, WolfVkSwapchain& swapchain, std::st
         const std::string manifest = mSpvDir + delim + "manifest.json";
         llstat st{};
         const S64 manifest_bytes = (LLFile::stat(manifest, &st) == 0) ? static_cast<S64>(st.st_size) : -1;
+        // [STORE STAMP 2026-11-26] ...and whether it is the store made for this binary (WolfVkShaderMirror::checkStore)
+        std::string stamp_line;
+        if (WolfVkShaderMirror::checkStore(mSpvDir, stamp_line))
+        {
+            LL_INFOS("Vulkan") << stamp_line << LL_ENDL;
+        }
+        else
+        {
+            LL_WARNS("Vulkan") << stamp_line << LL_ENDL;
+        }
         LL_INFOS("Vulkan") << "SPIR-V store: " << spv_files << " .spv files in " << mSpvDir << ", manifest.json "
                            << (manifest_bytes < 0 ? std::string("MISSING") : llformat("%lld bytes", static_cast<long long>(manifest_bytes))) << LL_ENDL;
     }
@@ -225,6 +254,8 @@ void WolfVkScene::destroy()
         // descriptor pools, samplers and layers, so nothing here is reset or destroyed (review: the result was ignored and
         // the pools reset anyway). The objects stay with the abandoned device; only the GL hooks come off. The members'
         // own destructors only file deferred destroys, which a hung device never runs.
+        WolfVkResources::shutdown();   // [VK S6a 2026-11-26] buffers back to OpenGL; the Vulkan side is left with the hung device
+        WolfVkTextures::shutdown();    // [VK S6 2026-11-26] likewise the raw-name textures: OpenGL keeps them
         WolfVkMirror::shutdown();
         (void)mShare.release();
         (void)mScene.release();
@@ -257,11 +288,13 @@ void WolfVkScene::destroy()
     mUIImage.reset();
     mWhite.reset();
     mTransparent.reset();
-    WolfVkMirror::setStagingRing(nullptr);
+    mOpaqueBlack.reset();   // [S2]
+    mUniformBuffers.clear();
+    WolfVkResources::shutdown();   // [VK S6a 2026-11-26] every buffer back into OpenGL's own pool before the device goes
+    WolfVkTextures::shutdown();    // [VK S6 2026-11-26] the raw-name textures keep their OpenGL half
     WolfVkMirror::shutdown();
     mSamplers.destroy();
     mUniforms.destroy();
-    mStaging.destroy();
     mPipelines.destroy();
     if (gGLManager.mInited)
     {
@@ -742,7 +775,9 @@ WolfVkShaderMirror* WolfVkScene::mirrorFor(LLGLSLShader* shader)
         mNoSpirv[shader] = shader->mProgramObject;
         return nullptr;
     }
-    // the GL side sends every uniform again at its next bind, so the Vulkan copy gets them all (llglslshader.cpp bind())
+    // [S2 2026-11-26] it starts from the values the GL program holds now (wolfvkshader.h syncFromGL); and the GL side
+    // sends every uniform again at its next bind (llglslshader.cpp bind())
+    shader->mWolfVk->syncFromGL(shader->mProgramObject);
     shader->mUniformsDirty = true;
     mMirrorsMade++;   // [BLACK WORLD 2026-11-10]
     mShaderStatus = "\"" + shader->mName + "\" running on Vulkan (key " + shader->mWolfVk->key().substr(0, 8) + ")";
@@ -770,8 +805,10 @@ uint32_t WolfVkScene::drawPass(VkCommandBuffer cmd, uint32_t pass_type, LLGLSLSh
         LLVertexBuffer* glvb = params->mVertexBuffer.get();
         // every attribute the shader reads must be in the buffer (LLVertexBuffer::setBuffer asserts the same, :1724-1727)
         if ((program_mask & glvb->getTypeMask()) != program_mask) { mSkippedLastFrame++; continue; }
-        WolfVkVertexBuffer* vb = WolfVkMirror::vertexBuffer(glvb);
-        if (!vb || vb->hasPendingUploads()) { mSkippedLastFrame++; continue; }   // a copy made this frame waits for the next (its upload is after this pass)
+        // [VK S6a 2026-11-26] the buffer's own ranges in the Vulkan-owned store (no copy); null when it is OpenGL's own
+        // (the store is off or failed), and OpenGL then draws the batch
+        WolfVkVertexBuffer* vb = WolfVkResources::vertexBuffer(glvb);
+        if (!vb) { mSkippedLastFrame++; continue; }
         // a draw must stay inside the copy (an out-of-range fetch on the card is a device loss): LLDrawInfo's index range and
         // vertex range against the copy's counts (both set from the GL buffer's when it was made)
         if (static_cast<uint64_t>(params->mOffset) + params->mCount > vb->getNumIndices() || params->mEnd >= vb->getNumVerts())
@@ -843,7 +880,6 @@ uint32_t WolfVkScene::drawPass(VkCommandBuffer cmd, uint32_t pass_type, LLGLSLSh
 
         vb->bind(cmd, program_mask);
         vb->drawRange(cmd, params->mCount, params->mOffset);
-        mDrawnByVulkan.insert(params);
         draws++;
         // [POSE CHECK 2026-11-08] what this draw used: the model matrix's values (by the pointer GL dereferences again in
         // LLRenderPass::applyModelMatrix, lldrawpool.cpp:559-574), the view, and the vertex/index range of the copy
@@ -858,7 +894,7 @@ uint32_t WolfVkScene::drawPass(VkCommandBuffer cmd, uint32_t pass_type, LLGLSLSh
             }
             if (!mPoseViewSet) { memcpy(mPoseView, gGLModelView, sizeof(mPoseView)); mPoseViewSet = true; }
             if (mPoseRecords.size() < 8192) mPoseRecords.push_back({ params->mVertexBuffer, params->mStart, params->mEnd, params->mOffset, params->mCount, params->mModelMatrix });
-            WolfVkMirror::poseNoteDrawn(glvb);
+            WolfVkResources::poseNoteDrawn(glvb);
             mPoseBatches++;
         }
     }
@@ -879,7 +915,8 @@ void WolfVkScene::preparePass(VkCommandBuffer cmd, uint32_t pass_type, LLGLSLSha
         if (!params || !params->mCount || params->mVertexBuffer.isNull()) continue;
         LLVertexBuffer* glvb = params->mVertexBuffer.get();
         if ((program_mask & glvb->getTypeMask()) != program_mask) continue;
-        WolfVkMirror::vertexBuffer(glvb);   // made (copied from the GL buffer) if new; its upload is recorded below
+        // [VK S6a 2026-11-26] the vertex buffer needs no preparing: it lives in the Vulkan-owned store and its bytes were
+        // submitted when LLVertexBuffer flushed them (WolfVkResources::vertexBuffer flushes what is still pending)
         if (params->mTextureList.size() > 1)
         {
             for (const auto& t : params->mTextureList) if (t.notNull() && t->getGLTexture()) WolfVkMirror::texture(t->getGLTexture(), VK_NULL_HANDLE);
@@ -889,33 +926,256 @@ void WolfVkScene::preparePass(VkCommandBuffer cmd, uint32_t pass_type, LLGLSLSha
             WolfVkMirror::texture(params->mTexture->getGLTexture(), VK_NULL_HANDLE);
         }
     }
-    WolfVkMirror::recordUploads(cmd);   // outside the render pass: vkCmdCopyBuffer is not allowed inside one
+    (void)cmd;   // [VK S6a 2026-11-26] no buffer uploads are recorded here any more (the store submits its own batches)
 }
 
-uint32_t WolfVkScene::drawGBufferSimple(VkCommandBuffer cmd, WolfVkRenderTarget& gbuffer)
+// ---------------------------------------------------------------------------------------------------------------
+// [VULKAN G-BUFFER S2 2026-11-26] The draw interceptor (wolfvkscene.h recordGBufferDraw)
+
+void WolfVkScene::onShaderLinked(LLGLSLShader* shader)
 {
-    // LLDrawPoolSimple::renderDeferred (lldrawpoolsimple.cpp:99-111): LLGLDisable blend, gDeferredDiffuseProgram, the static
-    // PASS_SIMPLE batches; the deferred loop's state around it (pipeline.cpp:4328 LLGLEnable cull, :4352 setColorMask(true, true));
-    // depth: LLGLDepthTest default LEQUAL with writes (the G-buffer pass writes depth)
-    mGBufferDraws = 0;
-    preparePass(cmd, LLRenderPass::PASS_SIMPLE, &gDeferredDiffuseProgram);
+    if (!shader || !mDevice) return;
+    delete shader->mWolfVk;   // a relink: the old mirror described the old program
+    shader->mWolfVk = nullptr;
+    std::string error;
+    shader->mWolfVk = WolfVkShaderMirror::create(*mDevice, shader, mSpvDir, error);
+    if (!shader->mWolfVk)
+    {
+        // every gap named once per program variant: this one is drawn by OpenGL wherever it is used
+        LL_INFOS("Vulkan") << "Linked without a Vulkan mirror (OpenGL draws it): " << error << LL_ENDL;
+        mNoSpirv[shader] = shader->mProgramObject;
+        return;
+    }
+    shader->mWolfVk->syncFromGL(shader->mProgramObject);   // the channels mapUniforms gave the samplers, and any value already set
+    mNoSpirv.erase(shader);
+    mMirrorsMade++;
+}
+
+void WolfVkScene::uniformBufferData(uint32_t buffer, uint32_t offset, uint32_t size, const void* data, bool respecify)
+{
+    UniformBufferCopy& c = mUniformBuffers[buffer];
+    c.mVersion++;
+    if (respecify)
+    {
+        // glBufferData: the store is size bytes; with no data its contents are undefined (OpenGL 4.6 6.2 "Creating and
+        // Modifying Buffer Object Data Stores"), so nothing may be drawn from it until written
+        if (data) c.mBytes.assign(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
+        else c.mBytes.clear();
+        return;
+    }
+    // glBufferSubData outside the store is GL_INVALID_VALUE and changes nothing (OpenGL 4.6 6.2); an unknown store stays unknown
+    if (c.mBytes.empty() || static_cast<uint64_t>(offset) + size > c.mBytes.size() || !data) return;
+    memcpy(c.mBytes.data() + offset, data, size);
+}
+
+void WolfVkScene::uniformBufferBind(uint32_t point, uint32_t buffer)
+{
+    if (point < sizeof(mUniformBufferPoint) / sizeof(mUniformBufferPoint[0])) mUniformBufferPoint[point] = buffer;
+}
+
+void WolfVkScene::beginGBufferBracket()
+{
+    mBracketPipeline = VK_NULL_HANDLE;
+    mBracketBuffer = nullptr;
+    mBracketMask = 0;
+}
+
+namespace
+{
+    // The texture unit a sampler of shader reads, as OpenGL has it: the value last given to the sampler uniform through
+    // LLGLSLShader::uniform1i (the mirror records it: wolfvkshader.cpp set/setReserved), else the channel mapUniforms gave
+    // a reserved sampler with a raw glUniform1i (llglslshader.cpp mapUniformTextureChannel, mTexture[index]), else 0:
+    // every uniform of a program is zero after linking until set (OpenGL 4.6 7.6 "Uniform Variables").
+    int32_t samplerUnit(const LLGLSLShader* shader, const WolfVkShaderMirror* mirror, const std::string& name)
+    {
+        const int32_t recorded = mirror->samplerChannel(name);
+        if (recorded >= 0) return recorded;
+        const std::vector<std::string>& reserved = LLShaderMgr::instance()->mReservedUniforms;
+        for (size_t i = 0; i < reserved.size() && i < shader->mTexture.size(); ++i)
+        {
+            if (reserved[i] == name) return shader->mTexture[i] >= 0 ? shader->mTexture[i] : 0;
+        }
+        return 0;
+    }
+}
+
+bool WolfVkScene::recordGBufferDraw(VkCommandBuffer cmd, WolfVkRenderTarget& gbuffer, bool& pass_open, const InterceptedDraw& d, const char*& why)
+{
+    LLGLSLShader* shader = LLGLSLShader::sCurBoundShaderPtr;
+    if (!shader) { why = "no program bound"; return false; }
+    WolfVkShaderMirror* mirror = shader->mWolfVk;
+    if (!mirror) { why = "the program has no Vulkan mirror (no SPIR-V for this variant)"; return false; }
+    // [W114-VULKAN S4 2026-11-26] skinned programs (rigged meshes and the system avatar body) are recorded like any other:
+    // their joint palette reaches the mirror through the setters OpenGL's goes through (wolfvkavatar.h paletteMirrored
+    // proves the mirror holds it in the uploaded shape; else the draw is OpenGL's, named in the log)
+    if (!WolfVkAvatar::paletteMirrored(shader, mirror, why)) return false;
+    // triangles only: points take gl_PointSize and lines LLRender's line width, which the pipeline does not carry, and a
+    // LINE_LOOP has no Vulkan topology (wolfvkpipeline.cpp draws it as a strip)
+    if (d.mMode != LLRender::TRIANGLES && d.mMode != LLRender::TRIANGLE_STRIP && d.mMode != LLRender::TRIANGLE_FAN)
+    {
+        why = "a point or line draw"; return false;
+    }
+    // state OpenGL may have on that the pipeline state does not express (LLGLState's record, llgl.h wolfVkIsEnabled)
+    if (LLGLState::wolfVkIsEnabled(GL_SCISSOR_TEST) || LLGLState::wolfVkIsEnabled(GL_POLYGON_OFFSET_FILL) || LLGLState::wolfVkIsEnabled(GL_STENCIL_TEST)
+        || LLGLState::wolfVkIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE) || LLGLState::wolfVkIsEnabled(GL_CLIP_DISTANCE0))
+    {
+        why = "scissor, polygon offset, stencil, alpha to coverage or a clip plane enabled"; return false;
+    }
+    // [W114-VULKAN S5 2026-11-26] GL_DEPTH_CLAMP (the sun shadow cascades: pipeline.cpp renderShadow, LLGLEnable
+    // clamp_depth(depth_clamp ? GL_DEPTH_CLAMP : 0)) is the pipeline's depthClampEnable (wolfvkpipeline.h mDepthClamp).
+    // A device without the depthClamp feature cannot draw it: never unclamped - OpenGL draws the call.
+    const bool depth_clamp = LLGLState::wolfVkIsEnabled(GL_DEPTH_CLAMP);
+    if (depth_clamp && !mDevice->depthClamp()) { why = "depth clamp enabled on a device without the depthClamp feature"; return false; }
+
+    // the vertex copy (LLVertexBuffer::setBuffer asserts the same attribute rule, llvertexbuffer.cpp setBuffer)
+    const WolfVkProgram& program = mirror->program();
+    const uint32_t program_mask = program.attributeMask();
+    if ((program_mask & d.mBuffer->getTypeMask()) != program_mask) { why = "the vertex buffer lacks an attribute the program reads"; return false; }
+    // [W114-VULKAN merge 2026-11-26] the buffer's own ranges in the S6a store (wolfvkresources.h vertexBuffer: no copy;
+    // null when the buffer is OpenGL's own - LLRender's immediate-mode buffers, a buffer made before the store, or the
+    // store is off or failed). The interceptor has already flushed LLVertexBuffer's pending writes (wolfvkbridge.cpp
+    // interceptDraw), so the flush inside vertexBuffer() finds nothing and cannot close the bracket under this record.
+    WolfVkVertexBuffer* vb = WolfVkResources::vertexBuffer(d.mBuffer);
+    if (!vb) { why = "the vertex buffer is not in the Vulkan-owned store"; return false; }
+    // a draw must stay inside the buffer (an out-of-range fetch on the card is a device loss)
+    if (d.mIndexed ? (static_cast<uint64_t>(d.mFirst) + d.mCount > vb->getNumIndices() || d.mEnd >= vb->getNumVerts())
+                   : (static_cast<uint64_t>(d.mFirst) + d.mCount > vb->getNumVerts()))
+    {
+        why = "the draw range is outside the vertex copy"; return false;
+    }
+
+    // textures: what each sampler the shader reads samples in OpenGL right now
+    mDrawImages.assign(32, VkDescriptorImageInfo{ VK_NULL_HANDLE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL });
+    const VkDescriptorImageInfo fallback{ mSamplers.get(WolfVkSamplerCache::TFO_BILINEAR, WolfVkSamplerCache::TAM_WRAP, false), mWhite->view(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    for (const WolfVkSpirv::Sampler& smp : program.samplers())
+    {
+        if (!smp.mUsed) continue;   // no use in the shader: the fallback (any 2D image) stands in for it
+        // only plain 2D samplers are mirrored (WolfVkMirror::texture: 2D copies); cube, array, 3D and shadow samplers that
+        // the shader reads need OpenGL's other texture kinds and depth comparison - not shareable yet
+        if (smp.mDim != 1 || smp.mArrayed || smp.mShadow || smp.mMultisampled || smp.mArraySize != 1)
+        {
+            why = "the shader reads a cube, array, 3D, shadow or multisample texture"; return false;
+        }
+        if (smp.mBinding >= mDrawImages.size()) { why = "a sampler binding above 31"; return false; }
+        const int32_t unit_index = samplerUnit(shader, mirror, smp.mName);
+        LLTexUnit* unit = unit_index >= 0 ? gGL.getTexUnit(static_cast<U32>(unit_index)) : nullptr;
+        if (!unit || unit_index >= static_cast<int32_t>(LL_NUM_TEXTURE_LAYERS)) { why = "a sampler on a texture unit LLRender does not have"; return false; }
+        // a unit keeps one binding per target; the record is of its last bind, so it says what the 2D target holds only
+        // when that bind was a 2D one
+        if (unit->mWolfVkType != LLTexUnit::TT_TEXTURE) { why = "a texture unit whose last bind was not a 2D texture"; return false; }
+        const U32 name = unit->mWolfVkName;
+        if (name == 0)
+        {
+            mDrawImages[smp.mBinding] = { fallback.sampler, mOpaqueBlack->view(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+            continue;
+        }
+        const LLImageGL* image = unit->mWolfVkImage;
+        if (name == LLTexUnit::sWhiteTexture && LLViewerFetchedTexture::sWhiteImagep.notNull())
+        {
+            image = LLViewerFetchedTexture::sWhiteImagep->getGLTexture();   // LLTexUnit::unbind binds this one's name (llviewertexturelist.cpp)
+        }
+        if (!image || image->getTexName() != name) { why = "a texture bound without an LLImageGL (a render target or a manual bind)"; return false; }
+        WolfVkMirror::Texture t = WolfVkMirror::texture(const_cast<LLImageGL*>(image), VK_NULL_HANDLE);
+        if (!t.mImage || t.mImage->layout() != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) { why = "a texture without a Vulkan copy (kind or format not mirrored)"; return false; }
+        mDrawImages[smp.mBinding] = { t.mSampler, t.mImage->view(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    }
+
+    // the viewer's uniform blocks (set 2): the bytes of the buffer bound to each block's point
+    const std::vector<WolfVkProgram::BlockBinding>& blocks = program.blocks();
+    bool blocks_used = false;
+    for (const WolfVkProgram::BlockBinding& b : blocks) blocks_used = blocks_used || b.mUsed;
+    mDrawBlockOffsets.assign(blocks.size(), 0);
+    if (blocks_used)
+    {
+        for (size_t i = 0; i < blocks.size(); ++i)
+        {
+            const WolfVkProgram::BlockBinding& b = blocks[i];
+            const uint32_t point = b.mBinding;
+            const uint32_t buffer = point < sizeof(mUniformBufferPoint) / sizeof(mUniformBufferPoint[0]) ? mUniformBufferPoint[point] : 0;
+            auto it = buffer ? mUniformBuffers.find(buffer) : mUniformBuffers.end();
+            if (it == mUniformBuffers.end() || it->second.mBytes.size() < b.mSize)
+            {
+                if (!b.mUsed) continue;   // its descriptor names the ring at offset 0; the shader never reads it
+                why = "a uniform block whose buffer bytes are not known (GLTF blocks are not mirrored)"; return false;
+            }
+            UniformBufferCopy& c = it->second;
+            if (c.mPushedEpoch != mUniforms.epoch() || c.mPushedVersion != c.mVersion)
+            {
+                VkDeviceSize offset = 0;
+                if (!mUniforms.push(c.mBytes.data(), c.mBytes.size(), offset)) { why = "the frame uniform ring is full"; return false; }
+                c.mOffset = offset;
+                c.mPushedEpoch = mUniforms.epoch();
+                c.mPushedVersion = c.mVersion;
+            }
+            mDrawBlockOffsets[i] = static_cast<uint32_t>(c.mOffset);
+        }
+    }
+
+    // the pipeline state from OpenGL's
     WolfVkPipelineState state;
-    state.mBlendEnable = false;
-    state.mDepthTest = true;
-    state.mDepthWrite = true;
-    state.mDepthFunc = GL_LEQUAL;
-    state.mCullFace = true;
-    state.mWireframe = gUseWireframe;
-    state.mTopology = static_cast<uint8_t>(LLRender::TRIANGLES);
-    state.mColorAttachments = gbuffer.getNumTextures();   // the four G-buffer attachments; wolf_coverage (location 4) has none and is discarded
+    state.mBlendEnable = LLGLState::wolfVkIsEnabled(GL_BLEND);
+    {
+        LLRender::eBlendFactor sc, dc, sa, da;
+        gGL.wolfVkBlendFactors(sc, dc, sa, da);
+        state.mBlendSrcColor = static_cast<uint8_t>(sc);
+        state.mBlendDstColor = static_cast<uint8_t>(dc);
+        state.mBlendSrcAlpha = static_cast<uint8_t>(sa);
+        state.mBlendDstAlpha = static_cast<uint8_t>(da);
+    }
+    const bool* mask = gGL.wolfVkColorMask();
+    for (int c = 0; c < 4; ++c) state.mColorMask[c] = mask[c];
+    state.mDepthTest = LLGLDepthTest::wolfVkDepthEnabled();
+    state.mDepthWrite = LLGLDepthTest::wolfVkWriteEnabled();
+    state.mDepthFunc = LLGLDepthTest::wolfVkDepthFunc();
+    state.mCullFace = LLGLState::wolfVkIsEnabled(GL_CULL_FACE);   // glCullFace(GL_BACK) is the only face set (llrender.cpp LLRender::init)
+    // [W114-VULKAN S4 2026-11-26/] ... except by the system avatar's hair and skirt (wolfvkavatar.h cullsFrontFaces)
+    if (state.mCullFace && shader->mFeatures.hasSkinning) state.mCullFront = WolfVkAvatar::cullsFrontFaces();
+    state.mWireframe = gUseWireframe;                             // renderGeomDeferred's glPolygonMode(GL_LINE) follows it
+    state.mDepthClamp = depth_clamp;                              // [W114-VULKAN S5 2026-11-26/]
+    state.mTopology = static_cast<uint8_t>(d.mMode);
+    state.mAttributeMask = program_mask;
+    state.mColorAttachments = gbuffer.getNumTextures();          // bindTarget draws into every attachment (llrendertarget.cpp)
     state.mCoverageAttachment = false;
-    const float clear[4] = { 0.f, 0.f, 0.f, 0.f };
-    const uint32_t skipped_before = mSkippedLastFrame;
-    gbuffer.begin(cmd, false, false, clear, 1.0f);   // LOAD: GL cleared it and drew the pools before this one
-    mGBufferDraws = drawPass(cmd, LLRenderPass::PASS_SIMPLE, &gDeferredDiffuseProgram, state, gbuffer);
-    gbuffer.end(cmd);
-    mGBufferComplete = (mSkippedLastFrame == skipped_before);
-    return mGBufferDraws;
+    // Source: WolfVkRenderTarget::begin() lazily makes this pass, but VkGraphicsPipelineCreateInfo needs it first.
+    std::string pass_error;
+    if (!gbuffer.ensurePass(pass_error))
+    {
+        LL_WARNS("Vulkan") << "G-buffer render pass: " << pass_error << LL_ENDL;
+        why = "the Vulkan G-buffer render pass could not be made";
+        return false;
+    }
+    VkPipeline pipeline = mPipelines.get(program, state, gbuffer.renderPass());
+    if (pipeline == VK_NULL_HANDLE) { why = "the Vulkan pipeline could not be made"; return false; }
+
+    // [W114-VULKAN merge 2026-11-26] no uploads are recorded here: the S6a store submits its own copy batches
+    // (LLVertexBuffer::wolfVkEndBatch), and a view of store ranges never has uploads pending (wolfvkbuffer.h initExternal)
+    if (!pass_open)
+    {
+        const float clear[4] = { 0.f, 0.f, 0.f, 0.f };
+        gbuffer.begin(cmd, false, false, clear, 1.0f);   // LOAD: what OpenGL drew before stays
+        pass_open = true;
+        mBracketPipeline = VK_NULL_HANDLE;   // a new render pass instance: bind again
+        mBracketBuffer = nullptr;
+    }
+    // descriptors first: a full ring or pool records nothing (the draw goes to OpenGL)
+    if (!mirror->bindUniforms(cmd, mUniforms)) { why = "the frame uniform ring or descriptor pool is full"; return false; }
+    if (!mirror->bindSamplers(cmd, mUniforms, mDrawImages, fallback)) { why = "the frame descriptor pool is full"; return false; }
+    if (blocks_used && !mirror->bindBlocks(cmd, mUniforms, mDrawBlockOffsets)) { why = "the frame descriptor pool is full"; return false; }
+    if (pipeline != mBracketPipeline)
+    {
+        gVk.vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);   // vulkan_core.h PFN_vkCmdBindPipeline
+        mBracketPipeline = pipeline;
+    }
+    if (vb != mBracketBuffer || program_mask != mBracketMask)
+    {
+        vb->bind(cmd, program_mask);
+        mBracketBuffer = vb;
+        mBracketMask = program_mask;
+    }
+    if (d.mIndexed) vb->drawRange(cmd, d.mCount, d.mFirst);
+    else vb->drawArrays(cmd, d.mFirst, d.mCount);
+    mGBufferDraws++;
+    return true;
 }
 
 void WolfVkScene::drawFullbright(VkCommandBuffer cmd)
@@ -1116,9 +1376,19 @@ void WolfVkScene::probeBatch(const LLDrawInfo* params, const LLVertexBuffer* glv
     const GLintptr offset = static_cast<GLintptr>(glvb->getOffset(LLVertexBuffer::TYPE_VERTEX)) + static_cast<GLintptr>(params->mStart) * 12;
     GLint saved_copy_read = 0;
     glGetIntegerv(GL_COPY_READ_BUFFER_BINDING, &saved_copy_read);
-    glBindBuffer(GL_COPY_READ_BUFFER, glvb->getGLBuffer());
-    glGetBufferSubData(GL_COPY_READ_BUFFER, offset, 12, pos);
-    glBindBuffer(GL_COPY_READ_BUFFER, static_cast<GLuint>(saved_copy_read));
+    if (glvb->getWolfVkVertexHandle() && glvb->getMappedData())
+    {
+        // [VK S6a 2026-11-26] a buffer in the Vulkan-owned store: its client copy holds every byte sent to the card
+        // (llvertexbuffer.cpp flush_vbo). glGetBufferSubData is not used on an imported buffer: NVIDIA 615.78 returns
+        // the bytes of its first read after Vulkan rewrites the memory (vk-s6 probe 2026-11-26).
+        if (static_cast<size_t>(offset) + 12 <= glvb->getSize()) memcpy(pos, glvb->getMappedData() + offset, 12);
+    }
+    else
+    {
+        glBindBuffer(GL_COPY_READ_BUFFER, glvb->getGLBuffer());
+        glGetBufferSubData(GL_COPY_READ_BUFFER, offset, 12, pos);
+        glBindBuffer(GL_COPY_READ_BUFFER, static_cast<GLuint>(saved_copy_read));
+    }
     const glm::vec4 clip = mvp * glm::vec4(pos[0], pos[1], pos[2], 1.f);
     std::ostringstream s;
     s << "probe: batch count " << params->mCount << " offset " << params->mOffset << " start " << params->mStart << " end " << params->mEnd
@@ -1215,6 +1485,7 @@ bool WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain,
                 w.pBufferInfo = &bi;
                 gVk.vkUpdateDescriptorSets(mDevice->device(), 1, &w, 0, nullptr);
                 const uint32_t dyn = static_cast<uint32_t>(offset);
+                mUniforms.forgetBound();   // [S2 2026-11-26/] bound here directly, not through the lean path's record
                 gVk.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mComposite->pipelineLayout(), WolfVkProgram::SET_UNIFORMS, 1, &set, 1, &dyn);
                 uniforms_bound = true;
             }
@@ -1239,17 +1510,22 @@ bool WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain,
         VkDescriptorSet set = uniforms_bound ? mUniforms.allocate(mComposite->samplerSetLayout()) : VK_NULL_HANDLE;
         if (set != VK_NULL_HANDLE)
         {
+            // [W114-VULKAN S7 2026-11-26] only the bindings the composite's set-1 layout holds (the samplers its
+            // stages statically use, WolfVkProgram::samplerSlots; VUID-VkWriteDescriptorSet-dstBinding-00315)
             VkWriteDescriptorSet writes[4]{};
+            uint32_t write_count = 0;
             for (uint32_t b = 0; b < 4; ++b)
             {
-                writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                writes[b].dstSet = set;
-                writes[b].dstBinding = b;
-                writes[b].descriptorCount = 1;
-                writes[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                writes[b].pImageInfo = &by_binding[b];
+                if (!mComposite->samplerInLayout(b)) continue;
+                writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[write_count].dstSet = set;
+                writes[write_count].dstBinding = b;
+                writes[write_count].descriptorCount = 1;
+                writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                writes[write_count].pImageInfo = &by_binding[b];
+                ++write_count;
             }
-            gVk.vkUpdateDescriptorSets(mDevice->device(), 4, writes, 0, nullptr);
+            if (write_count) gVk.vkUpdateDescriptorSets(mDevice->device(), write_count, writes, 0, nullptr);
             gVk.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mComposite->pipelineLayout(), WolfVkProgram::SET_SAMPLERS, 1, &set, 0, nullptr);
             gVk.vkCmdDraw(cmd, 3, 1, 0, 0);   // the full-screen triangle (compositeV.glsl)
             drawn = by_binding[2].imageView != mTransparent->view();   // [G2] with the GL frame layer bound
@@ -1262,9 +1538,10 @@ bool WolfVkScene::drawComposite(VkCommandBuffer cmd, WolfVkSwapchain& swapchain,
 void WolfVkScene::beginFrame()
 {
     mUniforms.beginFrame(static_cast<uint32_t>(mDevice->frameCounter()));
-    mStaging.beginFrame(static_cast<uint32_t>(mDevice->frameCounter()));
+    WolfVkResources::frameBegin();   // [VK S6a 2026-11-26] a store that failed hands its buffers back to OpenGL here
     probeVkCollect();   // [BLACK WORLD 2026-11-10] this slot's fence has been waited: its probe buffer is final
     frameCheckCollect();   // [G2 2026-11-11] likewise the login check's sample
+    mPipelines.saveIfDue(LLTimer::getElapsedSeconds());   // [W114-VULKAN S7 2026-11-26/] at most once a minute, only after new pipelines
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1773,82 +2050,14 @@ void WolfVkScene::poseCheckVertices()
     static LLCachedControl<bool> pose_check(gSavedSettings, "WolfVulkanDebugPoseCheck", false);
     if (!pose_check) return;
     const F64 now = LLTimer::getTotalSeconds();
-    if (now - mPoseLast < 1.0) return;   // once a second: glGetBufferSubData waits for the GPU
+    if (now - mPoseLast < 1.0) return;   // one log line a second
     mPoseLast = now;
-    GLint saved_array = 0, saved_element = 0;
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &saved_array);
-    glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &saved_element);
-    std::vector<uint8_t> gl_bytes;
-    // [POSE CHECK round 2, nv-ab3/nv-bis1] the batches with a model matrix (rocked boats, every active drawable) first - the
-    // dashes sit on them - then the rest, up to 1024 ranges; every attribute array of the range is compared, not only the
-    // positions (the colour's alpha is the env intensity frag_data[1] and encodeNormal write, diffuseIndexedF.glsl)
-    std::vector<const PoseRecord*> order;
-    for (const PoseRecord& r : mPoseRecords) if (r.mMatrix) order.push_back(&r);
-    const size_t moving = order.size();
-    for (const PoseRecord& r : mPoseRecords) if (!r.mMatrix) order.push_back(&r);
-    size_t sampled = 0;
-    for (const PoseRecord* rp : order)
-    {
-        const PoseRecord& r = *rp;
-        if (sampled >= 1024) break;
-        LLVertexBuffer* glvb = r.mBuffer.get();
-        if (!glvb || glvb->getGLBuffer() == 0) continue;
-        WolfVkVertexBuffer* vb = WolfVkMirror::existingVertexBuffer(glvb);
-        if (!vb || !vb->vertices().hostData()) continue;
-        sampled++;
-        mPoseVertexSampled++;
-        if (r.mMatrix) mPoseMovingSampled++;
-        glBindBuffer(GL_ARRAY_BUFFER, glvb->getGLBuffer());
-        // every attribute array the copy holds (WolfVkVertexBuffer::calcOffsets = LLVertexBuffer::calcOffsets,
-        // llvertexbuffer.cpp:1062-1082; TYPE_TEXTURE_INDEX lives inside the positions, so it is covered by TYPE_VERTEX)
-        for (uint32_t t = 0; t < WolfVkVertexBuffer::TYPE_TEXTURE_INDEX; ++t)
-        {
-            if (!(vb->getTypeMask() & (1u << t)) || WolfVkVertexBuffer::sTypeSize[t] == 0) continue;
-            const size_t stride = WolfVkVertexBuffer::sTypeSize[t];
-            const size_t first = static_cast<size_t>(vb->getOffset(static_cast<WolfVkVertexBuffer::AttributeType>(t))) + static_cast<size_t>(r.mStart) * stride;
-            const size_t bytes = static_cast<size_t>(r.mEnd - r.mStart + 1) * stride;
-            if (first + bytes > vb->vertices().size()) continue;
-            gl_bytes.resize(bytes);
-            glGetBufferSubData(GL_ARRAY_BUFFER, static_cast<GLintptr>(first), static_cast<GLsizeiptr>(bytes), gl_bytes.data());
-            if (memcmp(gl_bytes.data(), vb->vertices().hostData() + first, bytes) != 0)
-            {
-                mPoseVertexMismatch++;
-                if (r.mMatrix) mPoseMovingMismatch++;
-                if (mPoseFirstMismatch.empty())
-                {
-                    size_t at = 0;
-                    while (at < bytes && gl_bytes[at] == vb->vertices().hostData()[first + at]) ++at;
-                    mPoseFirstMismatch = llformat("vertex buffer %p attribute %u (%s) verts %u-%u: the Vulkan copy differs from GL's from byte %zu of %zu (%s)",
-                                                  (const void*)glvb, t, WolfVkVertexBuffer::sAttribName[t], r.mStart, r.mEnd, at, bytes,
-                                                  r.mMatrix ? "a batch with a model matrix" : "a static batch");
-                }
-                break;   // one count per range
-            }
-        }
-        if (glvb->getGLIndices() != 0 && vb->indices().hostData())
-        {
-            // the index size as the copy was made (16- or 32-bit: LLVertexBuffer::setIndexData has both, llvertexbuffer.cpp:1918-1931)
-            const size_t isz = vb->getNumIndices() ? static_cast<size_t>(vb->getIndicesSize() / vb->getNumIndices()) : 0;
-            const size_t ifirst = static_cast<size_t>(r.mOffset) * isz;
-            const size_t ibytes = static_cast<size_t>(r.mCount) * isz;
-            if (isz && ifirst + ibytes <= vb->indices().size())
-            {
-                gl_bytes.resize(ibytes);
-                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glvb->getGLIndices());
-                glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLintptr>(ifirst), static_cast<GLsizeiptr>(ibytes), gl_bytes.data());
-                if (memcmp(gl_bytes.data(), vb->indices().hostData() + ifirst, ibytes) != 0) mPoseIndexMismatch++;
-            }
-        }
-    }
-    mPoseMovingBatches += moving;
-    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(saved_array));
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLuint>(saved_element));
+    // [VK S6a 2026-11-26] the comparison of the Vulkan COPY of each vertex range with OpenGL's buffer ended with the copies:
+    // both renderers now draw the same bytes in the same memory (WolfVkResources). What can still differ is timing - a
+    // buffer rewritten after a Vulkan pass recorded draws from it - which the store counts (late flushes below).
     LL_INFOS("WolfVulkanPose") << "batches " << mPoseBatches << ", GL matrix checks " << mPoseGlMatrixChecks << ", matrix changed after the Vulkan pass "
                                << mPoseMatrixMismatch << " (max " << mPoseMatrixMaxDiff << "), view changed " << mPoseViewMismatch
-                               << "; vertex ranges sampled " << mPoseVertexSampled << " (with a model matrix " << mPoseMovingSampled
-                               << ", of " << mPoseMovingBatches << " such batches seen at the checks), attribute data differ " << mPoseVertexMismatch
-                               << " (with a model matrix " << mPoseMovingMismatch << "), indices differ " << mPoseIndexMismatch
-                               << "; late GL flushes into drawn buffers " << WolfVkMirror::poseLateFlushes()
+                               << "; late GL flushes into drawn buffers " << WolfVkResources::poseLateFlushes()
                                << (mPoseFirstMismatch.empty() ? std::string() : "; first: " + mPoseFirstMismatch) << " (totals)" << LL_ENDL;
     mPoseFirstMismatch.clear();
     // the Vulkan side's copy of the simple pass's uniforms (nv-bis1: the dashes vanish after the first shader reload, so
@@ -1870,7 +2079,7 @@ void WolfVkScene::poseCheckFrameEnd()
     mPoseMatrices.clear();
     mPoseRecords.clear();
     mPoseViewSet = false;
-    WolfVkMirror::poseFrameEnd();
+    WolfVkResources::poseFrameEnd();
 }
 
 bool WolfVkScene::handOverBroken() const

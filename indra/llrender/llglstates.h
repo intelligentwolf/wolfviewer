@@ -45,6 +45,10 @@ public:
     GLboolean mPrevDepthEnabled;
     GLenum mPrevDepthFunc;
     GLboolean mPrevWriteEnabled;
+    // [VULKAN G-BUFFER S2 2026-11-26] the depth state this class has applied, for the Vulkan draw interceptor
+    static bool wolfVkDepthEnabled() { return sDepthEnabled == GL_TRUE; }
+    static bool wolfVkWriteEnabled() { return sWriteEnabled == GL_TRUE; }
+    static GLenum wolfVkDepthFunc() { return sDepthFunc; }
 private:
     static GLboolean sDepthEnabled; // defaults to GL_FALSE
     static GLenum sDepthFunc; // defaults to GL_LESS

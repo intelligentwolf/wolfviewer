@@ -291,6 +291,23 @@
 	 top="1"
 	 visible="false"
 	 width="16" />
+	<!-- [COFFEE 2026-11-27] Paul: "next to the flea for flea report add a coffee cup icon that links to our buy me a coffee
+	     page". The same page as Wolf World > Buy us a coffee (Wolf.BuyCoffee: wolf-grid.com ?f=coffee in the system browser);
+	     llstatusbar.cpp places it just left of the Flea Report icon (or left of Wolf Grid on Second Life / other grids). -->
+	<button
+	 follows="right|top"
+	 height="16"
+	 image_pressed="WolfCoffee_Press"
+	 image_selected="WolfCoffee_Press"
+	 image_unselected="WolfCoffee_Off"
+	 label=""
+	 layout="topleft"
+	 left="-600"
+	 name="wolf_coffee_btn"
+	 tool_tip="Buy us a coffee: support Wolf Territories (opens our coffee page in your browser)"
+	 top="1"
+	 visible="true"
+	 width="16" />
 	<panel
 	 height="18"
 	 left="-481"

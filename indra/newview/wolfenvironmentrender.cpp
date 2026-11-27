@@ -25,6 +25,7 @@
 #include "wolfvrscreen.h"   // [VR CLOUDS 2026-11-05] WolfVRScreen::secondEye / stereoEye (cloudsFrame)
 
 #include <algorithm>
+#include <chrono>
 #include <iomanip>
 #include <sstream>
 #include <cmath>
@@ -37,6 +38,9 @@
 #include "llagent.h"
 #include "lldate.h"
 #include "lldir.h"
+#include "llfile.h"   // [W114-VULKAN S8 2026-11-26] LLFile::mkdir (sky tables dump)
+#include "wolfvknative.h"
+#include "vk/wolfcoreloader.h"
 #include "llenvironment.h"
 #include "llfocusmgr.h"        // [2026-11-02 tickets 442/439] the overlay watch: window focus
 #include "wolfeepreference.h"
@@ -103,6 +107,7 @@ namespace
             w.half.resize(65536);
             for (U32 i = 0; i < 65536; ++i) w.half[i] = glm::unpackHalf1x16((U16)i);
             for (U32 i = 0; i < 256; ++i) w.byte[i] = (F32)i / 255.f;   // OpenGL 4.6 core 2.3.5.1: c / (2^b - 1)
+            if (gGLManager.mIsNativeVulkan) return w;
             // the driver's own conversion: an RGBA16F texture holding every half and an RGBA8 one holding every byte, read as
             // GL_FLOAT (synchronous, once). The state touched is put back exactly (the texture-unit cache stays true).
             GLint prevTex = 0, prevPack = 0, prevUnpack = 0, packAlign = 4, unpackAlign = 4, unpackRow = 0;
@@ -184,6 +189,93 @@ namespace
     // = 0.004675 (the first sun's disc is the atmosphere's own, sky.glsl:48-59).
     const F64 WOLF_SUN_RADIUS = 0.004675;
 
+    // [W114 FRAME RATE 2026-11-26] A small read-back taken from the GPU without the CPU ever waiting for it: a ring of pixel-pack
+    // buffers, each fenced when its copy is queued, read only once glClientWaitSync(..., 0) says the copy is done (as the
+    // overlay watch's ring, owUpdate step 1). The two buffers a frame apart it replaces (camPbo / lumPbo) were read with
+    // glGetBufferSubData one frame later whether the GPU had got there or not, so a GPU more than a frame behind made the CPU
+    // wait (the Aurora review, 26 Nov). The reading is the same; when the GPU is behind it arrives a frame or two later.
+    struct ReadbackRing
+    {
+        static constexpr U32 N = 4;
+        S32    vkChannel = -1;
+        GLuint pbo[N] = {};
+        GLsync fence[N] = {};
+        F32    tag[N] = {};      // kept with a reading (the light meter's pre-exposure of the frame it came from)
+        U32    write = 0;        // the next slot to queue into
+        U32    used = 0;         // slots queued and not yet taken, the oldest at (write + N - used) % N
+
+        // forget what is queued (the readings are not wanted any more)
+        void drop()
+        {
+            if (gGLManager.mIsNativeVulkan)
+            {
+                if (vkChannel >= 0) WolfVkNative::resetAsyncTextureRead(vkChannel);
+                write = 0;
+                used = 0;
+                return;
+            }
+            for (U32 i = 0; i < N; ++i)
+            {
+                if (fence[i]) { glDeleteSync(fence[i]); fence[i] = 0; }
+            }
+            write = 0;
+            used = 0;
+        }
+        void release()
+        {
+            drop();
+            if (!gGLManager.mIsNativeVulkan && pbo[0]) { glDeleteBuffers((GLsizei)N, pbo); for (GLuint& b : pbo) b = 0; }
+        }
+        // the newest finished reading into `out` (and its tag); false (out untouched) when none has finished
+        bool take(void* out, size_t bytes, F32* tag_out = nullptr)
+        {
+            if (gGLManager.mIsNativeVulkan)
+            {
+                return vkChannel >= 0 && WolfVkNative::pollAsyncTextureRead(vkChannel, out, bytes, tag_out);
+            }
+            S32 last = -1;
+            while (used > 0)
+            {
+                const U32 i = (write + N - used) % N;
+                // [W114 FRAME RATE 2026-11-26] a slot whose glFenceSync failed holds 0, which is not a sync object to wait on
+                // (Source: OpenGL 4.6 core spec section 4.1 "Sync Objects and Fences": FenceSync returns zero on an error;
+                // ClientWaitSync on a name that is not a sync object is GL_INVALID_VALUE): it is dropped as a failed slot,
+                // exactly as the GL_WAIT_FAILED path below drops one, without the call.
+                const GLenum st = fence[i] ? glClientWaitSync(fence[i], 0, 0) : (GLenum)GL_WAIT_FAILED;
+                if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED && st != GL_WAIT_FAILED) break;   // in flight
+                if (fence[i]) glDeleteSync(fence[i]);
+                fence[i] = 0;
+                --used;
+                if (st != GL_WAIT_FAILED) last = (S32)i;   // a failed fence (none made): that reading is dropped
+            }
+            if (last < 0) return false;
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[last]);
+            glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)bytes, out);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            if (tag_out) *tag_out = tag[last];
+            return true;
+        }
+        // the next slot bound to GL_PIXEL_PACK_BUFFER with `bytes` reserved; false when all N are still in flight (nothing bound,
+        // this frame's reading is skipped rather than waited for)
+        bool beginQueue(size_t bytes)
+        {
+            if (!pbo[0]) glGenBuffers((GLsizei)N, pbo);
+            if (used >= N) return false;
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[write]);
+            glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr)bytes, nullptr, GL_STREAM_READ);
+            return true;
+        }
+        // after the copy into the bound slot was issued: fence it and unbind
+        void endQueue(F32 tag_in = 0.f)
+        {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            fence[write] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            tag[write] = tag_in;
+            write = (write + 1) % N;
+            ++used;
+        }
+    };
+
     struct Gpu
     {
         bool failed = false;          // a program or a target failed: tier 0 for the session
@@ -195,19 +287,14 @@ namespace
         LLRenderTarget layer;         // the composite, full resolution (the frame is its input)
         LLRenderTarget probeLayer;    // the same for reflection-probe faces (their own size: no reallocation per face)
         LLRenderTarget camShadow;     // 1 x 1: the clouds' transmittance at the camera (the light meter)
-        GLuint camPbo[2] = {};        // camShadow read back through two pixel-pack buffers, a frame apart (no stall)
-        bool   camPboPending[2] = {};
-        U32    camPboIndex = 0;
+        ReadbackRing camRing{ 0 };    // camShadow read back through fenced pixel-pack buffers (no stall) [W114 2026-11-26]
         LLRenderTarget logLum;        // 64 x 64, mipmapped: the frame's log luminance (wolftk/logLumF.glsl), its 1 x 1 mip the mean
         // [WolfViewer 2026-10-29 ticket 349] the native fog for the surfaces drawn after the composite (wolftk/fogSigmaF.glsl,
         // atmosphereLibF.glsl wolfTkNativeFog): W x H, mipmapped, (sigma x weight, weight); the frame and the overlay it was made with
         LLRenderTarget fogSigma;
         U32    fogFrame = U32_MAX;
         GLuint fogOverlay = 0;
-        GLuint lumPbo[2] = {};        // the mean read back a frame apart, as camShadow (RGBA half floats, 8 bytes)
-        bool   lumPboPending[2] = {};
-        F32    lumPboExposure[2] = { 1.f, 1.f };   // the pre-exposure of the frame each reading was taken from
-        U32    lumPboIndex = 0;
+        ReadbackRing lumRing{ 1 };    // the mean read back as camShadow (RGBA half floats, 8 bytes); its tag the pre-exposure
         U32    updateFrame = U32_MAX; // the frame frameUpdate last ran in (it runs once a frame)
         bool   active = false;        // skyActive(), worked out once a frame with tier()
         bool   captureFinalPending = false;   // WolfEnvironmentDebugCapture: postPass captured, the final frame to come
@@ -378,6 +465,7 @@ namespace
 
     bool timersAvailable()
     {
+        if (gGLManager.mIsNativeVulkan) return false;
         // glQueryCounter is OpenGL 3.3 core. On Windows llgl.cpp loads it as a pointer (llgl.cpp:228,
         // 1928, inside #if LL_WINDOWS): fail closed when the driver did not give one.
 #if LL_WINDOWS
@@ -423,6 +511,90 @@ namespace
             }
             sGpu.qPending[slot][s] = false;
         }
+    }
+
+    /** [W114-VULKAN 2026-11-27] THE SKY DIAGNOSTIC (Paul: "the frame rate is right down ... do a diagnostic of the sky"). Under
+     *  Vulkan there are no GL timer queries (timersAvailable), so every section of the Wolf sky is timed here: its CPU time
+     *  (wall clock round the call, which under Vulkan includes recording its commands) and its GPU time (WolfVkNative
+     *  gpuSectionBegin/End timestamps), the main view and the reflection-probe faces apart, with the calls a frame. One
+     *  #WolfEnvPerf# line every 10 s. Nested sections are inclusive (CLOUDS inside POST, probeSky inside SKY). */
+    enum DiagSection
+    {
+        DS_LUTS = 0, DS_SKY, DS_SKY_PROBE, DS_CLOUDS, DS_CLOUDS_PROBE, DS_POST, DS_POST_PROBE, DS_ZONE,   // GPU-timed too
+        DS_SCENE_UNIF, DS_COVER, DS_PROBE_SKY, DS_COUNT
+    };
+    const char* const DS_NAMES[DS_COUNT] = { "luts", "sky", "sky(probe)", "clouds", "clouds(probe)", "post", "post(probe)",
+                                             "zone", "sceneUniforms", "cloudCover", "probeSky" };
+    struct CpuDiag
+    {
+        F64 sec[DS_COUNT] = {};
+        U32 calls[DS_COUNT] = {};
+        U32 sceneMiss = 0;
+        U32 frames = 0;
+        F64 windowStart = -1.0;
+    };
+    CpuDiag sDiag;
+    bool envPerfEnabled()
+    {
+        static LLCachedControl<bool> s_envPerf(gSavedSettings, "WolfEnvPerfLog", false,
+            "Log Wolf Environment sky/cloud CPU and GPU timing every 10 s");
+        return s_envPerf;
+    }
+    struct DiagScope
+    {
+        S32 s;
+        bool active;
+        bool gpu;
+        std::chrono::steady_clock::time_point t0;
+        explicit DiagScope(S32 sec) : s(sec), active(envPerfEnabled()), gpu(active && gGLManager.mIsNativeVulkan && sec <= DS_ZONE)
+        {
+            if (active)
+            {
+                t0 = std::chrono::steady_clock::now();
+                if (gpu) WolfVkNative::gpuSectionBegin((U32)s);
+            }
+        }
+        ~DiagScope()
+        {
+            if (active)
+            {
+                if (gpu) WolfVkNative::gpuSectionEnd((U32)s);
+                sDiag.sec[s] += std::chrono::duration<F64>(std::chrono::steady_clock::now() - t0).count();
+                ++sDiag.calls[s];
+            }
+        }
+    };
+    void diagFrameAndLog()
+    {
+        if (!envPerfEnabled()) return;
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (sDiag.windowStart < 0.0) { sDiag = CpuDiag(); sDiag.windowStart = now; }
+        ++sDiag.frames;
+        if (now - sDiag.windowStart < 10.0 || sDiag.frames == 0) return;
+        const F64 inv = 1.0 / (F64)sDiag.frames;
+        F64 gms[WolfVkNative::GPU_SECTION_MAX] = {}, gcalls[WolfVkNative::GPU_SECTION_MAX] = {};
+        const bool haveGpu = gGLManager.mIsNativeVulkan && WolfVkNative::takeGpuSectionStats(gms, gcalls, WolfVkNative::GPU_SECTION_MAX);
+        std::ostringstream o;
+        o << std::fixed << std::setprecision(2) << "sky diagnostic over " << sDiag.frames << " frames (" << (F64)sDiag.frames / (now - sDiag.windowStart)
+          << " fps), per frame - CPU ms / GPU ms / calls:";
+        F64 cpuTop = 0.0, gpuTop = 0.0;
+        for (S32 s = 0; s < DS_COUNT; ++s)
+        {
+            o << " | " << DS_NAMES[s] << " " << sDiag.sec[s] * 1000.0 * inv;
+            if (s <= DS_ZONE) o << " / " << (haveGpu ? gms[s] : -1.0);
+            o << " / " << (F64)sDiag.calls[s] * inv;
+            // top level only: luts, sky, sky(probe), post, post(probe), zone (clouds is inside post, the rest inside those)
+            if (s == DS_LUTS || s == DS_SKY || s == DS_SKY_PROBE || s == DS_POST || s == DS_POST_PROBE || s == DS_ZONE)
+            {
+                cpuTop += sDiag.sec[s] * 1000.0 * inv;
+                if (haveGpu) gpuTop += gms[s];
+            }
+        }
+        o << " | sceneUniform cache misses/f " << (F64)sDiag.sceneMiss * inv
+          << " | TOTAL sky CPU " << cpuTop << " ms (+ sceneUniforms " << sDiag.sec[DS_SCENE_UNIF] * 1000.0 * inv << "), GPU " << gpuTop << " ms";
+        LL_INFOS("WolfEnvPerf") << o.str() << LL_ENDL;
+        sDiag = CpuDiag();
+        sDiag.windowStart = now;
     }
 
     /** "#rrggbb" colours are display (sRGB) values; the frame is linear. */
@@ -2134,6 +2306,7 @@ namespace
 
     void captureTexture(const std::string& name, U32 tex, U32 w, U32 h, bool alpha_png, GLenum target = GL_TEXTURE_2D, S32 layer = 0)
     {
+        if (gGLManager.mIsNativeVulkan) return;
         if (!tex || !w || !h || w > 8192 || h > 8192) return;
         std::vector<F32> px;
         if (target == GL_TEXTURE_2D)
@@ -2277,9 +2450,22 @@ namespace
     {
         if (sZeroTex) return sZeroTex;
         const F32 zero[4] = { 0.f, 0.f, 0.f, 0.f };
-        glGenTextures(1, &sZeroTex);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs, else OpenGL's own as before
+        sZeroTex = LLImageGL::wolfVkCreateStorage(GL_TEXTURE_2D, 1, GL_RGBA16F, 1, 1, 1, false);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                LLImageGL::sWolfVkNativeStore->setSamplerOptions(sZeroTex, LLTexUnit::TFO_POINT, LLTexUnit::TAM_CLAMP);
+            }
+            WolfVkNative::clearTextureZero(sZeroTex);
+            return sZeroTex;
+        }
+        const bool owned = sZeroTex != 0;
+        if (!owned) glGenTextures(1, &sZeroTex);
         gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, sZeroTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 1, 1, 0, GL_RGBA, GL_FLOAT, zero);
+        if (owned) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_FLOAT, zero);
+        else glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 1, 1, 0, GL_RGBA, GL_FLOAT, zero);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
@@ -2432,6 +2618,7 @@ bool WolfEnvironmentRender::volumetricActive()
 // static
 void WolfEnvironmentRender::verifyFrame(LLRenderTarget* displayed, LLRenderTarget* depthSource)
 {
+    if (gGLManager.mIsNativeVulkan) return;
     static LLCachedControl<bool> trace(gSavedSettings, "WolfEnvironmentTrace", false);
     if (!trace || gCubeSnapshot || !displayed || !depthSource) return;
     static F64 s_next = 0.0;
@@ -2654,6 +2841,8 @@ void WolfEnvironmentRender::frameUpdate()
     // build and the meter twice)
     if (sGpu.updateFrame == LLFrameTimer::getFrameCount()) return;
     sGpu.updateFrame = LLFrameTimer::getFrameCount();
+    diagFrameAndLog();   // [W114-VULKAN 2026-11-27] the sky diagnostic's frame and its 10 s line
+    DiagScope diagScope(DS_LUTS);
     if (tier() > 0) WolfEnvironmentState::instance().idle();   // nothing is read at tier 0 (the Low preset)
     ++sGpu.frame;
     timerCollect();
@@ -2668,7 +2857,7 @@ void WolfEnvironmentRender::frameUpdate()
         sNext.cloudTransmittanceAtCamera = 1.f;   // no old reading carried into the next start
         sNext.cloudDiffuseT = 1.f;
         sNext.cloudDiffusedBeam = 0.f;
-        sGpu.camPboPending[0] = sGpu.camPboPending[1] = false;
+        sGpu.camRing.drop();
         if (tier() > 0) logTimings();
         return;
     }
@@ -2695,6 +2884,18 @@ void WolfEnvironmentRender::frameUpdate()
         // frame for the first build (nothing native is on screen yet), 4 ms for a rebuild (the old tables stay in use, so a
         // rebuild must not cost the flight its frame rate).
         const F64 budget = sAtmos->ready() ? 0.004 : 0.025;
+        S32 maxStepsVk = 1;
+        if (const WolfCoreApi* wc = WolfCoreLoader::api())
+        {
+            WolfCoreFrameInputs in{};
+            in.last_frame_dt_sec  = LLFrameTimer::getFrameDeltaTimeF32();
+            in.atmos_tables_ready = sAtmos->ready() ? 1u : 0u;
+            in.is_native_vulkan   = gGLManager.mIsNativeVulkan ? 1u : 0u;
+            WolfCoreFramePlan plan{};
+            wc->plan_frame_pacing(&in, &plan);
+            maxStepsVk = std::max<S32>(1, static_cast<S32>(plan.max_atmos_lut_steps));
+        }
+        S32 stepsRun = 0;
         LLTimer stepTimer;
         // [WolfViewer 2026-10-15] the budget is GPU time: each step is waited for (glFinish). It was only the CPU's time to
         // SUBMIT the steps, so a weak GPU was handed the whole precompute in a frame or two (the scattering-density passes,
@@ -2702,9 +2903,26 @@ void WolfEnvironmentRender::frameUpdate()
         do
         {
             sAtmos->precomputeStep();
-            glFinish();
-        } while (sAtmos->building() && !sAtmos->failed() && stepTimer.getElapsedTimeF64() < budget);
+            if (!gGLManager.mIsNativeVulkan) glFinish();
+            ++stepsRun;
+        } while (sAtmos->building() && !sAtmos->failed() && stepTimer.getElapsedTimeF64() < budget
+                 && (!gGLManager.mIsNativeVulkan || stepsRun < maxStepsVk));
         if (sAtmos->failed()) fail("the atmosphere tables could not be built");
+    }
+    // [W114-VULKAN S8 2026-11-26] WolfVulkanDebugSkyTablesDump: OpenGL's tables in use, once, for the texel compare against
+    // Vulkan's (scripts/wolf_sky_table_compare.py); the setting turns itself off after the dump
+    static LLCachedControl<bool> s_dumpTables(gSavedSettings, "WolfVulkanDebugSkyTablesDump", false);
+    if (s_dumpTables && sAtmos->ready())
+    {
+        const std::string dir = gDirUtilp->add(gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "wolf_sky_tables"), "gl");
+        LLFile::mkdir(gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "wolf_sky_tables"));
+        std::string error;
+        if (sAtmos->dumpTablesGL(dir, error))
+            LL_INFOS("WolfEnv") << "sky tables (OpenGL) written to " << dir << " (" << sAtmos->completeWavelengths() << " wavelengths, spectrum "
+                                << std::hex << sAtmos->completeSpectrumHash() << std::dec << ")" << LL_ENDL;
+        else
+            LL_WARNS("WolfEnv") << "sky tables (OpenGL) dump failed: " << error << LL_ENDL;
+        gSavedSettings.setBOOL("WolfVulkanDebugSkyTablesDump", false);
     }
     const F64 t = LLFrameTimer::getElapsedSeconds();
     const F32 dt = sGpu.lastTime > 0.0 ? (F32)llclamp(t - sGpu.lastTime, 0.0, 1.0) : 0.f;
@@ -2852,6 +3070,7 @@ namespace
      */
     void probeSky(LLGLSLShader& sh, bool beforeDraw)
     {
+        DiagScope diagScope(DS_PROBE_SKY);
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
         if (!psky || !WolfEnvironmentRender::eepDriven() || sGainBroken)
         {
@@ -2908,48 +3127,65 @@ namespace
         }
 
         static LLStaticHashedString s_probe("uProbe"), s_dgain("wolfEepDomeGain");
-        if (!s_pbo)
+        if (!gGLManager.mIsNativeVulkan && !s_pbo)
         {
             glGenBuffers(1, &s_pbo);
             glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
             glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(U16), nullptr, GL_STREAM_READ);   // [2026-11-07 READ-BACKS] halves
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
-        if (!s_pboGained)
+        if (!gGLManager.mIsNativeVulkan && !s_pboGained)
         {
             glGenBuffers(1, &s_pboGained);
             glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pboGained);
             glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(U16), nullptr, GL_STREAM_READ);   // [2026-11-07 READ-BACKS] halves
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
-        auto render = [&](bool gainsOn, F32* out, GLuint pbo)   // out == nullptr: into the pack buffer `pbo`
+        auto render = [&](bool gainsOn, F32* out, GLuint pbo, S32 vkChan = -1)   // out == nullptr: into the pack buffer `pbo` / `vkChan`
         {
             sh.uniform1f(s_probe, 1.f);
             sAtmos->setEepProbeDirs(sProbeDir);   // [2026-10-25] skyF.glsl wolfEepProbeDir, in the WolfEepGains uniform block
             sh.uniform1f(s_dgain, gainsOn ? 1.f : 0.f);   // the dome's gain is on its whole colour (skyF.glsl wolfEepDomeGain)
             GLint vp[4] = { 0, 0, 0, 0 };
-            glGetIntegerv(GL_VIEWPORT, vp);   // flush() rebinds the frame's target at its full size: a snapshot tile's viewport is kept
+            if (!gGLManager.mIsNativeVulkan) glGetIntegerv(GL_VIEWPORT, vp);   // flush() rebinds the frame's target at its full size: a snapshot tile's viewport is kept
             sProbeRT.bindTarget();
             {
                 LLGLDepthTest depth(GL_FALSE, GL_FALSE);
                 LLGLDisable blend(GL_BLEND);
                 gPipeline.mScreenTriangleVB->setBuffer();
                 gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
-                if (out)
+                if (!gGLManager.mIsNativeVulkan)
                 {
-                    glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_FLOAT, out);
-                }
-                else
-                {
-                    // [2026-11-07 READ-BACKS] the probe target is RGBA16F (Source: probeSkyTarget, sProbeRT.allocate):
-                    // read in its own format (GL_FLOAT made the driver wait for the GPU), widened when mapped below
-                    glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
-                    glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_HALF_FLOAT, nullptr);
-                    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                    if (out)
+                    {
+                        glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_FLOAT, out);
+                    }
+                    else
+                    {
+                        // [2026-11-07 READ-BACKS] the probe target is RGBA16F (Source: probeSkyTarget, sProbeRT.allocate):
+                        // read in its own format (GL_FLOAT made the driver wait for the GPU), widened when mapped below
+                        glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+                        glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_HALF_FLOAT, nullptr);
+                        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                    }
                 }
             }
             sProbeRT.flush();
-            glViewport(vp[0], vp[1], vp[2], vp[3]);
+            if (gGLManager.mIsNativeVulkan)
+            {
+                if (out)
+                {
+                    WolfVkNative::readBackTextureFloatSync(sProbeRT.getTexture(), 0, 4, out, NDIR * 4);
+                }
+                else if (vkChan >= 0)
+                {
+                    WolfVkNative::queueAsyncTextureRead(vkChan, sProbeRT.getTexture(), 0);
+                }
+            }
+            else
+            {
+                glViewport(vp[0], vp[1], vp[2], vp[3]);
+            }
             sh.uniform1f(s_probe, 0.f);
             sh.uniform1f(s_dgain, sGainValid ? 1.f : 0.f);
         };
@@ -2963,9 +3199,14 @@ namespace
         if (prime)
         {
             // [2026-10-31] this frame's reading, read at once; the one in flight (if any) is dropped
+            if (gGLManager.mIsNativeVulkan)
+            {
+                WolfVkNative::resetAsyncTextureRead(2);
+                WolfVkNative::resetAsyncTextureRead(3);
+            }
             s_pending = false;
             s_pendGained = false;
-            render(false, px, 0);
+            render(false, px, 0, -1);
             haveReading = true;
             for (S32 i = 0; i < NDIR; ++i) readDir[i] = sProbeDir[i];
             readRef = ref;
@@ -2976,34 +3217,57 @@ namespace
             // the reading started at the last probe (its directions kept with it), then the next one started
             if (s_pending)
             {
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
-                if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(U16), GL_MAP_READ_BIT))
+                if (gGLManager.mIsNativeVulkan)
                 {
-                    for (S32 k = 0; k < NDIR * 4; ++k) px[k] = halfToF32(((const U16*)mapped)[k]);
-                    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-                    haveReading = true;
+                    U16 raw_h[NDIR * 4] = {};
+                    if (WolfVkNative::pollAsyncTextureRead(2, raw_h, sizeof(raw_h)))
+                    {
+                        for (S32 k = 0; k < NDIR * 4; ++k) px[k] = halfToF32(raw_h[k]);
+                        haveReading = true;
+                    }
+                    s_pending = false;
+                    if (haveReading && s_pendGained)
+                    {
+                        U16 gain_h[NDIR * 4] = {};
+                        if (WolfVkNative::pollAsyncTextureRead(3, gain_h, sizeof(gain_h)))
+                        {
+                            for (S32 k = 0; k < NDIR * 4; ++k) gx[k] = halfToF32(gain_h[k]);
+                            haveGained = true;
+                        }
+                    }
+                    s_pendGained = false;
                 }
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-                s_pending = false;
-                if (haveReading && s_pendGained)
+                else
                 {
-                    glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pboGained);
+                    glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
                     if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(U16), GL_MAP_READ_BIT))
                     {
-                        for (S32 k = 0; k < NDIR * 4; ++k) gx[k] = halfToF32(((const U16*)mapped)[k]);
+                        for (S32 k = 0; k < NDIR * 4; ++k) px[k] = halfToF32(((const U16*)mapped)[k]);
                         glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-                        haveGained = true;
+                        haveReading = true;
                     }
                     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                    s_pending = false;
+                    if (haveReading && s_pendGained)
+                    {
+                        glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pboGained);
+                        if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(U16), GL_MAP_READ_BIT))
+                        {
+                            for (S32 k = 0; k < NDIR * 4; ++k) gx[k] = halfToF32(((const U16*)mapped)[k]);
+                            glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                            haveGained = true;
+                        }
+                        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                    }
+                    s_pendGained = false;
                 }
-                s_pendGained = false;
             }
             for (S32 i = 0; i < NDIR; ++i) readDir[i] = s_pendDir[i];
-            render(false, nullptr, s_pbo);
+            render(false, nullptr, s_pbo, 2);
             // [2026-11-01 ticket 436] and the same directions as the screen shows them, while there are gains to check
             if (sGainValid)
             {
-                render(true, nullptr, s_pboGained);
+                render(true, nullptr, s_pboGained, 3);
                 s_pendGained = true;
             }
             for (S32 i = 0; i < NDIR; ++i) s_pendDir[i] = sProbeDir[i];
@@ -3150,6 +3414,7 @@ namespace
      */
     void measureCloudCover(const WolfTk::CloudsFrame& f)
     {
+        DiagScope diagScope(DS_COVER);
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
         if (!psky || !WolfEnvironmentRender::eepDriven())
         {
@@ -3244,75 +3509,113 @@ namespace
         // [2026-11-07 READ-BACKS] both march targets are RGBA16F (Source: wolftkclouds.cpp:1322-1323 alloc cColor /
         // cDepthVelocity): read as GL_HALF_FLOAT, widened below (halfToF32)
         const size_t bytes = (size_t)w * h * 4 * sizeof(U16);
-        if (!s_pbo[0]) glGenBuffers(2, s_pbo);
-        if (bytes != s_pboBytes)
-        {
-            for (S32 i = 0; i < 2; ++i)
-            {
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[i]);
-                glBufferData(GL_PIXEL_PACK_BUFFER, bytes, nullptr, GL_STREAM_READ);
-            }
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-            s_pboBytes = bytes;
-            s_pending = false;
-        }
-        // take the reading started a second ago
         std::vector<F32> buf, col;
         S32 rw = 0, rh = 0;
         glm::mat4 inv(1.f);
-        if (s_pending && (size_t)s_pw * s_ph * 4 * sizeof(U16) == s_pboBytes)
-        {
-            buf.resize((size_t)s_pw * s_ph * 4); col.resize(buf.size());
-            bool ok = true;
-            for (S32 i = 0; i < 2; ++i)
-            {
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[i]);
-                const void* m = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, s_pboBytes, GL_MAP_READ_BIT);
-                if (m)
-                {
-                    const U16* hp = (const U16*)m;
-                    std::vector<F32>& out = i == 0 ? buf : col;
-                    for (size_t k = 0; k < out.size(); ++k) out[k] = halfToF32(hp[k]);
-                    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-                }
-                else ok = false;
-            }
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-            if (ok) { rw = s_pw; rh = s_ph; inv = s_pinv; }
-        }
+        std::vector<F32> stock;
         const LLVector3 readRef = s_pref;
         const F32 readHorizon = s_phor;
-        // [round 16] the stock layer drawn for that reading (renderStockCloudProbe), same size, same camera a frame later
-        std::vector<F32> stock;
-        if (rw > 0 && sStockPending && sStockSeqRead == s_seq && sStockPW == rw && sStockPH == rh && sStockPbo
-            && sStockPboBytes == (size_t)rw * rh * 4 * (sStockPboHalf ? sizeof(U16) : sizeof(U8)))
+        if (gGLManager.mIsNativeVulkan)
         {
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, sStockPbo);
-            const void* m = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, sStockPboBytes, GL_MAP_READ_BIT);
-            if (m)
+            if (bytes != s_pboBytes)
             {
-                // [2026-11-07 READ-BACKS] widened from the probe target's own format (renderStockCloudProbe)
-                stock.resize((size_t)rw * rh * 4);
-                if (sStockPboHalf) { const U16* hp = (const U16*)m; for (size_t k = 0; k < stock.size(); ++k) stock[k] = halfToF32(hp[k]); }
-                else { const U8* bp = (const U8*)m; for (size_t k = 0; k < stock.size(); ++k) stock[k] = unorm8ToF32(bp[k]); }
-                glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                s_pboBytes = bytes;
+                s_pending = false;
+                WolfVkNative::resetAsyncTextureRead(4);
+                WolfVkNative::resetAsyncTextureRead(5);
             }
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            if (s_pending && (size_t)s_pw * s_ph * 4 * sizeof(U16) == s_pboBytes)
+            {
+                const size_t count = (size_t)s_pw * s_ph * 4;
+                std::vector<U16> raw0(count), raw1(count);
+                const bool ok0 = WolfVkNative::pollAsyncTextureRead(4, raw0.data(), s_pboBytes);
+                const bool ok1 = WolfVkNative::pollAsyncTextureRead(5, raw1.data(), s_pboBytes);
+                if (ok0 && ok1)
+                {
+                    buf.resize(count);
+                    col.resize(count);
+                    for (size_t k = 0; k < count; ++k)
+                    {
+                        buf[k] = halfToF32(raw0[k]);
+                        col[k] = halfToF32(raw1[k]);
+                    }
+                    rw = s_pw;
+                    rh = s_ph;
+                    inv = s_pinv;
+                }
+            }
+            sStockPending = false;
+            WolfVkNative::queueAsyncTextureRead(4, tex, 0);
+            WolfVkNative::queueAsyncTextureRead(5, sClouds->marchColorTex(), 0);
+            s_pending = true; s_pw = w; s_ph = h;
+            ++s_seq; sStockSeqWanted = s_seq; sStockDue = false; sStockW = w; sStockH = h;
         }
-        sStockPending = false;
+        else
+        {
+            if (!s_pbo[0]) glGenBuffers(2, s_pbo);
+            if (bytes != s_pboBytes)
+            {
+                for (S32 i = 0; i < 2; ++i)
+                {
+                    glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[i]);
+                    glBufferData(GL_PIXEL_PACK_BUFFER, bytes, nullptr, GL_STREAM_READ);
+                }
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                s_pboBytes = bytes;
+                s_pending = false;
+            }
+            // take the reading started a second ago
+            if (s_pending && (size_t)s_pw * s_ph * 4 * sizeof(U16) == s_pboBytes)
+            {
+                buf.resize((size_t)s_pw * s_ph * 4); col.resize(buf.size());
+                bool ok = true;
+                for (S32 i = 0; i < 2; ++i)
+                {
+                    glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[i]);
+                    const void* m = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, s_pboBytes, GL_MAP_READ_BIT);
+                    if (m)
+                    {
+                        const U16* hp = (const U16*)m;
+                        std::vector<F32>& out = i == 0 ? buf : col;
+                        for (size_t k = 0; k < out.size(); ++k) out[k] = halfToF32(hp[k]);
+                        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                    }
+                    else ok = false;
+                }
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                if (ok) { rw = s_pw; rh = s_ph; inv = s_pinv; }
+            }
+            // [round 16] the stock layer drawn for that reading (renderStockCloudProbe), same size, same camera a frame later
+            if (rw > 0 && sStockPending && sStockSeqRead == s_seq && sStockPW == rw && sStockPH == rh && sStockPbo
+                && sStockPboBytes == (size_t)rw * rh * 4 * (sStockPboHalf ? sizeof(U16) : sizeof(U8)))
+            {
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, sStockPbo);
+                const void* m = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, sStockPboBytes, GL_MAP_READ_BIT);
+                if (m)
+                {
+                    // [2026-11-07 READ-BACKS] widened from the probe target's own format (renderStockCloudProbe)
+                    stock.resize((size_t)rw * rh * 4);
+                    if (sStockPboHalf) { const U16* hp = (const U16*)m; for (size_t k = 0; k < stock.size(); ++k) stock[k] = halfToF32(hp[k]); }
+                    else { const U8* bp = (const U8*)m; for (size_t k = 0; k < stock.size(); ++k) stock[k] = unorm8ToF32(bp[k]); }
+                    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                }
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            }
+            sStockPending = false;
+            // start the next
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[0]);
+            gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, tex);
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[1]);
+            gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, sClouds->marchColorTex());
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+            s_pending = true; s_pw = w; s_ph = h;
+            // ... and have the sky pass draw the stock layer for it (renderStockCloudProbe)
+            ++s_seq; sStockSeqWanted = s_seq; sStockDue = true; sStockW = w; sStockH = h;
+        }
         const bool haveStock = !stock.empty();
-        // start the next
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[0]);
-        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, tex);
-        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo[1]);
-        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, sClouds->marchColorTex());
-        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
-        s_pending = true; s_pw = w; s_ph = h;
-        // ... and have the sky pass draw the stock layer for it (renderStockCloudProbe)
-        ++s_seq; sStockSeqWanted = s_seq; sStockDue = true; sStockW = w; sStockH = h;
         s_pinv = glm::inverse(f.proj * f.view);   // clip -> the LL agent frame (z up), for that reading
         s_pref = eepLightWorld(psky, sFrame); s_phor = eepHorizonRowDeg(sFrame);
         if (rw <= 0) return;
@@ -3658,12 +3961,15 @@ namespace
     // the window state, so the events before a resize still show beside the readings after it
     void owRelease(bool keepWindowState)
     {
-        for (OwSlot& s : sOw.ring)
+        if (!gGLManager.mIsNativeVulkan)
         {
-            if (s.fence) glDeleteSync(s.fence);
-            if (s.pbo) glDeleteBuffers(1, &s.pbo);
+            for (OwSlot& s : sOw.ring)
+            {
+                if (s.fence) glDeleteSync(s.fence);
+                if (s.pbo) glDeleteBuffers(1, &s.pbo);
+            }
+            if (sOw.fbo) glDeleteFramebuffers(1, &sOw.fbo);
         }
-        if (sOw.fbo) glDeleteFramebuffers(1, &sOw.fbo);
         const OwState::Window win = sOw.win;
         sOw = OwState();
         if (keepWindowState) sOw.win = win;
@@ -3714,6 +4020,7 @@ namespace
 
     void overlayWatch(const WolfTk::CloudsFrame& f)
     {
+        if (gGLManager.mIsNativeVulkan) return;
         if (!overlayWatchOn())
         {
             if (sOw.active) { owRelease(false); if (!sOwStopped) owLine("off (WolfOverlayWatch switched off)"); }
@@ -3997,12 +4304,14 @@ namespace
 
 bool WolfEnvironmentRender::stockCloudProbeDue()
 {
+    if (gGLManager.mIsNativeVulkan) return false;
     return sStockDue && eepDriven() && sStockW > 0 && sStockH > 0;
 }
 
 void WolfEnvironmentRender::renderStockCloudProbe(const std::function<void()>& draw)
 {
     sStockDue = false;
+    if (gGLManager.mIsNativeVulkan) return;
     const S32 w = sStockW, h = sStockH;
     if (w <= 0 || h <= 0) return;
     // the stock G-buffer's formats (pipeline.cpp allocateScreenBuffer / addDeferredAttachments): the colour target RGBA8, so the
@@ -4083,6 +4392,7 @@ bool WolfEnvironmentRender::renderSkyDome()
 {
     sMoonDrawn.on = false;   // [2026-10-27] set again below if this pass draws a moon disc
     if (!skyActive()) return false;
+    DiagScope diagScope(gCubeSnapshot ? DS_SKY_PROBE : DS_SKY);
     probeSkyTarget();   // [2026-10-31] the EEP probe's target, before any of this pass's textures are bound (sProbeRT)
     const WolfEnvDoc& d = WolfEnvironmentState::instance().active();
     LLGLSLShader& sh = gWolfEnvSkyProgram;
@@ -4093,7 +4403,7 @@ bool WolfEnvironmentRender::renderSkyDome()
     const bool glMsg = false;
     (void)glMsgTrace; (void)s_glMsgNext;
 #else
-    const bool glMsg = glMsgTrace && !gCubeSnapshot && gGLManager.mHasDebugOutput && LLFrameTimer::getElapsedSeconds() >= s_glMsgNext;
+    const bool glMsg = !gGLManager.mIsNativeVulkan && glMsgTrace && !gCubeSnapshot && gGLManager.mHasDebugOutput && LLFrameTimer::getElapsedSeconds() >= s_glMsgNext;
 #endif
 #if !LL_DARWIN
     if (glMsg)
@@ -4119,8 +4429,14 @@ bool WolfEnvironmentRender::renderSkyDome()
     {
         static LLStaticHashedString s_moonMap("wolfMoonMap"), s_sunMap("wolfSunMap");
         const S32 moonLoc = sh.getUniformLocation(s_moonMap), sunLoc = sh.getUniformLocation(s_sunMap);
-        if (moonLoc >= 0) glUniform1i(moonLoc, WolfTk::NAMED_UNIT_BASE + 1);
-        if (sunLoc >= 0) glUniform1i(sunLoc, WolfTk::NAMED_UNIT_BASE + 2);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            if (moonLoc >= 0) glUniform1i(moonLoc, WolfTk::NAMED_UNIT_BASE + 1);
+            if (sunLoc >= 0) glUniform1i(sunLoc, WolfTk::NAMED_UNIT_BASE + 2);
+        }
+        const S32 moonUnitVk = WolfTk::NAMED_UNIT_BASE + 1, sunUnitVk = WolfTk::NAMED_UNIT_BASE + 2;
+        WolfTk::rawUniformToVk(sh, "wolfMoonMap", WolfVkShaderMirror::Kind::I1, 1, &moonUnitVk);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
+        WolfTk::rawUniformToVk(sh, "wolfSunMap", WolfVkShaderMirror::Kind::I1, 1, &sunUnitVk);
     }
     // Source: LLDrawPoolWLSky::renderSkyHazeDeferred - the same depth state for the dome.
     // [WolfViewer 2026-10-30 ticket #334] ... and, as LL's dome draw itself, NO depth write. Source: llvowlsky.cpp:718
@@ -4149,7 +4465,9 @@ bool WolfEnvironmentRender::renderSkyDome()
         // Raw here too, as this pass's sampler units above (wolfMoonMap / wolfSunMap).
         static LLStaticHashedString s_gon("wolfEepGainOn"), s_dgain("wolfEepDomeGain");
         const S32 gonLoc = sh.getUniformLocation(s_gon);
-        if (gonLoc >= 0) glUniform1f(gonLoc, 0.f);
+        if (!gGLManager.mIsNativeVulkan && gonLoc >= 0) glUniform1f(gonLoc, 0.f);
+        const F32 gainOffVk = 0.f;
+        WolfTk::rawUniformToVk(sh, "wolfEepGainOn", WolfVkShaderMirror::Kind::F1, 1, &gainOffVk);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
         sh.uniform1f(s_dgain, sGainValid ? 1.f : 0.f);
     }
 
@@ -4162,7 +4480,15 @@ bool WolfEnvironmentRender::renderSkyDome()
     // the shafts were rendered over the whole viewport the frame draws into: the dome's screen uv is its
     // fragment's place in that viewport (a tiled snapshot's viewport is not the window's)
     GLint vp[4] = { 0, 0, 1, 1 };
-    glGetIntegerv(GL_VIEWPORT, vp);
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (LLRenderTarget::sBoundTarget) LLRenderTarget::sBoundTarget->getViewport(vp);
+        else { vp[0] = gGLViewport[0]; vp[1] = gGLViewport[1]; vp[2] = gGLViewport[2]; vp[3] = gGLViewport[3]; }
+    }
+    else
+    {
+        glGetIntegerv(GL_VIEWPORT, vp);
+    }
     sh.uniform2f(s_vpo, (F32)vp[0], (F32)vp[1]);
     sh.uniform2f(s_res, (F32)llmax(vp[2], 1), (F32)llmax(vp[3], 1));
 
@@ -4215,7 +4541,13 @@ bool WolfEnvironmentRender::renderSkyDome()
     if (moonOn)
     {
         const S32 loc = sh.getUniformLocation(LLStaticHashedString("wolfMoonMap"));
-        if (loc >= 0) { moonUnit = WolfTk::NAMED_UNIT_BASE + 1; gGL.getTexUnit(moonUnit)->bind(moonMap); glUniform1i(loc, moonUnit); }
+        if (loc >= 0)
+        {
+            moonUnit = WolfTk::NAMED_UNIT_BASE + 1;
+            gGL.getTexUnit(moonUnit)->bind(moonMap);
+            if (!gGLManager.mIsNativeVulkan) glUniform1i(loc, moonUnit);
+            WolfTk::rawUniformToVk(sh, "wolfMoonMap", WolfVkShaderMirror::Kind::I1, 1, &moonUnit);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
+        }
     }
     const LLVector3 north = (!eepMoon && WolfRegionWeather::instance().autoEnvRealSky()) ? lunarNorth() : LLVector3::z_axis;
     sh.uniform3fv(s_md, 1, moonDir.mV);
@@ -4288,7 +4620,8 @@ bool WolfEnvironmentRender::renderSkyDome()
                 {
                     moonUnit = WolfTk::NAMED_UNIT_BASE + 1;
                     gGL.getTexUnit(moonUnit)->bind(tex);
-                    glUniform1i(loc, moonUnit);
+                    if (!gGLManager.mIsNativeVulkan) glUniform1i(loc, moonUnit);
+                    WolfTk::rawUniformToVk(sh, "wolfMoonMap", WolfVkShaderMirror::Kind::I1, 1, &moonUnit);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
                     eepMoonOn = true;
                     sh.uniform1f(s_ereal, real ? 1.f : 0.f);
                     sh.uniform3fv(s_eto, 1, to_dir.mV);
@@ -4390,7 +4723,8 @@ bool WolfEnvironmentRender::renderSkyDome()
         {
             sunUnit = WolfTk::NAMED_UNIT_BASE + 2;
             gGL.getTexUnit(sunUnit)->bind(sunTex);
-            glUniform1i(loc, sunUnit);
+            if (!gGLManager.mIsNativeVulkan) glUniform1i(loc, sunUnit);
+            WolfTk::rawUniformToVk(sh, "wolfSunMap", WolfVkShaderMirror::Kind::I1, 1, &sunUnit);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
         }
         sh.uniform1f(s_smo, sunMapOn ? 1.f : 0.f);
     }
@@ -4494,6 +4828,9 @@ bool WolfEnvironmentRender::renderSkyDome()
     sh.uniform3fv(s_mde, 1, sFrame.moonECEF.mV);
     sh.uniform1f(s_mss, sFrame.moonSkyScale);
     sh.uniform1f(s_unight, sFrame.night);   // [2026-10-25] skyF.glsl: the moon's aureole outside the EEP gains by night
+    // [T1069 2026-11-26] skyF.glsl: the moon's glint on the open sea as the eye sees it (updateLight moonEyeTint, as the clouds' light_tint)
+    static LLStaticHashedString s_mtint("uMoonEyeTint");
+    sh.uniform3fv(s_mtint, 1, sFrame.moonEyeTint.mV);
     {
         // [WolfViewer 2026-10-14] the shooting stars (updateMeteors, skyF.glsl wolfMeteors); none in a reflection probe's faces.
         // [METEOR SHOWERS 2026-11-18] and the showers: up to WolfMeteors::MAX_DRAWN at once (wolfmeteors.h Drawn)
@@ -4532,8 +4869,8 @@ bool WolfEnvironmentRender::renderSkyDome()
     static bool s_domeQueryPending = false;
     static F64 s_domeNext = 0.0;
     const F64 domeNow = LLFrameTimer::getElapsedSeconds();
-    if (!s_domeQuery) glGenQueries(1, &s_domeQuery);
-    if (s_domeQueryPending)
+    if (!gGLManager.mIsNativeVulkan && !s_domeQuery) glGenQueries(1, &s_domeQuery);
+    if (!gGLManager.mIsNativeVulkan && s_domeQueryPending)
     {
         GLuint ready = 0;
         glGetQueryObjectuiv(s_domeQuery, GL_QUERY_RESULT_AVAILABLE, &ready);
@@ -4545,7 +4882,7 @@ bool WolfEnvironmentRender::renderSkyDome()
             LL_INFOS("WolfEnv") << "sky dome drew " << samples << " samples" << LL_ENDL;
         }
     }
-    const bool domeMeasure = domeTrace && !gCubeSnapshot && !s_domeQueryPending && domeNow >= s_domeNext;
+    const bool domeMeasure = !gGLManager.mIsNativeVulkan && domeTrace && !gCubeSnapshot && !s_domeQueryPending && domeNow >= s_domeNext;
     // [WolfViewer 2026-10-31 sky flash] no frame of the dome without valid EEP gains: at a start or a cut they are measured here,
     // before the draw (probeSky beforeDraw; nothing when they are valid and the reading in flight is current) - and before the
     // trace's sample count starts, so the probe's own pixels are not counted as the dome's
@@ -4600,6 +4937,7 @@ bool WolfEnvironmentRender::renderSkyDome()
         // logged: the program (LLGLSLShader::bind skips glUseProgram when its cache says this program is current) and the
         // screen triangle's attribute pointers (LLVertexBuffer::setBuffer skips setupVertexBuffer when its cache says this
         // buffer is bound). Source: llglslshader.cpp bind() sCurBoundShader; llvertexbuffer.cpp setBuffer() sGLRenderBuffer.
+        if (!gGLManager.mIsNativeVulkan)
         {
             GLint cur = 0;
             glGetIntegerv(GL_CURRENT_PROGRAM, &cur);
@@ -4820,6 +5158,7 @@ void WolfEnvironmentRender::postPass()
 void WolfEnvironmentRender::postPassInner()
 {
     if (!skyActive()) return;
+    DiagScope diagScope(gCubeSnapshot ? DS_POST_PROBE : DS_POST);
     LLPipeline::RenderTargetPack* rt = gPipeline.mRT;
     if (!rt || !rt->screen.isComplete()) return;
     // under water the air's aerial perspective and the clouds are not what the camera sees through: LL's own
@@ -4841,6 +5180,7 @@ void WolfEnvironmentRender::postPassInner()
     if (clouds)
     {
         timerStamp(SEC_CLOUDS, 0);
+        DiagScope diagScope(gCubeSnapshot ? DS_CLOUDS_PROBE : DS_CLOUDS);
         const WolfTk::CloudsFrame f = cloudsFrame(d, W, H, gCubeSnapshot);
         haveClouds = gCubeSnapshot ? sClouds->renderProbe(*sAtmos, f) : sClouds->render(*sAtmos, f);
         if (haveClouds && !gCubeSnapshot) measureCloudCover(f);   // [WolfViewer 2026-10-13] the EEP's cover, measured
@@ -4958,17 +5298,11 @@ void WolfEnvironmentRender::postPassInner()
     {
         if (haveClouds && allocate(sGpu.camShadow, 1, 1, GL_RGBA32F))
         {
-            // last frame's reading first (its copy has had a frame to land), then this frame's copy queued: the
+            // the newest finished reading first (its fence says the copy has landed), then this frame's copy queued: the
             // CPU never waits for the GPU here
-            if (!sGpu.camPbo[0]) glGenBuffers(2, sGpu.camPbo);
-            const U32 cur = sGpu.camPboIndex, prev = 1 - cur;
-            if (sGpu.camPboPending[prev])
+            F32 px[4] = { 1.f, 1.f, 0.f, 1.f };   // (direct T, diffuse T, diffused beam): clear sky
+            if (sGpu.camRing.take(px, sizeof(px)))
             {
-                F32 px[4] = { 1.f, 1.f, 0.f, 1.f };   // (direct T, diffuse T, diffused beam): clear sky
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, sGpu.camPbo[prev]);
-                glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, sizeof(px), px);
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-                sGpu.camPboPending[prev] = false;
                 if (std::isfinite(px[0]) && std::isfinite(px[1]) && std::isfinite(px[2]))
                 {
                     sNext.cloudTransmittanceAtCamera = llclamp(px[0], 0.f, 1.f);
@@ -4983,20 +5317,27 @@ void WolfEnvironmentRender::postPassInner()
             gPipeline.mScreenTriangleVB->setBuffer();
             gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
             cs.unbind();
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, sGpu.camPbo[cur]);
-            glBufferData(GL_PIXEL_PACK_BUFFER, 4 * sizeof(F32), nullptr, GL_STREAM_READ);
-            glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, nullptr);
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-            sGpu.camPboPending[cur] = true;
-            sGpu.camPboIndex = prev;
-            sGpu.camShadow.flush();
+            if (gGLManager.mIsNativeVulkan)
+            {
+                sGpu.camShadow.flush();
+                WolfVkNative::queueAsyncTextureRead(0, sGpu.camShadow.getTexture(), 0);
+            }
+            else
+            {
+                if (sGpu.camRing.beginQueue(4 * sizeof(F32)))
+                {
+                    glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, nullptr);
+                    sGpu.camRing.endQueue();
+                }
+                sGpu.camShadow.flush();
+            }
         }
         else
         {
             sNext.cloudTransmittanceAtCamera = 1.f;
             sNext.cloudDiffuseT = 1.f;
             sNext.cloudDiffusedBeam = 0.f;
-            sGpu.camPboPending[0] = sGpu.camPboPending[1] = false;
+            sGpu.camRing.drop();
         }
 
         // ── the light meter's reflected reading: the composited frame's log luminance (Reinhard 2002 eq. 1) over a
@@ -5008,23 +5349,17 @@ void WolfEnvironmentRender::postPassInner()
         }
         if (gWolfEnvLogLumProgram.isComplete() && sGpu.logLum.isComplete())
         {
-            if (!sGpu.lumPbo[0]) glGenBuffers(2, sGpu.lumPbo);
-            const U32 cur = sGpu.lumPboIndex, prev = 1 - cur;
-            if (sGpu.lumPboPending[prev])
+            // [LIGHT METER 2026-11-07] the reading is the texture's own RGBA16F halves (queued below), widened here: the
+            // same numbers bit for bit as the driver's GL_FLOAT conversion gave (half -> float is exact)
+            U16 h[4] = { 0, 0, 0, 0 };
+            F32 e = 1.f;
+            if (sGpu.lumRing.take(h, sizeof(h), &e))
             {
                 F32 v[4] = { 0.f, 0.f, 0.f, 0.f };   // (mean log(delta + L), mean L x sky, mean L, 1)
-                // [LIGHT METER 2026-11-07] the reading is the texture's own RGBA16F halves (queued below), widened here: the
-                // same numbers bit for bit as the driver's GL_FLOAT conversion gave (half -> float is exact)
-                U16 h[4] = { 0, 0, 0, 0 };
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, sGpu.lumPbo[prev]);
-                glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, sizeof(h), h);
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
                 for (S32 i = 0; i < 4; ++i)
                 {
                     v[i] = halfToF32(h[i]);
                 }
-                sGpu.lumPboPending[prev] = false;
-                const F32 e = sGpu.lumPboExposure[prev];
                 sNext.frameLogAvg = (std::isfinite(v[0]) && e > 0.f) ? expf(v[0]) / e : -1.f;
                 sNext.skyLuminanceShare = (std::isfinite(v[1]) && std::isfinite(v[2]) && v[2] > 0.f) ? llclamp(v[1] / v[2], 0.f, 1.f) : 1.f;
             }
@@ -5062,21 +5397,23 @@ void WolfEnvironmentRender::postPassInner()
             // reproduction of this sequence (same driver) waited for any read of this 16F level as GL_FLOAT (glGetTexImage,
             // glGetTextureSubImage, glReadPixels; with or without re-specifying the buffer; level 0 too) and never for
             // GL_HALF_FLOAT, which gave the same values
-            gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, sGpu.logLum.getTexture());
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, sGpu.lumPbo[cur]);
-            glBufferData(GL_PIXEL_PACK_BUFFER, 4 * sizeof(U16), nullptr, GL_STREAM_READ);
-            glGetTexImage(GL_TEXTURE_2D, 6, GL_RGBA, GL_HALF_FLOAT, nullptr);
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
-            sGpu.lumPboPending[cur] = true;
-            sGpu.lumPboExposure[cur] = sFrame.exposure;
-            sGpu.lumPboIndex = prev;
+            if (gGLManager.mIsNativeVulkan)
+            {
+                WolfVkNative::queueAsyncTextureRead(1, sGpu.logLum.getTexture(), 6, sFrame.exposure);
+            }
+            else if (sGpu.lumRing.beginQueue(4 * sizeof(U16)))
+            {
+                gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, sGpu.logLum.getTexture());
+                glGetTexImage(GL_TEXTURE_2D, 6, GL_RGBA, GL_HALF_FLOAT, nullptr);
+                gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+                sGpu.lumRing.endQueue(sFrame.exposure);
+            }
         }
         else
         {
             sNext.frameLogAvg = -1.f;
             sNext.skyLuminanceShare = 1.f;
-            sGpu.lumPboPending[0] = sGpu.lumPboPending[1] = false;
+            sGpu.lumRing.drop();
         }
     }
     timerStamp(SEC_POST, 1);
@@ -5124,6 +5461,7 @@ void WolfEnvironmentRender::bindSceneUniforms(LLGLSLShader& shader)
     static LLStaticHashedString s_e2w("wolfTkEyeToWorld"), s_on("wolfTkShadowOn"), s_uw("wolfTkUnderwater");
     if (shader.getUniformLocation(s_e2w) < 0) return;   // no wolftk/atmosphereLibF.glsl unit in this program
     if (!skyActive()) return;
+    DiagScope diagScope(DS_SCENE_UNIF);
     const bool on = sScenePreview == 0 && tier() >= 2 && sFrame.cover > 0.f && sClouds->shadowMapArray() != 0;
     // the uniforms persist in the program: a program already set up this frame for these matrices (the alpha
     // pass binds the same few programs many times) only gets its textures bound again (other draws use the units)
@@ -5156,6 +5494,7 @@ void WolfEnvironmentRender::bindSceneUniforms(LLGLSLShader& shader)
         return;
     }
     c.frame = frameNo; c.on = on; c.shadowTex = shadowTex; c.tables = tables;
+    ++sDiag.sceneMiss;
     memcpy(c.mv, gGLModelView, sizeof(c.mv));
     memcpy(c.pj, gGLProjection, sizeof(c.pj));
     sAtmos->setRuntimeUniforms(shader, sFrame.exposure);
@@ -5204,6 +5543,7 @@ void WolfEnvironmentRender::bindSceneUniforms(LLGLSLShader& shader)
 void WolfEnvironmentRender::zonePass()
 {
     if (gCubeSnapshot || tier() < 1) return;
+    DiagScope diagScope(DS_ZONE);
     const WolfEnvDoc& d = WolfEnvironmentState::instance().active();
     if (!d.mValid || d.mMode == WolfEnvDoc::OFF || !sharedSky()) return;
     LLPipeline::RenderTargetPack* rt = gPipeline.mRT;
@@ -5270,7 +5610,7 @@ void WolfEnvironmentRender::releaseGL()
     sGpu.camShadow.release();
     sStockRT.release();   // [round 16] the stock cloud probe
     sProbeRT.release();   // [2026-10-31] the EEP probe's target (probeSkyTarget allocates it again at the next sky pass)
-    if (sStockPbo) { glDeleteBuffers(1, &sStockPbo); sStockPbo = 0; sStockPboBytes = 0; }
+    if (sStockPbo) { if (!gGLManager.mIsNativeVulkan) glDeleteBuffers(1, &sStockPbo); sStockPbo = 0; sStockPboBytes = 0; }
     sStockPending = false;
     // [2026-11-02 tickets 442/439] the overlay watch's buffers go with the rest (a resize or a graphics change: logged, as the
     // clouds' targets and history go too); it starts afresh at the next frame
@@ -5279,22 +5619,24 @@ void WolfEnvironmentRender::releaseGL()
         owLine("EVENT GL buffers released (a resize or a graphics setting change): the watch restarts");
         owRelease(true);
     }
-    if (sGpu.camPbo[0]) { glDeleteBuffers(2, sGpu.camPbo); sGpu.camPbo[0] = sGpu.camPbo[1] = 0; }
-    sGpu.camPboPending[0] = sGpu.camPboPending[1] = false;
+    sGpu.camRing.release();
     sGpu.logLum.release();
     sGpu.fogSigma.release();   // [ticket 349]
     sGpu.fogFrame = U32_MAX;
     sGpu.fogOverlay = 0;
-    if (sGpu.lumPbo[0]) { glDeleteBuffers(2, sGpu.lumPbo); sGpu.lumPbo[0] = sGpu.lumPbo[1] = 0; }
-    sGpu.lumPboPending[0] = sGpu.lumPboPending[1] = false;
+    sGpu.lumRing.release();
+    if (gGLManager.mIsNativeVulkan)
+    {
+        for (S32 ch = 2; ch <= 5; ++ch) WolfVkNative::resetAsyncTextureRead(ch);
+    }
     sNext.frameLogAvg = -1.f;
-    if (sZeroTex) { glDeleteTextures(1, &sZeroTex); sZeroTex = 0; }
+    if (sZeroTex) { if (!LLImageGL::wolfVkDestroyStorage(sZeroTex)) glDeleteTextures(1, &sZeroTex); sZeroTex = 0; }   // [VK S6 2026-11-26/]
     if (sClouds) sClouds->release();
     sMeter.reset();
     for (auto& f : sGpu.q)
         for (auto& s : f)
             for (GLuint& id : s)
-                if (id) { glDeleteQueries(1, &id); id = 0; }
+                if (id) { if (!gGLManager.mIsNativeVulkan) glDeleteQueries(1, &id); id = 0; }
     for (auto& f : sGpu.qPending) for (bool& p : f) p = false;
 }
 

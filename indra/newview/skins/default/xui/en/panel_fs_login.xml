@@ -267,7 +267,7 @@
           name="patreon_text"
           top="42"
           width="280">
-        Support us on Patreon
+        Buy us a Coffee
       </text>
       <button
           follows="left|bottom"

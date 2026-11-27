@@ -558,10 +558,13 @@ GLuint LLShaderMgr::loadShaderFile(const std::string& filename, S32 & shader_lev
 
     GLenum error = GL_NO_ERROR;
 
-    error = glGetError();
-    if (error != GL_NO_ERROR)
+    if (!gGLManager.mIsNativeVulkan)
     {
-        LL_SHADER_LOADING_WARNS() << "GL ERROR entering loadShaderFile(): " << error << " for file: " << filename << LL_ENDL;
+        error = glGetError();
+        if (error != GL_NO_ERROR)
+        {
+            LL_SHADER_LOADING_WARNS() << "GL ERROR entering loadShaderFile(): " << error << " for file: " << filename << LL_ENDL;
+        }
     }
 
     if (filename.empty())
@@ -652,8 +655,37 @@ GLuint LLShaderMgr::loadShaderFile(const std::string& filename, S32 & shader_lev
 #else
         const bool old_select = false;
 #endif
-        mWolfVkUnitRecipes[stage + "|" + filename] = WolfVkShaderMirror::unitRecipe(stage, filename, gpu_class,
-            WolfVkShaderMirror::versionLine(type == GL_GEOMETRY_SHADER), defines, texture_index_channels, gGLManager.mIsAMD, old_select);
+        // [SPV KEY 2026-11-26] the defines this file uses, as the build's key has them (shader_check.py recipe_defines)
+        const std::set<std::string>* words = wolfVkFileWords(filename, gpu_class);
+        if (words)
+        {
+            const std::map<std::string, std::string> used = defines ? WolfVkShaderMirror::usedDefines(*words, *defines) : std::map<std::string, std::string>();
+            mWolfVkUnitRecipes[stage + "|" + filename] = WolfVkShaderMirror::unitRecipe(stage, filename, gpu_class,
+                WolfVkShaderMirror::versionLine(type == GL_GEOMETRY_SHADER), &used, texture_index_channels, gGLManager.mIsAMD, old_select);
+        }
+        else
+        {
+            // no recipe: a program joining this object reports "no recipe recorded" and stays on OpenGL
+            mWolfVkUnitRecipes.erase(stage + "|" + filename);
+            LL_WARNS("Vulkan") << "Could not re-read " << filename << " (class " << gpu_class << ") for its Vulkan recipe" << LL_ENDL;
+        }
+    }
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        // [NATIVE VULKAN 2026-11-26] Skip OpenGL shader compilation; SPIR-V is loaded from the precompiled store.
+        fclose(file);
+        static GLuint sWolfNativeShaderHandle = 1;
+        GLuint ret = sWolfNativeShaderHandle++;
+        if (type == GL_VERTEX_SHADER)
+        {
+            mVertexShaderObjects[filename] = ret;
+        }
+        else if (type == GL_FRAGMENT_SHADER)
+        {
+            mFragmentShaderObjects[filename] = ret;
+        }
+        return ret;
     }
 
     //we can't have any lines longer than 1024 characters
@@ -1799,6 +1831,69 @@ void LLShaderMgr::initAttribsAndUniforms()
 }
 
 // [VULKAN BACKEND 2026-11-08] The same search loadShaderFile does (:600-627): class shader_level down to 1, the first file that exists.
+const std::set<std::string>* LLShaderMgr::wolfVkFileWords(const std::string& filename, S32 found_level)
+{
+    const std::string key = std::to_string(found_level) + "|" + filename;
+    auto it = mWolfVkFileWords.find(key);
+    if (it != mWolfVkFileWords.end()) return &it->second;
+    std::stringstream fname;
+    fname << getShaderDirPrefix() << found_level << gDirUtilp->getDirDelimiter() << filename;   // as loadShaderFile opens it
+    LLFILE* file = LLFile::fopen(fname.str(), "r");   /* Flawfinder: ignore */
+    if (!file) return nullptr;
+    // The text loadShaderFile's wolf_read assembles (the same fgets pieces and `#wolf_include "path"` rule, path relative to
+    // class 1, depth below 8; an included file is followed by one "\n"); only its words matter here.
+    std::string body;
+    const std::string wolf_dir = getShaderDirPrefix() + "1" + gDirUtilp->getDirDelimiter();
+    std::function<void(LLFILE*, S32)> read = [&](LLFILE* f, S32 depth)
+    {
+        char line[1024];
+        while (NULL != fgets(line, 1024, f))
+        {
+            const char* p = line;
+            while (*p == ' ' || *p == '\t') ++p;
+            static const char KEY[] = "#wolf_include \"";
+            if (depth < 8 && strncmp(p, KEY, sizeof(KEY) - 1) == 0)
+            {
+                const char* name = p + sizeof(KEY) - 1;
+                const char* end = strchr(name, '"');
+                if (end)
+                {
+                    LLFILE* inc = LLFile::fopen(wolf_dir + std::string(name, static_cast<size_t>(end - name)), "r");   /* Flawfinder: ignore */
+                    if (inc)
+                    {
+                        read(inc, depth + 1);
+                        fclose(inc);
+                        body += "\n";
+                        continue;
+                    }
+                }
+            }
+            body += line;
+        }
+    };
+    read(file, 0);
+    fclose(file);
+    // shader_check.py _name_in: a name is used when it is not preceded or followed by [A-Za-z0-9_], i.e. it is one of
+    // the maximal runs of those characters
+    std::set<std::string> words;
+    size_t i = 0;
+    while (i < body.size())
+    {
+        size_t j = i;
+        while (j < body.size() && WolfVkShaderMirror::isWordChar(body[j])) ++j;
+        if (j > i)
+        {
+            words.insert(body.substr(i, j - i));
+            i = j;
+        }
+        else
+        {
+            ++i;
+        }
+    }
+    return &(mWolfVkFileWords[key] = std::move(words));
+}
+
 bool LLShaderMgr::wolfVkFindShaderClass(const std::string& filename, S32 shader_level, S32& found_level)
 {
     for (S32 gpu_class = shader_level; gpu_class > 0; gpu_class--)

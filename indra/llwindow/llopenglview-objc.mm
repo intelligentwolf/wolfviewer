@@ -220,12 +220,24 @@ attributedStringInfo getSegments(NSAttributedString *str)
 
 - (id) initWithFrame:(NSRect)frame withSamples:(NSUInteger)samples andVsync:(BOOL)vsync
 {
+    return [self initWithFrame:frame withSamples:samples andVsync:vsync withGL:YES];
+}
+
+- (id) initWithFrame:(NSRect)frame withSamples:(NSUInteger)samples andVsync:(BOOL)vsync withGL:(BOOL)withGL
+{
     // <FS> Fix some bad refcount code and squash some potential leakiness; by Cinder Roxley
     self = [super initWithFrame:frame];
     if (!self) { return self; }	// Despite what this may look like, returning nil self is a-ok.
     // <F/S>
     [self registerForDraggedTypes:[NSArray arrayWithObject:NSPasteboardTypeURL]];
     //[self initWithFrame:frame]; <FS> Fix some bad refcount code and squash some potential leakiness; by Cinder Roxley
+
+    if (!withGL)
+    {
+        // [NATIVE VULKAN 2026-11-27] Host view for input/IME/backing-rect events with WolfVkMetalView on top; no NSOpenGLContext.
+        [self setWantsBestResolutionOpenGLSurface:gHiDPISupport];
+        return self;
+    }
 
     // Initialize with a default "safe" pixel format that will work with versions dating back to OS X 10.6.
     // Any specialized pixel formats, i.e. a core profile pixel format, should be initialized through rebuildContextWithFormat.

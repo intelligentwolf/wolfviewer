@@ -141,6 +141,14 @@ public:
     ~WolfVkVertexBuffer();
 
     void init(WolfVkDevice& device, uint32_t typemask) { mDevice = &device; mTypeMask = typemask; }
+    // [VK S6a 2026-11-26] A view of ranges the resource store owns (newview/wolfvkresources.cpp) instead of buffers of
+    // its own: nverts vertices laid out as LLVertexBuffer::calcOffsets does from vertex_offset in vertex_buffer, and
+    // nindices indices of index_type from index_offset in index_buffer (either buffer may be null). Nothing is
+    // allocated, copied or freed by this object; bind() and the draws use the ranges. hasPendingUploads() is false
+    // and vertices()/indices() are invalid (no host bytes): the store uploads.
+    void initExternal(uint32_t typemask, uint32_t nverts, uint32_t nindices, VkBuffer vertex_buffer, VkDeviceSize vertex_offset,
+                      VkBuffer index_buffer, VkDeviceSize index_offset, VkIndexType index_type);
+    bool isExternal() const { return mExternal; }
     // LLVertexBuffer::allocateBuffer :1280-1293 (createGLBuffer/createGLIndices replaced by the Vulkan buffers)
     bool allocateBuffer(uint32_t nverts, uint32_t nindices, std::string& error);
     void destroy();
@@ -169,8 +177,8 @@ public:
     uint8_t* getMappedIndices() const { return mIndices.hostData(); }
     uint32_t getSize() const { return mSize; }
     uint32_t getIndicesSize() const { return mIndicesSize; }
-    VkBuffer vertexBuffer() const { return mVertices.buffer(); }
-    VkBuffer indexBuffer() const { return mIndices.buffer(); }
+    VkBuffer vertexBuffer() const { return mExternal ? mExternalVertices : mVertices.buffer(); }
+    VkBuffer indexBuffer() const { return mExternal ? mExternalIndices : mIndices.buffer(); }
     WolfVkBuffer& vertices() { return mVertices; }
     WolfVkBuffer& indices() { return mIndices; }
 
@@ -193,6 +201,11 @@ private:
     WolfVkBuffer mIndices;
     std::vector<MappedRegion> mMappedVertexRegions;
     std::vector<MappedRegion> mMappedIndexRegions;
+    // [VK S6a 2026-11-26] initExternal
+    bool mExternal = false;
+    VkBuffer mExternalVertices = VK_NULL_HANDLE, mExternalIndices = VK_NULL_HANDLE;
+    VkDeviceSize mExternalVertexOffset = 0, mExternalIndexOffset = 0;
+    VkIndexType mExternalIndexType = VK_INDEX_TYPE_UINT16;
 };
 
 #endif // WOLF_VK_BUFFER_H

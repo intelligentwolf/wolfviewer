@@ -75,6 +75,37 @@ namespace
         default: return 0;
         }
     }
+
+    bool isHalfFloatFormat(VkFormat fmt)
+    {
+        return fmt == VK_FORMAT_R16_SFLOAT || fmt == VK_FORMAT_R16G16_SFLOAT || fmt == VK_FORMAT_R16G16B16A16_SFLOAT;
+    }
+
+    uint16_t packF32ToF16(float val)
+    {
+        uint32_t bits = 0;
+        memcpy(&bits, &val, 4);
+        const uint32_t sign = (bits >> 16) & 0x8000u;
+        const int32_t exp = static_cast<int32_t>((bits >> 23) & 0xFFu) - 127 + 15;
+        uint32_t mant = bits & 0x007FFFFFu;
+        if (exp <= 0)
+        {
+            if (exp < -10) return static_cast<uint16_t>(sign);
+            mant = (mant | 0x00800000u) >> (1 - exp);
+            return static_cast<uint16_t>(sign | ((mant + 0x1000u) >> 13));
+        }
+        if (exp == 0xFF - 127 + 15)
+        {
+            return static_cast<uint16_t>(sign | 0x7C00u | (mant ? 0x0200u : 0u));
+        }
+        if (exp >= 31)
+        {
+            return static_cast<uint16_t>(sign | 0x7C00u);
+        }
+        uint32_t rounded = static_cast<uint32_t>(exp << 13) + ((mant + 0x0FFFu + ((mant >> 13) & 1u)) >> 13);
+        if (rounded >= 0x7C00u) return static_cast<uint16_t>(sign | 0x7C00u);
+        return static_cast<uint16_t>(sign | rounded);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -126,6 +157,13 @@ WolfVkImage::Format WolfVkImage::formatFor(uint32_t gl_internal_format, uint32_t
         return simple(VK_FORMAT_R16G16B16A16_UNORM, 8, 4, 2);   // :1950
     case GL_R32F:
         return simple(VK_FORMAT_R32_SFLOAT, 4, 1, 4);
+    case GL_RG32F:   // [VK S6 2026-11-26] the water zone map (wolfwaterfield.cpp); vulkan_core.h:1962 VK_FORMAT_R32G32_SFLOAT = 103
+        return simple(VK_FORMAT_R32G32_SFLOAT, 8, 2, 4);
+    case GL_R11F_G11F_B10F:
+        // [VK S6 2026-11-26] the HDR reflection probes (llcubemaparray.cpp allocate). vulkan_core.h:1981
+        // VK_FORMAT_B10G11R11_UFLOAT_PACK32 = 122: one packed 32-bit word per texel, the same bits as OpenGL's
+        // GL_UNSIGNED_INT_10F_11F_11F_REV (shared bit-exact with GL_R11F_G11F_B10F, probe 2026-11-26 case c)
+        return simple(VK_FORMAT_B10G11R11_UFLOAT_PACK32, 4, 1, 4);
     case GL_RGBA32F:
         return simple(VK_FORMAT_R32G32B32A32_SFLOAT, 16, 4, 4);
     case GL_DEPTH_COMPONENT: case GL_DEPTH_COMPONENT24: case GL_DEPTH_COMPONENT32F:
@@ -143,6 +181,28 @@ WolfVkImage::Format WolfVkImage::formatFor(uint32_t gl_internal_format, uint32_t
     }
 }
 
+// [VK S6 2026-11-26] see wolfvkimage.h. Source: vulkan_core.h:1984 VK_FORMAT_X8_D24_UNORM_PACK32 = 125 (vk.xml: class D24,
+// blockSize 4, packed 32, component D 24 bits UNORM); :3491 VkFormatProperties.optimalTilingFeatures; :2715
+// VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT, :2724 DEPTH_STENCIL_ATTACHMENT_BIT, :2727 SAMPLED_IMAGE_FILTER_LINEAR_BIT.
+WolfVkImage::Format WolfVkImage::sharedDepthFormat(WolfVkDevice& device, Kind kind, VkImageUsageFlags usage, uint32_t& gl_internal_format, bool& is_d24)
+{
+    Format d24 = depth(VK_FORMAT_X8_D24_UNORM_PACK32, false);
+    VkFormatProperties props{};
+    gVk.vkGetPhysicalDeviceFormatProperties(device.physical(), d24.mFormat, &props);
+    const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    bool dedicated_only = false;
+    std::string why;
+    if ((props.optimalTilingFeatures & need) == need && externalFormatSupported(device, kind, d24, usage, dedicated_only, why))
+    {
+        gl_internal_format = GL_DEPTH_COMPONENT24;
+        is_d24 = true;
+        return d24;
+    }
+    gl_internal_format = GL_DEPTH_COMPONENT32F;
+    is_d24 = false;
+    return depth(VK_FORMAT_D32_SFLOAT, false);
+}
+
 const char* WolfVkImage::formatName(VkFormat format)
 {
     switch (format)
@@ -157,6 +217,9 @@ const char* WolfVkImage::formatName(VkFormat format)
     case VK_FORMAT_R16G16_SFLOAT: return "R16G16_SFLOAT";
     case VK_FORMAT_R16G16B16A16_SFLOAT: return "R16G16B16A16_SFLOAT";
     case VK_FORMAT_R32_SFLOAT: return "R32_SFLOAT";
+    case VK_FORMAT_B10G11R11_UFLOAT_PACK32: return "B10G11R11_UFLOAT";
+    case VK_FORMAT_R32G32_SFLOAT: return "R32G32_SFLOAT";
+    case VK_FORMAT_X8_D24_UNORM_PACK32: return "X8_D24_UNORM";
     case VK_FORMAT_R32G32B32A32_SFLOAT: return "R32G32B32A32_SFLOAT";
     case VK_FORMAT_D32_SFLOAT: return "D32_SFLOAT";
     case VK_FORMAT_D32_SFLOAT_S8_UINT: return "D32_SFLOAT_S8_UINT";
@@ -202,9 +265,32 @@ bool WolfVkImage::createExternal(WolfVkDevice& device, const Format& format, uin
     return createInternal(device, Kind::TEXTURE_2D, format, width, height, 1, 1, usage, true, types, error);
 }
 
+// [VK S6 2026-11-26]
+bool WolfVkImage::createExternal(WolfVkDevice& device, Kind kind, const Format& format, uint32_t width, uint32_t height, uint32_t layers,
+                                 uint32_t mip_levels, VkImageUsageFlags usage, std::string& error)
+{
+    const VkExternalMemoryHandleTypeFlags types = device.externalHandleType();
+    if (types == 0)
+    {
+        error = "the device cannot export memory";
+        return false;
+    }
+    return createInternal(device, kind, format, width, height, layers, mip_levels, usage, true, types, error);
+}
+
 bool WolfVkImage::externalFormatSupported(WolfVkDevice& device, const Format& format, VkImageUsageFlags usage, bool& dedicated_only, std::string& error)
 {
+    return externalFormatSupported(device, Kind::TEXTURE_2D, format, usage, dedicated_only, error);
+}
+
+bool WolfVkImage::externalFormatSupported(WolfVkDevice& device, Kind kind, const Format& format, VkImageUsageFlags usage, bool& dedicated_only, std::string& error)
+{
     dedicated_only = false;
+    if (kind == Kind::TEXTURE_CUBE_ARRAY && !device.cubeArrays())
+    {
+        error = "the device has no cube map arrays (imageCubeArray)";
+        return false;
+    }
     const VkExternalMemoryHandleTypeFlags types = device.externalHandleType();
     if (types == 0 || !gVk.vkGetPhysicalDeviceImageFormatProperties2)
     {
@@ -222,7 +308,10 @@ bool WolfVkImage::externalFormatSupported(WolfVkDevice& device, const Format& fo
     info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
     info.pNext = &ext;
     info.format = format.mFormat;
-    info.type = VK_IMAGE_TYPE_2D;
+    // the same type and flags createInternal gives the image (the query must describe the image that will be made)
+    info.type = (kind == Kind::TEXTURE_3D) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
+    if (kind == Kind::TEXTURE_CUBE || kind == Kind::TEXTURE_CUBE_ARRAY) info.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    if (kind == Kind::TEXTURE_3D) info.flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;   // as createInternal
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
     info.usage = usage | VK_IMAGE_USAGE_SAMPLED_BIT;
     VkExternalImageFormatProperties ext_props{};
@@ -319,9 +408,31 @@ bool WolfVkImage::createInternal(WolfVkDevice& device, Kind kind, const Format& 
     mUsage = info.usage;
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;     // :2270
-    if (kind == Kind::TEXTURE_CUBE)
+    if (kind == Kind::TEXTURE_CUBE || kind == Kind::TEXTURE_CUBE_ARRAY)
     {
+        // "VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT specifies that the image can be used to create a VkImageView of type
+        // VK_IMAGE_VIEW_TYPE_CUBE or VK_IMAGE_VIEW_TYPE_CUBE_ARRAY" (Vulkan spec, VkImageCreateFlagBits)
         info.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;   // :2766
+    }
+    if (kind == Kind::TEXTURE_3D)
+    {
+        // [VK S6 2026-11-26] every 3D image can be rendered into slice by slice: VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT
+        // (vulkan_core.h:2769; VUID-VkImageCreateInfo-flags-00950: 3D images only) allows VK_IMAGE_VIEW_TYPE_2D and
+        // VK_IMAGE_VIEW_TYPE_2D_ARRAY views of its slices (VUID-VkImageViewCreateInfo-image-06723 / -06728 forbid them
+        // without it). The atmosphere tables are filled that way (createView).
+        info.flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+    }
+    if (kind == Kind::TEXTURE_CUBE_ARRAY && (!device.cubeArrays() || layers % 6u != 0))
+    {
+        error = !device.cubeArrays() ? "the device has no cube map arrays (imageCubeArray)" : "a cube map array needs 6 layers a cube";
+        mDevice = nullptr;
+        return false;
+    }
+    if (kind == Kind::TEXTURE_CUBE && layers != 6)
+    {
+        error = "a cube map has 6 layers";
+        mDevice = nullptr;
+        return false;
     }
     // Source: vulkan_core.h:5951 VkExternalMemoryImageCreateInfo { sType, pNext, handleTypes }; :293 sType
     VkExternalMemoryImageCreateInfo external_info{};
@@ -368,6 +479,9 @@ bool WolfVkImage::createInternal(WolfVkDevice& device, Kind kind, const Format& 
         mImage = VK_NULL_HANDLE;
         return false;
     }
+    // WolfVkAllocator::allocate chains VkMemoryDedicatedAllocateInfo (naming this image) whenever it takes its dedicated
+    // path, which it does when asked, for export types, and for a request of a quarter block or more: mDedicated says so
+    mDedicatedAllocation = mAllocation.mDedicated;
     if (external)
     {
         // [AMD PERF 2026-11-08] what each image shared with OpenGL got: the memory types the driver allowed for it and the
@@ -425,6 +539,7 @@ bool WolfVkImage::createInternal(WolfVkDevice& device, Kind kind, const Format& 
     switch (kind)
     {
     case Kind::TEXTURE_CUBE: view.viewType = VK_IMAGE_VIEW_TYPE_CUBE; break;
+    case Kind::TEXTURE_CUBE_ARRAY: view.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY; break;   // :2333
     case Kind::TEXTURE_2D_ARRAY: view.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY; break;
     case Kind::TEXTURE_3D: view.viewType = VK_IMAGE_VIEW_TYPE_3D; break;
     default: view.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
@@ -447,6 +562,52 @@ bool WolfVkImage::createInternal(WolfVkDevice& device, Kind kind, const Format& 
     return true;
 }
 
+// [VK S6 2026-11-26] see wolfvkimage.h. Source: vulkan_core.h:3939 VkImageViewCreateInfo { sType, pNext, flags, image, viewType,
+// format, components, subresourceRange }; the view keeps the image's format and swizzle.
+VkImageView WolfVkImage::createView(VkImageViewType view_type, uint32_t base_mip, uint32_t mip_count, uint32_t base_layer, uint32_t layer_count, std::string& error,
+                                    bool attachment)
+{
+    if (mImage == VK_NULL_HANDLE || !mDevice) { error = "no image"; return VK_NULL_HANDLE; }
+    uint32_t array_layers = (mKind == Kind::TEXTURE_3D) ? 1u : mLayers;
+    if (mKind == Kind::TEXTURE_3D && (view_type == VK_IMAGE_VIEW_TYPE_2D || view_type == VK_IMAGE_VIEW_TYPE_2D_ARRAY))
+    {
+        // a 2D or 2D-array view of a 3D image (created with 2D_ARRAY_COMPATIBLE, createInternal): the "layers" are the
+        // depth slices of ONE mip level - "subresourceRange.levelCount must be 1" (VUID-VkImageViewCreateInfo-image-04970)
+        // and baseArrayLayer + layerCount "must be less than or equal to the depth computed from baseMipLevel and
+        // extent.depth" (VUID-VkImageViewCreateInfo-image-02724, -subresourceRange-02725). Such a view is for rendering
+        // into slices; sampling a 3D image goes through its own VK_IMAGE_VIEW_TYPE_3D view().
+        if (mip_count != 1)
+        {
+            error = "a 2D view of a 3D image covers one mip level";
+            return VK_NULL_HANDLE;
+        }
+        array_layers = std::max<uint32_t>(1u, mLayers >> std::min<uint32_t>(base_mip, 31u));   // the level's depth
+    }
+    if (mip_count == 0 || layer_count == 0 || base_mip + mip_count > mMipLevels || base_layer + layer_count > array_layers)
+    {
+        error = llformat("view of levels %u+%u, layers %u+%u outside an image of %u levels, %u layers", base_mip, mip_count, base_layer, layer_count, mMipLevels, array_layers);
+        return VK_NULL_HANDLE;
+    }
+    VkImageViewCreateInfo view{};
+    view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view.image = mImage;
+    view.viewType = view_type;
+    view.format = mFormat.mFormat;
+    // a view used as a framebuffer attachment "must have been created with the identity swizzle"
+    // (VUID-VkFramebufferCreateInfo-pAttachments-00884); VkComponentMapping{} is all VK_COMPONENT_SWIZZLE_IDENTITY (= 0)
+    view.components = attachment ? VkComponentMapping{} : mFormat.mSwizzle;
+    view.subresourceRange = { aspect(), base_mip, mip_count, base_layer, layer_count };
+    VkImageView out = VK_NULL_HANDLE;
+    const VkResult res = gVk.vkCreateImageView(mDevice->device(), &view, nullptr, &out);
+    if (res != VK_SUCCESS)
+    {
+        error = std::string("vkCreateImageView: ") + WolfVkLoader::resultString(res);
+        return VK_NULL_HANDLE;
+    }
+    mExtraViews.push_back(out);
+    return out;
+}
+
 void WolfVkImage::destroy()
 {
     if (mDevice && mDevice->hasDevice())
@@ -455,8 +616,11 @@ void WolfVkImage::destroy()
         VkImage image = mImage;
         VkImageView view = mView;
         WolfVkAllocation alloc = mAllocation;
-        device->deferDestroy([device, image, view, alloc]() mutable
+        std::vector<VkImageView> extra;
+        extra.swap(mExtraViews);
+        device->deferDestroy([device, image, view, alloc, extra]() mutable
         {
+            for (VkImageView v : extra) gVk.vkDestroyImageView(device->device(), v, nullptr);
             if (view != VK_NULL_HANDLE) gVk.vkDestroyImageView(device->device(), view, nullptr);
             if (image != VK_NULL_HANDLE) gVk.vkDestroyImage(device->device(), image, nullptr);
             device->allocator().free(alloc);
@@ -464,6 +628,8 @@ void WolfVkImage::destroy()
     }
     mImage = VK_NULL_HANDLE;
     mView = VK_NULL_HANDLE;
+    mExtraViews.clear();
+    mDedicatedAllocation = false;
     mAllocation = WolfVkAllocation();
     mDevice = nullptr;
     mLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -497,6 +663,12 @@ bool WolfVkImage::upload(VkCommandBuffer cmd, uint32_t mip, uint32_t layer, uint
         error = "upload to no image or from no data";
         return false;
     }
+    if (mFormat.mFormat == VK_FORMAT_X8_D24_UNORM_PACK32)
+    {
+        // [VK S6 2026-11-26] sharedDepthFormat: a rendered depth image; the client-data path below writes floats
+        error = "a 24-bit depth image is rendered, not uploaded";
+        return false;
+    }
     // [DEVICE LOST 2026-11-08 nv-hang1] Refused, never recorded, when the copy would not fit the subresource: the mip level
     // must exist (VUID-vkCmdCopyBufferToImage-imageSubresource-07967), the layer too (-07968), and the extent must lie
     // inside that level (VUID-vkCmdCopyBufferToImage-imageSubresource-07971: a 16-wide copy into a 1x1 level in run
@@ -518,55 +690,96 @@ bool WolfVkImage::upload(VkCommandBuffer cmd, uint32_t mip, uint32_t layer, uint
     }
     const Format& f = mFormat;
     const uint32_t bpc = bytesForPixelType(gl_pixel_type);
+    const bool f32_to_f16 = (!f.mBlockBytes && gl_pixel_type == GL_FLOAT && f.mSourceBytesPerChannel == 2 && isHalfFloatFormat(f.mFormat));
 
     // Re-pack the GL rows (GL_UNPACK_ALIGNMENT 4) into a tight staging layout, widening RGB to RGBA when needed.
     VkDeviceSize staging_size = 0;
-    std::vector<uint8_t> packed;
+    uint32_t src_channels = 0, src_texel = 0, src_row = 0, dst_texel = 0, dst_row = 0;
     if (f.mBlockBytes)
     {
         // BC formats: 4x4 blocks, no row padding in the GL data either (compressed data is sized by blocks)
         const uint32_t bw = (width + 3) / 4, bh = (height + 3) / 4;
         staging_size = static_cast<VkDeviceSize>(bw) * bh * f.mBlockBytes;
-        packed.assign(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + staging_size);
     }
     else
     {
-        if (bpc == 0 || bpc != f.mSourceBytesPerChannel)
+        if (bpc == 0 || (!f32_to_f16 && bpc != f.mSourceBytesPerChannel))
         {
             error = llformat("pixel type 0x%x does not match format %s (%u bytes per channel expected)", gl_pixel_type, formatName(f.mFormat), f.mSourceBytesPerChannel);
             return false;
         }
-        const uint32_t src_channels = f.mSourceChannels;
-        const uint32_t src_texel = src_channels * bpc;
-        const uint32_t src_row = (width * src_texel + 3u) & ~3u;   // GL_UNPACK_ALIGNMENT "initial value is 4" (glPixelStore reference page, registry.khronos.org/OpenGL-Refpages/gl4/html/glPixelStore.xhtml); llimagegl.cpp never sets it
-        const uint32_t dst_texel = f.mTexelBytes;
-        const uint32_t dst_row = width * dst_texel;
+        src_channels = f.mSourceChannels;
+        src_texel = src_channels * bpc;
+        src_row = (width * src_texel + 3u) & ~3u;   // GL_UNPACK_ALIGNMENT "initial value is 4"
+        dst_texel = f.mTexelBytes;
+        dst_row = width * dst_texel;
         staging_size = static_cast<VkDeviceSize>(dst_row) * height;
-        packed.resize(static_cast<size_t>(staging_size));
+    }
+
+    const bool one_time = (cmd == VK_NULL_HANDLE);
+    VkBuffer staging_buf = VK_NULL_HANDLE;
+    VkDeviceSize staging_offset = 0;
+    uint8_t* dst_base = nullptr;
+    WolfVkBuffer* fallback_staging = nullptr;
+    WolfVkStagingRing* ring = (!one_time && mDevice) ? mDevice->stagingRing() : nullptr;
+    if (!ring || !ring->allocate(staging_size, staging_buf, staging_offset, dst_base))
+    {
+        ring = nullptr;
+        fallback_staging = new WolfVkBuffer();
+        if (!fallback_staging->create(*mDevice, staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, error))
+        {
+            delete fallback_staging;
+            return false;
+        }
+        staging_buf = fallback_staging->buffer();
+        staging_offset = 0;
+        dst_base = fallback_staging->hostData();
+    }
+
+    if (f.mBlockBytes)
+    {
+        memcpy(dst_base, data, static_cast<size_t>(staging_size));
+    }
+    else
+    {
         const uint8_t* src = static_cast<const uint8_t*>(data);
         for (uint32_t y = 0; y < height; ++y)
         {
             const uint8_t* s = src + static_cast<size_t>(y) * src_row;
-            uint8_t* d = packed.data() + static_cast<size_t>(y) * dst_row;
+            uint8_t* d = dst_base + static_cast<size_t>(y) * dst_row;
+            if (f32_to_f16)
+            {
+                const uint32_t dst_ch = f.mExpandRGB ? 4u : src_channels;
+                for (uint32_t x = 0; x < width; ++x)
+                {
+                    uint16_t* dh = reinterpret_cast<uint16_t*>(d + x * dst_texel);
+                    for (uint32_t c = 0; c < src_channels; ++c)
+                    {
+                        float fv = 0.f;
+                        memcpy(&fv, s + x * src_texel + c * 4u, 4);
+                        dh[c] = packF32ToF16(fv);
+                    }
+                    if (f.mExpandRGB && dst_ch == 4u) dh[3] = 0x3C00u;
+                }
+                continue;
+            }
             if (!f.mExpandRGB)
             {
                 memcpy(d, s, dst_row);
             }
             else
             {
-                // three channels in, four out; the alpha is "one" in the pixel type's own encoding
                 for (uint32_t x = 0; x < width; ++x)
                 {
                     memcpy(d + x * dst_texel, s + x * src_texel, src_texel);
                     uint8_t* a = d + x * dst_texel + src_texel;
                     if (bpc == 1) { a[0] = 0xFF; }
-                    else if (bpc == 2) { a[0] = 0x00; a[1] = 0x3C; }           // IEEE half 1.0 = 0x3C00, little-endian
+                    else if (bpc == 2) { a[0] = 0x00; a[1] = 0x3C; }
                     else { const float one = 1.0f; memcpy(a, &one, 4); }
                 }
             }
             if (swap_bytes && bpc > 1)
             {
-                // GL_UNPACK_SWAP_BYTES (llimagegl.cpp:811): the bytes of each component reversed
                 for (uint32_t i = 0; i + bpc <= dst_row; i += bpc)
                 {
                     std::reverse(d + i, d + i + bpc);
@@ -574,24 +787,23 @@ bool WolfVkImage::upload(VkCommandBuffer cmd, uint32_t mip, uint32_t layer, uint
             }
         }
     }
-
-    // Staging buffer for this upload, host visible; freed frames-in-flight later by its own destroy.
-    WolfVkBuffer* staging = new WolfVkBuffer();
-    if (!staging->create(*mDevice, staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, error))
+    if (ring)
     {
-        delete staging;
-        return false;
+        ring->flush(staging_offset, staging_size);
     }
-    staging->write(0, packed.data(), staging_size);
+    else
+    {
+        fallback_staging->markDirty(0, staging_size);
+    }
 
-    const bool one_time = (cmd == VK_NULL_HANDLE);
     if (one_time)
     {
         cmd = mDevice->beginOneTime();
         if (cmd == VK_NULL_HANDLE)
         {
             error = "no one-time command buffer";
-            delete staging;
+            fallback_staging->destroy();
+            delete fallback_staging;
             return false;
         }
     }
@@ -599,18 +811,15 @@ bool WolfVkImage::upload(VkCommandBuffer cmd, uint32_t mip, uint32_t layer, uint
     {
         transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);   // :2277
     }
-    // Source: vulkan_core.h:3996 VkBufferImageCopy { bufferOffset, bufferRowLength, bufferImageHeight, imageSubresource, imageOffset, imageExtent };
-    // :3989 VkImageSubresourceLayers { aspectMask, mipLevel, baseArrayLayer, layerCount }. Row length 0 = tightly packed.
     VkBufferImageCopy region{};
-    region.bufferOffset = 0;
+    region.bufferOffset = staging_offset;
     region.bufferRowLength = 0;
     region.bufferImageHeight = 0;
     region.imageSubresource = { f.mDepth ? static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT) : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT), mip,
                                 (mKind == Kind::TEXTURE_3D) ? 0u : layer, 1 };
     region.imageOffset = { 0, 0, (mKind == Kind::TEXTURE_3D) ? static_cast<int32_t>(layer) : 0 };
     region.imageExtent = { width, height, 1 };
-    // Source: vulkan_core.h:4592 PFN_vkCmdCopyBufferToImage(cmd, srcBuffer, dstImage, dstImageLayout, regionCount, pRegions)
-    gVk.vkCmdCopyBufferToImage(cmd, staging->buffer(), mImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    gVk.vkCmdCopyBufferToImage(cmd, staging_buf, mImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     mLastStages = VK_PIPELINE_STAGE_TRANSFER_BIT;
     mLastAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
 
@@ -619,9 +828,200 @@ bool WolfVkImage::upload(VkCommandBuffer cmd, uint32_t mip, uint32_t layer, uint
     {
         ok = mDevice->endOneTimeAndWait(cmd, error);
     }
-    // the staging buffer's destroy() defers its own release until the frames in flight are done
-    staging->destroy();
-    delete staging;
+    if (fallback_staging)
+    {
+        fallback_staging->destroy();
+        delete fallback_staging;
+    }
+    return ok;
+}
+
+bool WolfVkImage::uploadSubRect(VkCommandBuffer cmd, uint32_t mip, uint32_t layer, uint32_t x_offset, uint32_t y_offset,
+                                uint32_t width, uint32_t height, uint32_t src_row_pixels, const void* data,
+                                uint32_t gl_pixel_format, uint32_t gl_pixel_type, bool swap_bytes, std::string& error)
+{
+    if (mImage == VK_NULL_HANDLE || !data || width == 0 || height == 0)
+    {
+        error = "uploadSubRect: no image, no data, or empty extent";
+        return false;
+    }
+    if (mFormat.mFormat == VK_FORMAT_X8_D24_UNORM_PACK32)
+    {
+        error = "a 24-bit depth image is rendered, not uploaded";
+        return false;
+    }
+    const uint32_t level_w = std::max<uint32_t>(1u, mWidth >> std::min<uint32_t>(mip, 31u));
+    const uint32_t level_h = std::max<uint32_t>(1u, mHeight >> std::min<uint32_t>(mip, 31u));
+    const uint32_t level_d = (mKind == Kind::TEXTURE_3D) ? std::max<uint32_t>(1u, mLayers >> std::min<uint32_t>(mip, 31u)) : mLayers;
+    if (mip >= mMipLevels || layer >= level_d || x_offset + width > level_w || y_offset + height > level_h)
+    {
+        error = llformat("uploadSubRect refused: (%u,%u)+%ux%u into level %u layer %u (%ux%u)",
+                         x_offset, y_offset, width, height, mip, layer, level_w, level_h);
+        return false;
+    }
+
+    const Format& f = mFormat;
+    const uint32_t bpc = bytesForPixelType(gl_pixel_type);
+    const bool f32_to_f16 = (!f.mBlockBytes && gl_pixel_type == GL_FLOAT && f.mSourceBytesPerChannel == 2 && isHalfFloatFormat(f.mFormat));
+    VkDeviceSize staging_size = 0;
+    uint32_t src_channels = 0, src_texel = 0, src_row = 0, dst_texel = 0, dst_row = 0;
+
+    if (f.mBlockBytes)
+    {
+        const uint32_t bw = (width + 3) / 4, bh = (height + 3) / 4;
+        staging_size = static_cast<VkDeviceSize>(bw) * bh * f.mBlockBytes;
+    }
+    else
+    {
+        if (bpc == 0 || (!f32_to_f16 && bpc != f.mSourceBytesPerChannel))
+        {
+            error = llformat("uploadSubRect: pixel type 0x%x does not match format %s", gl_pixel_type, formatName(f.mFormat));
+            return false;
+        }
+        src_channels = f.mSourceChannels;
+        src_texel = src_channels * bpc;
+        const uint32_t row_pixels = src_row_pixels ? src_row_pixels : width;
+        src_row = row_pixels * src_texel; // GL_UNPACK_ALIGNMENT = 1 (LLRender::init)
+        dst_texel = f.mTexelBytes;
+        dst_row = width * dst_texel;
+        staging_size = static_cast<VkDeviceSize>(dst_row) * height;
+    }
+
+    const bool one_time = (cmd == VK_NULL_HANDLE);
+    VkBuffer staging_buf = VK_NULL_HANDLE;
+    VkDeviceSize staging_offset = 0;
+    uint8_t* dst_base = nullptr;
+    WolfVkBuffer* fallback_staging = nullptr;
+    WolfVkStagingRing* ring = (!one_time && mDevice) ? mDevice->stagingRing() : nullptr;
+    if (!ring || !ring->allocate(staging_size, staging_buf, staging_offset, dst_base))
+    {
+        ring = nullptr;
+        fallback_staging = new WolfVkBuffer();
+        if (!fallback_staging->create(*mDevice, staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, error))
+        {
+            delete fallback_staging;
+            return false;
+        }
+        staging_buf = fallback_staging->buffer();
+        staging_offset = 0;
+        dst_base = fallback_staging->hostData();
+    }
+
+    if (f.mBlockBytes)
+    {
+        memcpy(dst_base, data, static_cast<size_t>(staging_size));
+    }
+    else
+    {
+        const bool swap_rb = (gl_pixel_format == GL_BGRA &&
+                              (f.mFormat == VK_FORMAT_R8G8B8A8_UNORM || f.mFormat == VK_FORMAT_R8G8B8A8_SRGB) &&
+                              bpc == 1 && !f.mExpandRGB);
+        const uint8_t* src = static_cast<const uint8_t*>(data);
+        for (uint32_t y = 0; y < height; ++y)
+        {
+            const uint8_t* s = src + static_cast<size_t>(y) * src_row;
+            uint8_t* d = dst_base + static_cast<size_t>(y) * dst_row;
+            if (f32_to_f16)
+            {
+                const uint32_t dst_ch = f.mExpandRGB ? 4u : src_channels;
+                for (uint32_t x = 0; x < width; ++x)
+                {
+                    uint16_t* dh = reinterpret_cast<uint16_t*>(d + x * dst_texel);
+                    for (uint32_t c = 0; c < src_channels; ++c)
+                    {
+                        float fv = 0.f;
+                        memcpy(&fv, s + x * src_texel + c * 4u, 4);
+                        dh[c] = packF32ToF16(fv);
+                    }
+                    if (f.mExpandRGB && dst_ch == 4u) dh[3] = 0x3C00u;
+                }
+                continue;
+            }
+            if (!f.mExpandRGB)
+            {
+                if (swap_rb)
+                {
+                    for (uint32_t x = 0; x < width; ++x)
+                    {
+                        d[x * 4 + 0] = s[x * 4 + 2];
+                        d[x * 4 + 1] = s[x * 4 + 1];
+                        d[x * 4 + 2] = s[x * 4 + 0];
+                        d[x * 4 + 3] = s[x * 4 + 3];
+                    }
+                }
+                else
+                {
+                    memcpy(d, s, dst_row);
+                }
+            }
+            else
+            {
+                for (uint32_t x = 0; x < width; ++x)
+                {
+                    memcpy(d + x * dst_texel, s + x * src_texel, src_texel);
+                    uint8_t* a = d + x * dst_texel + src_texel;
+                    if (bpc == 1) { a[0] = 0xFF; }
+                    else if (bpc == 2) { a[0] = 0x00; a[1] = 0x3C; }
+                    else { const float one = 1.0f; memcpy(a, &one, 4); }
+                }
+            }
+            if (swap_bytes && bpc > 1)
+            {
+                for (uint32_t i = 0; i + bpc <= dst_row; i += bpc)
+                {
+                    std::reverse(d + i, d + i + bpc);
+                }
+            }
+        }
+    }
+    if (ring)
+    {
+        ring->flush(staging_offset, staging_size);
+    }
+    else
+    {
+        fallback_staging->markDirty(0, staging_size);
+    }
+
+    if (one_time)
+    {
+        cmd = mDevice->beginOneTime();
+        if (cmd == VK_NULL_HANDLE)
+        {
+            error = "no one-time command buffer";
+            fallback_staging->destroy();
+            delete fallback_staging;
+            return false;
+        }
+    }
+    if (mLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+    {
+        transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    }
+    VkBufferImageCopy region{};
+    region.bufferOffset = staging_offset;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource = { f.mDepth ? static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT) : static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT), mip,
+                                (mKind == Kind::TEXTURE_3D) ? 0u : layer, 1 };
+    region.imageOffset = { static_cast<int32_t>(x_offset), static_cast<int32_t>(y_offset), (mKind == Kind::TEXTURE_3D) ? static_cast<int32_t>(layer) : 0 };
+    region.imageExtent = { width, height, 1 };
+    gVk.vkCmdCopyBufferToImage(cmd, staging_buf, mImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    mLastStages = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    mLastAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    bool ok = true;
+    if (one_time)
+    {
+        transition(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                   VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+        ok = mDevice->endOneTimeAndWait(cmd, error);
+    }
+    if (fallback_staging)
+    {
+        fallback_staging->destroy();
+        delete fallback_staging;
+    }
     return ok;
 }
 

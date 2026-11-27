@@ -121,6 +121,8 @@
     X(vkCreateQueryPool, 4572) \
     X(vkDestroyQueryPool, 4573) \
     X(vkGetQueryPoolResults, 4574) \
+    X(vkCmdBeginQuery, 4597) \
+    X(vkCmdEndQuery, 4598) \
     X(vkCmdResetQueryPool, 4599) \
     X(vkCmdWriteTimestamp, 4600) \
     X(vkCreateShaderModule, 4610) \
@@ -143,6 +145,7 @@
     X(vkCmdBindPipeline, 4630) \
     X(vkCmdBindDescriptorSets, 4631) \
     X(vkCmdClearColorImage, 4632) \
+    X(vkCmdClearAttachments, 4634) \
     X(vkCmdPushConstants, 4638) \
     X(vkCreateGraphicsPipelines, 4639) \
     X(vkCreateFramebuffer, 4640) \
@@ -157,9 +160,11 @@
     X(vkCmdBindVertexBuffers, 4655) \
     X(vkCmdDraw, 4656) \
     X(vkCmdDrawIndexed, 4657) \
+    X(vkCmdDrawIndexedIndirect, 4659) \
     X(vkCmdBlitImage, 4660) \
     X(vkCmdBeginRenderPass, 4664) \
     X(vkCmdEndRenderPass, 4666) \
+    X(vkCmdExecuteCommands, 4667) \
     X(vkCreateSwapchainKHR, 9171) \
     X(vkDestroySwapchainKHR, 9172) \
     X(vkGetSwapchainImagesKHR, 9173) \
@@ -175,6 +180,7 @@
 #define WOLFVK_DEVICE_OPTIONAL_FUNCS(X) \
     X(vkGetBufferMemoryRequirements2, 6176) \
     X(vkGetImageMemoryRequirements2, 6175) \
+    X(vkResetQueryPool, 7025) \
     X(vkGetSemaphoreCounterValue, 7026) \
     X(vkWaitSemaphores, 7027) \
     X(vkSignalSemaphore, 7028) \
@@ -201,7 +207,9 @@ namespace WolfVkLoader
     // Opens the platform loader library and fetches vkGetInstanceProcAddr and the four global commands.
     // Returns false (with a plain-English reason in error) when no Vulkan loader is installed: the caller then
     // leaves the OpenGL renderer in charge. Safe to call more than once.
-    bool loadLibrary(std::string& error);
+    // [W114-VULKAN MAC 2026-11-26] for_validation: macOS only (ignored elsewhere) - the Vulkan SDK's loader is tried before
+    // the bundled MoltenVK, because MoltenVK on its own loads no layers (wolfvkloader.cpp, macOS candidates).
+    bool loadLibrary(std::string& error, bool for_validation = false);
 
     // True after loadLibrary succeeded.
     bool isLoaded();

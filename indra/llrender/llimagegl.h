@@ -81,6 +81,74 @@ public:
     static void (*sWolfVkOnDelete)(LLGLuint tex_name);
     void wolfVkTexelsChanged(LLGLuint name = 0) const { if (sWolfVkOnTexelsChanged) { sWolfVkOnTexelsChanged(name ? name : mTexName); } }
 
+    // [VK S6 2026-11-26] Resource ownership, textures held by a raw OpenGL name (the Wolf sky tables, the terrain layer
+    // arrays, the cloud maps, LLCubeMapArray ...): when an owner is installed (newview/wolfvktextures.cpp) the texture's
+    // memory is a Vulkan image that OpenGL imports (GL_EXT_memory_object), so both renderers use ONE copy and the
+    // Vulkan passes find the image by the name (WolfVkTextures::find).
+    struct WolfVkTextureOwner
+    {
+        virtual ~WolfVkTextureOwner() = default;
+        // A texture of target (GL_TEXTURE_2D, GL_TEXTURE_CUBE_MAP, GL_TEXTURE_2D_ARRAY, GL_TEXTURE_CUBE_MAP_ARRAY,
+        // GL_TEXTURE_3D) with IMMUTABLE storage of levels mip levels in internal_format (a sized format), width x height
+        // and, for the array and 3D targets, depth (layers; layer-faces for a cube map array; slices). gl_renders: OpenGL
+        // attaches it to a framebuffer, copies a framebuffer into it or runs glGenerateMipmap on it (a driver may make
+        // the mips by rendering), so the image must be one that can be rendered into. Returns the OpenGL name, not bound anywhere, or 0
+        // when it cannot be made that way (the caller then makes an ordinary OpenGL texture, as it did before).
+        // GL_RGB8 / GL_RGB16F have no exportable Vulkan format: the storage is then GL_RGBA8 / GL_RGBA16F with
+        // GL_TEXTURE_SWIZZLE_A = GL_ONE, which samples exactly as the three-channel format does.
+        virtual U32 createStorage(U32 target, S32 levels, U32 internal_format, S32 width, S32 height, S32 depth, bool gl_renders) = 0;
+        // name came from createStorage: it is deleted (the OpenGL texture now, the Vulkan image when no frame in
+        // flight uses it) and true is returned. Otherwise false and nothing is done.
+        virtual bool destroyStorage(U32 name) = 0;
+        // name came from createStorage: what it was made as (the format ASKED for) and true. Otherwise false.
+        virtual bool describe(U32 name, U32& internal_format, S32& width, S32& height, S32& depth, S32& levels) = 0;
+    };
+    static WolfVkTextureOwner* sWolfVkTextureOwner;
+
+    // [NATIVE VULKAN 2026-11-26] Pure-Vulkan texture store installed when gGLManager.mIsNativeVulkan is true.
+    // Owns synthetic non-zero texture names and WolfVkImage instances without any OpenGL calls.
+    struct WolfVkNativeTextureStore
+    {
+        virtual ~WolfVkNativeTextureStore() = default;
+        virtual U32 generateName() = 0;
+        virtual void destroyNames(S32 count, const U32* names) = 0;
+        virtual bool uploadImage2D(U32 name, S32 miplevel, U32 intformat, S32 width, S32 height,
+                                   U32 pixformat, U32 pixtype, const void* pixels, bool swap_bytes,
+                                   bool generate_mips, S32 exact_mips = 0) = 0;
+        virtual bool uploadSubImage2D(U32 name, S32 miplevel, S32 x_pos, S32 y_pos, S32 width, S32 height,
+                                      S32 row_pixels, U32 intformat, U32 pixformat, U32 pixtype,
+                                      const void* pixels, bool swap_bytes) = 0;
+        virtual bool generateMipmaps(U32 name) = 0;
+        virtual void setSamplerOptions(U32 name, S32 filter, S32 address) = 0;
+        virtual bool getSamplerOptions(U32 name, S32& filter, S32& address) = 0;
+        virtual bool readBackImage2D(U32 name, S32 gl_discard, S32 width, S32 height, S32 ncomponents, U8* out_data) = 0;
+    };
+    static WolfVkNativeTextureStore* sWolfVkNativeStore;
+    static U32 wolfVkCreateStorage(U32 target, S32 levels, U32 internal_format, S32 width, S32 height, S32 depth, bool gl_renders)
+    {
+        return sWolfVkTextureOwner ? sWolfVkTextureOwner->createStorage(target, levels, internal_format, width, height, depth, gl_renders) : 0;
+    }
+    // For the callers that delete their names with glDeleteTextures themselves (deleteTextures() below asks the owner
+    // by itself): true when the owner held name and deleted it.
+    static bool wolfVkDestroyStorage(U32 name) { return name && sWolfVkTextureOwner && sWolfVkTextureOwner->destroyStorage(name); }
+    // For the callers that (re)specify the WHOLE of a one-level 2D texture from client data on every upload ("if no
+    // name: generateTextures; bind on unit 0; setManualImage(level 0, no compression)"): the same in one call, with the
+    // texture in Vulkan-owned memory when an owner is installed. name: the caller's texture name, made here when 0 and
+    // REPLACED when the texture is owned and intformat / width / height changed (immutable storage; the old name is
+    // deleted like any other). pixformat / pixtype / pixels as for glTexImage2D; pixformat must be one core OpenGL
+    // takes as it is (GL_RED, GL_RG, GL_RGB, GL_RGBA: setManualImage rewrites only the deprecated GL_ALPHA /
+    // GL_LUMINANCE kinds). The texture is left bound on texture unit 0 (LLTexUnit::bindManual), as those callers had it.
+    static void wolfVkManualImage2D(U32& name, U32 intformat, S32 width, S32 height, U32 pixformat, U32 pixtype, const void* pixels);
+    // The number of levels of a full mip chain, floor(log2(largest size)) + 1: what glGenerateMipmap fills and the most
+    // glTexStorage2D/3D accept (Khronos reference pages glTexStorage2D / glTexStorage3D, GL_INVALID_OPERATION rule).
+    // depth counts for GL_TEXTURE_3D only: pass 1 for the array targets, whose layers are not mipped.
+    static S32 wolfVkFullMipLevels(S32 width, S32 height, S32 depth = 1)
+    {
+        S32 size = llmax(width, llmax(height, depth)), levels = 1;
+        while (size > 1) { size >>= 1; ++levels; }
+        return levels;
+    }
+
     // Size calculation
     static S32 dataFormatBits(S32 dataformat);
     static S64 dataFormatBytes(S32 dataformat, S32 width, S32 height);

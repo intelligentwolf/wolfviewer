@@ -41,6 +41,8 @@
 #include "llviewerwindow.h"
 #include "llviewerjoystick.h"
 #include "llviewermediafocus.h"
+#include "wolfvknative.h"
+#include "vk/wolfvkstate.h"
 
 extern bool gCubeSnapshot;
 extern bool gTeleportDisplay;
@@ -413,11 +415,16 @@ void LLHeroProbeManager::updateProbeFace(LLReflectionMap* probe, U32 face, bool 
             if (mip >= 0)
             {
                 LL_PROFILE_GPU_ZONE("hero probe mip copy");
-                mTexture->bind(0);
-
-                glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, mip, 0, 0, sourceIdx * 6 + face, 0, 0, res, res);
-
-                mTexture->unbind();
+                if (gGLManager.mIsNativeVulkan)
+                {
+                    WolfVkNative::copyBoundTargetToImage3D(mTexture->getGLName(), mip, sourceIdx * 6 + face, res, res);
+                }
+                else
+                {
+                    mTexture->bind(0);
+                    glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, mip, 0, 0, sourceIdx * 6 + face, 0, 0, res, res);
+                    mTexture->unbind();
+                }
             }
             mMipChain[i].flush();
         }
@@ -482,13 +489,20 @@ void LLHeroProbeManager::generateRadiance(LLReflectionMap* probe)
 
                     mVertexBuffer->drawArrays(gGL.TRIANGLE_STRIP, 0, 4);
 
-                    glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, i, 0, 0, probe->mCubeIndex * 6 + cf, 0, 0, res, res);
+                    if (gGLManager.mIsNativeVulkan)
+                    {
+                        WolfVkNative::copyBoundTargetToImage3D(mTexture->getGLName(), i, probe->mCubeIndex * 6 + cf, res, res);
+                    }
+                    else
+                    {
+                        glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, i, 0, 0, probe->mCubeIndex * 6 + cf, 0, 0, res, res);
+                    }
                 }
 
                 if (i != mMipChain.size() - 1)
                 {
                     res /= 2;
-                    glViewport(0, 0, res, res);
+                    WolfVkState::viewport(0, 0, res, res);
                 }
             }
 

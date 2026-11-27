@@ -154,18 +154,25 @@ private:
         bool mGround;
         U32 mOrigin;
     };
-    /** The field's sources from the last finished pass's builds (mPrims). [FAR DRAW PERF 2026-11-14/] was the object walk */
-    void raster();
+    /** The field's sources from the last finished pass's builds (mPrims). [FAR DRAW PERF 2026-11-14/] was the object walk
+     *  [W114 2026-11-26] levels: a bit per level to raster (the others are left as they are); the sources (mBoxes, mTopZ)
+     *  are always made whole. */
+    void raster(U32 levels = ALL_LEVELS);
+    static constexpr U32 ALL_LEVELS = (1u << LEVELS) - 1;
+    /** [W114 FRAME RATE 2026-11-26] What the field is made from: mPrims in global metres (each with its ground flag) and
+     *  every level's window corner, as a 64-bit hash. The same key = the same field, so the rebuild is skipped. */
+    U64 fieldKey() const;
     /** [FAR DRAW PERF 2026-11-14] Swap the field's working arrays (level k, or all and the sources) with the pending ones, so
      *  raster / finishLevel run unchanged on the rebuild under way while the published field stays whole. */
     void swapPendingLevel(S32 k);
     void swapPendingAll();
-    /** [FAR DRAW PERF 2026-11-14] The whole rebuild in this frame (a recentre, the first): raster, finish, upload, check. */
-    void rebuildNow();
+    /** [FAR DRAW PERF 2026-11-14] The whole rebuild in this frame (a recentre, the first): raster, finish, upload, check.
+     *  [W114 2026-11-26] levels: only those (a recentre of some levels over the builds the field already shows). */
+    void rebuildNow(U32 levels = ALL_LEVELS);
     /** [FAR DRAW PERF 2026-11-14] One step of the staged rebuild after a finished pass (mStage). */
     void advanceStage();
     void finishLevel(S32 k);
-    void upload();
+    void upload(U32 levels = ALL_LEVELS);
     void selfCheck(const LLVector3d& agent_origin);
     bool sampleLevel(S32 k, F32 ax, F32 ay, F32 out[CHANNELS]) const;
 
@@ -186,6 +193,8 @@ private:
     U64 mPassRegion = 0;      // [review 2] the agent's region when the pass under way began
     U64 mPrimsRegion = 0;     // [review 2] ... and when the one in mPrims began
     S32 mStage = -1;
+    U64 mFieldKey = 0;        // [W114 2026-11-26] fieldKey() of the published field (valid while mReady)
+    U64 mPendingKey = 0;      // [W114 2026-11-26] ... of the staged rebuild under way
     std::vector<F32> mTgP[LEVELS], mTsP[LEVELS][SKY_BANDS], mBsP[LEVELS][SKY_BANDS], mDP[LEVELS];
     std::vector<U8> mMarkP[LEVELS];
     std::vector<Box> mBoxesP;

@@ -119,6 +119,9 @@ uniform float uDrawSunDisc;         // 0 in reflection-probe faces: LL lights wi
 uniform float uSeaProbe;            // 1: the sea mirrors LL's default reflection probe (the sky and the clouds as the
 uniform samplerCubeArray reflectionProbes;   // world's water reflects them, llreflectionmapmanager.cpp probe 0)
 uniform float uMoonSkyScale;        // the moon's illuminance above the atmosphere / the sun's (0: not drawn)
+// [T1069 2026-11-26] the moon's light as the eye sees it, hue only (WolfEnvironmentRender updateLight moonEyeTint, ticket #304's
+// rule for the moonlit clouds; renderSkyDome sets it on every draw): white by night and while the sun is less than 6 deg down
+uniform vec3  uMoonEyeTint;
 uniform float uNight;               // [2026-10-25] WolfEnvironmentRender::nightFactor (0 day and civil / nautical twilight)
 uniform float uNightSky;            // the natural night-sky background, cd/m2 x pre-exposure (0 = none)
 uniform float wolf_aurora;
@@ -793,7 +796,15 @@ void main()
             if (uMoonSkyScale > 0.0)
             {
                 vec3 moonPerp = GetSunAndSkyIrradiance(seaPoint, uMoonDirECEF, uMoonDirECEF, dummySky) * uMoonSkyScale;
-                glint += wolfSeaGlint(surfaceNormal, -rayDirection, uMoonDirECEF, wolfSeaMss) * moonPerp;
+                // [T1069 2026-11-26] Ticket 1069 (Jimmy Olsen, TROMSO 05:37Z, sun -14 deg, moon 27 deg, W113): the moon's glint on
+                // the open sea "looking like a 2nd sun" - cream-white (his picture: 255,225,210 round it) where the world's water in
+                // front of it shone blue-white (242,247,253). moonPerp is the sun's beam through the air toward the moon (warm, as
+                // ticket #304's moonlit clouds were), and its eye colour came only from wolfNightLight below, weighted by nightFactor:
+                // 0 until the sun is 12 deg down and part-way to 18 - most of a Tromso winter night. The same rule as the clouds
+                // (cloudsLight.glsl wolfLightTint; all 0 = the uniform unset = white, as wolfLightTintOrWhite): the moon's direct light takes the night light's hue of moonlight at the frame's
+                // adaptation, its luminance kept, faded out as wolfNightLight comes in (no double shift). Was the same in W111.
+                glint += wolfSeaGlint(surfaceNormal, -rayDirection, uMoonDirECEF, wolfSeaMss) * moonPerp
+                      * (any(greaterThan(uMoonEyeTint, vec3(0.0))) ? uMoonEyeTint : vec3(1.0));
             }
         }
         radiance += glint;

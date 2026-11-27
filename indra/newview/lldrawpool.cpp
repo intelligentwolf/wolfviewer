@@ -53,7 +53,7 @@
 #include "llglcommonfunc.h"
 #include "llvoavatar.h"
 #include "llviewershadermgr.h"
-#include "wolfvkbridge.h"   // [VULKAN ONE RENDERER PER BATCH 2026-11-08] batches Vulkan drew this frame are skipped here
+#include "wolfvkbridge.h"   // [POSE CHECK 2026-11-08] poseCheckModelMatrix (applyModelMatrix)
 
 S32 LLDrawPool::sNumDrawPools = 0;
 
@@ -441,11 +441,6 @@ void LLRenderPass::pushBatches(U32 type, bool texture, bool batch_textures)
             LLDrawInfo* pparams = *i;
             LLCullResult::increment_iterator(i, end);
 
-            // [VULKAN ONE RENDERER PER BATCH 2026-11-08] a batch is drawn by one renderer: when Vulkan drew this one
-            // into the shared targets this frame, GL leaves it alone (drawing it twice at equal depth z-fights, which
-            // showed as textures flashing, Paul 2026-11-08); the batches Vulkan could not draw are GL's as always
-            if (WolfVkBridge::batchDrawnByVulkan(pparams)) continue;
-
             pushBatch(*pparams, texture, batch_textures);
         }
     }
@@ -505,13 +500,38 @@ void LLRenderPass::pushUntexturedRiggedBatches(U32 type)
     bool skipLastSkin = false;
     auto* begin = gPipeline.beginRenderMap(type);
     auto* end = gPipeline.endRenderMap(type);
+    // [W114-VULKAN 2026-11-27] the frame-rate hunt: "shadow opaque rigged" cost 6 ms a frame at Paul's spot (frame pieces
+    // 08:36-08:37Z). Counted here (the shadow passes' only caller of this untextured path): draws, palette uploads, and
+    // distinct (avatar, skin) changes, one #WolfShadows# line every 10 s while WolfLogFrameRate is on.
+    static LLCachedControl<bool> s_log_rate(gSavedSettings, "WolfLogFrameRate", false);
+    static U64 s_draws = 0, s_uploads = 0, s_calls = 0, s_frames_seen = 0;
+    static U32 s_last_frame = 0;
+    static F64 s_next_log = 0.0;
+    if (s_log_rate)
+    {
+        ++s_calls;
+        if (LLFrameTimer::getFrameCount() != s_last_frame) { s_last_frame = LLFrameTimer::getFrameCount(); ++s_frames_seen; }
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (now >= s_next_log)
+        {
+            if (s_next_log > 0.0 && s_frames_seen)
+            {
+                LL_INFOS("WolfShadows") << llformat("untextured rigged batches: %.1f draws, %.1f palette uploads, %.1f map walks a frame",
+                                                    (F64)s_draws / s_frames_seen, (F64)s_uploads / s_frames_seen, (F64)s_calls / s_frames_seen) << LL_ENDL;
+            }
+            s_draws = s_uploads = s_calls = s_frames_seen = 0;
+            s_next_log = now + 10.0;
+        }
+    }
     for (LLCullResult::drawinfo_iterator i = begin; i != end; )
     {
         LLDrawInfo* pparams = *i;
         LLCullResult::increment_iterator(i, end);
 
+        if (s_log_rate && pparams->mSkinInfo && (pparams->mAvatar != lastAvatar || pparams->mSkinInfo->mHash != lastMeshId)) ++s_uploads;
         if (uploadMatrixPalette(pparams->mAvatar, pparams->mSkinInfo, lastAvatar, lastMeshId, skipLastSkin))
         {
+            if (s_log_rate) ++s_draws;
             pushUntexturedBatch(*pparams);
         }
     }

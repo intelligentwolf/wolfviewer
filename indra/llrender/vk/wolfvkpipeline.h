@@ -30,7 +30,12 @@
  *              TRIANGLES -> TRIANGLE_LIST (:2667), TRIANGLE_STRIP -> TRIANGLE_STRIP (:2668), TRIANGLE_FAN -> TRIANGLE_FAN (:2669),
  *              POINTS -> POINT_LIST (:2664), LINES -> LINE_LIST (:2665), LINE_STRIP -> LINE_STRIP (:2666), LINE_LOOP -> LINE_STRIP
  *              (Vulkan has no loop; the closing segment is missing: a known limitation of this cut, the viewer's 21 LINE_LOOP
- *              uses are debug drawing; MoltenVK refuses TRIANGLE_FAN pipelines, Mac must convert fans - not done here, declared)
+ *              uses are debug drawing). [W114-VULKAN MAC 2026-11-26] TRIANGLE_FAN on a VK_KHR_portability_subset device needs
+ *              its triangleFans feature (VUID-VkPipelineInputAssemblyStateCreateInfo-triangleFans-04452); MoltenVK 1.4.2
+ *              offers it (MVKDevice.mm:610) and draws fans as indexed triangles itself (MVKCmdDraw.mm:182 "Metal doesn't
+ *              support triangle fans, so encode it as triangles"), and WolfVkDevice enables it. A device without it gets
+ *              no fan pipeline (build() refuses with a reason); a recorder then draws the fan as a TRIANGLE_LIST through
+ *              WolfVkTopology::fanToTriangleList below, which keeps Vulkan's own fan triangles and their order.
  *   vertex input  the attribute mask (which LLVertexBuffer arrays the draw binds) + the program's input locations
  * Viewport and scissor are dynamic (:2526-2527), set per render target.
  *
@@ -61,6 +66,19 @@
 
 class WolfVkDevice;
 
+// [W114-VULKAN MAC 2026-11-26] Triangle fan as a triangle list, for a device whose VK_KHR_portability_subset lacks
+// triangleFans (WolfVkDevice::triangleFans()). Vulkan's fan (Vulkan spec "Triangle Fans", chapters/drawing.adoc):
+// p_i = {v_(i+1), v_(i+2), v_0}, max(0, vertexCount - 2) primitives, provoking vertex v_(i+1). Each p_i is appended in
+// that same vertex order, so winding (cull) and the first-vertex provoking vertex of a TRIANGLE_LIST
+// (VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX: v_(3i)) are those of the fan, and the triangles come in the fan's order
+// (blending order unchanged). The fan's vertices are first .. first+count-1, or indices[first .. first+count-1] when
+// indices is not null (an indexed fan); out receives the list's vertex indices (cleared first).
+namespace WolfVkTopology
+{
+    void fanToTriangleList(uint32_t first, uint32_t count, const uint16_t* indices, std::vector<uint32_t>& out);
+    void fanToTriangleList(uint32_t first, uint32_t count, const uint32_t* indices, std::vector<uint32_t>& out);
+}
+
 class WolfVkProgram
 {
 public:
@@ -69,30 +87,70 @@ public:
     static constexpr uint32_t SET_SAMPLERS = 1;    // one binding per sampler, in the compiler's order
     static constexpr uint32_t BINDING_UNIFORMS_VERT = 0;
     static constexpr uint32_t BINDING_UNIFORMS_FRAG = 1;
+    // [VULKAN G-BUFFER S2 2026-11-26] the viewer's own std140 blocks: shader_vulkan.py gives them set 2 with
+    // LLGLSLShader::UniformBlock's order as the binding (llglslshader.h UB_REFLECTION_PROBES 0 .. UB_WOLF_EEP_GAINS 4)
+    static constexpr uint32_t SET_BLOCKS = 2;
+    struct BlockBinding
+    {
+        std::string mName;      // the block's name (ReflectionProbes, ...)
+        uint32_t mBinding = 0;  // = the GL binding point (llglslshader.cpp mapUniforms glUniformBlockBinding(..., i))
+        uint32_t mSize = 0;     // std140 bytes the shader reads
+        bool mUsed = false;     // statically used by either stage (WolfVkSpirv::UniformBlock::mUsed)
+    };
 
     struct Stage
     {
         VkShaderModule mModule = VK_NULL_HANDLE;
         WolfVkSpirv::Module mReflection;
-        const WolfVkSpirv::UniformBlock* mUniforms = nullptr;   // the stage's WolfUniforms block, or null when it has none
+        const WolfVkSpirv::UniformBlock* mUniforms = nullptr;      // the stage's WolfUniforms UBO block (set 0), or null
+        const WolfVkSpirv::UniformBlock* mPushConstants = nullptr; // WolfUniformsV promoted to PushConstant, or null
     };
 
     WolfVkProgram() = default;
     ~WolfVkProgram();
 
-    // vert/frag: SPIR-V words (from the .spv files). name: for the log.
-    bool create(WolfVkDevice& device, const std::string& name, const std::vector<uint32_t>& vert, const std::vector<uint32_t>& frag, std::string& error);
+    // vert/frag: SPIR-V words (from the .spv files). geom: the geometry stage's words, empty for a program without one
+    // ([GEOMETRY 2026-11-26] scripts/shader_vulkan.py STAGES; the stage has no uniform block). name: for the log.
+    bool create(WolfVkDevice& device, const std::string& name, const std::vector<uint32_t>& vert, const std::vector<uint32_t>& geom,
+                const std::vector<uint32_t>& frag, std::string& error);
     void destroy();
     bool isValid() const { return mPipelineLayout != VK_NULL_HANDLE; }
 
     const std::string& name() const { return mName; }
     const Stage& vertex() const { return mVertex; }
     const Stage& fragment() const { return mFragment; }
+    // [GEOMETRY 2026-11-26] the geometry stage; its mModule is VK_NULL_HANDLE when the program has none
+    const Stage& geometry() const { return mGeometry; }
+    bool hasGeometry() const { return mGeometry.mModule != VK_NULL_HANDLE; }
+    // [SPEC CONSTANTS 2026-11-26] a 32-bit float specialization constant every stage of this program's pipelines gets
+    // (constant_id, scripts/shader_vulkan.py SPEC_CONSTANTS); set after create, before the first pipeline is built.
+    // An id a stage does not declare is ignored by Vulkan (VkSpecializationInfo, spec 10.11 "Specialization Constants").
+    void setSpecConstant(uint32_t id, float value);
+    bool hasSpecConstant(uint32_t id) const;
+    // Null when the program has none.
+    const VkSpecializationInfo* specialization() const { return mSpecEntries.empty() ? nullptr : &mSpecInfo; }
     VkPipelineLayout pipelineLayout() const { return mPipelineLayout; }
     VkDescriptorSetLayout uniformSetLayout() const { return mUniformSetLayout; }
     VkDescriptorSetLayout samplerSetLayout() const { return mSamplerSetLayout; }   // VK_NULL_HANDLE when the program samples nothing
-    // Samplers by binding (set 1), merged from both stages.
+    // Every sampler the stages DECLARE (set 1), merged; mUsed = some stage statically uses it. Names and binding numbers
+    // for the uniform setters; NOT the layout (samplerSlots()).
     const std::vector<WolfVkSpirv::Sampler>& samplers() const { return mSamplers; }
+    // [W114-VULKAN S7 2026-11-26] The set-1 layout: one slot per statically used sampler, the SPIR-V binding number
+    // kept, visible to exactly the stages that use it (Mac gap (a): a device's per-stage sampler limit counts what the
+    // layout holds, not what the shaders declare; wolfvkpipeline.cpp create()). A descriptor write or a descriptor count
+    // for set 1 must follow this list and nothing else (VUID-VkWriteDescriptorSet-dstBinding-00315).
+    struct SamplerSlot
+    {
+        uint32_t mBinding = 0;
+        uint32_t mCount = 1;              // descriptors (the sampler's array size)
+        VkShaderStageFlags mStages = 0;   // the stages that statically use it
+    };
+    const std::vector<SamplerSlot>& samplerSlots() const { return mSamplerSlots; }
+    // binding (or an element of an arrayed slot: slot binding + element, as bindSamplers numbers them) is in the layout
+    bool samplerInLayout(uint32_t binding) const;
+    // Descriptors of the layout visible to a stage (0 vertex, 1 geometry, 2 fragment): samplers + uniform buffers, for
+    // VkPhysicalDeviceLimits::maxPerStageResources at pipeline creation (the colour attachments are added there).
+    uint32_t stageResources(uint32_t stage) const { return stage < 3 ? mStageResources[stage] : 0u; }
     // Vertex input location of an LLVertexBuffer attribute name ("position", "texcoord0", ...), or -1 when the shader lacks it.
     int32_t inputLocation(const char* attrib_name) const;
     // The attribute mask the vertex shader needs (bit = WolfVkVertexBuffer::AttributeType), from its inputs.
@@ -103,6 +161,9 @@ public:
     UniformRef findUniform(const std::string& name) const;
     // Sampler binding (set 1) by name, or -1.
     int32_t samplerBinding(const std::string& name) const;
+    // [S2] set 2 (empty when the program has none) and its layout (VK_NULL_HANDLE then; the pipeline layout has 2 sets)
+    const std::vector<BlockBinding>& blocks() const { return mBlocks; }
+    VkDescriptorSetLayout blockSetLayout() const { return mBlockSetLayout; }
 
 private:
     bool buildStage(WolfVkDevice& device, Stage& stage, const std::vector<uint32_t>& words, const char* block_name, std::string& error);
@@ -111,12 +172,21 @@ private:
     std::string mName;
     Stage mVertex;
     Stage mFragment;
+    Stage mGeometry;
+    std::vector<VkSpecializationMapEntry> mSpecEntries;
+    std::vector<float> mSpecData;
+    VkSpecializationInfo mSpecInfo{};
     std::vector<WolfVkSpirv::Sampler> mSamplers;
+    std::vector<VkShaderStageFlags> mSamplerStages;   // [S7] parallel to mSamplers: the stages that statically use each
+    std::vector<SamplerSlot> mSamplerSlots;           // [S7] the set-1 layout
+    uint32_t mStageResources[3] = { 0, 0, 0 };        // [S7]
     std::map<std::string, uint32_t> mSamplerBindings;
     std::map<std::string, uint32_t> mInputLocations;
     uint32_t mAttributeMask = 0;
     VkDescriptorSetLayout mUniformSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout mSamplerSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout mBlockSetLayout = VK_NULL_HANDLE;   // [S2]
+    std::vector<BlockBinding> mBlocks;                      // [S2]
     VkPipelineLayout mPipelineLayout = VK_NULL_HANDLE;
 };
 
@@ -133,6 +203,9 @@ struct WolfVkPipelineState
     bool mDepthWrite = true;
     uint32_t mDepthFunc = 0x0203;   // GL_LEQUAL (gl.h:262), LLGLDepthTest's default (llglstates.h:41)
     bool mCullFace = true;          // LLGLEnable(GL_CULL_FACE)
+    // [W114-VULKAN S4 2026-11-26] with mCullFace: front faces are culled instead of back faces (glCullFace(GL_FRONT):
+    // llviewerjoint.cpp:122, the inside pass of small avatar hair and skirts). Ignored when mCullFace is false.
+    bool mCullFront = false;
     bool mWireframe = false;
     uint8_t mTopology = 0;          // LLRender::eGeomModes: 0 TRIANGLES .. 6 LINE_LOOP
     uint32_t mAttributeMask = 0;    // the LLVertexBuffer arrays bound (WolfVkVertexBuffer::bind order)
@@ -146,6 +219,14 @@ struct WolfVkPipelineState
     // = factor, depthBiasConstantFactor = units (Vulkan spec 27.7.3 "Depth Bias"). 0/0 = off.
     float mDepthBiasConstant = 0.f;
     float mDepthBiasSlope = 0.f;
+    // [W114-VULKAN S5 2026-11-26] GL_DEPTH_CLAMP (the sun shadow cascades, pipeline.cpp renderShadow LLGLEnable
+    // clamp_depth): "If depth clamping is enabled ... clipping against the near and far planes is disabled" and the
+    // window z is clamped to the depth range (OpenGL 4.6 13.7 "Primitive Clipping", 15.1 "Depth Clamping").
+    // VkPipelineRasterizationStateCreateInfo::depthClampEnable is the same pair: clamp to the viewport's minDepth /
+    // maxDepth (Vulkan spec 29.9 "Depth Test") and, without VkPipelineRasterizationDepthClipStateCreateInfoEXT,
+    // "depth clipping is disabled when depthClampEnable is VK_TRUE" (spec 27.2 "Primitive Clipping"). Needs
+    // WolfVkDevice::depthClamp(); a pipeline asked for it on a device without the feature is refused, never drawn unclamped.
+    bool mDepthClamp = false;
 
     uint64_t hash() const;
     bool operator==(const WolfVkPipelineState& o) const;
@@ -160,7 +241,17 @@ public:
     ~WolfVkPipelineCache();
     WolfVkPipelineCache(const WolfVkPipelineCache&) = delete;
     WolfVkPipelineCache& operator=(const WolfVkPipelineCache&) = delete;
-    void init(WolfVkDevice& device);
+    // [W114-VULKAN S7 2026-11-26] disk_file (Mac gap (i): the driver's compiled pipelines kept between runs, so a start
+    // does not compile every pipeline again - on MoltenVK each one is a Metal shader translation): the full path of the
+    // file the VkPipelineCache is loaded from here and written to by saveIfDue() / destroy(); empty = memory only.
+    // What is loaded must carry this file's own envelope (length and checksum of the payload) and the header of THIS
+    // device and driver (VkPipelineCacheHeaderVersionOne: vendorID, deviceID, pipelineCacheUUID); anything else is
+    // ignored and replaced at the next save.
+    void init(WolfVkDevice& device, const std::string& disk_file = std::string());
+    // Writes the cache to the disk file when pipelines were built since the last write and at least SAVE_INTERVAL_SECONDS
+    // have passed since then (now_seconds: any monotonic clock). One vkGetPipelineCacheData and one file write; called
+    // once a frame by the owner. destroy() writes unconditionally when anything is unsaved.
+    void saveIfDue(double now_seconds);
     void destroy();
     // [B2 2026-11-11] the device is hung: the pipelines are left to it (no Vulkan call) and the cache unregisters
     void abandon();
@@ -184,6 +275,15 @@ private:
     void forget(const std::function<bool(const Key&)>& match);
 
     VkPipeline build(const WolfVkProgram& program, const WolfVkPipelineState& state, VkRenderPass render_pass, std::string& error);
+    // [W114-VULKAN S7 2026-11-26] the disk file (wolfvkpipeline.cpp "pipeline cache on disk")
+    static constexpr double SAVE_INTERVAL_SECONDS = 60.0;
+    // No eternal stores: a cache file larger than this is neither read nor written (the old file is removed).
+    static constexpr size_t DISK_LIMIT_BYTES = 256u * 1024u * 1024u;
+    bool loadDisk(std::vector<uint8_t>& payload) const;
+    void saveDisk();
+    std::string mDiskFile;
+    uint32_t mBuiltSinceSave = 0;
+    double mLastSave = -1.0;   // < 0: the clock has not been seen yet
 
     WolfVkDevice* mDevice = nullptr;
     VkPipelineCache mCache = VK_NULL_HANDLE;

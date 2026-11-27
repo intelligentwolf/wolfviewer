@@ -55,6 +55,7 @@
 #include "llfloatertools.h"
 #include "llfocusmgr.h"
 #include "llgl.h"
+#include "vk/wolfvkstate.h"
 #include "llglheaders.h"
 #include "llgltfmateriallist.h"
 #include "llhudmanager.h"
@@ -270,7 +271,7 @@ void display_startup()
 
     LLGLState::checkStates();
 
-    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT); // | GL_STENCIL_BUFFER_BIT);
+    LLGLState::wolfClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT); // | GL_STENCIL_BUFFER_BIT);
     LLGLSUIDefault gls_ui;
     gPipeline.disableLights();
 
@@ -296,7 +297,7 @@ void display_startup()
         WolfVkBridge::onLoginScreenShown();   // [VULKAN BACKEND 2026-11-08/] a frame of the login screen is on the screen: the first-run marker
     }
 
-    glClear(GL_DEPTH_BUFFER_BIT);
+    LLGLState::wolfClear(GL_DEPTH_BUFFER_BIT);
 }
 
 void display_update_camera()
@@ -630,7 +631,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         LL_DEBUGS("Window") << "Resizing window" << LL_ENDL;
         LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Resize Window");
         gGL.flush();
-        glClear(GL_COLOR_BUFFER_BIT);
+        LLGLState::wolfClear(GL_COLOR_BUFFER_BIT);
         if (!WolfVkBridge::present())   // [VULKAN BACKEND 2026-11-08/]
         {
             gViewerWindow->getWindow()->swapBuffers();
@@ -989,7 +990,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         if (LLViewerDynamicTexture::updateAllInstances())
         {
             gGL.setColorMask(true, true);
-            glClear(GL_DEPTH_BUFFER_BIT);
+            LLGLState::wolfClear(GL_DEPTH_BUFFER_BIT);
         }
     }
 
@@ -1098,7 +1099,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
             }
 
             gGL.setColorMask(true, true);
-            glClearColor(0.f, 0.f, 0.f, 0.f);
+            LLGLState::wolfClearColor(0.f, 0.f, 0.f, 0.f);
 
             LLGLState::checkStates();
 
@@ -1123,7 +1124,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
 
                 glm::mat4 proj = get_current_projection();
                 glm::mat4 mod = get_current_modelview();
-                glViewport(0,0,512,512);
+                WolfVkState::viewport(0,0,512,512);
 
                 if (!WolfVRScreen::secondEye()) LLVOAvatar::updateImpostors();   // [VR FPS 2026-11-04/] once a frame
 
@@ -1137,7 +1138,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
 
                 LLGLState::checkStates();
             }
-            glClear(GL_DEPTH_BUFFER_BIT);
+            LLGLState::wolfClear(GL_DEPTH_BUFFER_BIT);
         }
 
         //////////////////////////////////////
@@ -1223,8 +1224,8 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
 
         if(gUseWireframe)
         {
-            glClearColor(0.5f, 0.5f, 0.5f, 0.f);
-            glClear(GL_COLOR_BUFFER_BIT);
+            LLGLState::wolfClearColor(0.5f, 0.5f, 0.5f, 0.f);
+            LLGLState::wolfClear(GL_COLOR_BUFFER_BIT);
         }
 
         LLAppViewer::instance()->pingMainloopTimeout("Display:RenderStart");
@@ -1284,11 +1285,11 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         if (gUseWireframe)
         {
             constexpr F32 g = 0.5f;
-            glClearColor(g, g, g, 1.f);
+            LLGLState::wolfClearColor(g, g, g, 1.f);
         }
         else
         {
-            glClearColor(1, 0, 1, 1);
+            LLGLState::wolfClearColor(1, 0, 1, 1);
         }
         gPipeline.mRT->deferredScreen.clear();
 
@@ -1518,18 +1519,29 @@ void display_cube_face()
     static LLCullResult result;
     LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
     LLPipeline::sUnderWaterRender = LLViewerCamera::getInstance()->cameraUnderWater();
-    gPipeline.updateCull(*LLViewerCamera::getInstance(), result);
+    { WolfVRScreen::SubPart wsp_("probe cull"); gPipeline.updateCull(*LLViewerCamera::getInstance(), result); }   // [W114-VULKAN 2026-11-27]
 
     gGL.setColorMask(true, true);
 
-    glClearColor(0.f, 0.f, 0.f, 0.f);
-    gPipeline.generateSunShadow(*LLViewerCamera::getInstance());
+    LLGLState::wolfClearColor(0.f, 0.f, 0.f, 0.f);
+    // [W114-VULKAN 2026-11-27] WolfProbeSunShadows (default on, LL's behaviour): a reflection-probe face renders its own sun
+    // shadow cascades; off, the face keeps the main view's (the frame-rate test: "probe sunShadow" in the frame pieces)
+    static LLCachedControl<bool> s_probe_shadows(gSavedSettings, "WolfProbeSunShadows", true,
+        "Reflection-probe faces render their own sun shadow maps (off: they reuse the main view's)");
+    static S32 s_shadows_logged = -1;
+    if ((S32)(bool)s_probe_shadows != s_shadows_logged)
+    {
+        s_shadows_logged = (S32)(bool)s_probe_shadows;
+        LL_INFOS("WolfReflectionProbes") << "probe faces: own sun shadows " << (s_shadows_logged ? "ON" : "OFF") << LL_ENDL;
+    }
+    if (s_probe_shadows)
+    { WolfVRScreen::SubPart wsp_("probe sunShadow"); gPipeline.generateSunShadow(*LLViewerCamera::getInstance()); }
 
-    glClear(GL_DEPTH_BUFFER_BIT); // | GL_STENCIL_BUFFER_BIT);
+    LLGLState::wolfClear(GL_DEPTH_BUFFER_BIT); // | GL_STENCIL_BUFFER_BIT);
 
     {
         LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
-        gPipeline.stateSort(*LLViewerCamera::getInstance(), result);
+        { WolfVRScreen::SubPart wsp_("probe stateSort"); gPipeline.stateSort(*LLViewerCamera::getInstance(), result); }
 
         if (rebuild)
         {
@@ -1554,21 +1566,21 @@ void display_cube_face()
     gPipeline.mRT->deferredScreen.bindTarget();
     if (gUseWireframe)
     {
-        glClearColor(0.5f, 0.5f, 0.5f, 1.f);
+        LLGLState::wolfClearColor(0.5f, 0.5f, 0.5f, 1.f);
     }
     else
     {
-        glClearColor(1.f, 0.f, 1.f, 1.f);
+        LLGLState::wolfClearColor(1.f, 0.f, 1.f, 1.f);
     }
     gPipeline.mRT->deferredScreen.clear();
 
     LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
 
-    gPipeline.renderGeomDeferred(*LLViewerCamera::getInstance());
+    { WolfVRScreen::SubPart wsp_("probe renderGeom"); gPipeline.renderGeomDeferred(*LLViewerCamera::getInstance()); }
 
     gPipeline.mRT->deferredScreen.flush();
 
-    gPipeline.renderDeferredLighting();
+    { WolfVRScreen::SubPart wsp_("probe lighting"); gPipeline.renderDeferredLighting(); }
 
     LLPipeline::sUnderWaterRender = false;
 
@@ -2048,9 +2060,9 @@ static void renderChatRangeSphere(const LLVector3& center, F32 radius, const LLC
         gGL.pushMatrix();
         {
             gGL.scalef(radius, radius, radius);
-            glCullFace(GL_FRONT);
+            WolfVkState::cullFace(GL_FRONT);
             gSphere.render();
-            glCullFace(GL_BACK);
+            WolfVkState::cullFace(GL_BACK);
             gSphere.render();
         }
         gGL.popMatrix();
@@ -2153,7 +2165,7 @@ void render_ui_2d()
     // Render 2D UI elements that overlay the world (no z compare)
 
     //  Disable wireframe mode below here, as this is HUD/menus
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
     //  Menu overlays, HUD, etc
     gViewerWindow->setup2DRender();
@@ -2247,7 +2259,7 @@ void render_ui_2d()
 
                 LLRect clip_rect(last_rect);
 
-                glClear(GL_COLOR_BUFFER_BIT);
+                LLGLState::wolfClear(GL_COLOR_BUFFER_BIT);
 
                 gViewerWindow->draw();
             }

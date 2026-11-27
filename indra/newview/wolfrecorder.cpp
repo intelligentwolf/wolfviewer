@@ -335,6 +335,7 @@ namespace
 
     bool makeGpu(U32 w, U32 h)
     {
+        if (gGLManager.mIsNativeVulkan) return false;
         freeGpu();
         GLint tex2d = 0, draw_fb = 0, pack = 0;
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex2d);

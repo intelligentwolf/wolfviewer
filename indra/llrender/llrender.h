@@ -226,6 +226,18 @@ public:
 
     void setHasMipMaps(bool hasMips) { mHasMipMaps = hasMips; }
 
+    // [VULKAN G-BUFFER S2 2026-11-26] What this unit's last glBindTexture really bound, for the Vulkan draw interceptor
+    // (wolfvkscene.cpp recordGBufferDraw), which samples what OpenGL would sample. mCurrTexture is LLTexUnit's cache and
+    // is not always the GL binding: unbind() sets it to 0 while binding sWhiteTexture (llrender.cpp unbind/unbindFast).
+    // Written at every glBindTexture of this class; mWolfVkImage is the LLImageGL whose name was bound, or null when the
+    // name came without one (bindManual, a render target, refreshState, unbind).
+    U32                 mWolfVkName = 0;
+    eTextureType        mWolfVkType = TT_TEXTURE;
+    const LLImageGL*    mWolfVkImage = nullptr;
+    eTextureFilterOptions mWolfVkFilter = TFO_BILINEAR;
+    eTextureAddressMode   mWolfVkAddress = TAM_WRAP;
+    void wolfVkBound(eTextureType type, U32 name, const LLImageGL* image) { mWolfVkType = type; mWolfVkName = name; mWolfVkImage = image; }
+
 protected:
     friend class LLRender;
 
@@ -500,6 +512,11 @@ public:
     static bool sNsightDebugSupport;
     static LLVector2 sUIGLScaleFactor;
     static bool sClassicMode; // classic sky mode active
+    // [VULKAN G-BUFFER S2 2026-11-26] the blend factors blendFunc last applied and the colour mask setColorMask last applied
+    // (glBlendFuncSeparate / glColorMask are only called from those two when they change), for the Vulkan draw interceptor
+    void wolfVkBlendFactors(eBlendFactor& color_s, eBlendFactor& color_d, eBlendFactor& alpha_s, eBlendFactor& alpha_d) const
+    { color_s = mCurrBlendColorSFactor; color_d = mCurrBlendColorDFactor; alpha_s = mCurrBlendAlphaSFactor; alpha_d = mCurrBlendAlphaDFactor; }
+    const bool* wolfVkColorMask() const { return mCurrColorMask; }
 
 private:
     friend class LLLightState;

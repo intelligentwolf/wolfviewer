@@ -343,6 +343,7 @@ class WolfWaterClearance : public LLSingleton<WolfWaterClearance>, public WolfOb
 
 public:
     static constexpr S32 LEVELS = 3;
+    static constexpr U32 ALL_LEVELS = (1u << LEVELS) - 1;   // [W114 2026-11-26/]
     static constexpr S32 N = 256;                     // texels an edge, every level
     static constexpr F32 ALPHA = 0.78f * 0.25f;       // waterV.glsl WOLF_CLEAR_ALPHA
     static constexpr F32 BETA = 0.1f;                 // waterV.glsl WOLF_CLEAR_BETA
@@ -431,12 +432,12 @@ private:
     void rasterTerrain(S32 k);
     void rasterTerrainMax(S32 b);
     void classifyOpen(S32 k);
-    void rasterObjects();
+    void rasterObjects(U32 levels = ALL_LEVELS);   // [W114 2026-11-26/] levels: a bit per level (the others left as they are)
     /** [FAR DRAW PERF 2026-11-14] One step of the staged rebuild (mStage): a solve into the pending arrays, or the publish. */
     void advanceStage();
     void solve(S32 k, const std::vector<F32>& src, std::vector<F32>& S, std::vector<F32>* D);
     void uploadRows(S32 row0, S32 rows, const F32* data);
-    void uploadLevels();
+    void uploadLevels(U32 levels = ALL_LEVELS);    // [W114 2026-11-26/] only those levels' rows
     void uploadTerrain(S32 b);
     U64 terrainStamp() const;
 

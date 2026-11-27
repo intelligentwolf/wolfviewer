@@ -2048,6 +2048,7 @@ bool LLAppViewer::doFrame()
                     LLFloaterSimpleSnapshot::update();
                     LLFloaterFlickr::update(); // <FS:Beq/> FIRE-35002 - Flickr preview not updating whne opened directly from tool tray icon
                     FSFloaterPrimfeed::update(); // <FS:Beq/> Primfeed support
+                    WolfVkBridge::endUnshownFrame(); // [NATIVE VULKAN 2026-11-26] submit offscreen probe/snapshot work recorded after present()
                     gGLActive = false;
                 }
 
@@ -2091,7 +2092,10 @@ bool LLAppViewer::doFrame()
             // and when not quiting (causes trouble at mac's cleanup stage)
             // [VR STAGES 2026-11-04] not while a headset is in VR: then the headset IS the foreground, and this sleep
             // (BackgroundYieldTime, 40 ms a frame) was measured as half of every VR frame when the window lost focus
-            if (!LLApp::isExiting() && !WolfVRStream::headsetInVR()
+            // [W114 FRAME RATE 2026-11-26] nor while a video recording runs: the recorder copies each drawn frame, so a
+            // 40 ms (or 15 fps) wait would cut the video's frame rate whenever the viewer is behind another window.
+            // Source: wolfrecorder.h:76 isRecording() - STARTING or RECORDING (paused or not); wolfrecorder.cpp:1327
+            if (!LLApp::isExiting() && !WolfVRStream::headsetInVR() && !WolfRecorder::isRecording()
                 && ((gViewerWindow && !gViewerWindow->getWindow()->getVisible())
                     || !gFocusMgr.getAppHasFocus()))
             {
@@ -2101,6 +2105,20 @@ bool LLAppViewer::doFrame()
                 //S32 milliseconds_to_sleep = llclamp((S32)s_background_yield_time, 0, 1000);
                 S32 milliseconds_to_sleep = llclamp((S32)s_background_yield_time, (gViewerWindow && gViewerWindow->getWindow()->getMinimized()) ? 1 : 0, 1000);
                 // </FS:Ansariel>
+                // [W114 FRAME RATE 2026-11-26] behind other windows the frame also waits out WolfBackgroundFrameLimit (15 fps):
+                // the 40 ms yield alone still let a light scene run at about 20 fps, drawing for nobody (the Aurora review,
+                // 26 Nov: Aurora's background_fps_limit 15). frameTimer holds this frame's time so far (reset at the frame's end
+                // below); 0 = off. The yield stays the least it sleeps.
+                // Not on the login screen, while teleporting or after logout was asked for: the same states the
+                // FSLimitFramerate limiter below leaves alone (Source: llappviewer.cpp:2191 FIRE-22297 limiter:
+                // getStartupState() == STATE_STARTED && !gTeleportDisplay && !logoutRequestSent()).
+                static LLCachedControl<U32> s_background_fps(gSavedSettings, "WolfBackgroundFrameLimit", 15);
+                if (s_background_fps > 0 && LLStartUp::getStartupState() == STATE_STARTED && !gTeleportDisplay
+                    && !logoutRequestSent())
+                {
+                    const S32 cap_ms = llclamp((S32)((1.0 / (F64)s_background_fps - frameTimer.getElapsedTimeF64()) * 1000.0), 0, 1000);
+                    milliseconds_to_sleep = llmax(milliseconds_to_sleep, cap_ms);
+                }
                 // don't sleep when BackgroundYieldTime set to 0, since this will still yield to other threads
                 // of equal priority on Windows
                 if (milliseconds_to_sleep > 0)
@@ -2814,6 +2832,7 @@ bool LLAppViewer::cleanup()
     //Note:
     //SUBSYSTEM_CLEANUP(LLViewerMedia) has to be put before gTextureList.shutdown()
     //because some new image might be generated during cleaning up media. --bao
+    gGLTFMaterialList.flushMaterials(); // release LLFetchedGLTFMaterial textures before GL/Vulkan & sImageList teardown
     gTextureList.shutdown(); // shutdown again in case a callback added something
     LLUIImageList::getInstance()->cleanUp();
 
@@ -4503,8 +4522,8 @@ LLSD LLAppViewer::getViewerInfo() const
     info["CONCURRENCY"] = LLSD::Integer(std::thread::hardware_concurrency());    // <FS:Beq> Add hardware concurrency to info
     // Moved hack adjustment to Windows memory size into llsys.cpp
     info["OS_VERSION"] = LLOSInfo::instance().getOSString();
-    info["GRAPHICS_CARD_VENDOR"] = ll_safe_string((const char*)(glGetString(GL_VENDOR)));
-    info["GRAPHICS_CARD"] = ll_safe_string((const char*)(glGetString(GL_RENDERER)));
+    info["GRAPHICS_CARD_VENDOR"] = gGLManager.mIsNativeVulkan ? gGLManager.mGLVendor : ll_safe_string((const char*)(glGetString(GL_VENDOR)));
+    info["GRAPHICS_CARD"] = gGLManager.mIsNativeVulkan ? gGLManager.mGLRenderer : ll_safe_string((const char*)(glGetString(GL_RENDERER)));
     info["GRAPHICS_CARD_MEMORY"] = LLSD::Integer(gGLManager.mVRAM);
     info["GRAPHICS_CARD_MEMORY_DETECTED"] = gGLManager.mVRAMDetected; // <FS:Beq/> allow detected hardware to be overridden.
 
@@ -4549,7 +4568,7 @@ LLSD LLAppViewer::getViewerInfo() const
 // [RLVa:KB] - Checked: 2010-04-18 (RLVa-1.2.0)
     info["RLV_VERSION"] = (rlv_handler_t::isEnabled()) ? RlvStrings::getVersionAbout() : LLTrans::getString("RLVaStatusDisabled");
 // [/RLVa:KB]
-    info["OPENGL_VERSION"] = ll_safe_string((const char*)(glGetString(GL_VERSION)));
+    info["OPENGL_VERSION"] = gGLManager.mIsNativeVulkan ? gGLManager.mGLVersionString : ll_safe_string((const char*)(glGetString(GL_VERSION)));
     // [VULKAN BACKEND 2026-11-08] strings.xml AboutRenderer; the same fields the hardware statistics and crash reports carry
     info["RENDERER"] = WolfVkBridge::rendererLine();
     info["VULKAN_INFO"] = WolfVkBridge::vulkanLine();

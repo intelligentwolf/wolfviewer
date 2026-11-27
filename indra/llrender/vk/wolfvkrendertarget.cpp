@@ -75,6 +75,7 @@ bool WolfVkRenderTarget::addColorAttachment(uint32_t gl_color_fmt, std::string& 
         return false;
     }
     mColorRefs.push_back(img.get());
+    mColorLayers.push_back(0);
     mColor.push_back(std::move(img));
     mGLColorFormats.push_back(gl_color_fmt);
     if (mColorRefs.size() > 1 || mDepth)
@@ -101,11 +102,17 @@ bool WolfVkRenderTarget::allocateDepth(std::string& error)
 
 bool WolfVkRenderTarget::addExternalColorAttachment(WolfVkImage* image, std::string& error)
 {
+    return addExternalLayerAttachment(image, 0, error);
+}
+
+bool WolfVkRenderTarget::addExternalLayerAttachment(WolfVkImage* image, uint32_t layer, std::string& error)
+{
     if (!image || !image->isValid()) { error = "external colour attachment: no image"; return false; }
-    if (mColorRefs.size() >= MAX_COLOR_ATTACHMENTS) { error = "a render target has at most four colour attachments"; return false; }
+    if (mColorRefs.size() >= MAX_COLOR_ATTACHMENTS) { error = "a render target has at most eight colour attachments"; return false; }
     if (mResX == 0) { mResX = image->width(); mResY = image->height(); }
     if (image->width() != mResX || image->height() != mResY) { error = "external colour attachment size differs from the target"; return false; }
     mColorRefs.push_back(image);
+    mColorLayers.push_back(layer);
     mGLColorFormats.push_back(0);
     destroyPass();
     return true;
@@ -116,6 +123,11 @@ void WolfVkRenderTarget::setExternalDepth(WolfVkImage* depth)
     if (mExternalDepth == depth) return;
     mExternalDepth = depth;
     mDepth.reset();
+    // [W114-VULKAN S5 2026-11-26] a depth-only target (a shadow map: LLRenderTarget::allocate(w, h, 0, true),
+    // pipeline.cpp allocateShadowBuffer) has no colour attachment to take its size from, and the framebuffer and the
+    // viewport were then 0 x 0: the size is the depth image's. With colour attachments the sizes must agree already
+    // (addExternalColorAttachment checks the colours against each other; the G-buffer's depth is made at the same size).
+    if (depth && mColorRefs.empty()) { mResX = depth->width(); mResY = depth->height(); }
     destroyPass();
 }
 
@@ -141,6 +153,7 @@ void WolfVkRenderTarget::release()
     destroyPass();
     mColor.clear();
     mColorRefs.clear();
+    mColorLayers.clear();
     mGLColorFormats.clear();
     mDepth.reset();
     mResX = mResY = 0;
@@ -168,20 +181,58 @@ bool WolfVkRenderTarget::rebuildPass(std::string& error)
 {
     destroyPass();
     WolfVkImage* depth = depthImage();
-    if (mColor.empty() && !depth)
+    if (mColorRefs.empty() && !depth)
     {
         error = "render target has no attachments";
         return false;
     }
     VkDevice dev = mDevice->device();
 
+    std::vector<VkImageView> color_att_views;
+    color_att_views.reserve(mColorRefs.size());
+    for (size_t ci = 0; ci < mColorRefs.size(); ++ci)
+    {
+        WolfVkImage* img = mColorRefs[ci];
+        const uint32_t layer = ci < mColorLayers.size() ? mColorLayers[ci] : 0u;
+        const VkComponentMapping& sw = img->format().mSwizzle;
+        const bool non_identity = (sw.r != VK_COMPONENT_SWIZZLE_IDENTITY && sw.r != VK_COMPONENT_SWIZZLE_R) ||
+                                  (sw.g != VK_COMPONENT_SWIZZLE_IDENTITY && sw.g != VK_COMPONENT_SWIZZLE_G) ||
+                                  (sw.b != VK_COMPONENT_SWIZZLE_IDENTITY && sw.b != VK_COMPONENT_SWIZZLE_B) ||
+                                  (sw.a != VK_COMPONENT_SWIZZLE_IDENTITY && sw.a != VK_COMPONENT_SWIZZLE_A);
+        if (layer > 0 || img->kind() == WolfVkImage::Kind::TEXTURE_3D || img->kind() == WolfVkImage::Kind::TEXTURE_2D_ARRAY ||
+            img->mipLevels() > 1 || img->layers() > 1 || non_identity)
+        {
+            VkImageView av = img->createView(VK_IMAGE_VIEW_TYPE_2D, 0, 1, layer, 1, error, /*attachment=*/true);
+            if (av == VK_NULL_HANDLE) return false;
+            color_att_views.push_back(av);
+        }
+        else
+        {
+            color_att_views.push_back(img->view());
+        }
+    }
+    VkImageView depth_att_view = VK_NULL_HANDLE;
+    if (depth)
+    {
+        if (depth->mipLevels() > 1 || depth->layers() > 1)
+        {
+            depth_att_view = depth->createView(VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1, error, /*attachment=*/true);
+            if (depth_att_view == VK_NULL_HANDLE) return false;
+        }
+        else
+        {
+            depth_att_view = depth->view();
+        }
+    }
+
     auto build = [&](bool clear_color, bool clear_depth, VkRenderPass& out_pass, VkFramebuffer& out_fb) -> bool
     {
         std::vector<VkAttachmentDescription> attachments;
         std::vector<VkAttachmentReference> color_refs;
         std::vector<VkImageView> views;
-        for (WolfVkImage* img : mColorRefs)
+        for (size_t ci = 0; ci < mColorRefs.size(); ++ci)
         {
+            WolfVkImage* img = mColorRefs[ci];
             // Source: vulkan_core.h:4419 VkAttachmentDescription { flags, format, samples, loadOp, storeOp, stencilLoadOp, stencilStoreOp, initialLayout, finalLayout }
             VkAttachmentDescription a{};
             a.format = img->format().mFormat;
@@ -197,7 +248,7 @@ bool WolfVkRenderTarget::rebuildPass(std::string& error)
             attachments.push_back(a);
             // Source: vulkan_core.h:4431 VkAttachmentReference { attachment, layout }
             color_refs.push_back({ static_cast<uint32_t>(attachments.size() - 1), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });   // :2272
-            views.push_back(img->view());
+            views.push_back(color_att_views[ci]);
         }
         VkAttachmentReference depth_ref{ VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };   // :137, :2273
         if (depth)
@@ -216,7 +267,7 @@ bool WolfVkRenderTarget::rebuildPass(std::string& error)
             a.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             attachments.push_back(a);
             depth_ref.attachment = static_cast<uint32_t>(attachments.size() - 1);
-            views.push_back(depth->view());
+            views.push_back(depth_att_view);
         }
 
         // Source: vulkan_core.h:4458 VkSubpassDescription { flags, pipelineBindPoint, inputAttachmentCount, pInputAttachments, colorAttachmentCount,
@@ -234,7 +285,7 @@ bool WolfVkRenderTarget::rebuildPass(std::string& error)
         VkSubpassDependency deps[2]{};
         deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;   // :138
         deps[0].dstSubpass = 0;
-        deps[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;   // :2929, :2934
+        deps[0].srcStageMask = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
         deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;   // :2932, :2930, :2931
         deps[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;   // :3109, :3115, :3116
         deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;   // :3112, :3111, :3114, :3113
@@ -242,7 +293,7 @@ bool WolfVkRenderTarget::rebuildPass(std::string& error)
         deps[1].srcSubpass = 0;
         deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
         deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+        deps[1].dstStageMask = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
         deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
         deps[1].dependencyFlags = 0;
@@ -286,16 +337,22 @@ bool WolfVkRenderTarget::rebuildPass(std::string& error)
     return true;
 }
 
-void WolfVkRenderTarget::begin(VkCommandBuffer cmd, bool clear_color, bool clear_depth, const float clear_rgba[4], float depth_value, const VkRect2D* viewport)
+bool WolfVkRenderTarget::ensurePass(std::string& error)
 {
-    if (mPasses[3] == VK_NULL_HANDLE)
+    // Source: WolfVkRenderTarget::begin() below previously performed this lazily. Pipelines use renderPass() first.
+    if (mPasses[3] != VK_NULL_HANDLE && mFramebuffers[3] != VK_NULL_HANDLE) return true;
+    return rebuildPass(error);
+}
+
+void WolfVkRenderTarget::begin(VkCommandBuffer cmd, bool clear_color, bool clear_depth, const float clear_rgba[4], float depth_value,
+                               const VkRect2D* viewport, bool secondary_contents,
+                               VkRenderPass* out_active_pass, VkFramebuffer* out_active_fb)
+{
+    std::string error;
+    if (!ensurePass(error))
     {
-        std::string error;
-        if (!rebuildPass(error))
-        {
-            LL_WARNS_ONCE("Vulkan") << "render target pass: " << error << LL_ENDL;
-            return;
-        }
+        LL_WARNS_ONCE("Vulkan") << "render target pass: " << error << LL_ENDL;
+        return;
     }
     // A never-drawn attachment is in VK_IMAGE_LAYOUT_UNDEFINED and the LOAD passes expect the post-end() layouts: clear it then.
     bool color_fresh = false;
@@ -312,6 +369,8 @@ void WolfVkRenderTarget::begin(VkCommandBuffer cmd, bool clear_color, bool clear
     const int variant = ((clear_color || color_fresh) ? 1 : 0) | ((clear_depth || depth_fresh) ? 2 : 0);
     VkRenderPass pass = mPasses[variant];
     VkFramebuffer fb = mFramebuffers[variant];
+    if (out_active_pass) *out_active_pass = pass;
+    if (out_active_fb) *out_active_fb = fb;
 
     // Source: vulkan_core.h:4494 VkClearValue { color | depthStencil }; :4483 VkClearDepthStencilValue { depth, stencil }
     std::vector<VkClearValue> clears;
@@ -339,8 +398,13 @@ void WolfVkRenderTarget::begin(VkCommandBuffer cmd, bool clear_color, bool clear
     begin.clearValueCount = static_cast<uint32_t>(clears.size());
     begin.pClearValues = clears.data();
     // Source: vulkan_core.h:4664 PFN_vkCmdBeginRenderPass(cmd, pRenderPassBegin, contents); :2707 VK_SUBPASS_CONTENTS_INLINE
-    gVk.vkCmdBeginRenderPass(cmd, &begin, VK_SUBPASS_CONTENTS_INLINE);
+    gVk.vkCmdBeginRenderPass(cmd, &begin,
+                             secondary_contents ? VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS : VK_SUBPASS_CONTENTS_INLINE);
     mInPass = true;
+    if (secondary_contents)
+    {
+        return; // Secondary command buffers set their own dynamic viewport & scissor (Vulkan spec 8.2)
+    }
 
     // LLRenderTarget::bindTarget, llrendertarget.cpp:447 glViewport(0, 0, mResX, mResY). ORIENTATION: every image this
     // backend shares with or copies from OpenGL has GL's memory order, row 0 = the BOTTOM of the picture (GL textures,
@@ -379,7 +443,7 @@ void WolfVkRenderTarget::end(VkCommandBuffer cmd)
         if (mColorLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
             img->noteLayout(mColorLayout, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
         else
-            img->noteLayout(mColorLayout, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+            img->noteLayout(mColorLayout, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
     }
     if (WolfVkImage* depth = depthImage())
     {

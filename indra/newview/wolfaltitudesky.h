@@ -48,7 +48,8 @@ namespace WolfAltitudeSky
     // Metres to add to the camera's far clip: its height above the water, so the ground within
     // the draw distance stays in view from the air (Paul, 10-07: from 3.8 km up a 4096 m far clip
     // reached only 1.6 km out and the sea beyond it was bare sky). At most FAR_EXTRA_MAX_M; 0 when
-    // switched off (WolfViewerFarClipFollowsHeight) or on another grid.
+    // switched off (WolfViewerFarClipFollowsHeight) or on another grid. [W114 2026-11-26] Only while
+    // flying or under open sky: none under a roof (a skybox, an interior; WolfWeather::indoors()).
     F32 farClipExtra();
 
     // The camera's height above the sea for the sky's ocean (skyF.glsl wolfHorizonSea, waterF.glsl's

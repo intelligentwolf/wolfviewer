@@ -504,7 +504,7 @@ namespace
 // static
 void WolfAurora::frameUpdate()
 {
-    if (gCubeSnapshot) return;
+    if (gCubeSnapshot || gGLManager.mIsNativeVulkan) return;
     const U32 frame = LLFrameTimer::getFrameCount();
     if (frame == sState.frame) return;
     sState.frame = frame;

@@ -205,6 +205,34 @@ The key is the MD5 of the program's recipe (per unit `stage|file|class found|#ve
 attach order), computed identically by the viewer (`WolfVkShaderMirror::create`). A variant without SPIR-V is reported
 once with its recipe and skipped. The result of the full run and the remaining blockers are in section 8.
 
+[2026-11-26, branch w114vk-spv] Additions: struct uniforms carry every struct they contain (inner first); explicit
+`layout(location = N)` in the source is kept and the rest pack around it, `wolf_coverage` one past the highest output;
+struct varyings take one location per member; `type[N] name` declarations; a geometry stage (`<key>.geom.spv`, vert->geom
+and geom->frag interfaces; the viewer enables `geometryShader` and builds 3-stage pipelines); `POISSON3D_SAMPLES`
+(never set by the viewer) becomes the same `const`, any other non-zero uniform initialiser is a transform error (the
+viewer's uniform image starts at 0 and the manifest's defaults are not applied at run time);
+`TERRAIN_TRIPLANAR_BLEND_FACTOR` (a free F32 setting) is a specialization constant (`constant_id = 0`, value from GL's
+define text at pipeline creation) and is left out of the key. The key's `defines` are now only the defines the file
+uses (a whole word of the file after `#wolf_include`, or of a used define's value: `shader_check.used_defines`, viewer
+`LLShaderMgr::wolfVkFileWords` + `WolfVkShaderMirror::usedDefines`), so a setting that changes a define a program never
+reads no longer gives it a key the build never made (the nv-rl1 "no SPIR-V after an SSR change" case).
+
+### 6.2 Coverage of every variant the viewer can request (2026-11-26)
+
+The build enumerates 6 GPU profiles x 35 settings scenarios (one setting at a time away from the defaults), not every
+combination a resident can reach. A dependency fixpoint over all 17 settings axes (per program, the fields that change
+it, found by toggling every field at every base and every pair at the default; `TerrainPaintBitDepth` 1-8) gives, for
+the nvidia-gl46 profile alone, 10,762 distinct program keys where the 35 scenarios give 1,604; AMD adds its own (the
+`amd` part of the key). At ~4 s of glslang per program and ~39 KB of SPIR-V per program that is about a day of CPU per
+build and ~840 MB in every download, so the decision (Shadow, 26 Nov) is to compile missing variants at program load in
+the viewer (libglslang + a C++ port of this transform proved byte-identical, a capped disk cache), keeping the
+build-time store for the default presets. Until that lands, a combination outside the 35 scenarios has no SPIR-V.
+
+Mac (MoltenVK, 16 samplers per stage): of the 2,635 fragment modules of the GL 4.1 recipes, 452 DECLARE more than 16
+samplers and none USES more than 16 (static use in the SPIR-V); over all profiles only the 18 `Water Shader` modules of
+32-unit GPUs use 17-19. The pipeline layout must therefore hold only the statically used samplers with the stages that
+use them (today every sampler is declared for both stages).
+
 ### 6.1 How many programs compile, and what stops the rest (2026-11-08)
 
 Two GL 4.6 profiles x four settings scenarios (the build-time quick set): **932 of 1,310** linked programs compile as
@@ -237,10 +265,38 @@ Blockers of the FIRST full run (spv5, before the version change), for the record
 
 | Path | Linux (this laptop) | Windows | macOS |
 |---|---|---|---|
-| loader | `libvulkan.so.1` (dlopen) | `vulkan-1.dll` (LoadLibrary) | `libvulkan.1.dylib` / `libMoltenVK.dylib` (bundle not wired) |
-| surface | X11 tested (through XWayland, both GPUs; child window from W103, 8.2s); Wayland written, RADV only (8.2q); pure NVIDIA X11 reported failing in W101/W102 (8.2s) | Win32 written: child HWND for the surface from W103 (8.2t), first run W102 = black world (8.2t) | Metal layer written (`wolfvksurface_macosx.mm`) |
-| build | built here | CMake paths complete, not compiled here | CMake paths complete, not compiled here |
-| MoltenVK quirks | - | - | `VK_KHR_portability_subset` enabled when offered; triangle fans not converted (declared) |
+| loader | `libvulkan.so.1` (dlopen) | `vulkan-1.dll` (LoadLibrary) | bundled `Contents/Frameworks/libMoltenVK.dylib` opened directly (no loader); with `WolfVulkanValidation` the SDK's `libvulkan.1.dylib` first, `VK_DRIVER_FILES` = the bundle's manifest (7.1) |
+| surface | X11 tested (through XWayland, both GPUs; child window from W103, 8.2s); Wayland written, RADV only (8.2q); pure NVIDIA X11 reported failing in W101/W102 (8.2s) | Win32 written: child HWND for the surface from W103 (8.2t), first run W102 = black world (8.2t) | child `NSView` with a `CAMetalLayer` over the GL view (W114 mac, 7.1); not run anywhere |
+| build | built here | CMake paths complete, not compiled here | CMake paths complete, not compiled here; MoltenVK packaged by CI (7.1) |
+| MoltenVK quirks | - | - | `VK_KHR_portability_subset`: every offered subset feature enabled (incl. triangleFans), stride alignment checked per pipeline (7.1) |
+
+### 7.1 macOS (W114 mac helper, 2026-11-26; static checks only, nothing run on a Mac)
+
+- **MoltenVK 1.4.2** (Apache-2.0; SPIRV-Cross, SPIRV-Tools Apache-2.0, SPIRV-Headers Khronos MIT-style, cereal BSD-3-Clause
+  inside the dylib; all five in `licenses-mac.txt`, MoltenVK's full LICENSE as `Contents/Resources/MoltenVK-LICENSE.txt`).
+  `.github/scripts/install-moltenvk.sh` fetches `MoltenVK-macos.tar` (sha256 `f95765a6...4c4024e`, GitHub's published digest,
+  checked against a download), checks both slices (arm64, x86_64) and the `vkGetInstanceProcAddr` export, and exports
+  `WOLF_MOLTENVK_DIR`; the macOS CI job runs it before Configure. `viewer_manifest.py` (Darwin) puts the dylib in
+  `Contents/Frameworks`, writes `Contents/Resources/vulkan/icd.d/MoltenVK_icd.json` (`library_path`
+  `../../../Frameworks/libMoltenVK.dylib`), signs the dylib inside-out before the app, and refuses a package without it.
+  The dylib's `LC_BUILD_VERSION` minos is **12.0**; the viewer's deployment target is 11 (fs-build-variables
+  `LL_BUILD_DARWIN_DEPLOY_TARGET`), so Vulkan must not be offered below macOS 12.
+- **Why no loader**: no Khronos macOS loader binary exists outside LunarG's SDK; a loader would add any Homebrew/SDK MoltenVK
+  as a second identical device; layers are only needed for validation, which takes the SDK loader (wolfvkloader.cpp).
+- **Surface**: a `WolfVkMetalView` child of `LLOpenGLView` (layer-backed via `makeBackingLayer`, `hitTest:` nil, autoresizing,
+  `contentsScale` = backing scale, kept at resize and screen change); the GL view and its `NSOpenGLContext` are not touched.
+- **Swapchain on MoltenVK 1.4.2** (MVKDevice.mm/MVKSwapchain.mm): image count 2..3 (we ask min+1 = 3, the guide's advice);
+  present modes FIFO and IMMEDIATE only (no MAILBOX: vsync off gives IMMEDIATE); formats BGRA8 UNORM/SRGB, RGBA16F, RGB10A2,
+  BGR10A2 (our first choice B8G8R8A8_UNORM is offered); `VK_KHR_swapchain_maintenance1` + `VK_KHR_surface_maintenance1`
+  offered (present fences work); extent = layer bounds x contentsScale, SUBOPTIMAL when it changes.
+- **The forced OpenGL** (`wolfvkbridge.cpp` decideBackend `#if LL_DARWIN`, "[MAC OPENGL 2026-11-10]") stays. It may go only
+  when ALL of these hold in one build: (1) the full-Vulkan frame runs with no GL draw left (every stage done: there is no
+  hybrid on a Mac, Apple's GL 4.1 has no `GL_EXT_memory_object`, `WolfVkShare::available` is false there); (2) a Mac CI build
+  of that tree packages MoltenVK and its SPIR-V store passes `spv_store_check`; (3) a run on a real Mac (Apple Silicon and an
+  Intel/AMD Mac) shows 0 `VulkanValidation` messages with the SDK and a camera-locked GL/Vulkan A/B within the agreed
+  threshold; (4) the replacement gate refuses Vulkan below macOS 12.0 (MoltenVK's minos). Then the `#if LL_DARWIN` block in
+  decideBackend becomes "Vulkan when the full frame is available and macOS >= 12", and the W101 retry exemption below it
+  (`#if !LL_DARWIN`) is reviewed with it.
 
 ## 8. Proof (test runs of 2026-11-08)
 
@@ -1762,6 +1818,146 @@ Decided 2026-11-08 after the shared layers worked; the pieces, in the order they
    `WolfVulkanDebugGBufferGLOnly` (GL draws it into the same shared buffers); `~/.cache/vkbackend/gbufdiff.py A B`
    prints, per attachment, the fraction of texels differing and writes difference images - the normal buffer first
    (any winding or matrix slip shows there first).
+
+## 8.6 S2: the G-buffer draw interceptor (branch w114vk-s2, 2026-11-26, NOT RUN)
+
+**What changed.** The per-pass Vulkan loop (`drawPassSimple` / `drawGBufferSimple`, a hand-over, submit, take-back and
+depth rewrite for each pass, and GL skipping the batches Vulkan drew) is gone. Vulkan now records OpenGL's own draw
+calls: GL's pool loops run unchanged, and each draw call they make is either recorded into the shared G-buffer by Vulkan
+from OpenGL's state at that moment, or drawn by OpenGL. One renderer per draw call, decided where the call is made, so
+per-batch logic, order and uniform values are OpenGL's by construction. Every pool and every program variant goes through
+the same path; S3/S4/S5 extend it by opening the phase around their own draws.
+
+**Interface (for the stage helpers).**
+- `WolfVkBridge::setGBufferPhase(bool)` (wolfvkbridge.h): `LLPipeline::renderGeomDeferred` turns it on for pool types
+  `POOL_SIMPLE`..`POOL_GLTF_PBR` of the main camera (not `gCubeSnapshot`) and off after the loop; the "on" for terrain and
+  later pools is false, so the bracket is closed before `doOcclusion`. `WolfVkBridge::ScopedGLOnly` suspends it for GL-only
+  work inside the phase (the GLTF scene manager's draws). `WolfVkBridge::closeGBufferBracket()` closes an open bracket.
+- The per-draw entry: `LLVertexBuffer::sWolfVkInterceptDraw` (llvertexbuffer.h), called by `drawRange`, `drawRangeFast`
+  and `drawArrays` after `gGL.syncMatrices()`; non-null only while the phase is on. It returns true when Vulkan recorded
+  the draw (the glDraw call is skipped). The Vulkan side is `WolfVkScene::recordGBufferDraw` (wolfvkscene.h): program
+  = `LLGLSLShader::sCurBoundShaderPtr->mWolfVk`; textures = what each statically used sampler's texture unit really has
+  bound (`LLTexUnit::mWolfVkName` / `mWolfVkType` / `mWolfVkImage`, written at every `glBindTexture` in llrender.cpp;
+  name 0 = incomplete = (0,0,0,1), `LLTexUnit::sWhiteTexture` = `sWhiteImagep`); uniform blocks (set 2) = the bytes of the
+  GL buffer bound to the block's point; pipeline state = `LLGLState` (blend, cull; `wolfVkIsEnabled`), `LLGLDepthTest`
+  statics, `LLRender::wolfVkBlendFactors` / `wolfVkColorMask`, `gUseWireframe`.
+- Refusal: `recordGBufferDraw` returns false with a static string naming the gap; the bridge closes the bracket, OpenGL
+  draws that call, and the gap is logged once per session per "program: reason" at INFO (log tag `Vulkan`, "G-buffer draw
+  left to OpenGL - ...") and counted per second in the `WolfVulkanFrame` line "G-buffer interceptor (last second): N draws
+  recorded, M left to OpenGL, B brackets, W closed by a buffer write; OpenGL drew: ..." (WolfLogFrameRate on). Reasons
+  today: no program / no SPIR-V for the variant; a rigged program (stage S4); a point or line draw; scissor, polygon
+  offset, stencil, alpha to coverage, depth clamp or clip distance 0 enabled; the vertex buffer lacks a program attribute
+  or has no copy; a draw range outside the copy; a statically used cube / array / 3D / shadow / multisample sampler; a
+  sampler on a unit whose last bind was not 2D, or bound without an `LLImageGL` (a render target, `bindManual`); a texture
+  with no Vulkan copy; a used uniform block whose bytes are not known (GLTF blocks); ring or descriptor pool full;
+  pipeline creation failed; a debug switch; the hand-over failed.
+- Other render targets: only `mRT->deferredScreen` (the shared G-buffer, `WolfVkGBuffer`) is supported in S2; the
+  interceptor refuses (closes) whenever another target is bound (`mainGBufferBound`). A stage that adds a target uses the
+  per-target provider registry of the vk-s6 branch (`LLRenderTarget::wolfVkRegister` / `wolfVkUnregisterProvider` /
+  `wolfVkProvider()`), not `sWolfVkProvider`.
+
+**The bracket.** Opened lazily by the first recordable draw: `WolfVkGBuffer::prepare`, the frame slot (`ensureFrameBegun`),
+a mid-frame command buffer, `glHandToVulkan` (GL signals gl_pass_done), `acquire`. Following draws record into the same
+command buffer and the same render pass instance (LOAD), pipelines per program and state. Closed (end render pass,
+release, `submitMidFrame` with the pass semaphores, `glTakeBack`, `glRewriteDepth` when the main G-buffer is bound) by:
+a draw Vulkan cannot record (before OpenGL draws it); `LLRenderTarget::bindTarget` / `clear` / `flush`
+(`LLRenderTarget::sWolfVkBeforeTargetChange`); a `flush_vbo` into a vertex buffer that a draw of this bracket used
+(`LLVertexBuffer::sWolfVkBeforeWrite`, `mWolfVkBracket` = the bracket's serial; counted per second); the phase ending;
+`dumpGBufferIfAsked`; and as safety nets `present()` / `endUnshownFrame()` (they end the phase first). Every signal is
+submitted before anything waits on it, as in 8.2k; on a failed hand-over nothing is recorded and OpenGL draws. Tear-down
+and shutdown abandon an open bracket (command buffer discarded unsubmitted) and remove every hook. A vertex copy with
+uploads waiting ends the render pass, records the uploads and begins it again (LOAD): copies are not allowed inside a
+render pass. Texture copies are still made by `WolfVkMirror::texture` (one-time submits, outside the bracket's buffer).
+
+**Uniforms.** Every program gets its mirror when it links (`LLGLSLShader::sWolfVkOnLinked`, after `mapUniforms`, before
+the first uniform is set); programs linked before Vulkan started (the window's first `setShaders` runs before
+`initAfterGL`) get theirs at Vulkan start. A new mirror reads the GL program's current values of every active loose
+uniform (`WolfVkShaderMirror::syncFromGL`: `glGetActiveUniform`, `glGetUniformfv/iv`), sampler units included, so it starts
+from exactly OpenGL's state. Raw `glUniform*` calls bypass the mirror: the eight in `LLDrawPoolMaterials::renderDeferred`
+(env_intensity, emissive_brightness, minimum_alpha, specular_color) now also write it (`wolfVkSet`). Audit of the other raw
+`glUniform*` sites (wolftkatmosphere.cpp, wolfenvironmentrender.cpp, wolfstarfold.cpp, wolfvrscreen.cpp, the Vulkan
+files): none of their uniform names occurs in the SPIR-V manifest's uniform lists of the deferred diffuse, bump or
+material programs (checked 2026-11-26 against the build tree's manifest.json); the PBR opaque program has no SPIR-V yet.
+The viewer's std140 blocks (set 2, `WolfVkProgram::blocks()`, new in the pipeline layout): bytes from
+`LLGLSLShader::wolfVkUniformBufferData` / `wolfVkUniformBufferBind` at their call sites (llreflectionmapmanager.cpp
+ReflectionProbes, wolftkatmosphere.cpp WolfEepGains; gltfscenemanager.cpp reports its binds only), and at Vulkan start a
+one-time read-back of the buffers bound to the five points.
+
+**Static use.** `WolfVkSpirv::Sampler::mUsed` / `UniformBlock::mUsed`: an `OpLoad`, access chain, `OpCopyObject` or
+function-call argument names the variable (spirv.hpp opcodes cited in wolfvkspirv.cpp). glslang drops functions that main
+never calls (the material fragment module of key 0e9fa685... loads only bumpMap and diffuseMap of its 16 samplers), so an
+unused sampler gets the white 2D fallback and an unused block needs no bytes.
+
+**Lean per-draw path** (wolfvkshader.h): set 0 is allocated and written once per program per frame (dynamic offsets per
+draw); a stage image is pushed into the ring only after a value in it changed (setters compare before they write);
+`setReserved` resolves a reserved uniform's members once per program (the matrices `LLRender::syncMatrices` sends);
+sampler sets are cached per frame per distinct image/sampler list; `WolfVkFrameUniforms::needBind` skips a bind of the set
+and offsets already bound (cleared on another command buffer, frame or pipeline layout; the composite's own binds call
+`forgetBound`); the pipeline and vertex buffer binds are skipped when unchanged. Not measured (Paul, 2026-11-26).
+
+**Debug switches** (settings.xml, HideFromEditor, off by default = Vulkan records): `WolfVulkanDebugGLSimple`,
+`WolfVulkanDebugGLBump`, `WolfVulkanDebugGLMaterials`, `WolfVulkanDebugGLPBR` - OpenGL draws that family's draw calls
+(by program: gDeferredDiffuseProgram, gDeferredBumpProgram, every gDeferredMaterialProgram variant,
+gDeferredPBROpaqueProgram). `WolfVulkanDebugNoGBuffer` / `WolfVulkanDebugGBufferGLOnly` keep the whole phase on OpenGL.
+
+**Coverage.** The fullbright pool has no deferred pass (`LLDrawPoolFullbright` has post-deferred passes only,
+lldrawpoolsimple.h), so nothing of it is in this phase. SPIR-V in the build tree's manifest (2026-11-26): Deferred Diffuse
+Shader 4 of 8 variants, Deferred Bump Shader 4 of 8, Material Shader 0-15 all, Deferred PBR Opaque Shader none - the
+variants without SPIR-V are drawn by OpenGL and named in the log (routed to the "spv" helper). Rigged passes, the GLTF
+scene manager's draws and everything from terrain on stay OpenGL's in S2.
+
+**Unproven until a run:** all of it (built and checked only).
+
+## 8.7 S4: avatars in the G-buffer phase (branch w114vk-s4, 2026-11-26, NOT BUILT, NOT RUN)
+
+**Rule.** No avatar rendering code is changed (LLDrawPoolAvatar, LLVOAvatar, LLViewerJoint/Mesh, LLRenderPass's rigged
+loops are byte-for-byte as they were). The S2 interceptor records the draw calls that code makes; S4 adds what the
+interceptor needed to accept them. New files `newview/wolfvkavatar.cpp/.h`.
+
+**What is recorded now (part 1).**
+- Rigged meshes: the refusal "a rigged program (stage S4)" is gone for every program with `hasObjectSkinning`, whichever
+  pass meets it (deferred pools now; the shadow passes when S5 opens them). The palette needs no code of its own:
+  `LLRenderPass::uploadMatrixPalette` (lldrawpool.cpp:713) calls `uniformMatrix3x4fv(AVATAR_MATRIX)` on the bound program,
+  whose setter writes the mirror first (llglslshader.cpp `wolfVkSet(index, 10 ...)` = `Kind::M3x4`), and
+  `WolfVkShaderMirror::writeMember` lays 3 columns of 4 floats at the reflected matrix and array strides.
+  `projection_matrix` and `modelview_matrix` (the `HAS_SKIN` path multiplies them itself) arrive from
+  `LLRender::syncMatrices` (llrender.cpp:1071, :1140) through `uniformMatrix4fv`, with the depth-range correction applied
+  by name (`applyProjectionFix`). The weights are `weight4`, 4 floats (wolfvkbuffer.cpp attribFormat).
+- System avatar body: `gDeferredAvatarProgram` (lldrawpoolavatar.cpp:650), palette `vec4 matrixPalette[45]` sent by
+  `LLViewerJointMesh::uploadJointMatrices` (llviewerjointmesh.cpp:185, `uniform4fv`), attribute `weight` (1 float; the
+  shader's `vec4 weight` reads only `.x`, avatarSkinV.glsl:32-35), cloth uniforms through `uniform4fv`.
+- Eyes: `gDeferredNonIndexedDiffuseAlphaMaskNoColorProgram` (lldrawpoolavatar.cpp:585), unskinned, joint matrix through
+  `gGL.multMatrix` (llviewerjointmesh.cpp drawShape).
+- `WolfVkAvatar::paletteMirrored` (called at the old refusal line) lets a skinned program through only when the
+  mirror's vertex block really has `matrixPalette` in the uploaded shape (mat3x4 array / vec4[45]); otherwise the draw
+  is OpenGL's and the reason is logged. Checked once per SPIR-V program key.
+- The phase now also covers `POOL_AVATAR`, `POOL_CONTROL_AV`, and the two alpha-mask pools with a deferred pass,
+  `POOL_ALPHA_MASK` and `POOL_GLTF_PBR_ALPHA_MASK` (their rigged batches are attachments; their static batches go
+  through the same interceptor) (pipeline.cpp renderGeomDeferred, `WolfVkAvatar::poolInPhase`); `doOcclusion` runs
+  under `ScopedGLOnly` (its queries count OpenGL's draws). `POOL_FULLBRIGHT_ALPHA_MASK` has no deferred pass.
+- Immediate mode: the impostor quad's vertices come from `LLRender::flush` -> `genBuffer`. Stage S9 takes the GL-only
+  mark off every `genBuffer` batch (w114vk-s9 28e76c3eee3), so they live in the Vulkan-owned store; S4 changes nothing
+  in llrender.cpp (its own phase-only version of bdc8f1b8333 was withdrawn for S9's).
+- Cull face: `WolfVkPipelineState::mCullFront` (VK_CULL_MODE_FRONT_BIT). The one raw `glCullFace(GL_FRONT)` of the
+  avatar code (llviewerjoint.cpp:122, the inside pass of small hair and skirts) is seen by no LLGLState record, so for
+  a system-avatar program (`hasSkinning`) with culling on the recorder asks OpenGL (`WolfVkAvatar::cullsFrontFaces`,
+  `glGetIntegerv(GL_CULL_FACE_MODE)`). In the opaque deferred pass that path is not reached
+  (`renderSkinned` calls `renderTransparent` only when `!sSkipTransparent || sImpostorRender`, llvoavatar.cpp:6305;
+  the deferred pass sets `sSkipTransparent`); it is there for the passes that draw hair, once they can be recorded.
+- Debug switches (HideFromEditor, off): `WolfVulkanDebugGLRigged`, `WolfVulkanDebugGLAvatar`.
+
+**Still OpenGL's, per program (each is logged as "G-buffer draw left to OpenGL").**
+- `Deferred Impostor Shader` (avatar impostor quads): refused with "a texture bound without an LLImageGL": the
+  impostor's attachments are an OpenGL render target (`LLVOAvatar::mImpostor`, allocated in
+  `LLPipeline::generateImpostor`, bound by `LLTexUnit::bind(LLRenderTarget*)` -> `bindManual`). Needs S6 item 6c:
+  render-target attachments in Vulkan-owned memory (a registry provider for `mImpostor`) and the hand-over that makes
+  such an image Vulkan's to sample inside a bracket. Asked of the lead 2026-11-26; no private copy was written.
+- Impostor generation (`LLPipeline::generateImpostor`: the whole deferred frame into `mImpostor`), the avatar
+  post-deferred pass (`gDeferredAvatarAlphaProgram`: hair, skirt, eyelashes into the lit screen target) and rigged
+  alpha: they draw into targets other than the shared G-buffer and sample shadow maps and probes (S5, S7).
+- `Deferred Fullbright Alpha Masking` programs and their skinned variants: post-deferred only (the lit screen target).
+- `Debug Shader` hit boxes (lines): S9.
+- Any skinned variant without SPIR-V: named in the log at link.
 
 ## 9a. Release readiness (r43, 2026-11-09)
 

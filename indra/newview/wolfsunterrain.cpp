@@ -217,22 +217,32 @@ void WolfSunTerrain::raster(S32 b)
 
 void WolfSunTerrain::upload(S32 b)
 {
-    if (!mTex)
+    if (!mTex) mTexAllocated = false;
+    if (mTexAllocated)
     {
-        LLImageGL::generateTextures(1, &mTex);
-        mTexAllocated = false;
+        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mTex);
     }
-    gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mTex);
-    if (!mTexAllocated)
+    else
     {
         std::vector<F32> none((size_t)N * N * BLOCKS, NO_TERRAIN);
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_R32F,
-                                  N, N * BLOCKS, GL_RED, GL_FLOAT, none.data(), false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D makes
+        // the name when there is none and leaves the texture bound on unit 0), else as before
+        LLImageGL::wolfVkManualImage2D(mTex, GL_R32F, N, N * BLOCKS, GL_RED, GL_FLOAT, none.data());
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
         gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
         mTexAllocated = true;
     }
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, b * N, N, N, GL_RED, GL_FLOAT, mBuf.data());
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (LLImageGL::sWolfVkNativeStore)
+        {
+            LLImageGL::sWolfVkNativeStore->uploadSubImage2D(mTex, 0, 0, b * N, N, N, N, GL_R32F, GL_RED, GL_FLOAT, mBuf.data(), false);
+        }
+    }
+    else
+    {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, b * N, N, N, GL_RED, GL_FLOAT, mBuf.data());
+    }
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     mPubOrigin[b] = mOrigin[b];
     mUploaded[b] = true;

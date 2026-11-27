@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llreflectionmapmanager.h"
+#include "wolfvrscreen.h"   // [W114-VULKAN 2026-11-27] frame pieces (probe scene / probe filter)
 
 #include <vector>
 
@@ -40,6 +41,9 @@
 #include "llstartup.h"
 #include "llviewermenufile.h"
 #include "llnotificationsutil.h"
+#include "wolfvknative.h"
+#include "vk/wolfcoreloader.h"
+#include "vk/wolfvkstate.h"
 
 #if LL_WINDOWS
 #pragma warning (push)
@@ -69,8 +73,11 @@ void load_exr(const std::string& filename)
     int ret =  LoadEXRWithLayer(&out, &width, &height, filename.c_str(), /* layername */ nullptr, &err);
     if (ret == TINYEXR_SUCCESS)
     {
-        U32 texName = 0;
-        LLImageGL::generateTextures(1, &texName);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (GL_RGB16F is then RGBA16F storage
+        // sampled with alpha one, llimagegl.h WolfVkTextureOwner), with the mip chain glGenerateMipmap fills below
+        U32 texName = LLImageGL::wolfVkCreateStorage(GL_TEXTURE_2D, LLImageGL::wolfVkFullMipLevels(width, height), GL_RGB16F, width, height, 1, true);
+        const bool owned = texName != 0;
+        if (!owned) LLImageGL::generateTextures(1, &texName);
 
         gEXRImage = new LLImageGL(texName, 4, GL_TEXTURE_2D, GL_RGB16F, GL_RGB16F, GL_FLOAT, LLTexUnit::TAM_CLAMP);
         gEXRImage->setHasMipMaps(true);
@@ -79,13 +86,26 @@ void load_exr(const std::string& filename)
 
         gGL.getTexUnit(0)->bind(gEXRImage);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGBA, GL_FLOAT, out);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                LLImageGL::sWolfVkNativeStore->uploadImage2D(texName, 0, GL_RGBA16F, width, height, GL_RGBA, GL_FLOAT, out, false, true);
+                LLImageGL::sWolfVkNativeStore->generateMipmaps(texName);
+            }
+            free(out);
+        }
+        else
+        {
+            if (owned) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_FLOAT, out);
+            else glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGBA, GL_FLOAT, out);
 
-        LLImageGLMemory::alloc_tex_image(width, height, GL_RGB16F, 1);
+            LLImageGLMemory::alloc_tex_image(width, height, GL_RGB16F, 1);
 
-        free(out); // release memory of image data
+            free(out); // release memory of image data
 
-        glGenerateMipmap(GL_TEXTURE_2D);
+            glGenerateMipmap(GL_TEXTURE_2D);
+        }
 
         gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
 
@@ -338,10 +358,29 @@ void LLReflectionMapManager::update()
     LLReflectionMap* oldestProbe = nullptr;
     LLReflectionMap* oldestOccluded = nullptr;
 
+    static LLCachedControl<U32> s_probe_interval(gSavedSettings, "WolfProbeUpdateInterval", 3U,
+        "Frames between reflection-probe face refreshes once a probe is complete (1 = every frame)");
+    static U32 s_probe_frame = 0;
+    ++s_probe_frame;
+    bool refresh_frame = true;
+    if (const WolfCoreApi* wc = WolfCoreLoader::api())
+    {
+        WolfCoreFrameInputs in{};
+        in.probe_frame_counter    = s_probe_frame;
+        in.probe_interval_setting = static_cast<U32>(s_probe_interval);
+        in.is_native_vulkan       = gGLManager.mIsNativeVulkan ? 1u : 0u;
+        WolfCoreFramePlan plan{};
+        wc->plan_frame_pacing(&in, &plan);
+        refresh_frame = (plan.refresh_complete_probe != 0u);
+    }
+
     if (mUpdatingProbe != nullptr)
     {
-        did_update = true;
-        doProbeUpdate();
+        did_update = true;   // a probe is in progress: no other starts this frame, refresh frame or not
+        if (!mUpdatingProbe->mComplete || refresh_frame)
+        {
+            doProbeUpdate();
+        }
     }
 
     // update distance to camera for all probes
@@ -523,7 +562,7 @@ void LLReflectionMapManager::update()
     }
 
     // switch to updating the next oldest probe
-    if (!did_update && oldestProbe != nullptr)
+    if (!did_update && oldestProbe != nullptr && (!oldestProbe->mComplete || refresh_frame))   // [W114-VULKAN 2026-11-27] WolfProbeUpdateInterval
     {
         LLReflectionMap* probe = oldestProbe;
         llassert(probe->mCubeIndex != -1);
@@ -599,6 +638,16 @@ U32 LLReflectionMapManager::probeMemory()
 
 GLuint LLReflectionMapManager::allocateQuery()
 {
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (!mQueryPool.empty())
+        {
+            GLuint query = mQueryPool.front();
+            mQueryPool.pop_front();
+            return query;
+        }
+        return WolfVkNative::genOcclusionQuery();
+    }
     if (mQueryPool.empty())
     {
         GLuint query;
@@ -818,6 +867,10 @@ void LLReflectionMapManager::doProbeUpdate()
 void LLReflectionMapManager::updateProbeFace(LLReflectionMap* probe, U32 face)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_DISPLAY;
+    if (!probe || mTexture.isNull() || mTexture->getGLName() == 0 || mMaxProbeLOD <= 0.f || mMipChain.empty())
+    {
+        return;
+    }
     LL_PROFILE_GPU_ZONE("probe update");
     // hacky hot-swap of camera specific render targets
     gPipeline.mRT = &gPipeline.mAuxillaryRT;
@@ -839,14 +892,14 @@ void LLReflectionMapManager::updateProbeFace(LLReflectionMap* probe, U32 face)
         gPipeline.andRenderTypeMask(LLPipeline::RENDER_TYPE_SKY, LLPipeline::RENDER_TYPE_WL_SKY,
             LLPipeline::RENDER_TYPE_WATER, LLPipeline::RENDER_TYPE_VOIDWATER, LLPipeline::RENDER_TYPE_CLOUDS, LLPipeline::RENDER_TYPE_TERRAIN, LLPipeline::END_RENDER_TYPES);
 
-        probe->update(mRenderTarget.getWidth(), face);
+        { WolfVRScreen::SubPart wsp_("probe scene (default)"); probe->update(mRenderTarget.getWidth(), face); }
 
         gPipeline.popRenderTypeMask();
     }
     else
     {
         llassert(mRenderReflectionProbeLevel > 0); // should never update a probe that's not the default probe if reflection coverage is none
-        probe->update(mRenderTarget.getWidth(), face);
+        { WolfVRScreen::SubPart wsp_("probe scene (local)"); probe->update(mRenderTarget.getWidth(), face); }
     }
 
     gPipeline.mRT = &gPipeline.mMainRT;
@@ -938,14 +991,16 @@ void LLReflectionMapManager::updateProbeFace(LLReflectionMap* probe, U32 face)
             if (mip >= 0)
             {
                 LL_PROFILE_GPU_ZONE("probe mip copy");
-                mTexture->bind(0);
-                //glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, mip, 0, 0, probe->mCubeIndex * 6 + face, 0, 0, res, res);
-                glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, mip, 0, 0, sourceIdx * 6 + face, 0, 0, res, res);
-                //if (i == 0)
-                //{
-                    //glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, mip, 0, 0, probe->mCubeIndex * 6 + face, 0, 0, res, res);
-                //}
-                mTexture->unbind();
+                if (gGLManager.mIsNativeVulkan)
+                {
+                    WolfVkNative::copyBoundTargetToImage3D(mTexture->getGLName(), mip, sourceIdx * 6 + face, res, res);
+                }
+                else
+                {
+                    mTexture->bind(0);
+                    glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, mip, 0, 0, sourceIdx * 6 + face, 0, 0, res, res);
+                    mTexture->unbind();
+                }
             }
             mMipChain[i].flush();
         }
@@ -999,13 +1054,20 @@ void LLReflectionMapManager::updateProbeFace(LLReflectionMap* probe, U32 face)
 
                     mVertexBuffer->drawArrays(gGL.TRIANGLE_STRIP, 0, 4);
 
-                    glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, i, 0, 0, probe->mCubeIndex * 6 + cf, 0, 0, res, res);
+                    if (gGLManager.mIsNativeVulkan)
+                    {
+                        WolfVkNative::copyBoundTargetToImage3D(mTexture->getGLName(), i, probe->mCubeIndex * 6 + cf, res, res);
+                    }
+                    else
+                    {
+                        glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, i, 0, 0, probe->mCubeIndex * 6 + cf, 0, 0, res, res);
+                    }
                 }
 
                 if (i != mMipChain.size() - 1)
                 {
                     res /= 2;
-                    glViewport(0, 0, res, res);
+                    WolfVkState::viewport(0, 0, res, res);
                 }
             }
 
@@ -1036,7 +1098,7 @@ void LLReflectionMapManager::updateProbeFace(LLReflectionMap* probe, U32 face)
             {
                 int i = start_mip;
                 LL_PROFILE_GPU_ZONE("probe irradiance gen");
-                glViewport(0, 0, mMipChain[i].getWidth(), mMipChain[i].getHeight());
+                WolfVkState::viewport(0, 0, mMipChain[i].getWidth(), mMipChain[i].getHeight());
                 for (int cf = 0; cf < 6; ++cf)
                 { // for each cube face
                     LLCoordFrame frame;
@@ -1049,9 +1111,16 @@ void LLReflectionMapManager::updateProbeFace(LLReflectionMap* probe, U32 face)
                     mVertexBuffer->drawArrays(gGL.TRIANGLE_STRIP, 0, 4);
 
                     S32 res = mMipChain[i].getWidth();
-                    mIrradianceMaps->bind(channel);
-                    glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, i - start_mip, 0, 0, probe->mCubeIndex * 6 + cf, 0, 0, res, res);
-                    mTexture->bind(channel);
+                    if (gGLManager.mIsNativeVulkan)
+                    {
+                        WolfVkNative::copyBoundTargetToImage3D(mIrradianceMaps->getGLName(), i - start_mip, probe->mCubeIndex * 6 + cf, res, res);
+                    }
+                    else
+                    {
+                        mIrradianceMaps->bind(channel);
+                        glCopyTexSubImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, i - start_mip, 0, 0, probe->mCubeIndex * 6 + cf, 0, 0, res, res);
+                        mTexture->bind(channel);
+                    }
                 }
             }
 
@@ -1338,14 +1407,19 @@ void LLReflectionMapManager::updateUniforms()
     //copy mProbeData into uniform buffer object
     if (mUBO == 0)
     {
-        glGenBuffers(1, &mUBO);
+        if (gGLManager.mIsNativeVulkan) { static GLuint sNativeUbo = 0x10000; mUBO = sNativeUbo++; }
+        else glGenBuffers(1, &mUBO);
     }
 
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("rmmsu - update buffer");
-        glBindBuffer(GL_UNIFORM_BUFFER, mUBO);
-        glBufferData(GL_UNIFORM_BUFFER, sizeof(ReflectionProbeData), &mProbeData, GL_STREAM_DRAW);
-        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            glBindBuffer(GL_UNIFORM_BUFFER, mUBO);
+            glBufferData(GL_UNIFORM_BUFFER, sizeof(ReflectionProbeData), &mProbeData, GL_STREAM_DRAW);
+            glBindBuffer(GL_UNIFORM_BUFFER, 0);
+        }
+        LLGLSLShader::wolfVkUniformBufferData(mUBO, 0, (U32)sizeof(ReflectionProbeData), &mProbeData, true);   // [VULKAN G-BUFFER S2 2026-11-26/] llglslshader.h
     }
 
 #if 0
@@ -1375,7 +1449,8 @@ void LLReflectionMapManager::setUniforms()
     {
         updateUniforms();
     }
-    glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_REFLECTION_PROBES, mUBO);
+    if (!gGLManager.mIsNativeVulkan) glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_REFLECTION_PROBES, mUBO);
+    LLGLSLShader::wolfVkUniformBufferBind(LLGLSLShader::UB_REFLECTION_PROBES, mUBO);   // [VULKAN G-BUFFER S2 2026-11-26/]
 }
 
 
@@ -1447,7 +1522,7 @@ void renderReflectionProbe(LLReflectionMap* probe, std::map<LLSpatialGroup*, int
         float pointSize = (dupByGroup || dupByObject || dupByLoc)
                             ? bigSize
                             : normalSize;
-        glPointSize(pointSize);
+        WolfVkState::pointSize(pointSize);
         gGL.begin(gGL.POINTS);
         gGL.vertex3fv(po);
         gGL.end();
@@ -1651,7 +1726,10 @@ void LLReflectionMapManager::cleanup()
     mDefaultProbe = nullptr;
     mUpdatingProbe = nullptr;
 
-    glDeleteBuffers(1, &mUBO);
+    if (mUBO && !gGLManager.mIsNativeVulkan)
+    {
+        glDeleteBuffers(1, &mUBO);
+    }
     mUBO = 0;
 
     cleanupQueryPool();
@@ -1665,8 +1743,18 @@ void LLReflectionMapManager::cleanupQueryPool()
     if (!mQueryPool.empty())
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("cleanup query pool");
-        std::vector<GLuint> queries(mQueryPool.begin(), mQueryPool.end());
-        glDeleteQueries(static_cast<GLsizei>(queries.size()), queries.data());
+        if (gGLManager.mIsNativeVulkan)
+        {
+            for (GLuint q : mQueryPool)
+            {
+                WolfVkNative::deleteOcclusionQuery(q);
+            }
+        }
+        else
+        {
+            std::vector<GLuint> queries(mQueryPool.begin(), mQueryPool.end());
+            glDeleteQueries(static_cast<GLsizei>(queries.size()), queries.data());
+        }
         mQueryPool.clear();
     }
 }

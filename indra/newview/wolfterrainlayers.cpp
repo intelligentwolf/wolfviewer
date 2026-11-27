@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfterrainlayers.h"
+#include "wolfvknative.h"
 
 #include <cmath>
 
@@ -576,13 +577,41 @@ void WolfTerrainLayers::uploadLayer(Array& a, S32 i, const LLImageRaw* raw)
         return;
     }
 
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (!a.mGL)
+        {
+            a.mGL = LLImageGL::wolfVkCreateStorage(GL_TEXTURE_2D_ARRAY, LLImageGL::wolfVkFullMipLevels(PX, PX), GL_RGBA8, PX, PX, LAYERS, false);
+        }
+        if (!a.mGL)
+        {
+            a.mState[i] = ST_FAILED;
+            return;
+        }
+        {
+            LLImageDataSharedLock lock(dst);
+            if (!WolfVkNative::uploadTexture2DArrayLayer(a.mGL, i, PX, PX, dst->getData(), /*generate_mips=*/true))
+            {
+                a.mState[i] = ST_FAILED;
+                return;
+            }
+        }
+        a.mState[i] = ST_READY;
+        return;
+    }
+
     LLTexUnit* unit = gGL.getTexUnit(0);
     unit->activate();
     if (!a.mGL)
     {
-        LLImageGL::generateTextures(1, &a.mGL);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (OpenGL fills the layers and makes the
+        // mips by this name as before; the Vulkan terrain pass finds the image by the name), with the full mip chain
+        // glGenerateMipmap fills below; else OpenGL's own as before
+        a.mGL = LLImageGL::wolfVkCreateStorage(GL_TEXTURE_2D_ARRAY, LLImageGL::wolfVkFullMipLevels(PX, PX), GL_RGBA8, PX, PX, LAYERS, true);
+        const bool owned = a.mGL != 0;
+        if (!owned) LLImageGL::generateTextures(1, &a.mGL);
         glBindTexture(GL_TEXTURE_2D_ARRAY, a.mGL);
-        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, PX, PX, LAYERS, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        if (!owned) glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, PX, PX, LAYERS, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);

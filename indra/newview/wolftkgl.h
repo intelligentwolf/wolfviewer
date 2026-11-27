@@ -19,8 +19,10 @@
 
 #include "llgl.h"
 #include "llglslshader.h"
+#include "llimagegl.h"
 #include "llrender.h"
 #include "llshadermgr.h"
+#include "vk/wolfvkshader.h"   // [W114-VULKAN S8 2026-11-26] WolfVkShaderMirror (rawUniformToVk)
 
 /**
  * [WOLF ENV TAKRAM 2026-10-12] Texture binding rules for the translated passes (three.js binds a
@@ -38,6 +40,20 @@ namespace WolfTk
 {
     constexpr S32 NAMED_UNIT_BASE = 8;
     constexpr S32 NAMED_UNIT_LAST = 15;
+
+    /** [W114-VULKAN S8 2026-11-26] The Wolf sky, cloud and water code sets some uniforms with raw glUniform* calls (struct
+     *  members LL's mapUniform cannot name, sampler units, values LL's cache must not hold). LLGLSLShader's setters hand
+     *  every value to the program's Vulkan mirror (llglslshader.cpp LLGLSLShader::wolfVkSet); a raw call bypasses them, so
+     *  each raw call site also hands its exact value here, by the name GL looks it up by (the mirror's reflected names
+     *  flatten struct members as "outer.inner" and arrays of structs as "outer[i].inner", wolfvkspirv.cpp:161-166 flatten,
+     *  which is GLSL's glGetUniformLocation naming). GL is untouched; in OpenGL mode the program has no mirror (mWolfVk
+     *  null) and this does nothing. Kind is the GL call's type: Source: wolfvkshader.h:102 WolfVkShaderMirror::Kind;
+     *  transpose as the GL call's transpose argument (WolfVkShaderMirror::set writes the matrix untransposed). */
+    inline void rawUniformToVk(LLGLSLShader& sh, const char* name, WolfVkShaderMirror::Kind kind, U32 count, const void* data,
+                               bool transpose = false)
+    {
+        if (sh.mWolfVk) sh.mWolfVk->set(name, kind, count, data, transpose);
+    }
 
     /** Binds raw texture `tex` (target GL_TEXTURE_2D, GL_TEXTURE_3D or GL_TEXTURE_2D_ARRAY) to the program's
      *  LL-assigned channel for reserved sampler `reserved`. Returns the channel, -1 if the program has none. */
@@ -58,8 +74,17 @@ namespace WolfTk
         {
             // LLTexUnit has no 2D-array type: bound beside its own state (a different target on the unit, so the
             // unit's cached GL_TEXTURE_2D / 3D bindings stay true); left bound - no LL code samples 2D arrays
-            unit->activate();
-            glBindTexture(target, tex);
+            if (!gGLManager.mIsNativeVulkan)
+            {
+                unit->activate();
+                glBindTexture(target, tex);
+            }
+            unit->wolfVkBound(LLTexUnit::TT_TEXTURE, tex, nullptr);
+            S32 f_opt = LLTexUnit::TFO_ANISOTROPIC, a_opt = LLTexUnit::TAM_WRAP;
+            if (LLImageGL::sWolfVkNativeStore) LLImageGL::sWolfVkNativeStore->getSamplerOptions(tex, f_opt, a_opt);
+            unit->mWolfVkFilter = static_cast<LLTexUnit::eTextureFilterOptions>(f_opt);
+            unit->mWolfVkAddress = static_cast<LLTexUnit::eTextureAddressMode>(a_opt);
+            unit->setHasMipMaps(f_opt >= LLTexUnit::TFO_TRILINEAR);
         }
         return ch;
     }
@@ -82,11 +107,21 @@ namespace WolfTk
                 s_warned = true;
             }
         }
-        glUniform1i(loc, unit);
+        if (!gGLManager.mIsNativeVulkan) glUniform1i(loc, unit);
+        rawUniformToVk(sh, name, WolfVkShaderMirror::Kind::I1, 1, &unit);   // [W114-VULKAN S8 2026-11-26] the sampler's unit
         LLTexUnit* u = gGL.getTexUnit(unit);
         if (target == GL_TEXTURE_3D) u->bindManual(LLTexUnit::TT_TEXTURE_3D, tex);
         else if (target == GL_TEXTURE_2D) u->bindManual(LLTexUnit::TT_TEXTURE, tex);
-        else { u->activate(); glBindTexture(target, tex); }
+        else
+        {
+            if (!gGLManager.mIsNativeVulkan) { u->activate(); glBindTexture(target, tex); }
+            u->wolfVkBound(LLTexUnit::TT_TEXTURE, tex, nullptr);
+            S32 f_opt = LLTexUnit::TFO_ANISOTROPIC, a_opt = LLTexUnit::TAM_WRAP;
+            if (LLImageGL::sWolfVkNativeStore) LLImageGL::sWolfVkNativeStore->getSamplerOptions(tex, f_opt, a_opt);
+            u->mWolfVkFilter = static_cast<LLTexUnit::eTextureFilterOptions>(f_opt);
+            u->mWolfVkAddress = static_cast<LLTexUnit::eTextureAddressMode>(a_opt);
+            u->setHasMipMaps(f_opt >= LLTexUnit::TFO_TRILINEAR);
+        }
         return true;
     }
 
@@ -97,7 +132,11 @@ namespace WolfTk
         LLTexUnit* u = gGL.getTexUnit(unit);
         if (target == GL_TEXTURE_3D) u->unbind(LLTexUnit::TT_TEXTURE_3D);
         else if (target == GL_TEXTURE_2D) u->unbind(LLTexUnit::TT_TEXTURE);
-        else { u->activate(); glBindTexture(target, 0); }
+        else
+        {
+            if (!gGLManager.mIsNativeVulkan) { u->activate(); glBindTexture(target, 0); }
+            u->wolfVkBound(LLTexUnit::TT_TEXTURE, 0, nullptr);
+        }
     }
 }
 

@@ -90,6 +90,49 @@ public:
     // GL's entry points must have been loaded (WolfVkShare::available).
     bool create(WolfVkDevice& device, const WolfVkImage::Format& format, uint32_t width, uint32_t height, VkImageUsageFlags usage,
                 uint32_t gl_internal_format, std::string& error);
+    // [VK S6 2026-11-26] Any kind of image, with layers and mip levels (WolfVkImage::createExternal(kind ...)): the GL
+    // texture is made on the matching target and gets immutable storage over the image's memory,
+    //   TEXTURE_2D -> GL_TEXTURE_2D, TEXTURE_CUBE -> GL_TEXTURE_CUBE_MAP                  glTexStorageMem2DEXT
+    //   TEXTURE_2D_ARRAY -> GL_TEXTURE_2D_ARRAY, TEXTURE_CUBE_ARRAY -> GL_TEXTURE_CUBE_MAP_ARRAY (depth = layers, i.e.
+    //   layer-faces), TEXTURE_3D -> GL_TEXTURE_3D (depth = layers)                        glTexStorageMem3DEXT
+    // ("equivalent to calling TexStorage* ... except that ... the memory at <offset> in the memory object ... will be
+    // used", EXT_external_objects; the targets are TexStorage2D's and TexStorage3D's, OpenGL 4.6 core 8.19).
+    // layers: 1 for 2D, 6 for a cube, N, 6 x cubes, or the depth. False with error when the driver cannot export or
+    // import it; nothing is left behind then. glTarget() says which target the texture has.
+    bool createKind(WolfVkDevice& device, WolfVkImage::Kind kind, const WolfVkImage::Format& format, uint32_t width, uint32_t height,
+                    uint32_t layers, uint32_t mip_levels, VkImageUsageFlags usage, uint32_t gl_internal_format, std::string& error);
+    uint32_t glTarget() const { return mGlTarget; }
+    // The hand-over of this image between the two renderers, for every level and layer at once. OpenGL is told the
+    // layout in its semaphore call (glLayout() of the same VkImageLayout); Vulkan records a queue family transfer:
+    //   acquireFromGL  VK_QUEUE_FAMILY_EXTERNAL -> the device's family, gl_layout -> vk_layout, for dst_stages/dst_access
+    //   releaseToGL    the device's family -> VK_QUEUE_FAMILY_EXTERNAL, the image's current layout -> gl_layout
+    // exactly as WolfVkShare::acquire/release do for the frame layers (one level, one layer there). The image must have
+    // been released once (createKind leaves it in UNDEFINED, owned by Vulkan: the first releaseToGL starts from that).
+    void acquireFromGL(VkCommandBuffer cmd, VkImageLayout gl_layout, VkImageLayout vk_layout, VkPipelineStageFlags dst_stages, VkAccessFlags dst_access);
+    void releaseToGL(VkCommandBuffer cmd, VkImageLayout gl_layout);
+    // [VK S6 2026-11-26] The FIRST hand-over of a fresh image (createKind leaves it UNDEFINED and Vulkan's), done here
+    // and now, for textures OpenGL starts using at once: Vulkan releases it in gl_layout (one submit, waited for with the
+    // device's bound), signalling a semaphore of this image's own, and OpenGL waits that semaphore with the texture and
+    // the layout (glWaitSemaphoreEXT: "<srcLayouts> specifies the layouts the textures are in"). One signal, one wait,
+    // the signal submitted and run before the wait is issued, so neither side can wait for ever. The semaphore lives as
+    // long as the image and is never used again. False with error when a call failed (the image must then be destroyed).
+    // glHandLayout(): the layout of that hand-over, i.e. the one a later acquireFromGL starts from when OpenGL has not
+    // named another in a glSignalSemaphoreEXT since.
+    bool handToGL(VkImageLayout gl_layout, std::string& error);
+    VkImageLayout glHandLayout() const { return mGlHandLayout; }
+    // The device is going away while OpenGL keeps using the texture (the renderer fell back to OpenGL): the Vulkan image
+    // is released (deferred; left with a hung device) and the image leaves find(). The OpenGL texture and memory object
+    // stay valid - OpenGL holds its own reference to the memory (probe 2026-11-26 section D, NVIDIA and RADV: texture
+    // exact after the Vulkan image was destroyed and its memory freed) - until destroy().
+    void releaseVulkanHalf();
+    // The GL_LAYOUT_*_EXT token of a Vulkan layout (EXT_external_objects table 4.4; GL/glext.h:8064-8072); GL_NONE (0)
+    // for VK_IMAGE_LAYOUT_UNDEFINED and for a layout the table does not list.
+    static uint32_t glLayout(VkImageLayout layout);
+    // The shared image whose OpenGL texture has this name (made by create or createKind and still alive), else null:
+    // code that holds only a raw GL texture name (the Wolf sky, the terrain layers) finds the Vulkan image through it.
+    static WolfVkSharedImage* find(uint32_t gl_texture);
+    // glTexStorageMem3DEXT is present (looked up apart from the entry points the shared layers need).
+    static bool arrayImportAvailable();
     void destroy();
     bool isValid() const { return mImage && mImage->isValid() && mGlTexture != 0; }
     WolfVkImage* image() { return mImage.get(); }
@@ -116,6 +159,11 @@ private:
     std::unique_ptr<WolfVkImage> mImage;
     uint32_t mGlMemory = 0;
     uint32_t mGlTexture = 0;
+    uint32_t mGlTarget = 0x0DE1;   // GL_TEXTURE_2D (GL/gl.h); createKind sets the target it used
+    // [VK S6 2026-11-26] handToGL
+    VkSemaphore mHandSemaphore = VK_NULL_HANDLE;
+    uint32_t mGlHandSemaphore = 0;
+    VkImageLayout mGlHandLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
 class WolfVkShare
@@ -189,6 +237,43 @@ public:
     // The GL entry points for sharing, loaded once (false when any is missing). WolfVkSharedImage needs them.
     static bool loadGL();
     const LLRect& worldRect() const;
+
+    // ---- [VK S6a 2026-11-26] the OpenGL half of the resource store (wolfvkresources.cpp) -----------------------------
+    // All need the GL context current and available() true. GL_EXT_memory_object / GL_EXT_semaphore (texts read
+    // 2026-11-26, registry.khronos.org EXT_external_objects.txt, _fd.txt, _win32.txt).
+    // A GL memory object over the whole of a Vulkan allocation of size bytes that was made exportable
+    // (VkExportMemoryAllocateInfo). dedicated: the allocation is a dedicated one (GL_DEDICATED_MEMORY_OBJECT_EXT "must
+    // be set to TRUE" then). 0 with error when the export or the import fails.
+    static uint32_t glImportMemory(WolfVkDevice& device, VkDeviceMemory memory, VkDeviceSize size, bool dedicated, std::string& error);
+    static void glDeleteMemory(uint32_t gl_memory);
+    // A GL buffer whose data store is size bytes of gl_memory from offset (glBufferStorageMemEXT). OpenGL may only
+    // read it: such a buffer cannot be mapped (issue 12) and no write call is promised to work on it. 0 with error.
+    // Bound through GL_COPY_WRITE_BUFFER, which LLVertexBuffer does not track; that binding is left at 0.
+    static uint32_t glBufferOverMemory(uint32_t gl_memory, VkDeviceSize offset, VkDeviceSize size, std::string& error);
+    // glBufferStorageMemEXT is present (it belongs to GL_EXT_memory_object, but the entry point is looked up apart from
+    // the ones the shared layers need).
+    static bool glBufferImportAvailable();
+    // An exported binary Vulkan semaphore and the GL semaphore imported from it.
+    static bool glCreateSemaphore(WolfVkDevice& device, VkSemaphore& vk_semaphore, uint32_t& gl_semaphore, std::string& error);
+    static void glDeleteSemaphore(uint32_t gl_semaphore);
+    // glSignalSemaphoreEXT / glWaitSemaphoreEXT with buffer barriers only (count names at buffers; may be 0/null).
+    // False with error when GL raised an error: the semaphore's state is then unknown.
+    static bool glSignalBuffers(uint32_t gl_semaphore, uint32_t count, const uint32_t* buffers, std::string& error);
+    static bool glWaitBuffers(uint32_t gl_semaphore, uint32_t count, const uint32_t* buffers, std::string& error);
+    // [VK S6 2026-11-26] The same with texture barriers only, for the hand-over of shared images (WolfVkSharedImage /
+    // WolfVkTextures::find) between the two renderers: count (>= 1) OpenGL texture names at textures and, for each,
+    // the Vulkan layout at layouts; OpenGL is given its GL_LAYOUT_*_EXT token (WolfVkSharedImage::glLayout; a layout
+    // with no token, such as VK_IMAGE_LAYOUT_UNDEFINED, is refused).
+    //   glSignalTextures: OpenGL's work on the textures so far is ahead of the signal and they are left in those
+    //     layouts ("<dstLayouts> specifies the layouts the textures are transitioned to"); the Vulkan submit that
+    //     waits the semaphore records acquireFromGL(that layout ...). The call flushes OpenGL's stream.
+    //   glWaitTextures: OpenGL's later commands wait for the Vulkan submit that signals the semaphore and recorded
+    //     releaseToGL(that layout) ("<srcLayouts> specifies the layouts the textures are in").
+    // Order, always: issue the signal before the wait that consumes it (glSignalTextures, then the Vulkan submit
+    // waiting it; the Vulkan submit signalling, then glWaitTextures), one wait per signal. False with error when
+    // OpenGL raised an error: the semaphore's state is then unknown and it must not be used again.
+    static bool glSignalTextures(uint32_t gl_semaphore, uint32_t count, const uint32_t* textures, const VkImageLayout* layouts, std::string& error);
+    static bool glWaitTextures(uint32_t gl_semaphore, uint32_t count, const uint32_t* textures, const VkImageLayout* layouts, std::string& error);
 
 private:
     struct Layer

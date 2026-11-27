@@ -32,6 +32,7 @@
 #include "pipeline.h"
 #include "llglcommonfunc.h"
 #include "llvoavatar.h"
+#include "vk/wolfvkshader.h"   // [VULKAN G-BUFFER S2 2026-11-26/] WolfVkShaderMirror::Kind for the raw uniforms below
 
 LLDrawPoolMaterials::LLDrawPoolMaterials()
 :  LLRenderPass(LLDrawPool::POOL_MATERIALS)
@@ -165,22 +166,26 @@ void LLDrawPoolMaterials::renderDeferred(S32 pass)
 
     if (intensity > -1)
     {
-        glUniform1f(intensity, lastIntensity);
+        if (!gGLManager.mIsNativeVulkan) glUniform1f(intensity, lastIntensity);
+        mShader->wolfVkSet(LLShaderMgr::ENVIRONMENT_INTENSITY, static_cast<int>(WolfVkShaderMirror::Kind::F1), 1, &lastIntensity);   // [VULKAN G-BUFFER S2 2026-11-26/] a raw glUniform bypasses the mirror: the same value into it
     }
 
     if (brightness > -1)
     {
-        glUniform1f(brightness, lastFullbright);
+        if (!gGLManager.mIsNativeVulkan) glUniform1f(brightness, lastFullbright);
+        mShader->wolfVkSet(LLShaderMgr::EMISSIVE_BRIGHTNESS, static_cast<int>(WolfVkShaderMirror::Kind::F1), 1, &lastFullbright);   // [VULKAN G-BUFFER S2 2026-11-26/] a raw glUniform bypasses the mirror: the same value into it
     }
 
     if (minAlpha > -1)
     {
-        glUniform1f(minAlpha, lastMinimumAlpha);
+        if (!gGLManager.mIsNativeVulkan) glUniform1f(minAlpha, lastMinimumAlpha);
+        mShader->wolfVkSet(LLShaderMgr::MINIMUM_ALPHA, static_cast<int>(WolfVkShaderMirror::Kind::F1), 1, &lastMinimumAlpha);   // [VULKAN G-BUFFER S2 2026-11-26/] a raw glUniform bypasses the mirror: the same value into it
     }
 
     if (specular > -1)
     {
-        glUniform4fv(specular, 1, lastSpecular.mV);
+        if (!gGLManager.mIsNativeVulkan) glUniform4fv(specular, 1, lastSpecular.mV);
+        mShader->wolfVkSet(LLShaderMgr::SPECULAR_COLOR, static_cast<int>(WolfVkShaderMirror::Kind::F4), 1, lastSpecular.mV);   // [VULKAN G-BUFFER S2 2026-11-26/] a raw glUniform bypasses the mirror: the same value into it
     }
 
     const LLVOAvatar* lastAvatar = nullptr;
@@ -197,26 +202,30 @@ void LLDrawPoolMaterials::renderDeferred(S32 pass)
         if (specular > -1 && params.mSpecColor != lastSpecular)
         {
             lastSpecular = params.mSpecColor;
-            glUniform4fv(specular, 1, lastSpecular.mV);
+            if (!gGLManager.mIsNativeVulkan) glUniform4fv(specular, 1, lastSpecular.mV);
+            mShader->wolfVkSet(LLShaderMgr::SPECULAR_COLOR, static_cast<int>(WolfVkShaderMirror::Kind::F4), 1, lastSpecular.mV);   // [VULKAN G-BUFFER S2 2026-11-26/] a raw glUniform bypasses the mirror: the same value into it
         }
 
         if (intensity != -1 && lastIntensity != params.mEnvIntensity)
         {
             lastIntensity = params.mEnvIntensity;
-            glUniform1f(intensity, lastIntensity);
+            if (!gGLManager.mIsNativeVulkan) glUniform1f(intensity, lastIntensity);
+            mShader->wolfVkSet(LLShaderMgr::ENVIRONMENT_INTENSITY, static_cast<int>(WolfVkShaderMirror::Kind::F1), 1, &lastIntensity);   // [VULKAN G-BUFFER S2 2026-11-26/] a raw glUniform bypasses the mirror: the same value into it
         }
 
         if (minAlpha > -1 && lastMinimumAlpha != params.mAlphaMaskCutoff)
         {
             lastMinimumAlpha = params.mAlphaMaskCutoff;
-            glUniform1f(minAlpha, lastMinimumAlpha);
+            if (!gGLManager.mIsNativeVulkan) glUniform1f(minAlpha, lastMinimumAlpha);
+            mShader->wolfVkSet(LLShaderMgr::MINIMUM_ALPHA, static_cast<int>(WolfVkShaderMirror::Kind::F1), 1, &lastMinimumAlpha);   // [VULKAN G-BUFFER S2 2026-11-26/] a raw glUniform bypasses the mirror: the same value into it
         }
 
         F32 fullbright = params.mFullbright ? 1.f : 0.f;
         if (brightness > -1 && lastFullbright != fullbright)
         {
             lastFullbright = fullbright;
-            glUniform1f(brightness, lastFullbright);
+            if (!gGLManager.mIsNativeVulkan) glUniform1f(brightness, lastFullbright);
+            mShader->wolfVkSet(LLShaderMgr::EMISSIVE_BRIGHTNESS, static_cast<int>(WolfVkShaderMirror::Kind::F1), 1, &lastFullbright);   // [VULKAN G-BUFFER S2 2026-11-26/] a raw glUniform bypasses the mirror: the same value into it
         }
 
         if (normChannel > -1 && params.mNormalMap != lastNormalMap)

@@ -912,9 +912,19 @@ void LLBumpImageList::onSourceUpdated(LLViewerTexture* src, EBumpEffect bump_cod
 
         gGL.getTexUnit(0)->bind(bump);
 
-        LLImageGL::setManualImage(GL_TEXTURE_2D, 0, dst_img->getPrimaryFormat(), dst_img->getWidth(), dst_img->getHeight(), GL_RGBA, GL_UNSIGNED_BYTE, nullptr, false);
-
         LLGLuint tex_name = dst_img->getTexName();
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                LLImageGL::sWolfVkNativeStore->uploadImage2D(tex_name, 0, dst_img->getPrimaryFormat(), dst_img->getWidth(), dst_img->getHeight(), GL_RGBA, GL_UNSIGNED_BYTE, nullptr, false, true);
+            }
+        }
+        else
+        {
+            LLImageGL::setManualImage(GL_TEXTURE_2D, 0, dst_img->getPrimaryFormat(), dst_img->getWidth(), dst_img->getHeight(), GL_RGBA, GL_UNSIGNED_BYTE, nullptr, false);
+        }
+
         // point render target at empty buffer
         sRenderTarget.setColorAttachment(bump->getGLTexture(), tex_name);
 
@@ -974,7 +984,17 @@ void LLBumpImageList::onSourceUpdated(LLViewerTexture* src, EBumpEffect bump_cod
 
         // generate mipmap
         gGL.getTexUnit(0)->bind(bump);
-        glGenerateMipmap(GL_TEXTURE_2D);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                LLImageGL::sWolfVkNativeStore->generateMipmaps(bump->getTexName());
+            }
+        }
+        else
+        {
+            glGenerateMipmap(GL_TEXTURE_2D);
+        }
         gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     }
 

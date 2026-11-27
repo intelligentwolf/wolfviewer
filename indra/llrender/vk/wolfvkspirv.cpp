@@ -17,6 +17,8 @@
 
 #include "linden_common.h"
 #include "wolfvkspirv.h"
+#include "wolfcoreloader.h"
+#include <unordered_set>
 #include <unordered_map>
 #include <map>
 #include <cstring>
@@ -32,6 +34,9 @@ namespace
         OpTypeVoid = 19, OpTypeBool = 20, OpTypeInt = 21, OpTypeFloat = 22, OpTypeVector = 23, OpTypeMatrix = 24,
         OpTypeImage = 25, OpTypeSampler = 26, OpTypeSampledImage = 27, OpTypeArray = 28, OpTypeRuntimeArray = 29,
         OpTypeStruct = 30, OpTypePointer = 32, OpConstant = 43, OpVariable = 59, OpDecorate = 71, OpMemberDecorate = 72,
+        // [VULKAN G-BUFFER S2 2026-11-26] the instructions that use a variable by its id (spirv.hpp:1771 OpFunctionCall 57, :1774
+        // OpLoad 61, :1778 OpAccessChain 65, :1779 OpInBoundsAccessChain 66, :1780 OpPtrAccessChain 67, :1795 OpCopyObject 83)
+        OpFunctionCall = 57, OpLoad = 61, OpAccessChain = 65, OpInBoundsAccessChain = 66, OpPtrAccessChain = 67, OpCopyObject = 83,
     };
     enum Decoration : uint32_t
     {
@@ -80,6 +85,7 @@ namespace
         std::unordered_map<uint32_t, uint32_t> mArrayStrides; // array type id -> stride
         struct Var { uint32_t mId, mTypeId, mStorage; };
         std::vector<Var> mVariables;
+        std::unordered_set<uint32_t> mUsedIds;   // [S2] ids a load, access chain, copy or call operand names
 
         const Type* type(uint32_t id) const
         {
@@ -215,6 +221,21 @@ bool reflect(const uint32_t* words, size_t word_count, Module& out, std::string&
     }
 
     Parser p;
+    bool have_static_use = false;
+    if (const WolfCoreApi* wc = WolfCoreLoader::api())
+    {
+        const uint32_t n_used = wc->spv_collect_used_ids(words, word_count, nullptr, 0u);
+        if (n_used != UINT32_MAX)
+        {
+            have_static_use = true;
+            if (n_used > 0u)
+            {
+                std::vector<uint32_t> used_buf(n_used, 0u);
+                wc->spv_collect_used_ids(words, word_count, used_buf.data(), n_used);
+                p.mUsedIds.insert(used_buf.begin(), used_buf.end());
+            }
+        }
+    }
     size_t i = 5;
     while (i < word_count)
     {
@@ -364,6 +385,7 @@ bool reflect(const uint32_t* words, size_t word_count, Module& out, std::string&
             b.mSet = dec.mSet;
             b.mBinding = dec.mBinding;
             b.mPushConstant = v.mStorage == ScPushConstant;
+            b.mUsed = !have_static_use || (p.mUsedIds.count(v.mId) != 0);
             p.flatten(ptr->mComponent, "", 0, b.mMembers);
             uint32_t end = 0;
             for (const BlockMember& m : b.mMembers)
@@ -398,6 +420,7 @@ bool reflect(const uint32_t* words, size_t word_count, Module& out, std::string&
             s.mArrayed = img->mArrayed != 0;
             s.mShadow = img->mDepth == 1;
             s.mMultisampled = img->mMS != 0;
+            s.mUsed = !have_static_use || (p.mUsedIds.count(v.mId) != 0);
             out.mSamplers.push_back(s);
         }
         else if (v.mStorage == ScInput)

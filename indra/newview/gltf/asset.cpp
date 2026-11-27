@@ -180,12 +180,24 @@ void Asset::uploadTransforms()
 
     if (mNodesUBO == 0)
     {
-        glGenBuffers(1, &mNodesUBO);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            static GLuint sNativeGltfNodesUbo = 0x30000;
+            mNodesUBO = sNativeGltfNodesUbo++;
+        }
+        else
+        {
+            glGenBuffers(1, &mNodesUBO);
+        }
     }
 
-    glBindBuffer(GL_UNIFORM_BUFFER, mNodesUBO);
-    glBufferData(GL_UNIFORM_BUFFER, glmp.size() * sizeof(F32), glmp.data(), GL_STREAM_DRAW);
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        glBindBuffer(GL_UNIFORM_BUFFER, mNodesUBO);
+        glBufferData(GL_UNIFORM_BUFFER, glmp.size() * sizeof(F32), glmp.data(), GL_STREAM_DRAW);
+        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    }
+    LLGLSLShader::wolfVkUniformBufferData(mNodesUBO, 0, static_cast<U32>(glmp.size() * sizeof(F32)), glmp.data(), true);
 }
 
 void Asset::uploadMaterials()
@@ -229,12 +241,24 @@ void Asset::uploadMaterials()
 
     if (mMaterialsUBO == 0)
     {
-        glGenBuffers(1, &mMaterialsUBO);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            static GLuint sNativeGltfMatsUbo = 0x40000;
+            mMaterialsUBO = sNativeGltfMatsUbo++;
+        }
+        else
+        {
+            glGenBuffers(1, &mMaterialsUBO);
+        }
     }
 
-    glBindBuffer(GL_UNIFORM_BUFFER, mMaterialsUBO);
-    glBufferData(GL_UNIFORM_BUFFER, md.size() * sizeof(vec4), md.data(), GL_STREAM_DRAW);
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        glBindBuffer(GL_UNIFORM_BUFFER, mMaterialsUBO);
+        glBufferData(GL_UNIFORM_BUFFER, md.size() * sizeof(vec4), md.data(), GL_STREAM_DRAW);
+        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    }
+    LLGLSLShader::wolfVkUniformBufferData(mMaterialsUBO, 0, static_cast<U32>(md.size() * sizeof(vec4)), md.data(), true);
 }
 
 S32 Asset::lineSegmentIntersect(const LLVector4a& start, const LLVector4a& end,

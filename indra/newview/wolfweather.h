@@ -97,6 +97,16 @@ private:
     LLVector3 mOriginAgent;                // that corner in agent space, as of the last update()
     S32  mNext = 0;
     S32  mCameraCell = -1;
+    // [W114 FRAME RATE 2026-11-26] a camera that stands still: once every cell has been rayed again since it stopped (counted
+    // in round-robin rays, see update()), the grid rests (no rays) for REST_SECS, then sweeps once more (a roof that moves
+    // over a still camera is still found); an update() idle for longer than REST_SECS starts the stillness again
+    static constexpr F32 STILL_M = 0.05f;
+    static constexpr F64 REST_SECS = 1.0;
+    LLVector3d mStillAt;
+    bool mStillValid = false;
+    S32  mStillRays = 0;      // round-robin rays since the camera stopped (or since the last rest ended)
+    F64  mRestUntil = 0.0;
+    F64  mLastUpdate = 0.0;   // when update() last ran (LLFrameTimer::getElapsedSeconds)
     std::vector<F32> mLand;
     std::vector<F32> mGround;
 };

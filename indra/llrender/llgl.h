@@ -108,6 +108,8 @@ public:
     bool mIsNVIDIA;
     bool mIsIntel;
     bool mIsApple = false;
+    // [NATIVE VULKAN 2026-11-26] True when WolfRenderBackend=vulkan runs natively without any OpenGL context.
+    bool mIsNativeVulkan = false;
 
     // hints to the render pipe
     U32 mDownScaleMethod = 0; // see settings.xml RenderDownScaleMethod
@@ -247,6 +249,17 @@ public:
     // what we expect
     //  writeAlpha - whether or not writing to alpha channel is expected
     static void checkStates(GLboolean writeAlpha = GL_TRUE);
+
+    // [VULKAN G-BUFFER S2 2026-11-26] the enable state LLGLState has recorded for cap (GL_FALSE when it was never set
+    // through LLGLState): the Vulkan draw interceptor builds its pipeline state from the same record GL's state follows
+    static bool wolfVkIsEnabled(LLGLenum cap) { auto it = sStateMap.find(cap); return it != sStateMap.end() && it->second == GL_TRUE; }
+    // [NATIVE VULKAN 2026-11-26] CPU-tracked scissor rect and clear hook for GL-free native Vulkan mode.
+    static S32 sWolfScissor[4];
+    static void wolfSetScissor(S32 x, S32 y, S32 w, S32 h);
+    static void (*sWolfVkClear)(U32 mask, const F32 rgba[4], F32 depth);
+    static F32 sWolfClearColor[4];
+    static void wolfClearColor(F32 r, F32 g, F32 b, F32 a);
+    static void wolfClear(U32 mask);
 
 protected:
     static std::unordered_map<LLGLenum, LLGLboolean> sStateMap;

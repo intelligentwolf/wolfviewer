@@ -233,6 +233,7 @@
 #include "wolfai.h"   // [WOLF AI CREDITS 2026-10-24/] handleFocus
 #include "wolfvrscreen.h"   // [VR WORLD POINTER 2026-11-04/] WolfVRScreen::pointerActive
 #include "wolfvkbridge.h"   // [VULKAN BACKEND 2026-11-08/] the Vulkan renderer: set up after gGL.init, resize, shutdown
+#include "wolfvknative.h"   // [NATIVE VULKAN 2026-11-26/] native Vulkan renderer (zero OpenGL context)
 
 #if LL_WINDOWS
 #include <tchar.h> // For Unicode conversion methods
@@ -2068,21 +2069,38 @@ LLViewerWindow::LLViewerWindow(const Params& p)
 #endif
         LLAppViewer::instance()->fastQuit(1);
     }
-    else if (!LLViewerShaderMgr::sInitialized)
+    else
     {
-        //immediately initialize shaders
-        LLViewerShaderMgr::sInitialized = true;
+        // [NATIVE VULKAN 2026-11-26] Initialize native Vulkan BEFORE shaders/gGL when requested (zero OpenGL context).
+        if (LLWindow::sWolfNativeVulkan)
         {
-            // [WOLF SPLASH 2026-10-21] the long wait, said on the splash; plain English if a skin or language lacks the
-            // string (LLTrans::getString would put "MissingString(...)" on the splash)
-            std::string msg;
-            if (!LLTrans::findString(msg, "StartupPreparingShaders") || msg.empty())
+            std::string vk_err;
+            if (!WolfVkNative::init(mWindow, vk_err))
             {
-                msg = "Preparing shaders... the first start after an update can take a minute";
+                LL_WARNS("Vulkan") << "[Native] Native Vulkan init failed (" << vk_err << "); falling back to OpenGL" << LL_ENDL;
+                LLWindow::sWolfNativeVulkan = false;
+                gGLManager.mIsNativeVulkan = false;
+                LLCoordScreen cur_sz(p.width, p.height);
+                mWindow->getSize(&cur_sz);
+                mWindow->switchContext(p.fullscreen, cur_sz, gSavedSettings.getBOOL("RenderVSyncEnable"));
             }
-            LLSplashScreen::update(msg);
         }
-        LLViewerShaderMgr::instance()->setShaders();
+        if (!LLViewerShaderMgr::sInitialized)
+        {
+            //immediately initialize shaders
+            LLViewerShaderMgr::sInitialized = true;
+            {
+                // [WOLF SPLASH 2026-10-21] the long wait, said on the splash; plain English if a skin or language lacks the
+                // string (LLTrans::getString would put "MissingString(...)" on the splash)
+                std::string msg;
+                if (!LLTrans::findString(msg, "StartupPreparingShaders") || msg.empty())
+                {
+                    msg = "Preparing shaders... the first start after an update can take a minute";
+                }
+                LLSplashScreen::update(msg);
+            }
+            LLViewerShaderMgr::instance()->setShaders();
+        }
     }
 
     if (!LLAppViewer::instance()->restoreErrorTrap())
@@ -6764,7 +6782,7 @@ bool LLViewerWindow::cubeSnapshot(const LLVector3& origin, LLCubeMapArray* cubea
 
     gPipeline.pushRenderTypeMask();
 
-    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT); // stencil buffer is deprecated | GL_STENCIL_BUFFER_BIT);
+    if (!gGLManager.mIsNativeVulkan) glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT); // stencil buffer is deprecated | GL_STENCIL_BUFFER_BIT);   // [W114-VULKAN 2026-11-27] no GL context
 
     U32 dynamic_render_types[] = {
         LLPipeline::RENDER_TYPE_AVATAR,
@@ -6985,7 +7003,7 @@ void LLViewerWindow::setup2DViewport(S32 x_offset, S32 y_offset)
     gGLViewport[1] = mWindowRectRaw.mBottom + y_offset;
     gGLViewport[2] = mWindowRectRaw.getWidth();
     gGLViewport[3] = mWindowRectRaw.getHeight();
-    glViewport(gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3]);
+    if (!gGLManager.mIsNativeVulkan) glViewport(gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3]);
 }
 
 
@@ -7028,7 +7046,7 @@ void LLViewerWindow::setup3DViewport(S32 x_offset, S32 y_offset)
     gGLViewport[1] = mWorldViewRectRaw.mBottom + y_offset;
     gGLViewport[2] = mWorldViewRectRaw.getWidth();
     gGLViewport[3] = mWorldViewRectRaw.getHeight();
-    glViewport(gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3]);
+    if (!gGLManager.mIsNativeVulkan) glViewport(gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3]);
 }
 
 void LLViewerWindow::revealIntroPanel()

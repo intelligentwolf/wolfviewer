@@ -217,7 +217,7 @@ private:
     LLVector3d mLastOrigin;
     LLVector3 mLastCamera;
     bool mHaveLastCamera = false;
-    F64 mLastIdle = 0.0, mNextDirect = 0.0, mLastLog = 0.0;
+    F64 mLastIdle = 0.0, mNextDirect = 0.0, mNextScanAt = 0.0, mLastLog = 0.0;
     F64 mCostIdleUs = 0.0, mCostBuildUs = 0.0, mCostFishMeshUs = 0.0;
     S32 mCostFrames = 0, mChunksBuilt = 0;
     bool mPlantsActive = false, mFishActive = false;

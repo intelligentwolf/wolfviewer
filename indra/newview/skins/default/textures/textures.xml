@@ -102,6 +102,8 @@ with the same filename but different name
   <!-- [WOLF BUG REPORT 2026-10-24] the status bar's bug icon (Report a Problem, wolffloaterbugreport.cpp), drawn like Audio_Off / Audio_Press -->
   <texture name="WolfBug_Off" file_name="icons/wolf_bug_off.png" preload="true" />
   <texture name="WolfBug_Press" file_name="icons/wolf_bug_press.png" preload="true" />
+  <texture name="WolfCoffee_Off" file_name="icons/wolf_coffee_off.png" preload="true" />
+  <texture name="WolfCoffee_Press" file_name="icons/wolf_coffee_press.png" preload="true" />
   <texture name="Audio_Off" file_name="icons/Audio_Off.png" preload="false" />
   <texture name="Audio_Press" file_name="icons/Audio_Press.png" preload="false" />
   <texture name="AudioMute_Press" file_name="icons/AudioMute_Press.png" preload="false" />

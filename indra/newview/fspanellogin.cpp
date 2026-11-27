@@ -1174,7 +1174,7 @@ void FSPanelLogin::onClickVersion(void*)
 //static
 void FSPanelLogin::onClickPatreon(void*)
 {
-    LLWeb::loadURLExternal(WolfGrid::PATREON_URL);
+    LLWeb::loadURLExternal("https://wolf-grid.com/index.php?f=coffee");
 }
 
 // <WolfViewer 2026-10-06>

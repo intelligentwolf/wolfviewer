@@ -138,15 +138,17 @@ void LLTexUnit::refreshState(void)
 
     gGL.flush();
 
-    glActiveTexture(GL_TEXTURE0 + mIndex);
+    if (!gGLManager.mIsNativeVulkan) glActiveTexture(GL_TEXTURE0 + mIndex);
 
     if (mCurrTexType != TT_NONE)
     {
-        glBindTexture(sGLTextureType[mCurrTexType], mCurrTexture);
+        if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[mCurrTexType], mCurrTexture);
+        wolfVkBound(mCurrTexType, mCurrTexture, nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/] llrender.h mWolfVkName
     }
     else
     {
-        glBindTexture(GL_TEXTURE_2D, 0);
+        if (!gGLManager.mIsNativeVulkan) glBindTexture(GL_TEXTURE_2D, 0);
+        wolfVkBound(TT_TEXTURE, 0, nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/]
     }
 }
 
@@ -157,7 +159,7 @@ void LLTexUnit::activate(void)
     if ((S32)gGL.mCurrTextureUnitIndex != mIndex || gGL.mDirty)
     {
         gGL.flush();
-        glActiveTexture(GL_TEXTURE0 + mIndex);
+        if (!gGLManager.mIsNativeVulkan) glActiveTexture(GL_TEXTURE0 + mIndex);
         gGL.mCurrTextureUnitIndex = mIndex;
     }
 }
@@ -196,14 +198,14 @@ void LLTexUnit::disable(void)
 extern F32 gWolfLodBias;   // llimagegl.cpp
 static void apply_wolf_lod_bias(GLenum target, bool mips)
 {
-    if (mips && target != GL_TEXTURE_2D_MULTISAMPLE) glTexParameterf(target, GL_TEXTURE_LOD_BIAS, gWolfLodBias);
+    if (!gGLManager.mIsNativeVulkan && mips && target != GL_TEXTURE_2D_MULTISAMPLE) glTexParameterf(target, GL_TEXTURE_LOD_BIAS, gWolfLodBias);
 }
 
 void LLTexUnit::bindFast(LLTexture* texture)
 {
     LLImageGL* gl_tex = texture->getGLTexture();
     texture->setActive();
-    glActiveTexture(GL_TEXTURE0 + mIndex);
+    if (!gGLManager.mIsNativeVulkan) glActiveTexture(GL_TEXTURE0 + mIndex);
     gGL.mCurrTextureUnitIndex = mIndex;
     mCurrTexture = gl_tex->getTexName();
     mCurrTexType = gl_tex->getTarget();
@@ -215,7 +217,19 @@ void LLTexUnit::bindFast(LLTexture* texture)
         gl_tex->forceUpdateBindStats();
         texture->bindDefaultImage(mIndex);
     }
-    glBindTexture(sGLTextureType[gl_tex->getTarget()], mCurrTexture);
+    if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[gl_tex->getTarget()], mCurrTexture);
+    // [VULKAN G-BUFFER S2 2026-11-26] after a missing texture bindDefaultImage's bind() has set mCurrTexture to the default
+    // image's name, which the line above binds again: that image (recorded by bind()) is kept then
+    if (mCurrTexture == gl_tex->getTexName())
+    {
+        wolfVkBound(gl_tex->getTarget(), mCurrTexture, gl_tex);
+        mWolfVkAddress = gl_tex->mAddressMode;
+        mWolfVkFilter = gl_tex->mFilterOption;
+    }
+    else if (mWolfVkName != mCurrTexture)
+    {
+        wolfVkBound(gl_tex->getTarget(), mCurrTexture, nullptr);
+    }
     mHasMipMaps = gl_tex->mHasMipMaps;
     if (gl_tex->mTexOptionsDirty)
     {
@@ -246,19 +260,39 @@ bool LLTexUnit::bind(LLTexture* texture, bool for_rendering, bool forceBind)
                     activate();
                     enable(gl_tex->getTarget());
                     mCurrTexture = gl_tex->getTexName();
-                    glBindTexture(sGLTextureType[gl_tex->getTarget()], mCurrTexture);
+                    if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[gl_tex->getTarget()], mCurrTexture);
+                    wolfVkBound(gl_tex->getTarget(), mCurrTexture, gl_tex);   // [VULKAN G-BUFFER S2 2026-11-26/]
                     if(gl_tex->updateBindStats())
                     {
                         texture->setActive() ;
                         texture->updateBindStatsForTester() ;
                     }
                     mHasMipMaps = gl_tex->mHasMipMaps;
+                    mWolfVkAddress = gl_tex->mAddressMode;
+                    mWolfVkFilter = gl_tex->mFilterOption;
                     if (gl_tex->mTexOptionsDirty)
                     {
                         gl_tex->mTexOptionsDirty = false;
                         setTextureAddressMode(gl_tex->mAddressMode);
                         setTextureFilteringOption(gl_tex->mFilterOption);
                         apply_wolf_lod_bias(sGLTextureType[gl_tex->getTarget()], mHasMipMaps);   // [VR TEXTURE BIAS 2026-11-07/]
+                    }
+                }
+                else
+                {
+                    if (gGL.getCurrentTexUnitIndex() != (U32)mIndex)
+                    {
+                        activate();
+                    }
+                    wolfVkBound(gl_tex->getTarget(), mCurrTexture, gl_tex);
+                    mHasMipMaps = gl_tex->mHasMipMaps;
+                    mWolfVkAddress = gl_tex->mAddressMode;
+                    mWolfVkFilter = gl_tex->mFilterOption;
+                    if (gl_tex->mTexOptionsDirty)
+                    {
+                        gl_tex->mTexOptionsDirty = false;
+                        setTextureAddressMode(gl_tex->mAddressMode);
+                        setTextureFilteringOption(gl_tex->mFilterOption);
                     }
                 }
             }
@@ -324,10 +358,13 @@ bool LLTexUnit::bind(LLImageGL* texture, bool for_rendering, bool forceBind, S32
         enable(texture->getTarget());
         stop_glerror();
         mCurrTexture = texname;
-        glBindTexture(sGLTextureType[texture->getTarget()], mCurrTexture);
+        if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[texture->getTarget()], mCurrTexture);
+        wolfVkBound(texture->getTarget(), mCurrTexture, texname == texture->getTexName() ? texture : nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/] usename: another name
         stop_glerror();
         texture->updateBindStats();
         mHasMipMaps = texture->mHasMipMaps;
+        mWolfVkAddress = texture->mAddressMode;
+        mWolfVkFilter = texture->mFilterOption;
         if (texture->mTexOptionsDirty)
         {
             stop_glerror();
@@ -336,6 +373,25 @@ bool LLTexUnit::bind(LLImageGL* texture, bool for_rendering, bool forceBind, S32
             setTextureFilteringOption(texture->mFilterOption);
             apply_wolf_lod_bias(sGLTextureType[texture->getTarget()], mHasMipMaps);   // [VR TEXTURE BIAS 2026-11-07/]
             stop_glerror();
+        }
+    }
+    else
+    {
+        // [NATIVE VULKAN 2026-11-26] Ensure mCurTexUnitIndex points to this unit even on a cache hit so subsequent
+        // setManualImage / sampler option calls never target a stale non-zero texture unit.
+        if (gGL.getCurrentTexUnitIndex() != (U32)mIndex)
+        {
+            activate();
+        }
+        wolfVkBound(texture->getTarget(), mCurrTexture, texname == texture->getTexName() ? texture : nullptr);
+        mHasMipMaps = texture->mHasMipMaps;
+        mWolfVkAddress = texture->mAddressMode;
+        mWolfVkFilter = texture->mFilterOption;
+        if (texture->mTexOptionsDirty)
+        {
+            texture->mTexOptionsDirty = false;
+            setTextureAddressMode(texture->mAddressMode);
+            setTextureFilteringOption(texture->mFilterOption);
         }
     }
 
@@ -363,8 +419,11 @@ bool LLTexUnit::bind(LLCubeMap* cubeMap)
             activate();
             enable(LLTexUnit::TT_CUBE_MAP);
             mCurrTexture = cubeMap->mImages[0]->getTexName();
-            glBindTexture(GL_TEXTURE_CUBE_MAP, mCurrTexture);
+            if (!gGLManager.mIsNativeVulkan) glBindTexture(GL_TEXTURE_CUBE_MAP, mCurrTexture);
+            wolfVkBound(TT_CUBE_MAP, mCurrTexture, nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/]
             mHasMipMaps = cubeMap->mImages[0]->mHasMipMaps;
+            mWolfVkAddress = cubeMap->mImages[0]->mAddressMode;
+            mWolfVkFilter = cubeMap->mImages[0]->mFilterOption;
             cubeMap->mImages[0]->updateBindStats();
             if (cubeMap->mImages[0]->mTexOptionsDirty)
             {
@@ -379,6 +438,17 @@ bool LLTexUnit::bind(LLCubeMap* cubeMap)
             LL_WARNS() << "Using cube map without extension!" << LL_ENDL;
             return false;
         }
+    }
+    else
+    {
+        if (gGL.getCurrentTexUnitIndex() != (U32)mIndex)
+        {
+            activate();
+        }
+        wolfVkBound(TT_CUBE_MAP, mCurrTexture, nullptr);
+        mHasMipMaps = cubeMap->mImages[0]->mHasMipMaps;
+        mWolfVkAddress = cubeMap->mImages[0]->mAddressMode;
+        mWolfVkFilter = cubeMap->mImages[0]->mFilterOption;
     }
     return true;
 }
@@ -418,8 +488,26 @@ bool LLTexUnit::bindManual(eTextureType type, U32 texture, bool hasMips)
         activate();
         enable(type);
         mCurrTexture = texture;
-        glBindTexture(sGLTextureType[type], texture);
+        if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[type], texture);
+        wolfVkBound(type, texture, nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/]
         mHasMipMaps = hasMips;
+    }
+    else
+    {
+        if (gGL.getCurrentTexUnitIndex() != (U32)mIndex)
+        {
+            activate();
+        }
+        wolfVkBound(type, texture, nullptr);
+    }
+    if (texture && LLImageGL::sWolfVkNativeStore)
+    {
+        S32 f = 0, a = 0;
+        if (LLImageGL::sWolfVkNativeStore->getSamplerOptions(texture, f, a))
+        {
+            mWolfVkFilter = static_cast<eTextureFilterOptions>(f);
+            mWolfVkAddress = static_cast<eTextureAddressMode>(a);
+        }
     }
     return true;
 }
@@ -442,11 +530,13 @@ void LLTexUnit::unbind(eTextureType type)
 
         if (type == LLTexUnit::TT_TEXTURE)
         {
-            glBindTexture(sGLTextureType[type], sWhiteTexture);
+            if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[type], sWhiteTexture);
+            wolfVkBound(type, sWhiteTexture, nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/]
         }
         else
         {
-            glBindTexture(sGLTextureType[type], 0);
+            if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[type], 0);
+            wolfVkBound(type, 0, nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/]
         }
         stop_glerror();
     }
@@ -463,11 +553,13 @@ void LLTexUnit::unbindFast(eTextureType type)
 
         if (type == LLTexUnit::TT_TEXTURE)
         {
-            glBindTexture(sGLTextureType[type], sWhiteTexture);
+            if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[type], sWhiteTexture);
+            wolfVkBound(type, sWhiteTexture, nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/]
         }
         else
         {
-            glBindTexture(sGLTextureType[type], 0);
+            if (!gGLManager.mIsNativeVulkan) glBindTexture(sGLTextureType[type], 0);
+            wolfVkBound(type, 0, nullptr);   // [VULKAN G-BUFFER S2 2026-11-26/]
         }
     }
 }
@@ -485,6 +577,12 @@ void LLTexUnit::setTextureAddressMode(eTextureAddressMode mode)
 
 void LLTexUnit::setTextureAddressModeFast(eTextureAddressMode mode, eTextureType tex_type)
 {
+    mWolfVkAddress = mode;
+    if (mWolfVkName && LLImageGL::sWolfVkNativeStore)
+    {
+        LLImageGL::sWolfVkNativeStore->setSamplerOptions(mWolfVkName, mWolfVkFilter, mWolfVkAddress);
+    }
+    if (gGLManager.mIsNativeVulkan) return;
     glTexParameteri(sGLTextureType[tex_type], GL_TEXTURE_WRAP_S, sGLAddressMode[mode]);
     glTexParameteri(sGLTextureType[tex_type], GL_TEXTURE_WRAP_T, sGLAddressMode[mode]);
     if (tex_type == TT_CUBE_MAP || tex_type == TT_CUBE_MAP_ARRAY || tex_type == TT_TEXTURE_3D)
@@ -504,6 +602,12 @@ void LLTexUnit::setTextureFilteringOption(LLTexUnit::eTextureFilterOptions optio
 
 void LLTexUnit::setTextureFilteringOptionFast(LLTexUnit::eTextureFilterOptions option, eTextureType tex_type)
 {
+    mWolfVkFilter = option;
+    if (mWolfVkName && LLImageGL::sWolfVkNativeStore)
+    {
+        LLImageGL::sWolfVkNativeStore->setSamplerOptions(mWolfVkName, mWolfVkFilter, mWolfVkAddress);
+    }
+    if (gGLManager.mIsNativeVulkan) return;
     if (option == TFO_POINT)
     {
         glTexParameteri(sGLTextureType[tex_type], GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -863,6 +967,18 @@ LLRender::~LLRender()
 
 bool LLRender::init(bool needs_vertex_buffer)
 {
+    if (gGLManager.mIsNativeVulkan)
+    {
+        gGL.setSceneBlendType(LLRender::BT_ALPHA);
+        gGL.setAmbientLightColor(LLColor4::black);
+        if (needs_vertex_buffer)
+        {
+            initVertexBuffer();
+        }
+        mMaxLineWidthAliased = 1.f;
+        mMaxLineWidthSmooth = 1.f;
+        return true;
+    }
 #if LL_WINDOWS
     if (gGLManager.mHasDebugOutput && gDebugGL)
     { //setup debug output callback
@@ -919,6 +1035,10 @@ void LLRender::initVertexBuffer()
     llassert_always(mBuffer.isNull()) ;
     stop_glerror();
     mBuffer = new LLVertexBuffer(immediate_mask);
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        mBuffer->setWolfGLOnly();   // [VK S6a 2026-11-26] immediate mode is drawn by OpenGL only: an ordinary GL buffer
+    }
     // <FS:Ansariel> Warn in case of allocation failure
     //mBuffer->allocateBuffer(4096, 0);
     if (!mBuffer->allocateBuffer(4096, 0))
@@ -939,6 +1059,7 @@ void LLRender::resetVertexBuffer()
 
 void LLRender::shutdown()
 {
+    sVBCache.clear();
     resetVertexBuffer();
 }
 
@@ -1409,10 +1530,13 @@ void LLRender::setColorMask(bool writeColorR, bool writeColorG, bool writeColorB
         mCurrColorMask[2] = writeColorB;
         mCurrColorMask[3] = writeAlpha;
 
-        glColorMask(writeColorR ? GL_TRUE : GL_FALSE,
-                    writeColorG ? GL_TRUE : GL_FALSE,
-                    writeColorB ? GL_TRUE : GL_FALSE,
-                    writeAlpha ? GL_TRUE : GL_FALSE);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            glColorMask(writeColorR ? GL_TRUE : GL_FALSE,
+                        writeColorG ? GL_TRUE : GL_FALSE,
+                        writeColorB ? GL_TRUE : GL_FALSE,
+                        writeAlpha ? GL_TRUE : GL_FALSE);
+        }
     }
 }
 
@@ -1476,8 +1600,11 @@ void LLRender::blendFunc(eBlendFactor sfactor, eBlendFactor dfactor)
         mCurrBlendColorDFactor = dfactor;
         mCurrBlendAlphaDFactor = alpha_d;
         flush();
-        if (alpha_s == sfactor && alpha_d == dfactor) glBlendFunc(sGLBlendFactor[sfactor], sGLBlendFactor[dfactor]);
-        else glBlendFuncSeparate(sGLBlendFactor[sfactor], sGLBlendFactor[dfactor], sGLBlendFactor[alpha_s], sGLBlendFactor[alpha_d]);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            if (alpha_s == sfactor && alpha_d == dfactor) glBlendFunc(sGLBlendFactor[sfactor], sGLBlendFactor[dfactor]);
+            else glBlendFuncSeparate(sGLBlendFactor[sfactor], sGLBlendFactor[dfactor], sGLBlendFactor[alpha_s], sGLBlendFactor[alpha_d]);
+        }
     }
 }
 
@@ -1509,8 +1636,11 @@ void LLRender::blendFunc(eBlendFactor color_sfactor, eBlendFactor color_dfactor,
         mCurrBlendAlphaDFactor = alpha_dfactor;
         flush();
 
-        glBlendFuncSeparate(sGLBlendFactor[color_sfactor], sGLBlendFactor[color_dfactor],
-                           sGLBlendFactor[alpha_sfactor], sGLBlendFactor[alpha_dfactor]);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            glBlendFuncSeparate(sGLBlendFactor[color_sfactor], sGLBlendFactor[color_dfactor],
+                               sGLBlendFactor[alpha_sfactor], sGLBlendFactor[alpha_dfactor]);
+        }
     }
 }
 
@@ -1552,7 +1682,14 @@ void LLRender::setLineWidth(F32 line_width)
 {
     if (line_width > 1.f)
     {
-        line_width = llmin(line_width, glIsEnabled(GL_LINE_SMOOTH) ? mMaxLineWidthSmooth : mMaxLineWidthAliased);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            line_width = llmin(line_width, mMaxLineWidthAliased);
+        }
+        else
+        {
+            line_width = llmin(line_width, glIsEnabled(GL_LINE_SMOOTH) ? mMaxLineWidthSmooth : mMaxLineWidthAliased);
+        }
     }
     if (mLineWidth != line_width || mDirty)
     {
@@ -1561,7 +1698,7 @@ void LLRender::setLineWidth(F32 line_width)
             flush();
         }
         mLineWidth = line_width;
-        glLineWidth(line_width);
+        if (!gGLManager.mIsNativeVulkan) glLineWidth(line_width);
     }
 }
 // </FS>
@@ -1581,6 +1718,7 @@ bool LLRender::verifyTexUnitActive(U32 unitToVerify)
 
 void LLRender::clearErrors()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     while (glGetError())
     {
         //loop until no more error flags left
@@ -1799,6 +1937,7 @@ LLVertexBuffer* LLRender::bufferfromCache(U32 attribute_mask, U32 count)
 LLVertexBuffer* LLRender::genBuffer(U32 attribute_mask, S32 count)
 {
     LLVertexBuffer * vb = new LLVertexBuffer(attribute_mask);
+    vb->setWolfGLOnly();   // [VK S6a 2026-11-26] as mBuffer: LLRender's cached batches are drawn by OpenGL only
     vb->allocateBuffer(count, 0);
 
     // Non-Apple path uses glBufferSubData inside setXxxData, so the VBO

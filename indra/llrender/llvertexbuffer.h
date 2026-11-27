@@ -263,6 +263,7 @@ public:
     U32 getOffset(AttributeType type) const { return mOffsets[type]; }
     U32 getGLBuffer() const                 { return mGLBuffer; }    // [VULKAN BACKEND 2026-11-08/] for the Vulkan copy's glGetBufferSubData
     U32 getGLIndices() const                { return mGLIndices; }   // [VULKAN BACKEND 2026-11-08/]
+    U32 getIndicesType() const              { return mIndicesType; } // [VK S6a 2026-11-26/] GL_UNSIGNED_SHORT or GL_UNSIGNED_INT (setIndexData(const U32*))
 
     // these functions assume (and assert on) the current VBO being bound
     // Detailed error checking can be enabled by setting gDebugGL to true
@@ -337,11 +338,61 @@ public:
     static U32 sLastMask;
     static U32 sVertexCount;
 
-    // [VULKAN BACKEND 2026-11-08] The Vulkan backend keeps a device-local copy of each buffer it draws (llrender/vk mirror,
-    // newview/wolfvkmirror.cpp). flush_vbo tells it which bytes changed (start..end inclusive, as flush_vbo gets them) and
-    // the destructor tells it the buffer is gone. Null when the OpenGL renderer runs alone.
-    static void (*sWolfVkOnFlush)(LLVertexBuffer* buffer, bool indices, U32 start, U32 end, const U8* data);
+    // [VULKAN BACKEND 2026-11-08] The Vulkan renderer hears when a buffer is destroyed (its view of the buffer's ranges
+    // goes, wolfvkresources.cpp). Null when the OpenGL renderer runs alone. [VK S6a 2026-11-26] the flush hook that fed
+    // the Vulkan COPY of each buffer is gone with the copies.
     static void (*sWolfVkOnDestroy)(LLVertexBuffer* buffer);
+
+    // [VULKAN G-BUFFER S2 2026-11-26] The Vulkan draw interceptor (newview/wolfvkbridge.cpp, the G-buffer bracket). Both
+    // pointers are null except while Vulkan may record draws (WolfVkBridge::setGBufferPhase), so the OpenGL renderer pays
+    // one load and branch per draw. sWolfVkInterceptDraw is called by drawRange / drawRangeFast / drawArrays after the
+    // matrices are synced and before the glDraw call: true = Vulkan recorded this draw from OpenGL's current state (the
+    // glDraw call is skipped), false = OpenGL draws it (the interceptor has closed the bracket first, so the shared G-buffer
+    // is OpenGL's again). indexed: drawRange(start, end, count, first = indices offset) vs drawArrays(first, count).
+    // sWolfVkBeforeWrite is called by flush_vbo before new bytes reach this buffer: a draw already recorded from it must be
+    // submitted with the old bytes first (mWolfVkBracket = the bracket that recorded a draw from it).
+    static bool (*sWolfVkInterceptDraw)(const LLVertexBuffer* buffer, U32 mode, U32 start, U32 end, U32 count, U32 first, bool indexed);
+    static void (*sWolfVkBeforeWrite)(const LLVertexBuffer* buffer);
+    mutable U32 mWolfVkBracket = 0;
+
+    // [VK S6a 2026-11-26] Resource ownership: when a store is installed, a buffer's bytes on the card belong to the
+    // Vulkan renderer (newview/wolfvkresources.cpp). The store hands out a range of Vulkan memory and an OpenGL buffer
+    // name imported over the same bytes (GL_EXT_memory_object, glBufferStorageMemEXT), so there is ONE copy on the card
+    // and both renderers draw from it. OpenGL cannot write such a buffer (EXT_external_objects issue 12: not mappable;
+    // glBufferStorageMemEXT takes no flags, so glBufferSubData is not promised either): flush_vbo hands the changed
+    // bytes to the store instead, and flushBuffers ends each batch with batchEnd(), after which OpenGL may draw them.
+    struct WolfVkStore
+    {
+        virtual ~WolfVkStore() = default;
+        // A range of size bytes for vertices or indices. False = none (the buffer then comes from the OpenGL pool).
+        // gl_name: the imported OpenGL buffer; handle: the store's own reference, given back to write() and free().
+        virtual bool allocate(bool indices, U32 size, U32& gl_name, void*& handle) = 0;
+        // The range and its OpenGL name are no longer used by this buffer (the store deletes the name).
+        virtual void free(void* handle) = 0;
+        // size bytes at data replace the range's bytes from start. The bytes are copied before write() returns.
+        virtual void write(void* handle, U32 start, U32 size, const U8* data) = 0;
+        // Every write() since the last batchEnd() must be visible to both renderers when this returns
+        // (to OpenGL: in command order, as glBufferSubData would have been).
+        virtual void batchEnd() = 0;
+        // Bytes of card memory handed out.
+        virtual U64 bytesUsed() = 0;
+    };
+    // Installs (or with null removes) the store. Buffers made before stay where they are.
+    static void setWolfVkStore(WolfVkStore* store);
+    // Every buffer the store holds moves to the OpenGL pool, refilled from its client copy (mMappedData holds all of
+    // it: every write goes through it). For the fall-back to OpenGL; the store is then removed. OpenGL context current.
+    static void wolfVkReleaseAllToGL();
+    // Ends the store's open batch, if any (flushBuffers and setBuffer do; the Vulkan renderer calls it before it draws).
+    static void wolfVkEndBatch();
+    // This buffer always lives in the OpenGL pool (LLRender's immediate-mode buffers: only OpenGL draws them, and a
+    // store batch per UI flush would cost a queue submit each). Call before allocateBuffer.
+    void setWolfGLOnly() { mWolfGLOnly = true; }
+    void* getWolfVkVertexHandle() const { return mWolfVkVertexHandle; }
+    void* getWolfVkIndexHandle() const { return mWolfVkIndexHandle; }
+private:
+    void* mWolfVkVertexHandle = nullptr;
+    void* mWolfVkIndexHandle = nullptr;
+    bool mWolfGLOnly = false;
 };
 
 #if LL_PROFILER_ENABLE_RENDER_DOC

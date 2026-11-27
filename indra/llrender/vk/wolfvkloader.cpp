@@ -26,6 +26,14 @@
 #else
 #include <dlfcn.h>
 #endif
+#if LL_DARWIN
+// [W114-VULKAN MAC 2026-11-26] _NSGetExecutablePath (mach-o/dyld.h) for the bundle path of the driver manifest; realpath,
+// setenv/getenv (stdlib.h)
+#include <mach-o/dyld.h>
+#include <climits>
+#include <cstdlib>
+#include <unistd.h>   // access()
+#endif
 
 WolfVkFunctions gVk;
 
@@ -44,23 +52,67 @@ namespace
     //         so LD_LIBRARY_PATH in wrapper.sh:155 finds that first; both are the Khronos loader and read the
     //         system ICD manifests in /usr/share/vulkan/icd.d).
     //  Windows: vulkan-1.dll in System32, installed by every GPU driver with Vulkan (llviewerstats.cpp:826-829).
-    //  macOS: libvulkan.1.dylib is the LunarG loader shipped with the Vulkan SDK / bundled by apps; MoltenVK's own
-    //         libMoltenVK.dylib exports vkGetInstanceProcAddr directly (MoltenVK README "Using MoltenVK directly").
-    //         Both are tried; the bundle must carry one of them beside the viewer (UNTESTED: no Mac here).
+    //  macOS: [W114-VULKAN MAC 2026-11-26] the MoltenVK driver the bundle carries, opened DIRECTLY, without the Khronos
+    //         loader (viewer_manifest.py Darwin construct: Contents/Frameworks/libMoltenVK.dylib, MoltenVK 1.4.2 from
+    //         .github/scripts/install-moltenvk.sh). MoltenVK exports vkGetInstanceProcAddr for exactly this use
+    //         (MoltenVK_Runtime_UserGuide.md "Install MoltenVK as a Dynamic Library on macOS": the app links or loads
+    //         libMoltenVK.dylib itself, "@executable_path/../Frameworks"). Why not the loader:
+    //          - Khronos publishes no macOS binary of the loader (Vulkan-Loader releases are source tags; the only
+    //            build is inside LunarG's SDK), so shipping one means a second native component to build and sign;
+    //          - a loader adds every driver it finds in the system and user search paths after the bundle's
+    //            (LoaderDriverInterface.md "Example macOS Driver Search Path": <bundle>/Contents/Resources/vulkan/icd.d,
+    //            then ~/.config, /etc/xdg, /usr/local/etc, /etc, ~/.local/share, /usr/local/share, /usr/share), so a
+    //            resident's Homebrew or SDK MoltenVK would appear as a second "Apple" device beside ours and the
+    //            device choice (WolfVkDevice::choosePhysicalDevice) could no longer tell the two apart;
+    //          - the one thing the loader brings, layers, is wanted only for validation (below).
+    //         dlopen resolves "@executable_path" against the main executable (Contents/MacOS/WolfViewer), so this is
+    //         Contents/Frameworks/libMoltenVK.dylib.
+    //         VALIDATION (WolfVulkanValidation=1, for_validation): MoltenVK "does not load Vulkan Layers on its own. In
+    //         order to use Vulkan Layers, such as the validation layers, use the Vulkan Loader and Layers from the
+    //         Vulkan SDK" (MoltenVK_Runtime_UserGuide.md "Known MoltenVK Limitations"). Then the SDK's loader
+    //         (libvulkan.1.dylib, which the SDK installs in /usr/local/lib, on dlopen's default fallback path) is tried
+    //         first, told by VK_DRIVER_FILES (and its older name VK_ICD_FILENAMES, LoaderInterfaceArchitecture.md
+    //         "Table of Debug Environment Variables") to use only the bundle's own manifest
+    //         Contents/Resources/vulkan/icd.d/MoltenVK_icd.json - the same MoltenVK as a normal start, with the SDK's
+    //         layers. Without an SDK the bundled MoltenVK opens as always and WolfVkDevice::createInstance logs that
+    //         the validation layer is not installed.
+#if LL_DARWIN
+    const char* const sDarwinValidationLoader = "libvulkan.1.dylib";
+#endif
     const char* const sCandidates[] =
     {
 #if LL_WINDOWS
         "vulkan-1.dll",
 #elif LL_DARWIN
-        "@executable_path/../Frameworks/libvulkan.1.dylib",
         "@executable_path/../Frameworks/libMoltenVK.dylib",
-        "libvulkan.1.dylib",
-        "libMoltenVK.dylib",
 #else
         "libvulkan.so.1",
         "libvulkan.so",
 #endif
     };
+
+#if LL_DARWIN
+    // [W114-VULKAN MAC 2026-11-26] <bundle>/Contents/Resources/vulkan/icd.d/MoltenVK_icd.json from the executable's own
+    // path (Contents/MacOS/WolfViewer). Source: mach-o/dyld.h _NSGetExecutablePath(char* buf, uint32_t* bufsize): 0 on
+    // success, -1 with *bufsize set to the size needed; the path may hold symbolic links, so realpath (stdlib.h) follows.
+    std::string bundledDriverManifest()
+    {
+        char raw[PATH_MAX];
+        uint32_t size = sizeof(raw);
+        if (_NSGetExecutablePath(raw, &size) != 0) return std::string();
+        char real[PATH_MAX];
+        if (!realpath(raw, real)) return std::string();
+        std::string path(real);
+        // .../WolfViewer.app/Contents/MacOS/WolfViewer -> .../WolfViewer.app/Contents
+        for (int up = 0; up < 2; ++up)
+        {
+            const size_t slash = path.find_last_of('/');
+            if (slash == std::string::npos || slash == 0) return std::string();
+            path.resize(slash);
+        }
+        return path + "/Resources/vulkan/icd.d/MoltenVK_icd.json";
+    }
+#endif
 
     void* symbol(const char* name)
     {
@@ -75,15 +127,44 @@ namespace
 namespace WolfVkLoader
 {
 
-bool loadLibrary(std::string& error)
+bool loadLibrary(std::string& error, bool for_validation)
 {
     if (sLibrary)
     {
         return true;
     }
 
+#if LL_DARWIN
+    if (for_validation)
+    {
+        // [W114-VULKAN MAC 2026-11-26] the SDK loader with the bundle's MoltenVK only (see sCandidates). A value the
+        // person already set is theirs and stays (setenv overwrite 0). Nothing here when the bundle has no manifest.
+        const std::string manifest = bundledDriverManifest();
+        const bool have_manifest = !manifest.empty() && access(manifest.c_str(), R_OK) == 0;
+        const bool own_choice = getenv("VK_DRIVER_FILES") || getenv("VK_ICD_FILENAMES");
+        if (have_manifest && !own_choice)
+        {
+            setenv("VK_DRIVER_FILES", manifest.c_str(), 0);
+            setenv("VK_ICD_FILENAMES", manifest.c_str(), 0);
+        }
+        sLibrary = dlopen(sDarwinValidationLoader, RTLD_NOW | RTLD_LOCAL);
+        if (sLibrary)
+        {
+            sLibraryName = std::string(sDarwinValidationLoader) + " (Vulkan SDK loader, for validation; drivers: "
+                         + (own_choice ? std::string("VK_DRIVER_FILES/VK_ICD_FILENAMES as set before the start")
+                            : have_manifest ? manifest : std::string("the system's, the bundle has no MoltenVK_icd.json")) + ")";
+        }
+    }
+#else
+    (void)for_validation;
+#endif
+
     for (const char* candidate : sCandidates)
     {
+        if (sLibrary)
+        {
+            break;
+        }
 #if LL_WINDOWS
         sLibrary = LoadLibraryA(candidate);
 #else
@@ -221,6 +302,10 @@ bool loadDeviceFunctions(VkDevice device, std::string& error)
     if (!gVk.name) { gVk.name = reinterpret_cast<PFN_##name>(gVk.vkGetDeviceProcAddr(device, #name "KHR")); }
     WOLFVK_DEVICE_OPTIONAL_FUNCS(WOLFVK_LOAD_OPTIONAL)
 #undef WOLFVK_LOAD_OPTIONAL
+    if (!gVk.vkResetQueryPool)
+    {
+        gVk.vkResetQueryPool = reinterpret_cast<PFN_vkResetQueryPool>(gVk.vkGetDeviceProcAddr(device, "vkResetQueryPoolEXT"));
+    }
     return true;
 }
 

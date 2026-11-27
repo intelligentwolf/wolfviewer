@@ -33,6 +33,7 @@
 #include "llglslshader.h"
 #include "llviewershadermgr.h"
 #include "lldrawpoolwater.h"
+#include "wolfvknative.h"
 
 //-----------------------------------------------------------------------------------
 //static variables definitions
@@ -802,12 +803,24 @@ U32 LLOcclusionCullingGroup::getNewOcclusionQueryObjectName()
 
     if (sFreeQueries.empty())
     {
-        //seed 1024 query names into the free query pool
-        GLuint queries[1024];
-        glGenQueries(1024, queries);
-        for (int i = 0; i < 1024; ++i)
+        if (gGLManager.mIsNativeVulkan)
         {
-            sFreeQueries.push(queries[i]);
+            for (int i = 0; i < 1024; ++i)
+            {
+                const U32 q = WolfVkNative::genOcclusionQuery();
+                if (q != 0) sFreeQueries.push(q);
+            }
+            if (sFreeQueries.empty()) return 0;
+        }
+        else
+        {
+            //seed 1024 query names into the free query pool
+            GLuint queries[1024];
+            glGenQueries(1024, queries);
+            for (int i = 0; i < 1024; ++i)
+            {
+                sFreeQueries.push(queries[i]);
+            }
         }
     }
 
@@ -1106,7 +1119,7 @@ U32 LLOcclusionCullingGroup::getLastOcclusionIssuedTime()
 
 void LLOcclusionCullingGroup::checkOcclusion()
 {
-    if (LLPipeline::sUseOcclusion < 2) return;  // 0 - NoOcclusion, 1 = ReadOnly, 2 = ModifyOcclusionState  TODO: DJH 11-2021 ENUM this
+    if (LLPipeline::sUseOcclusion < 2 || (gGLManager.mIsNativeVulkan && !WolfVkNative::occlusionSupported())) return;  // 0 - NoOcclusion, 1 = ReadOnly, 2 = ModifyOcclusionState  TODO: DJH 11-2021 ENUM this
 
     LL_PROFILE_ZONE_SCOPED_CATEGORY_OCTREE;
     LLOcclusionCullingGroup* parent = (LLOcclusionCullingGroup*)getParent();
@@ -1125,6 +1138,35 @@ void LLOcclusionCullingGroup::checkOcclusion()
             // mark non-occluded
             clearOcclusionState(LLOcclusionCullingGroup::OCCLUDED, LLOcclusionCullingGroup::STATE_MODE_DIFF);
             clearOcclusionState(QUERY_PENDING | DISCARD_QUERY);
+        }
+        else if (gGLManager.mIsNativeVulkan)
+        {
+            bool available = false;
+            U32 query_result = 1;
+            WolfVkNative::getOcclusionQueryResult(mOcclusionQuery[LLViewerCamera::sCurCameraID], available, query_result);
+            mOcclusionCheckCount[LLViewerCamera::sCurCameraID]++;
+
+            static LLCachedControl<U32> occlusion_timeout(gSavedSettings, "RenderOcclusionTimeout", 4);
+            if (available || mOcclusionCheckCount[LLViewerCamera::sCurCameraID] > occlusion_timeout)
+            {
+                mOcclusionCheckCount[LLViewerCamera::sCurCameraID] = 0;
+                if (!available)
+                {
+                    query_result = 1; // conservative visible on timeout; never block GPU
+                }
+#if LL_TRACK_PENDING_OCCLUSION_QUERIES
+                sPendingQueries.erase(mOcclusionQuery[LLViewerCamera::sCurCameraID]);
+#endif
+                if (query_result > 0)
+                {
+                    clearOcclusionState(LLOcclusionCullingGroup::OCCLUDED, LLOcclusionCullingGroup::STATE_MODE_DIFF);
+                }
+                else
+                {
+                    setOcclusionState(LLOcclusionCullingGroup::OCCLUDED, LLOcclusionCullingGroup::STATE_MODE_DIFF);
+                }
+                clearOcclusionState(QUERY_PENDING);
+            }
         }
         else
         {
@@ -1174,7 +1216,7 @@ void LLOcclusionCullingGroup::checkOcclusion()
 void LLOcclusionCullingGroup::doOcclusion(LLCamera* camera, const LLVector4a* shift)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_OCTREE;
-    if (mSpatialPartition->isOcclusionEnabled() && LLPipeline::sUseOcclusion > 1)
+    if ((!gGLManager.mIsNativeVulkan || WolfVkNative::occlusionSupported()) && mSpatialPartition->isOcclusionEnabled() && LLPipeline::sUseOcclusion > 1)
     {
         //move mBounds to the agent space if necessary
         LLVector4a bounds[2];
@@ -1203,6 +1245,7 @@ void LLOcclusionCullingGroup::doOcclusion(LLCamera* camera, const LLVector4a* sh
         {
             if (!isOcclusionState(QUERY_PENDING) || isOcclusionState(DISCARD_QUERY))
             {
+                bool query_issued = false;
                 { //no query pending, or previous query to be discarded
                     LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("doOcclusion - render");
 
@@ -1232,59 +1275,79 @@ void LLOcclusionCullingGroup::doOcclusion(LLCamera* camera, const LLVector4a* sh
                         //store which frame this query was issued on
                         mOcclusionIssued[LLViewerCamera::sCurCameraID] = gFrameCount;
 
+                        bool begun_ok = true;
                         {
                             LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("glBeginQuery");
 
                             //get an occlusion query that hasn't been used in awhile
                             releaseOcclusionQueryObjectName(mOcclusionQuery[LLViewerCamera::sCurCameraID]);
                             mOcclusionQuery[LLViewerCamera::sCurCameraID] = getNewOcclusionQueryObjectName();
-                            glBeginQuery(mode, mOcclusionQuery[LLViewerCamera::sCurCameraID]);
-                        }
-
-                        LLGLSLShader* shader = LLGLSLShader::sCurBoundShaderPtr;
-                        llassert(shader);
-
-                        shader->uniform3fv(LLShaderMgr::BOX_CENTER, 1, bounds[0].getF32ptr());
-                        shader->uniform3f(LLShaderMgr::BOX_SIZE, bounds[1][0]+SG_OCCLUSION_FUDGE,
-                                                                 bounds[1][1]+SG_OCCLUSION_FUDGE,
-                                                                 bounds[1][2]+OCCLUSION_FUDGE_Z);
-
-                        if (!use_depth_clamp && mSpatialPartition->mDrawableType == LLPipeline::RENDER_TYPE_VOIDWATER)
-                        {
-                            LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("doOcclusion - draw water");
-
-                            LLGLSquashToFarClip squash;
-                            if (camera->getOrigin().isExactlyZero())
-                            { //origin is invalid, draw entire box
-                                gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, 0);
-                                gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, b111*8);
+                            if (gGLManager.mIsNativeVulkan)
+                            {
+                                begun_ok = WolfVkNative::beginOcclusionQuery(mOcclusionQuery[LLViewerCamera::sCurCameraID]);
                             }
                             else
                             {
-                                gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, get_box_fan_indices(camera, bounds[0]));
-                            }
-                        }
-                        else
-                        {
-                            LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("doOcclusion - draw");
-                            if (camera->getOrigin().isExactlyZero())
-                            { //origin is invalid, draw entire box
-                                gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, 0);
-                                gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, b111*8);
-                            }
-                            else
-                            {
-                                gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, get_box_fan_indices(camera, bounds[0]));
+                                glBeginQuery(mode, mOcclusionQuery[LLViewerCamera::sCurCameraID]);
                             }
                         }
 
+                        if (begun_ok)
                         {
-                            LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("glEndQuery");
-                            glEndQuery(mode);
+                            LLGLSLShader* shader = LLGLSLShader::sCurBoundShaderPtr;
+                            llassert(shader);
+
+                            shader->uniform3fv(LLShaderMgr::BOX_CENTER, 1, bounds[0].getF32ptr());
+                            shader->uniform3f(LLShaderMgr::BOX_SIZE, bounds[1][0]+SG_OCCLUSION_FUDGE,
+                                                                     bounds[1][1]+SG_OCCLUSION_FUDGE,
+                                                                     bounds[1][2]+OCCLUSION_FUDGE_Z);
+
+                            if (!use_depth_clamp && mSpatialPartition->mDrawableType == LLPipeline::RENDER_TYPE_VOIDWATER)
+                            {
+                                LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("doOcclusion - draw water");
+
+                                LLGLSquashToFarClip squash;
+                                if (camera->getOrigin().isExactlyZero())
+                                { //origin is invalid, draw entire box
+                                    gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, 0);
+                                    gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, b111*8);
+                                }
+                                else
+                                {
+                                    gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, get_box_fan_indices(camera, bounds[0]));
+                                }
+                            }
+                            else
+                            {
+                                LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("doOcclusion - draw");
+                                if (camera->getOrigin().isExactlyZero())
+                                { //origin is invalid, draw entire box
+                                    gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, 0);
+                                    gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, b111*8);
+                                }
+                                else
+                                {
+                                    gPipeline.mCubeVB->drawRange(LLRender::TRIANGLE_FAN, 0, 7, 8, get_box_fan_indices(camera, bounds[0]));
+                                }
+                            }
+
+                            {
+                                LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("glEndQuery");
+                                if (gGLManager.mIsNativeVulkan)
+                                {
+                                    WolfVkNative::endOcclusionQuery();
+                                }
+                                else
+                                {
+                                    glEndQuery(mode);
+                                }
+                            }
+                            query_issued = true;
                         }
                     }
                 }
 
+                if (query_issued)
                 {
                     LL_PROFILE_ZONE_NAMED_CATEGORY_OCTREE("doOcclusion - set state");
                     setOcclusionState(LLOcclusionCullingGroup::QUERY_PENDING);

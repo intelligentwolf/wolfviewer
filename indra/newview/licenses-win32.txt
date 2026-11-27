@@ -801,7 +801,7 @@ tinygltf
 ============
 MIT License
 
-Copyright (c) 2017 Syoyo Fujita, Aurélien Chatelain and many contributors
+Copyright (c) 2017 Syoyo Fujita, AurÃ©lien Chatelain and many contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1049,7 +1049,7 @@ TileableVolumeNoise by Sebastien Hillaire (via three-geospatial; cloudShapeF.gls
 /**
  * The MIT License (MIT)
  *
- * Copyright(c) 2017 Sébastien Hillaire
+ * Copyright(c) 2017 SÃ©bastien Hillaire
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1162,7 +1162,7 @@ three.js r171 shader chunks common / packing and math (Matrix4, Vector3, Box3, O
 
 The MIT License
 
-Copyright © 2010-2024 three.js authors
+Copyright Â© 2010-2024 three.js authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1389,3 +1389,22 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
+
+===========================================================================
+WolfCore Optional Runtime Library (Official IntelligentWolf Ltd Releases)
+
+Copyright (C) 2026 IntelligentWolf Ltd. All Rights Reserved.
+
+Official WolfViewer releases distributed by IntelligentWolf Ltd may include the
+optional WolfCore shared library (`libwolfcore.so`, `wolfcore.dll`, or
+`libwolfcore.dylib`), which is proprietary software owned by IntelligentWolf Ltd
+and is dynamically loaded at run time through the public C interface in
+`wolfcore_api.h`.
+
+WolfViewer itself is free software licensed under the GNU Lesser General Public
+License, version 2.1 (see LGPL-license.txt), with complete corresponding source
+code available at https://github.com/intelligentwolf/wolfviewer. In accordance
+with Section 6 of the GNU Lesser General Public License v2.1, you are permitted
+to modify WolfViewer for your own use, relink or run modified versions of
+WolfViewer with or without WolfCore, and reverse-engineer WolfCore solely to the
+extent necessary for debugging such modifications to WolfViewer.

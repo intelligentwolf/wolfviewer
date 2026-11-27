@@ -150,6 +150,14 @@ private:
         std::vector<LLUUID> mKeepIds;             // the root prims of those linksets: kept real wherever they stand now
     };
 
+    // [W114 FRAME RATE 2026-11-26] the fine cells one box marks in a keep-real mask, inclusive (markKeep): the masks are
+    // rebuilt from these, and only when this frame's list differs from the one the region's table was built from
+    struct KeepRect
+    {
+        U32 x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+        bool operator==(const KeepRect& o) const { return x0 == o.x0 && x1 == o.x1 && y0 == o.y0 && y1 == o.y1; }
+    };
+
     struct Region
     {
         enum State { NEW, INFO, MODEL, DECODING, BUILDING, IDLE };
@@ -167,12 +175,15 @@ private:
         std::vector<U8> mFar;                     // which side the cell is on (changes only outside the hysteresis ring)
         std::vector<U8> mHidden;                  // f == 1: real objects wholly on such cells are not drawn, unless ...
         // ... the keep-real mask: fine cells (8 m) the model lists (Model::mKeepBaked) or under a moving object
-        // (added every frame); mKeepSum is mKeep's summed-area table for the cull hooks
+        // (looked at every frame); mKeepSum is mKeep's summed-area table for the cull hooks
         std::vector<U8> mKeep;
         std::vector<U32> mKeepSum;
         // the fine cells under the linksets any model lists by id, where they stand on this region now and are not
         // (yet) moving objects (refreshKeepLive, every frame)
-        std::vector<U8> mKeepLive;
+        std::vector<KeepRect> mKeepLive;
+        // [W114 2026-11-26] this frame's boxes over mKeepBaked (mKeepLive, then the moving objects'), and those mKeep and
+        // mKeepSum were last built from: equal (and the table built for this model) = the table stands as it is
+        std::vector<KeepRect> mKeepRects, mKeepRectsBuilt;
         bool mAnyFade = false;
         // the cull hooks compare this with the partition's region and never follow it
         const LLViewerRegion* mRegionp = nullptr;
@@ -190,7 +201,8 @@ private:
     void computeFades();
     void refreshKeepLive();
     void markKeepLive(const LLViewerObject* object);
-    static void markKeep(const Model& m, const LLVector3& origin_agent, std::vector<U8>& grid, const LLVector4a* ext, F32 margin);
+    static bool keepRect(const Model& m, const LLVector3& origin_agent, const LLVector4a* ext, F32 margin, KeepRect& out);
+    static void markKeep(const Model& m, std::vector<U8>& grid, const KeepRect& rc);
     void drawParts(LLCamera& camera, bool far_clip, bool opaque, bool cut, bool fade_uniform);
     void logStats(F64 now);
     void clear();

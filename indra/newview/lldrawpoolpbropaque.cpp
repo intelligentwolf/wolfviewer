@@ -28,6 +28,7 @@
 
 #include "lldrawpool.h"
 #include "lldrawpoolpbropaque.h"
+#include "wolfvkbridge.h"   // [VULKAN G-BUFFER S2 2026-11-26] ScopedGLOnly
 #include "llviewershadermgr.h"
 #include "pipeline.h"
 #include "gltfscenemanager.h"
@@ -56,13 +57,19 @@ void LLDrawPoolGLTFPBR::renderDeferred(S32 pass)
 
     if (mRenderType == LLPipeline::RENDER_TYPE_PASS_GLTF_PBR_ALPHA_MASK)
     {
+        WolfVkBridge::ScopedGLOnly gltf_scene_on_gl;   // [S2 2026-11-26/] as below (this pool is after terrain: the phase is off anyway)
         LL::GLTFSceneManager::instance().renderOpaque();
     }
 
     gDeferredPBROpaqueProgram.bind();
     pushGLTFBatches(mRenderType);
 
-    LL::GLTFSceneManager::instance().render(true, true);
+    {
+        // [VULKAN G-BUFFER S2 2026-11-26] the GLTF scene manager's own draws stay OpenGL's in this stage: its programs read
+        // the GLTFNodes / GLTFMaterials / GLTFJoints blocks, whose bytes are not mirrored (wolfvkscene.cpp recordGBufferDraw)
+        WolfVkBridge::ScopedGLOnly gltf_scene_on_gl;
+        LL::GLTFSceneManager::instance().render(true, true);
+    }
 
     gDeferredPBROpaqueProgram.bind(true);
     pushRiggedGLTFBatches(mRenderType + 1);

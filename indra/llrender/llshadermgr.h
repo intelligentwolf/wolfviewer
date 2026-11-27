@@ -29,6 +29,7 @@
 
 #include "llgl.h"
 #include "llglslshader.h"
+#include <set>   // [SPV KEY 2026-11-26] mWolfVkFileWords
 
 class LLShaderMgr
 {
@@ -464,6 +465,12 @@ public:
     // The class directory loadShaderFile would open filename from (its search from shader_level down to 1, :600-627): true and
     // found_level when the file exists; the Vulkan backend needs it for a program whose objects came from the binary cache.
     bool wolfVkFindShaderClass(const std::string& filename, S32 shader_level, S32& found_level);
+    // [SPV KEY 2026-11-26] Every whole word ([A-Za-z0-9_] run) of class found_level's filename after `#wolf_include`, read
+    // as loadShaderFile reads it; memoised. The Vulkan recipe key keeps only the defines a file uses (shader_check.py
+    // used_defines, WolfVkShaderMirror::usedDefines), so settings a file never names do not split its key. Null when the
+    // file cannot be opened.
+    const std::set<std::string>* wolfVkFileWords(const std::string& filename, S32 found_level);
+    std::map<std::string, std::set<std::string>> mWolfVkFileWords;
 
     //global (reserved slot) shader parameters
     std::vector<std::string> mReservedAttribs;

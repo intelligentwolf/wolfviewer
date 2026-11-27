@@ -40,6 +40,7 @@
 #include "llviewertexturelist.h"
 #include "llworld.h"
 #include "pipeline.h"
+#include "vk/wolfvkstate.h"
 #include "wolfgrid.h"
 #include "workqueue.h"
 
@@ -784,8 +785,10 @@ bool WolfFarProxy::buildSome(Region& r)
     r.mHidden.assign(cells, 0);
     r.mAnyFade = false;
     r.mKeep.clear();
-    r.mKeepSum.clear();
-    r.mKeepLive.clear();     // refreshKeepLive, later this frame, sizes it for this model
+    r.mKeepSum.clear();      // computeFades builds the table afresh for this model (its size no longer matches)
+    r.mKeepLive.clear();     // refreshKeepLive, later this frame, lists it for this model
+    r.mKeepRects.clear();
+    r.mKeepRectsBuilt.clear();
     return true;
 }
 
@@ -867,20 +870,17 @@ void WolfFarProxy::computeFades()
     // The keep-real mask of every region that hides something: the places the model itself lists (what the baker left
     // out as a mover or a kept-real scripted object, standing still or not) and, fresh every frame, the spatial
     // bridges - the objects that have moved - standing in its octree (wolffarproxy.h).
+    // [W114 FRAME RATE 2026-11-26] Looked at every frame as before, but as the list of boxes (KeepRect) laid over
+    // mKeepBaked; the mask and its summed-area table, (size / 8 m)^2 cells (262,144 on a 4,096 m region), are rebuilt
+    // below only when that list differs from the one they were built from (the Aurora review, 26 Nov: both were rebuilt
+    // for every hiding region every frame).
     mKeepCells = 0;
     mFarMovers = 0;
     mFarMoversSeen = 0;
     for (const Region* hiding : sHiding)
     {
         Region& r = const_cast<Region&>(*hiding);   // an entry of mRegions, listed just above
-        r.mKeep = r.mModel->mKeepBaked;
-        if (r.mKeepLive.size() == r.mKeep.size())
-        {
-            for (size_t i = 0; i < r.mKeep.size(); ++i)
-            {
-                r.mKeep[i] |= r.mKeepLive[i];
-            }
-        }
+        r.mKeepRects = r.mKeepLive;
     }
     if (any_hidden)
     {
@@ -902,7 +902,11 @@ void WolfFarProxy::computeFades()
                     // bridge partition is never looked at by the cull hooks (allHidden: PARTITION_VOLUME only)
                     if (part->mPartitionType == LLViewerRegion::PARTITION_VOLUME)
                     {
-                        markKeep(*r.mModel, r.mOriginAgent, r.mKeep, bridge->getSpatialExtents(), BRIDGE_MARGIN_M);
+                        KeepRect rc;
+                        if (keepRect(*r.mModel, r.mOriginAgent, bridge->getSpatialExtents(), BRIDGE_MARGIN_M, rc))
+                        {
+                            r.mKeepRects.push_back(rc);
+                        }
                     }
                     // for the log: a mover whose own centre stands on a cell drawn as its proxy, and whether the
                     // cull still let it through (the proof that moving objects are never hidden)
@@ -936,6 +940,17 @@ void WolfFarProxy::computeFades()
         // summed-area table: mKeepSum[(y + 1) * (n + 1) + (x + 1)] = the marked fine cells in [0..x] x [0..y], so
         // "is anything marked under this octree node" is four reads whatever the node's size
         const U32 n = r.mModel->mKeepSide;
+        if (r.mKeepSum.size() == (size_t)(n + 1) * (n + 1) && r.mKeepRects == r.mKeepRectsBuilt)
+        {
+            mKeepCells += r.mKeepSum.back();   // built from the same boxes over the same model: as it stands
+            continue;
+        }
+        r.mKeep = r.mModel->mKeepBaked;
+        for (const KeepRect& rc : r.mKeepRects)
+        {
+            markKeep(*r.mModel, r.mKeep, rc);
+        }
+        r.mKeepRectsBuilt = r.mKeepRects;
         r.mKeepSum.assign((size_t)(n + 1) * (n + 1), 0);
         for (U32 y = 0; y < n; ++y)
         {
@@ -965,15 +980,7 @@ void WolfFarProxy::refreshKeepLive()
     mKeepIdsFound = 0;
     for (auto& kv : mRegions)
     {
-        Region& r = kv.second;
-        if (r.mModel)
-        {
-            r.mKeepLive.assign(r.mModel->mKeepBaked.size(), 0);
-        }
-        else
-        {
-            r.mKeepLive.clear();
-        }
+        kv.second.mKeepLive.clear();   // [W114 2026-11-26] a list of boxes now; markKeepLive adds a region's only if it has a model
     }
     for (auto& kv : mRegions)
     {
@@ -1010,31 +1017,45 @@ void WolfFarProxy::markKeepLive(const LLViewerObject* object)
         return;
     }
     auto it = mRegions.find(regionp->getHandle());
-    if (it == mRegions.end() || !it->second.mModel || it->second.mKeepLive.empty())
+    if (it == mRegions.end() || !it->second.mModel)
     {
         return;   // a region with no model hides nothing
     }
     // a static drawable's box is in the agent frame, as an octree node's is (allHidden reads those the same way)
-    markKeep(*it->second.mModel, regionp->getOriginAgent(), it->second.mKeepLive, drawable->getSpatialExtents(), KEEP_LIVE_MARGIN_M);
+    KeepRect rc;
+    if (keepRect(*it->second.mModel, regionp->getOriginAgent(), drawable->getSpatialExtents(), KEEP_LIVE_MARGIN_M, rc))
+    {
+        it->second.mKeepLive.push_back(rc);
+    }
 }
 
-/** Marks the fine cells under a box (agent frame, with a margin) in a keep-real grid of the region. */
+/** The fine cells under a box (agent frame, with a margin) in a keep-real grid of the region; false when it marks none. */
 // static
-void WolfFarProxy::markKeep(const Model& m, const LLVector3& origin_agent, std::vector<U8>& grid, const LLVector4a* ext, F32 margin)
+bool WolfFarProxy::keepRect(const Model& m, const LLVector3& origin_agent, const LLVector4a* ext, F32 margin, KeepRect& out)
 {
     const F32 size = (F32)m.mRegionSize;
     const F32 x0 = ext[0][VX] - origin_agent.mV[VX] - margin, x1 = ext[1][VX] - origin_agent.mV[VX] + margin;
     const F32 y0 = ext[0][VY] - origin_agent.mV[VY] - margin, y1 = ext[1][VY] - origin_agent.mV[VY] + margin;
     if (!(x0 <= x1) || !(y0 <= y1) || x1 < 0.f || y1 < 0.f || x0 >= size || y0 >= size)
     {
-        return;   // an unset box, or wholly off the region
+        return false;   // an unset box, or wholly off the region
     }
     const U32 n = m.mKeepSide;
-    const U32 cx0 = (U32)(llmax(x0, 0.f) / KEEP_CELL_M), cx1 = llmin((U32)(llmin(x1, size) / KEEP_CELL_M), n - 1);
-    const U32 cy0 = (U32)(llmax(y0, 0.f) / KEEP_CELL_M), cy1 = llmin((U32)(llmin(y1, size) / KEEP_CELL_M), n - 1);
-    for (U32 cy = cy0; cy <= cy1; ++cy)
+    out.x0 = (U32)(llmax(x0, 0.f) / KEEP_CELL_M);
+    out.x1 = llmin((U32)(llmin(x1, size) / KEEP_CELL_M), n - 1);
+    out.y0 = (U32)(llmax(y0, 0.f) / KEEP_CELL_M);
+    out.y1 = llmin((U32)(llmin(y1, size) / KEEP_CELL_M), n - 1);
+    return true;
+}
+
+/** Marks a keepRect's fine cells in a keep-real grid of the region. */
+// static
+void WolfFarProxy::markKeep(const Model& m, std::vector<U8>& grid, const KeepRect& rc)
+{
+    const U32 n = m.mKeepSide;
+    for (U32 cy = rc.y0; cy <= rc.y1; ++cy)
     {
-        memset(grid.data() + (size_t)cy * n + cx0, 1, cx1 - cx0 + 1);
+        memset(grid.data() + (size_t)cy * n + rc.x0, 1, rc.x1 - rc.x0 + 1);
     }
 }
 
@@ -1228,13 +1249,13 @@ void WolfFarProxy::renderDeferred()
     // cell (the sign and size LLDrawPoolTerrain uses to lay its ownership overlay over the ground,
     // lldrawpoolterrain.cpp:880-881)
     LLGLEnable offset(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(-1.f, -1.f);
+    WolfVkState::polygonOffset(-1.f, -1.f);
     LLGLSLShader& shader = gWolfFarProxyProgram;
     shader.bind();
     shader.setMinimumAlpha(0.5f);   // DESIGN.md: texture alpha under one half is a hole
     gGLLastMatrix = nullptr;
     drawParts(*LLViewerCamera::getInstance(), true, true, true, true);
-    glPolygonOffset(0.f, 0.f);
+    WolfVkState::polygonOffset(0.f, 0.f);
     shader.unbind();
 }
 

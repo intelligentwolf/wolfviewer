@@ -248,6 +248,7 @@ void LLGLSLShader::stopProfile()
 
 void LLGLSLShader::placeProfileQuery(bool for_runtime)
 {
+    if (gGLManager.mIsNativeVulkan) return;
     if (sProfileEnabled || for_runtime)
     {
         if (mTimerQuery == 0)
@@ -269,6 +270,7 @@ void LLGLSLShader::placeProfileQuery(bool for_runtime)
 
 bool LLGLSLShader::readProfileQuery(bool for_runtime, bool force_read)
 {
+    if (gGLManager.mIsNativeVulkan) return false;
     if ((sProfileEnabled || for_runtime) && sCanProfile)
     {
         if (!mProfilePending)
@@ -369,42 +371,45 @@ void LLGLSLShader::unloadInternal()
 
     if (mProgramObject)
     {
-        GLuint obj[1024];
-        GLsizei count = 0;
-        glGetAttachedShaders(mProgramObject, 1024, &count, obj);
-
-        for (GLsizei i = 0; i < count; i++)
+        if (!gGLManager.mIsNativeVulkan)
         {
-            glDetachShader(mProgramObject, obj[i]);
-        }
+            GLuint obj[1024];
+            GLsizei count = 0;
+            glGetAttachedShaders(mProgramObject, 1024, &count, obj);
 
-        for (GLsizei i = 0; i < count; i++)
-        {
-            if (glIsShader(obj[i]))
+            for (GLsizei i = 0; i < count; i++)
             {
-                glDeleteShader(obj[i]);
+                glDetachShader(mProgramObject, obj[i]);
             }
-        }
 
-        glDeleteProgram(mProgramObject);
+            for (GLsizei i = 0; i < count; i++)
+            {
+                if (glIsShader(obj[i]))
+                {
+                    glDeleteShader(obj[i]);
+                }
+            }
+
+            glDeleteProgram(mProgramObject);
+        }
 
         mProgramObject = 0;
     }
 
     if (mTimerQuery)
     {
-        glDeleteQueries(1, &mTimerQuery);
+        if (!gGLManager.mIsNativeVulkan) glDeleteQueries(1, &mTimerQuery);
         mTimerQuery = 0;
     }
 
     if (mSamplesQuery)
     {
-        glDeleteQueries(1, &mSamplesQuery);
+        if (!gGLManager.mIsNativeVulkan) glDeleteQueries(1, &mSamplesQuery);
         mSamplesQuery = 0;
     }
 
     //hack to make apple not complain
-    glGetError();
+    if (!gGLManager.mIsNativeVulkan) glGetError();
 
     stop_glerror();
 }
@@ -438,6 +443,78 @@ bool LLGLSLShader::createShader()
     mShaderHash = hash();
 
     // Create program
+    if (gGLManager.mIsNativeVulkan)
+    {
+        // [NATIVE VULKAN 2026-11-26] No OpenGL program: record shader unit recipes, attach feature unit names,
+        // load the SPIR-V program via sWolfVkOnLinked, and populate attributes/uniforms from SPIR-V reflection.
+        static GLuint sWolfNativeProgramHandle = 1;
+        mProgramObject = sWolfNativeProgramHandle++;
+        mUsingBinaryProgram = false;
+
+        bool success = true;
+        for (auto fileIter = mShaderFiles.begin(); fileIter != mShaderFiles.end(); ++fileIter)
+        {
+            const bool wolf_unit = (*fileIter).first.compare(0, 7, "wolftk/") == 0;
+            GLuint shaderhandle = LLShaderMgr::instance()->loadShaderFile((*fileIter).first, mShaderLevel, (*fileIter).second, &mDefines,
+                                                                          wolf_unit ? 0 : mFeatures.mIndexedTextureChannels);
+            if (!shaderhandle)
+            {
+                success = false;
+            }
+        }
+        if (!LLShaderMgr::instance()->attachShaderFeatures(this))
+        {
+            unloadInternal();
+            return false;
+        }
+        if (success && sWolfVkOnLinked)
+        {
+            sWolfVkOnLinked(this);
+        }
+        if (success)
+        {
+            success = mapAttributes();
+        }
+        if (success)
+        {
+            success = mapUniforms();
+        }
+        if (!success)
+        {
+            LL_SHADER_LOADING_WARNS() << "Native Vulkan: failed to map shader " << mName << LL_ENDL;
+            unloadInternal();
+            return false;
+        }
+        if (mFeatures.mIndexedTextureChannels > 0)
+        {
+            llassert(mFeatures.mIndexedTextureChannels == LLGLSLShader::sIndexedTextureChannels);
+            bind();
+            S32 channel_count = mFeatures.mIndexedTextureChannels;
+            for (S32 i = 0; i < channel_count; i++)
+            {
+                LLStaticHashedString uniName(llformat("tex%d", i));
+                uniform1i(uniName, i);
+            }
+            for (U32 i = 0; i < mTexture.size(); i++)
+            {
+                if (mTexture[i] > -1)
+                {
+                    S32 new_tex = mTexture[i] + channel_count;
+                    uniform1i(i, new_tex);
+                    mTexture[i] = new_tex;
+                }
+            }
+            mActiveTextureChannels = channel_count;
+            for (auto& tex : mTexture)
+            {
+                mActiveTextureChannels = llmax(mActiveTextureChannels, tex + 1);
+            }
+            unbind();
+        }
+        sInstances.insert(this);
+        return true;
+    }
+
     mProgramObject = glCreateProgram();
     if (mProgramObject == 0)
     {
@@ -494,6 +571,10 @@ bool LLGLSLShader::createShader()
     if (success)
     {
         success = mapUniforms();
+    }
+    if (success && sWolfVkOnLinked)
+    {
+        sWolfVkOnLinked(this);   // [VULKAN G-BUFFER S2 2026-11-26/] llglslshader.h: before the first uniform is set below
     }
     if (!success)
     {
@@ -590,6 +671,10 @@ void dumpAttachObject(const char* func_name, GLuint program_object, const std::s
 bool LLGLSLShader::attachVertexObject(std::string object_path)
 {
     mWolfVkFeatureObjects.push_back(std::make_pair(object_path, (GLenum)GL_VERTEX_SHADER));   // [VULKAN BACKEND 2026-11-08/] also when the GL program is a cached binary
+    if (gGLManager.mIsNativeVulkan)
+    {
+        return LLShaderMgr::instance()->mVertexShaderObjects.count(object_path) > 0;
+    }
     if (LLShaderMgr::instance()->mVertexShaderObjects.count(object_path) > 0)
     {
         stop_glerror();
@@ -610,6 +695,10 @@ bool LLGLSLShader::attachVertexObject(std::string object_path)
 bool LLGLSLShader::attachFragmentObject(std::string object_path)
 {
     mWolfVkFeatureObjects.push_back(std::make_pair(object_path, (GLenum)GL_FRAGMENT_SHADER));   // [VULKAN BACKEND 2026-11-08/] also when the GL program is a cached binary
+    if (gGLManager.mIsNativeVulkan)
+    {
+        return LLShaderMgr::instance()->mFragmentShaderObjects.count(object_path) > 0;
+    }
     if(mUsingBinaryProgram)
         return true;
 
@@ -632,7 +721,7 @@ bool LLGLSLShader::attachFragmentObject(std::string object_path)
 
 void LLGLSLShader::attachObject(GLuint object)
 {
-    if(mUsingBinaryProgram)
+    if(mUsingBinaryProgram || gGLManager.mIsNativeVulkan)
         return;
 
     if (object != 0)
@@ -665,6 +754,36 @@ void LLGLSLShader::attachObjects(GLuint* objects, S32 count)
 bool LLGLSLShader::mapAttributes()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        mAttribute.clear();
+#if LL_RELEASE_WITH_DEBUG_INFO
+        mAttribute.resize(LLShaderMgr::instance()->mReservedAttribs.size(), { -1, NULL });
+#else
+        mAttribute.resize(LLShaderMgr::instance()->mReservedAttribs.size(), -1);
+#endif
+        mAttributeMask = 0;
+        if (mWolfVk && mWolfVk->program().isValid())
+        {
+            const WolfVkProgram& prog = mWolfVk->program();
+            for (U32 i = 0; i < LLShaderMgr::instance()->mReservedAttribs.size(); i++)
+            {
+                const char* name = LLShaderMgr::instance()->mReservedAttribs[i].c_str();
+                S32 loc = prog.inputLocation(name);
+                if (loc != -1)
+                {
+#if LL_RELEASE_WITH_DEBUG_INFO
+                    mAttribute[i] = { loc, name };
+#else
+                    mAttribute[i] = loc;
+#endif
+                    mAttributeMask |= (1u << i);
+                }
+            }
+        }
+        return true;
+    }
 
     bool res = true;
     if (!mUsingBinaryProgram)
@@ -865,6 +984,91 @@ GLint LLGLSLShader::mapUniformTextureChannel(GLint location, GLenum type, GLint 
 bool LLGLSLShader::mapUniforms()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
+
+    if (gGLManager.mIsNativeVulkan)
+    {
+        // [NATIVE VULKAN 2026-11-26] Populate uniform/texture tables from SPIR-V reflection (zero GL queries).
+        mTotalUniformSize = 0;
+        mActiveTextureChannels = 0;
+        mUniform.clear();
+        mUniformMap.clear();
+        mTexture.clear();
+        mValue.clear();
+        const auto& reserved = LLShaderMgr::instance()->mReservedUniforms;
+        mUniform.resize(reserved.size(), -1);
+        mTexture.resize(reserved.size(), -1);
+
+        if (!mWolfVk || !mWolfVk->program().isValid())
+        {
+            return true;
+        }
+        const WolfVkProgram& prog = mWolfVk->program();
+        S32 next_loc = 1;
+
+        auto registerUniformName = [&](const std::string& name, bool is_sampler, S32 sampler_array_size)
+        {
+            LLStaticHashedString hashed(name);
+            auto it = mUniformMap.find(hashed);
+            S32 loc = (it != mUniformMap.end()) ? it->second : next_loc++;
+            mUniformMap[hashed] = loc;
+
+            for (S32 i = 0; i < (S32)reserved.size(); ++i)
+            {
+                if (mUniform[i] == -1 && reserved[i] == name)
+                {
+                    mUniform[i] = loc;
+                    if (is_sampler)
+                    {
+                        S32 first_ch = mActiveTextureChannels;
+                        S32 count = llclamp(sampler_array_size, 1, 16);
+                        GLint channels[16];
+                        for (S32 c = 0; c < count; ++c)
+                        {
+                            channels[c] = mActiveTextureChannels++;
+                        }
+                        mTexture[i] = first_ch;
+                        mWolfVk->set(name, WolfVkShaderMirror::Kind::I1, static_cast<uint32_t>(count), channels);
+                    }
+                    break;
+                }
+            }
+        };
+
+        // Match GL's diffuseMap-first channel assignment order so channel 0 is always diffuseMap when present,
+        // and only register statically used samplers (matching OpenGL glGetActiveUniform). Non-reserved samplers
+        // (e.g. wolfClearField, wolfSunTerrain, WolfTk::bindNamed) are recorded in mUniformMap without consuming
+        // mActiveTextureChannels, matching mapUniform() / mapUniformTextureChannel() above.
+        const char* priority_samplers[] = { "diffuseMap", "specularMap", "bumpMap", "environmentMap", "reflectionMap" };
+        std::set<std::string> done_samplers;
+        for (const char* pname : priority_samplers)
+        {
+            for (const WolfVkSpirv::Sampler& s : prog.samplers())
+            {
+                if (s.mUsed && s.mName == pname && done_samplers.insert(s.mName).second)
+                {
+                    registerUniformName(s.mName, true, static_cast<S32>(s.mArraySize > 0 ? s.mArraySize : 1));
+                }
+            }
+        }
+        for (const WolfVkSpirv::Sampler& s : prog.samplers())
+        {
+            if (s.mUsed && done_samplers.insert(s.mName).second)
+            {
+                registerUniformName(s.mName, true, static_cast<S32>(s.mArraySize > 0 ? s.mArraySize : 1));
+            }
+        }
+        auto registerBlockMembers = [&](const WolfVkSpirv::UniformBlock* blk)
+        {
+            if (!blk) return;
+            for (const WolfVkSpirv::BlockMember& m : blk->mMembers)
+            {
+                registerUniformName(m.mName, false, 1);
+            }
+        };
+        registerBlockMembers(prog.vertex().mUniforms ? prog.vertex().mUniforms : prog.vertex().mPushConstants);
+        registerBlockMembers(prog.fragment().mUniforms ? prog.fragment().mUniforms : prog.fragment().mPushConstants);
+        return true;
+    }
 
     bool res = true;
 
@@ -1107,11 +1311,14 @@ void LLGLSLShader::bind()
             sCurBoundShaderPtr->readProfileQuery();
         }
         LLVertexBuffer::unbind();
-        glUseProgram(mProgramObject);
+        if (!gGLManager.mIsNativeVulkan) glUseProgram(mProgramObject);
         sCurBoundShader = mProgramObject;
         sCurBoundShaderPtr = this;
-        placeProfileQuery();
-        LLVertexBuffer::setupClientArrays(mAttributeMask);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            placeProfileQuery();
+            LLVertexBuffer::setupClientArrays(mAttributeMask);
+        }
     }
 
     if (mUniformsDirty)
@@ -1150,12 +1357,12 @@ void LLGLSLShader::unbind(void)
     gGL.flush();
     LLVertexBuffer::unbind();
 
-    if (sCurBoundShaderPtr)
+    if (!gGLManager.mIsNativeVulkan && sCurBoundShaderPtr)
     {
         sCurBoundShaderPtr->readProfileQuery();
     }
 
-    glUseProgram(0);
+    if (!gGLManager.mIsNativeVulkan) glUseProgram(0);
     sCurBoundShader = 0;
     sCurBoundShaderPtr = NULL;
 }
@@ -1337,6 +1544,7 @@ S32 LLGLSLShader::disableTexture(S32 uniform, LLTexUnit::eTextureType mode)
 void LLGLSLShader::uniform1i(U32 index, GLint x)
 {
     GLint wolf_v[1] = { x }; wolfVkSet(index, 4, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
     if (mProgramObject)
@@ -1363,6 +1571,7 @@ void LLGLSLShader::uniform1i(U32 index, GLint x)
 void LLGLSLShader::uniform1f(U32 index, GLfloat x)
 {
     GLfloat wolf_v[1] = { x }; wolfVkSet(index, 0, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1390,6 +1599,7 @@ void LLGLSLShader::uniform1f(U32 index, GLfloat x)
 void LLGLSLShader::fastUniform1f(U32 index, GLfloat x)
 {
     GLfloat wolf_v[1] = { x }; wolfVkSet(index, 0, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
     llassert(mProgramObject);
@@ -1401,6 +1611,7 @@ void LLGLSLShader::fastUniform1f(U32 index, GLfloat x)
 void LLGLSLShader::uniform2f(U32 index, GLfloat x, GLfloat y)
 {
     GLfloat wolf_v[2] = { x, y }; wolfVkSet(index, 1, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1429,6 +1640,7 @@ void LLGLSLShader::uniform2f(U32 index, GLfloat x, GLfloat y)
 void LLGLSLShader::uniform3f(U32 index, GLfloat x, GLfloat y, GLfloat z)
 {
     GLfloat wolf_v[3] = { x, y, z }; wolfVkSet(index, 2, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1457,6 +1669,7 @@ void LLGLSLShader::uniform3f(U32 index, GLfloat x, GLfloat y, GLfloat z)
 void LLGLSLShader::uniform4f(U32 index, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
     GLfloat wolf_v[4] = { x, y, z, w }; wolfVkSet(index, 3, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1485,6 +1698,7 @@ void LLGLSLShader::uniform4f(U32 index, GLfloat x, GLfloat y, GLfloat z, GLfloat
 void LLGLSLShader::uniform1iv(U32 index, U32 count, const GLint* v)
 {
     wolfVkSet(index, 4, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1513,6 +1727,7 @@ void LLGLSLShader::uniform1iv(U32 index, U32 count, const GLint* v)
 void LLGLSLShader::uniform4iv(U32 index, U32 count, const GLint* v)
 {
     wolfVkSet(index, 6, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1542,6 +1757,7 @@ void LLGLSLShader::uniform4iv(U32 index, U32 count, const GLint* v)
 void LLGLSLShader::uniform1fv(U32 index, U32 count, const GLfloat* v)
 {
     wolfVkSet(index, 0, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1570,6 +1786,7 @@ void LLGLSLShader::uniform1fv(U32 index, U32 count, const GLfloat* v)
 void LLGLSLShader::uniform2fv(U32 index, U32 count, const GLfloat* v)
 {
     wolfVkSet(index, 1, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1598,6 +1815,7 @@ void LLGLSLShader::uniform2fv(U32 index, U32 count, const GLfloat* v)
 void LLGLSLShader::uniform3fv(U32 index, U32 count, const GLfloat* v)
 {
     wolfVkSet(index, 2, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1626,6 +1844,7 @@ void LLGLSLShader::uniform3fv(U32 index, U32 count, const GLfloat* v)
 void LLGLSLShader::uniform4fv(U32 index, U32 count, const GLfloat* v)
 {
     wolfVkSet(index, 3, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1655,6 +1874,7 @@ void LLGLSLShader::uniform4fv(U32 index, U32 count, const GLfloat* v)
 void LLGLSLShader::uniform4uiv(U32 index, U32 count, const GLuint* v)
 {
     wolfVkSet(index, 7, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1684,6 +1904,7 @@ void LLGLSLShader::uniform4uiv(U32 index, U32 count, const GLuint* v)
 void LLGLSLShader::uniformMatrix2fv(U32 index, U32 count, GLboolean transpose, const GLfloat* v)
 {
     wolfVkSet(index, 8, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1706,6 +1927,7 @@ void LLGLSLShader::uniformMatrix2fv(U32 index, U32 count, GLboolean transpose, c
 void LLGLSLShader::uniformMatrix3fv(U32 index, U32 count, GLboolean transpose, const GLfloat* v)
 {
     wolfVkSet(index, 9, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1728,6 +1950,7 @@ void LLGLSLShader::uniformMatrix3fv(U32 index, U32 count, GLboolean transpose, c
 void LLGLSLShader::uniformMatrix3x4fv(U32 index, U32 count, GLboolean transpose, const GLfloat* v)
 {
     wolfVkSet(index, 10, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1750,6 +1973,7 @@ void LLGLSLShader::uniformMatrix3x4fv(U32 index, U32 count, GLboolean transpose,
 void LLGLSLShader::uniformMatrix4fv(U32 index, U32 count, GLboolean transpose, const GLfloat* v)
 {
     wolfVkSet(index, 11, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     llassert(sCurBoundShaderPtr == this);
 
@@ -1779,7 +2003,7 @@ GLint LLGLSLShader::getUniformLocation(const LLStaticHashedString& uniform)
         LLStaticStringTable<GLint>::iterator iter = mUniformMap.find(uniform);
         if (iter != mUniformMap.end())
         {
-            if (gDebugGL)
+            if (gDebugGL && !gGLManager.mIsNativeVulkan)
             {
                 stop_glerror();
                 if (iter->second != glGetUniformLocation(mProgramObject, uniform.String().c_str()))
@@ -1830,6 +2054,7 @@ GLint LLGLSLShader::getAttribLocation(U32 attrib)
 void LLGLSLShader::uniform1i(const LLStaticHashedString& uniform, GLint v)
 {
     GLint wolf_v[1] = { v }; wolfVkSet(uniform, 4, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1848,6 +2073,7 @@ void LLGLSLShader::uniform1i(const LLStaticHashedString& uniform, GLint v)
 void LLGLSLShader::uniform1iv(const LLStaticHashedString& uniform, U32 count, const GLint* v)
 {
     wolfVkSet(uniform, 4, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1867,6 +2093,7 @@ void LLGLSLShader::uniform1iv(const LLStaticHashedString& uniform, U32 count, co
 void LLGLSLShader::uniform4iv(const LLStaticHashedString& uniform, U32 count, const GLint* v)
 {
     wolfVkSet(uniform, 6, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1886,6 +2113,7 @@ void LLGLSLShader::uniform4iv(const LLStaticHashedString& uniform, U32 count, co
 void LLGLSLShader::uniform2i(const LLStaticHashedString& uniform, GLint i, GLint j)
 {
     GLint wolf_v[2] = { i, j }; wolfVkSet(uniform, 5, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1905,6 +2133,7 @@ void LLGLSLShader::uniform2i(const LLStaticHashedString& uniform, GLint i, GLint
 void LLGLSLShader::uniform1f(const LLStaticHashedString& uniform, GLfloat v)
 {
     GLfloat wolf_v[1] = { v }; wolfVkSet(uniform, 0, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1923,6 +2152,7 @@ void LLGLSLShader::uniform1f(const LLStaticHashedString& uniform, GLfloat v)
 void LLGLSLShader::uniform2f(const LLStaticHashedString& uniform, GLfloat x, GLfloat y)
 {
     GLfloat wolf_v[2] = { x, y }; wolfVkSet(uniform, 1, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1942,6 +2172,7 @@ void LLGLSLShader::uniform2f(const LLStaticHashedString& uniform, GLfloat x, GLf
 void LLGLSLShader::uniform3f(const LLStaticHashedString& uniform, GLfloat x, GLfloat y, GLfloat z)
 {
     GLfloat wolf_v[3] = { x, y, z }; wolfVkSet(uniform, 2, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1960,6 +2191,7 @@ void LLGLSLShader::uniform3f(const LLStaticHashedString& uniform, GLfloat x, GLf
 void LLGLSLShader::uniform4f(const LLStaticHashedString& uniform, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
     GLfloat wolf_v[4] = { x, y, z, w }; wolfVkSet(uniform, 3, 1, wolf_v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1978,6 +2210,7 @@ void LLGLSLShader::uniform4f(const LLStaticHashedString& uniform, GLfloat x, GLf
 void LLGLSLShader::uniform1fv(const LLStaticHashedString& uniform, U32 count, const GLfloat* v)
 {
     wolfVkSet(uniform, 0, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -1996,6 +2229,7 @@ void LLGLSLShader::uniform1fv(const LLStaticHashedString& uniform, U32 count, co
 void LLGLSLShader::uniform2fv(const LLStaticHashedString& uniform, U32 count, const GLfloat* v)
 {
     wolfVkSet(uniform, 1, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -2014,6 +2248,7 @@ void LLGLSLShader::uniform2fv(const LLStaticHashedString& uniform, U32 count, co
 void LLGLSLShader::uniform3fv(const LLStaticHashedString& uniform, U32 count, const GLfloat* v)
 {
     wolfVkSet(uniform, 2, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -2032,6 +2267,7 @@ void LLGLSLShader::uniform3fv(const LLStaticHashedString& uniform, U32 count, co
 void LLGLSLShader::uniform4fv(const LLStaticHashedString& uniform, U32 count, const GLfloat* v)
 {
     wolfVkSet(uniform, 3, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -2051,6 +2287,7 @@ void LLGLSLShader::uniform4fv(const LLStaticHashedString& uniform, U32 count, co
 void LLGLSLShader::uniform4uiv(const LLStaticHashedString& uniform, U32 count, const GLuint* v)
 {
     wolfVkSet(uniform, 7, count, v);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -2070,6 +2307,7 @@ void LLGLSLShader::uniform4uiv(const LLStaticHashedString& uniform, U32 count, c
 void LLGLSLShader::uniformMatrix4fv(const LLStaticHashedString& uniform, U32 count, GLboolean transpose, const GLfloat* v)
 {
     wolfVkSet(uniform, 11, count, v, transpose != GL_FALSE);   // [VULKAN BACKEND 2026-11-08/] the Vulkan side of this program (wolfvkshader.h)
+    if (gGLManager.mIsNativeVulkan) return;
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
     GLint location = getUniformLocation(uniform);
 
@@ -2084,6 +2322,7 @@ void LLGLSLShader::uniformMatrix4fv(const LLStaticHashedString& uniform, U32 cou
 
 void LLGLSLShader::vertexAttrib4f(U32 index, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
+    if (gGLManager.mIsNativeVulkan) return;
     if (mAttribute[index] > 0)
     {
         glVertexAttrib4f(mAttribute[index], x, y, z, w);
@@ -2092,6 +2331,7 @@ void LLGLSLShader::vertexAttrib4f(U32 index, GLfloat x, GLfloat y, GLfloat z, GL
 
 void LLGLSLShader::vertexAttrib4fv(U32 index, GLfloat* v)
 {
+    if (gGLManager.mIsNativeVulkan) return;
     if (mAttribute[index] > 0)
     {
         glVertexAttrib4fv(mAttribute[index], v);
@@ -2185,7 +2425,8 @@ void LLGLSLShader::wolfVkSet(U32 index, int kind, U32 count, const void* data, b
     const std::vector<std::string>& names = LLShaderMgr::instance()->mReservedUniforms;
     if (index < names.size())
     {
-        mWolfVk->set(names[index], static_cast<WolfVkShaderMirror::Kind>(kind), count, data, transpose);
+        // [VULKAN G-BUFFER S2 2026-11-26] by the reserved index: the member is looked up once per program (wolfvkshader.h setReserved)
+        mWolfVk->setReserved(index, names[index], static_cast<WolfVkShaderMirror::Kind>(kind), count, data, transpose);
     }
 }
 
@@ -2194,3 +2435,7 @@ void LLGLSLShader::wolfVkSet(const LLStaticHashedString& uniform, int kind, U32 
     if (!mWolfVk) return;
     mWolfVk->set(uniform.String(), static_cast<WolfVkShaderMirror::Kind>(kind), count, data, transpose);
 }
+
+void (*LLGLSLShader::sWolfVkOnLinked)(LLGLSLShader*) = nullptr;                                   // [VULKAN G-BUFFER S2 2026-11-26/]
+void (*LLGLSLShader::sWolfVkOnUniformBufferData)(GLuint, U32, U32, const void*, bool) = nullptr;   // [VULKAN G-BUFFER S2 2026-11-26/]
+void (*LLGLSLShader::sWolfVkOnUniformBufferBind)(GLuint, GLuint) = nullptr;                       // [VULKAN G-BUFFER S2 2026-11-26/]

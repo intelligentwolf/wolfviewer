@@ -167,13 +167,32 @@ private:
     // draw infos need and records their uploads on cmd, so the pass itself skips nothing for "copy still uploading".
     void preparePass(VkCommandBuffer cmd, uint32_t pass_type, LLGLSLShader* program);
 public:
-    // The deferred simple pass (LLDrawPoolSimple::renderDeferred: gDeferredDiffuseProgram, PASS_SIMPLE) into the shared
-    // G-buffer target, recorded on a mid-frame command buffer. Returns the draws made.
-    uint32_t drawGBufferSimple(VkCommandBuffer cmd, WolfVkRenderTarget& gbuffer);
+    // [VULKAN G-BUFFER S2 2026-11-26] The draw interceptor's Vulkan side (WolfVkBridge owns the bracket: the hand-over, the
+    // mid-frame command buffer, the submit). recordGBufferDraw records ONE draw call OpenGL was about to make
+    // (LLVertexBuffer::drawRange / drawRangeFast / drawArrays, llvertexbuffer.h sWolfVkInterceptDraw) into the shared
+    // G-buffer target, from OpenGL's state at that moment: the bound LLGLSLShader's mirror (every uniform the viewer set),
+    // the textures bound to the units its samplers read (LLTexUnit::mWolfVkName / mWolfVkImage), the viewer's uniform
+    // blocks bound to their points, and LLGLState / LLGLDepthTest / LLRender's blend and colour mask. It begins the
+    // render pass (LOAD: everything OpenGL drew is kept) when it is not open (pass_open), and ends it first when the draw's
+    // vertex copy has uploads waiting (copies are not allowed inside a render pass). Returns false, with why (a static
+    // string naming the gap) and nothing recorded, when the draw cannot be made exactly as OpenGL would make it.
+    struct InterceptedDraw
+    {
+        LLVertexBuffer* mBuffer;
+        uint32_t mMode;      // LLRender::eGeomModes
+        uint32_t mStart, mEnd, mCount, mFirst;
+        bool mIndexed;
+    };
+    bool recordGBufferDraw(VkCommandBuffer cmd, WolfVkRenderTarget& gbuffer, bool& pass_open, const InterceptedDraw& d, const char*& why);
+    // A new bracket on cmd: the per-command-buffer records (bound pipeline, vertex buffer) start empty.
+    void beginGBufferBracket();
+    // the eager mirror of a program that has just linked (LLGLSLShader::sWolfVkOnLinked); a variant without SPIR-V is logged once
+    void onShaderLinked(LLGLSLShader* shader);
+    // the viewer's uniform-buffer writes and binds (LLGLSLShader::sWolfVkOnUniformBufferData / Bind)
+    void uniformBufferData(uint32_t buffer, uint32_t offset, uint32_t size, const void* data, bool respecify);
+    void uniformBufferBind(uint32_t point, uint32_t buffer);
     uint32_t gbufferDrawsLastFrame() const { return mGBufferDraws; }
-    // [ONE RENDERER PER BATCH 2026-11-08] the draw infos Vulkan drew this frame (GL skips them in LLRenderPass::pushBatches)
-    bool drawnByVulkan(const LLDrawInfo* params) const { return mDrawnByVulkan.count(params) != 0; }
-    void clearDrawnByVulkan() { mDrawnByVulkan.clear(); }
+    void setGBufferDraws(uint32_t n) { mGBufferDraws = n; }
     // [POSE CHECK 2026-11-08] WolfVulkanDebugPoseCheck (Paul: the boats have blue tearing and bits missing, the houses are
     // fine). Evidence for one question: does the Vulkan G-buffer pass draw a batch with the same model matrix, view and
     // vertex data that OpenGL's later passes of the same frame use for the same object? drawPass records what it used;
@@ -184,9 +203,6 @@ public:
     void poseCheckVertices();
     void poseCheckFrameEnd();
     uint32_t skippedLastFrameTotal() const { return mSkippedLastFrame; }
-    // false when the last G-buffer pass could not draw every batch (uniform ring full, a buffer still uploading): the
-    // caller then lets GL draw the pass as well, so nothing is missing from the picture
-    bool gbufferPassComplete() const { return mGBufferComplete; }
 private:
     struct PoseRecord { LLPointer<LLVertexBuffer> mBuffer; uint32_t mStart, mEnd, mOffset, mCount; const LLMatrix4* mMatrix; };
     std::unordered_map<const LLMatrix4*, std::array<float, 16>> mPoseMatrices;   // model matrices the pass used this frame
@@ -200,8 +216,22 @@ private:
     std::string mPoseFirstMismatch;
     F64 mPoseLast = 0.0;
     uint32_t mGBufferDraws = 0;
-    bool mGBufferComplete = true;
-    std::unordered_set<const LLDrawInfo*> mDrawnByVulkan;
+    // [S2] the interceptor's per-bracket records and the viewer's uniform blocks
+    VkPipeline mBracketPipeline = VK_NULL_HANDLE;
+    const WolfVkVertexBuffer* mBracketBuffer = nullptr;
+    uint32_t mBracketMask = 0;
+    std::vector<VkDescriptorImageInfo> mDrawImages;   // scratch, by sampler binding
+    std::vector<uint32_t> mDrawBlockOffsets;          // scratch, by WolfVkProgram::blocks() index
+    struct UniformBufferCopy
+    {
+        std::vector<uint8_t> mBytes;   // empty: contents unknown (allocated without data)
+        uint64_t mVersion = 1;
+        uint64_t mPushedEpoch = UINT64_MAX, mPushedVersion = 0;
+        VkDeviceSize mOffset = 0;
+    };
+    std::unordered_map<uint32_t, UniformBufferCopy> mUniformBuffers;   // GL buffer name -> its bytes
+    uint32_t mUniformBufferPoint[8] = {};                              // GL binding point -> buffer name (0 = none)
+    std::unique_ptr<WolfVkImage> mOpaqueBlack;   // what an incomplete texture (GL name 0) samples: (0, 0, 0, 1)
     // true when the composite's draw was recorded with the GL frame layer bound ([G2] the login check). check_pass: the
     // twin pass that ends in TRANSFER_SRC (requestFrameCheck)
     // pass_ran: the render pass was recorded (the image then ends in the pass's final layout - TRANSFER_SRC for the twin)
@@ -234,7 +264,6 @@ private:
     WolfVkPipelineCache mPipelines;
     WolfVkFrameUniforms mUniforms;
     WolfVkSamplerCache mSamplers;
-    WolfVkStagingRing mStaging;   // [STAGING RACE 2026-11-08] per-frame transient staging for the vertex buffer copies
 
     // GL read-backs: pixel pack buffers (world, UI, depth) and the client copies handed to the uploads
     uint32_t mPboWorld = 0, mPboUI = 0, mPboDepth = 0;

@@ -1068,10 +1068,8 @@ bool WolfTerrainPaint::layerReady(const Layer& L, LLViewerRegion* regionp) const
 void WolfTerrainPaint::upload(Layer& L)
 {
     if (L.mMap.empty()) return;
-    if (!L.mTex) LLImageGL::generateTextures(1, &L.mTex);
-    gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, L.mTex);
-    LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGBA16F,
-                              L.mW, L.mH * 2, GL_RGBA, GL_HALF_FLOAT, L.mMap.data(), false);
+    // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+    LLImageGL::wolfVkManualImage2D(L.mTex, GL_RGBA16F, L.mW, L.mH * 2, GL_RGBA, GL_HALF_FLOAT, L.mMap.data());
     gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
     gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);

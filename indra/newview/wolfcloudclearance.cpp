@@ -28,6 +28,7 @@
 #include "llviewercontrol.h"   // [t1003 2026-11-22] gSavedSettings (WolfEnvironmentTrace)
 
 #include <cmath>
+#include <cstring>   // [W114 FRAME RATE 2026-11-26/] memcpy (the field hash)
 #include <utility>   // [FAR DRAW PERF 2026-11-14/] std::swap (swapPendingAll)
 #include <algorithm>   // [t1003 2026-11-22] std::sort (traceColumn)
 #include <sstream>     // [t1003 2026-11-22] traceColumn
@@ -104,7 +105,7 @@ void WolfCloudClearance::idle()
     if (!gAgent.getRegion()) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
     const LLVector3d cam = gAgent.getPosGlobalFromAgent(LLViewerCamera::getInstance()->getOrigin());
-    bool moved = false;
+    U32 moved = 0;   // [W114 2026-11-26] a bit per level whose window was recentred (was one flag for all)
     for (S32 k = 0; k < LEVELS; ++k)
     {
         // recentred as WolfWaterClearance::idle: when the camera is an eighth of the window from its centre, the corner
@@ -119,7 +120,7 @@ void WolfCloudClearance::idle()
             mOrigin[k].mdV[VY] = floor((cam.mdV[VY] - half) / t) * t;
             mOrigin[k].mdV[VZ] = 0.0;
             mHaveOrigin[k] = true;
-            moved = true;
+            moved |= 1u << k;
         }
     }
     // [FAR DRAW PERF 2026-11-14] The builds come from the shared object pass (INTERVAL_SECS in wolfcloudclearance.h). A recentre
@@ -133,7 +134,16 @@ void WolfCloudClearance::idle()
     {
         WolfObjectSweep::instance().walkNow(this);
     }
-    if (moved || !mReady || walk)
+    // [W114 FRAME RATE 2026-11-26] (the Aurora review, 26 Nov: the whole field - 3 levels of 256^2 texels, 16 channels - was
+    // rebuilt and uploaded every second, and in one frame at a recentre, even when nothing had changed.) A recentre of some
+    // levels over the builds the published field already shows (no fresh pass waiting, no staged rebuild under way, no
+    // walk) rebuilds and uploads only those levels: the others would come out the same. A finished pass whose builds
+    // and windows make the same field key as the published field is dropped: its rebuild would give the same field.
+    if (moved && mReady && !walk && mStage < 0 && !mPrimsFresh)
+    {
+        rebuildNow(moved);
+    }
+    else if (moved || !mReady || walk)
     {
         rebuildNow();
     }
@@ -144,10 +154,15 @@ void WolfCloudClearance::idle()
     else if (mPrimsFresh)
     {
         mPrimsFresh = false;
-        swapPendingAll();
-        raster();
-        swapPendingAll();
-        mStage = 0;
+        const U64 key = fieldKey();
+        if (key != mFieldKey)
+        {
+            mPendingKey = key;
+            swapPendingAll();
+            raster();
+            swapPendingAll();
+            mStage = 0;
+        }
     }
     // [t1003 2026-11-22] the column over the camera, for a trace log (wolfcloudclearance.h traceColumn)
     static LLCachedControl<bool> trace(gSavedSettings, "WolfEnvironmentTrace", false);
@@ -165,16 +180,50 @@ void WolfCloudClearance::idle()
 }
 
 // [FAR DRAW PERF 2026-11-14]
-void WolfCloudClearance::rebuildNow()
+void WolfCloudClearance::rebuildNow(U32 levels)
 {
     mStage = -1;
     mPrimsFresh = false;
     const LLVector3d agent_origin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
-    raster();
-    for (S32 k = 0; k < LEVELS; ++k) finishLevel(k);
-    upload();
+    raster(levels);
+    for (S32 k = 0; k < LEVELS; ++k)
+    {
+        if (levels & (1u << k)) finishLevel(k);
+    }
+    upload(levels);
     mReady = mTex != 0;
+    mFieldKey = fieldKey();
     selfCheck(agent_origin);
+}
+
+// [W114 FRAME RATE 2026-11-26] FNV-1a over 64-bit words, then a final mix (splitmix64's): the window corners, then each prim's
+// box as raster() places it in global metres (lo, hi: the F32 agent box plus its pass origin, in F64) and its ground flag
+U64 WolfCloudClearance::fieldKey() const
+{
+    U64 h = 1469598103934665603ULL;
+    auto mixWord = [&h](U64 w) { h ^= w; h *= 1099511628211ULL; };
+    auto mixF64 = [&mixWord](F64 v) { U64 w; memcpy(&w, &v, sizeof(w)); mixWord(w); };
+    for (S32 k = 0; k < LEVELS; ++k)
+    {
+        mixF64(mOrigin[k].mdV[VX]);
+        mixF64(mOrigin[k].mdV[VY]);
+    }
+    mixWord((U64)mPrims.size());
+    for (const PrimBox& pb : mPrims)
+    {
+        const LLVector3d& ao = mPrimOrigins[pb.mOrigin];
+        mixF64(pb.mLo.mV[VX] + ao.mdV[VX]);
+        mixF64(pb.mLo.mV[VY] + ao.mdV[VY]);
+        mixF64(pb.mLo.mV[VZ]);
+        mixF64(pb.mHi.mV[VX] + ao.mdV[VX]);
+        mixF64(pb.mHi.mV[VY] + ao.mdV[VY]);
+        mixF64(pb.mHi.mV[VZ]);
+        mixWord(pb.mGround ? 1u : 0u);
+    }
+    h ^= h >> 30; h *= 0xbf58476d1ce4e5b9ULL;
+    h ^= h >> 27; h *= 0x94d049bb133111ebULL;
+    h ^= h >> 31;
+    return h;
 }
 
 void WolfCloudClearance::swapPendingLevel(S32 k)
@@ -212,6 +261,7 @@ void WolfCloudClearance::advanceStage()
     swapPendingAll();
     upload();
     mReady = mTex != 0;
+    mFieldKey = mPendingKey;
     selfCheck(gAgent.getPosGlobalFromAgent(LLVector3::zero));
     mStage = -1;
 }
@@ -285,11 +335,12 @@ void WolfCloudClearance::endPass()
     mPrimsRegion = mPassRegion;
 }
 
-void WolfCloudClearance::raster()
+void WolfCloudClearance::raster(U32 levels)
 {
     const size_t NN = (size_t)N * N;
     for (S32 k = 0; k < LEVELS; ++k)
     {
+        if (!(levels & (1u << k))) continue;   // [W114 2026-11-26/] left as it is
         mTg[k].assign(NN, -SENTINEL);
         for (S32 b = 0; b < SKY_BANDS; ++b)
         {
@@ -316,6 +367,7 @@ void WolfCloudClearance::raster()
         mBoxes.push_back(b);
         for (S32 k = 0; k < LEVELS; ++k)
         {
+            if (!(levels & (1u << k))) continue;   // [W114 2026-11-26/]
             const F32 t = TEXEL_M[k];
             const F64 ox = mOrigin[k].mdV[VX] - agent_origin.mdV[VX], oy = mOrigin[k].mdV[VY] - agent_origin.mdV[VY];
             const S32 ti0 = llmax(0, (S32)floor((lo.mV[VX] - ox) / t)), ti1 = llmin(N - 1, (S32)floor((hi.mV[VX] - ox) / t));
@@ -444,12 +496,14 @@ void WolfCloudClearance::finishLevel(S32 k)
 
 // ROWS x (PAGES x N) RGBA16F (level k in rows k N ..; page 0 R D, G Tg, B Ts0, A Bs0, page p the bands 2p - 1 and 2p: R Ts,
 // G Bs, B Ts, A Bs - wolfcloudclearance.h), allocated once, then replaced whole each rebuild.
-void WolfCloudClearance::upload()
+void WolfCloudClearance::upload(U32 levels)
 {
     const size_t W_TEX = (size_t)PAGES * N;
     mUpload.resize(W_TEX * ROWS * 4);
+    if (!mTex || !mTexAllocated) levels = ALL_LEVELS;   // [W114 2026-11-26/] the first upload is the whole texture
     for (S32 k = 0; k < LEVELS; ++k)
     {
+        if (!(levels & (1u << k))) continue;   // [W114 2026-11-26/] its rows on the texture stand
         for (S32 y = 0; y < N; ++y)
         {
             F32* row = &mUpload[((size_t)k * N + y) * W_TEX * 4];
@@ -472,23 +526,39 @@ void WolfCloudClearance::upload()
             }
         }
     }
-    if (!mTex)
-    {
-        LLImageGL::generateTextures(1, &mTex);
-        mTexAllocated = false;
-    }
-    gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mTex);
+    if (!mTex) mTexAllocated = false;
     if (!mTexAllocated)
     {
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGBA16F,
-                                  PAGES * N, ROWS, GL_RGBA, GL_FLOAT, mUpload.data(), false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D makes
+        // the name when there is none and leaves the texture bound on unit 0), else as before
+        LLImageGL::wolfVkManualImage2D(mTex, GL_RGBA16F, PAGES * N, ROWS, GL_RGBA, GL_FLOAT, mUpload.data());
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
         gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
         mTexAllocated = true;
     }
+    else if (levels == ALL_LEVELS)
+    {
+        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mTex);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                LLImageGL::sWolfVkNativeStore->uploadSubImage2D(mTex, 0, 0, 0, PAGES * N, ROWS, PAGES * N, GL_RGBA16F, GL_RGBA, GL_FLOAT, mUpload.data(), false);
+            }
+        }
+        else
+        {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PAGES * N, ROWS, GL_RGBA, GL_FLOAT, mUpload.data());
+        }
+    }
     else
     {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PAGES * N, ROWS, GL_RGBA, GL_FLOAT, mUpload.data());
+        // [W114 2026-11-26] level k is rows k N .. k N + N - 1, whole width (the layout above)
+        for (S32 k = 0; k < LEVELS; ++k)
+        {
+            if (!(levels & (1u << k))) continue;
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, k * N, PAGES * N, N, GL_RGBA, GL_FLOAT, &mUpload[(size_t)k * N * W_TEX * 4]);
+        }
     }
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
 }
@@ -564,6 +634,13 @@ F32 WolfCloudClearance::clearAt(F32 ax, F32 ay, F32 az) const
 // where the field is not blending out (the outermost level's last tenth) must read clear = 1 through the CPU twin.
 void WolfCloudClearance::selfCheck(const LLVector3d& agent_origin)
 {
+    // [W114 FRAME RATE 2026-11-26] a diagnostic only (nothing drawn reads it): the first check of the session, then only with
+    // WolfEnvironmentTrace on (up to 4,096 boxes x 9 clearAt reads at each rebuild otherwise)
+    static LLCachedControl<bool> trace(gSavedSettings, "WolfEnvironmentTrace", false);
+    if (mChecks > 0 && !trace)
+    {
+        return;
+    }
     U32 points = 0, misses = 0;
     const LLVector2 o = levelOriginAgent(LEVELS - 1);
     const F32 t = TEXEL_M[LEVELS - 1];

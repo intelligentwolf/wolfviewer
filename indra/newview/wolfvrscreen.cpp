@@ -840,6 +840,7 @@ namespace
 
     bool makeGl(U32 w, U32 h)
     {
+        if (gGLManager.mIsNativeVulkan) return false;
         freeGl();
         glGenTextures(1, &gCap.tex);
         glBindTexture(GL_TEXTURE_2D, gCap.tex);
@@ -1086,7 +1087,7 @@ void release()
     gEyeTargetFailed = false;
     if (gParts.q[0])   // [VR FRAME PARTS]
     {
-        glDeleteQueries(FrameParts::kQ, gParts.q);
+        if (!gGLManager.mIsNativeVulkan) glDeleteQueries(FrameParts::kQ, gParts.q);
     }
     gParts = FrameParts();
 }
@@ -1097,7 +1098,7 @@ void release()
 // headset with no code of its own.
 void captureLayer()
 {
-    if (gSnapshot || gCubeSnapshot || gEye == 0 || !gViewerWindow) return;
+    if (gGLManager.mIsNativeVulkan || gSnapshot || gCubeSnapshot || gEye == 0 || !gViewerWindow) return;
     if (!WolfVRStream::layerWanted())
     {
         if (gLayer.w) freeLayer();
@@ -1948,6 +1949,7 @@ void resetParts(FrameParts& p, F64 now)
 // the GPU's timestamps that have come back (never waits): when it finished each frame's eyes, on the CPU's clock
 void partsGpuCollect()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     FrameParts& p = gParts;
     for (int i = 0; i < FrameParts::kQ; ++i)
     {
@@ -1967,6 +1969,7 @@ void partsGpuCollect()
 // glGetInteger64v(GL_TIMESTAMP) is the GPU's clock now, so their difference from the CPU's clock gives the lag
 void partsGpuMark()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     FrameParts& p = gParts;
     if (!p.q[0]) glGenQueries(FrameParts::kQ, p.q);
     const int i = p.q_next;
@@ -1982,6 +1985,7 @@ void partsGpuMark()
 }
 
 // the start of each frame: the period since the last one, and once every 30 s the summary line
+bool gPartsDesktop = false;   // [W114-VULKAN 2026-11-27] counting on the desktop (WolfFramePartsLog), not a headset
 void partsFrameStart(bool counting, F64 now)
 {
     FrameParts& p = gParts;
@@ -2009,7 +2013,9 @@ void partsFrameStart(bool counting, F64 now)
         lag = llformat("%.0f ms (p95 %.0f)", v[v.size() / 2], v[std::min(v.size() - 1, (size_t)((double)v.size() * 0.95))]);
     }
     const F64 other = p.period - p.idle - p.eye0 - p.eye1 - p.probes;
-    LL_INFOS("WolfVR") << llformat("VR frame parts: %.1f frames/s; per frame (main thread, ms) idle loop %.1f, left eye %.1f, "
+    LL_INFOS("WolfVR") << llformat(gPartsDesktop ? "DESKTOP frame parts: %.1f frames/s; per frame (main thread, ms) idle loop %.1f, display %.1f, "
+                                                 "(unused %.1f, HUD layer %.1f), reflection probes %.1f, other %.1f; GPU done after the CPU by %s"
+                                                 : "VR frame parts: %.1f frames/s; per frame (main thread, ms) idle loop %.1f, left eye %.1f, "
                                    "right eye %.1f (HUD layer %.1f of it), reflection probes %.1f, other %.1f; GPU done after the "
                                    "CPU by %s",
                                    p.n / p.period, p.idle * k, p.eye0 * k, p.eye1 * k, p.layer * k, p.probes * k, other * k,
@@ -2022,8 +2028,8 @@ void partsFrameStart(bool counting, F64 now)
         for (const auto& [name, t] : p.sub) v.emplace_back(t * k, name);
         std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
         std::string line;
-        for (size_t i = 0; i < v.size() && i < 18; ++i) line += llformat("%s%s %.1f", i ? ", " : "", v[i].second, v[i].first);
-        LL_INFOS("WolfVR") << "VR frame pieces (ms per frame): " << line << LL_ENDL;
+        for (size_t i = 0; i < v.size() && i < 30; ++i) line += llformat("%s%s %.1f", i ? ", " : "", v[i].second, v[i].first);
+        LL_INFOS("WolfVR") << (gPartsDesktop ? "DESKTOP frame pieces (ms per frame): " : "VR frame pieces (ms per frame): ") << line << LL_ENDL;
     }
     resetParts(p, now);
 }
@@ -2057,7 +2063,13 @@ void displayFrame()
     }
     s_last_frame = LLTimer::getTotalSeconds();
     const F64 t0 = s_last_frame;
-    partsFrameStart(world && stereo && WolfVRStream::headsetInVR(), t0);   // [VR FRAME PARTS]
+    // [W114-VULKAN 2026-11-27] WolfFramePartsLog: the same frame parts on the desktop (no headset), every 30 s - Paul: "the frame
+    // rate is right down"; the sky diagnostic showed ~23 ms a frame of CPU outside the sky and outside Vulkan's own recording
+    static LLCachedControl<bool> s_partsDesktop(gSavedSettings, "WolfFramePartsLog", false,
+        "Log the main loop's frame parts (idle loop, display, named pieces) every 30 s on the desktop too");
+    const bool vrCounting = world && stereo && WolfVRStream::headsetInVR();
+    gPartsDesktop = !vrCounting && s_partsDesktop && LLStartUp::getStartupState() == STATE_STARTED && !gDisconnected;
+    partsFrameStart(vrCounting || gPartsDesktop, t0);   // [VR FRAME PARTS]
     gStamp.frame = wolfvr::clockMs();   // [VR STAGES]
     gStamp.eye0 = 0;
     F64 t1 = t0;
@@ -2127,6 +2139,7 @@ void displayFrame()
         display();
         unbindEyeTarget();   // [VR EYE OFFSCREEN] a pass that returned before captureWorld
         gDisplaySwapBuffers = true;
+        if (gParts.since > 0) gParts.eye0 += LLTimer::getTotalSeconds() - t0;   // [W114-VULKAN 2026-11-27] the desktop's one display()
         if (world && gCap.fbo) collectCapture();   // [VR READBACK POLL 2026-11-09] (see the stereo pass below)
     }
     else

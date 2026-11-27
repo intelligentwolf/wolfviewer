@@ -67,80 +67,40 @@ int main(int argc, char **argv)
 
     curl_global_init(CURL_GLOBAL_ALL);
 
-    auto curl = curl_easy_init();
-
-//Not compatible with LL's crusty old curl - support for the curl_mime functions
-//was introduced in curl 7.57.0, LL is still using 7.54 :(
-
-/*
-    if( curl)
+    if (auto curl = curl_easy_init())
     {
         auto form = curl_mime_init(curl);
+        if (!form)
+        {
+            std::cerr << "curl_mime_init() failed" << std::endl;
+        }
+        else
+        {
+            // Source: curl.h curl_mime_* declarations — the replacement API for curl_formadd/CURLOPT_HTTPPOST.
+            auto field = curl_mime_addpart(form);
+            curl_mime_name(field, "upload_file_minidump");
+            curl_mime_filedata(field, dmpFile.c_str());
 
-        auto field = curl_mime_addpart(form);
-        curl_mime_name(field, "upload_file_minidump");
-        curl_mime_filedata(field, dmpFile.c_str() );
+            field = curl_mime_addpart(form);
+            curl_mime_name(field, "product");
+            curl_mime_data(field, "WolfViewer-Releasex64", CURL_ZERO_TERMINATED);
 
-        field = curl_mime_addpart(form);
-        curl_mime_name(field, "product");
-        curl_mime_data(field, "WolfViewer-Releasex64", CURL_ZERO_TERMINATED);
+            field = curl_mime_addpart(form);
+            curl_mime_name(field, "version");
+            curl_mime_data(field, version.c_str(), CURL_ZERO_TERMINATED);
 
-        field = curl_mime_addpart(form);
-        curl_mime_name(field, "version");
-        curl_mime_data(field, version.c_str(), CURL_ZERO_TERMINATED);
+            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+            curl_easy_setopt(curl, CURLOPT_MIMEPOST, form);
+            const auto res = curl_easy_perform(curl);
+            if (res != CURLE_OK)
+            {
+                std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+            }
 
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str() );
-        curl_easy_setopt(curl, CURLOPT_MIMEPOST, form);
-
-        auto res = curl_easy_perform(curl);
-
-        if(res != CURLE_OK)
-            std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
-
+            curl_mime_free(form);
+        }
         curl_easy_cleanup(curl);
-
-        curl_mime_free(form);
-    }*/
-
-if (auto curl_handle = curl_easy_init()) {
-    struct curl_httppost* formpost = NULL;
-    struct curl_httppost* lastptr = NULL;
-
-    // Add the file part
-    curl_formadd(&formpost, &lastptr,
-                 CURLFORM_COPYNAME, "upload_file_minidump",
-                 CURLFORM_FILE, dmpFile.c_str(),
-                 CURLFORM_END);
-
-    // Add the 'product' part
-    curl_formadd(&formpost, &lastptr,
-                 CURLFORM_COPYNAME, "product",
-                 CURLFORM_COPYCONTENTS, "WolfViewer-Releasex64",
-                 CURLFORM_END);
-
-    // Add the 'version' part
-    curl_formadd(&formpost, &lastptr,
-                 CURLFORM_COPYNAME, "version",
-                 CURLFORM_COPYCONTENTS, version.c_str(),
-                 CURLFORM_END);
-
-    // Set the URL
-    curl_easy_setopt(curl_handle, CURLOPT_URL, url.c_str());
-
-    // Set the form post data
-    curl_easy_setopt(curl_handle, CURLOPT_HTTPPOST, formpost);
-
-    // Perform the request
-    auto res = curl_easy_perform(curl_handle);
-
-    // Cleanup
-    curl_easy_cleanup(curl_handle);
-    curl_formfree(formpost);
-
-    // Check for errors
-    if (res != CURLE_OK)
-        std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
-}
+    }
 
     return 0;
 }

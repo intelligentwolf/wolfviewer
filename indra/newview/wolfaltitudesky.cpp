@@ -22,6 +22,7 @@
 #include "llvoavatarself.h"
 #include "llviewercamera.h"
 #include "llviewercontrol.h"
+#include "llworld.h"         // [W114 FRAME RATE 2026-11-26/] resolveLandHeightAgent: the skybox test in farClipExtra
 #include "wolfgrid.h"
 #include "wolfstarfold.h"   // [STARFOLD 2026-11-24/] skyAltitude
 #include "wolfweather.h"
@@ -39,6 +40,10 @@ namespace
     // The far clip grows with height up to this: from 30 km the horizon is ~600 km away, far past
     // any ground there is to draw, and depth precision suffers past it.
     constexpr F32 FAR_EXTRA_MAX_M = 30000.f;
+    // [W114 FRAME RATE 2026-11-26] A roofed camera this far over the ground (or the sea) right below it is in a skybox or a sky
+    // platform, not a house, porch, tree or bridge: the line our birds already draw between the town below and a skybox.
+    // Source: wolfbirds.cpp:217 SKYBOX_ABOVE_M = 60 m ("objects higher than this over the ground are not the town below").
+    constexpr F32 SKYBOX_ABOVE_M = 60.f;
 
     bool enabled()
     {
@@ -106,7 +111,27 @@ F32 WolfAltitudeSky::farClipExtra()
     {
         return 0.f;
     }
-    return llmin(altitude(), FAR_EXTRA_MAX_M);
+    // [W114 FRAME RATE 2026-11-26] Taken away only inside a skybox (391c44ef9d5, Paul 10-07: the ground and sea seen from the
+    // air, kept everywhere else). Standing in a 2,000 m skybox the far plane went from 256 m to about 2,256 m and everything
+    // in the loaded regions was culled and drawn behind its walls (the Aurora review, 26 Nov). A skybox here is: not flying
+    // (agentFlying, the gate WolfFarTerrain::refresh already uses; riding something that flies counts as flying), a roof over
+    // the camera, and the camera more than SKYBOX_ABOVE_M over the ground or sea right below it. A porch, a tree or a bridge on
+    // a hill has a roof but is low over its ground, so it keeps the full extra. The roof test is the weather's own indoors
+    // ray (WolfWeather::updateIndoors, rayed every frame before this in LLAppViewer::idle), eased 0..1 over
+    // INDOOR_FADE_SECS, so walking in under a skybox roof or out from one the far clip eases rather than jumps.
+    F32 open_sky = 1.f;
+    if (!agentFlying())
+    {
+        const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+        // Source: llworld.cpp:966 resolveLandHeightAgent() - the terrain height under an agent-frame point (0 off any region);
+        // the sea surface counts as the ground over water, as altitude() above measures from it.
+        const F32 ground = llmax(LLWorld::getInstance()->resolveLandHeightAgent(cam), LLEnvironment::instance().getWaterHeight());
+        if (cam.mV[VZ] - ground > SKYBOX_ABOVE_M)
+        {
+            open_sky = 1.f - WolfWeather::indoors();
+        }
+    }
+    return llmin(altitude(), FAR_EXTRA_MAX_M) * open_sky;
 }
 
 F32 WolfAltitudeSky::horizonSeaHeight()

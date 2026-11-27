@@ -538,8 +538,45 @@ bool WolfVkStagingRing::allocate(VkDeviceSize size, VkBuffer& buffer, VkDeviceSi
     return true;
 }
 
+// [VK S6a 2026-11-26] see wolfvkbuffer.h
+void WolfVkVertexBuffer::initExternal(uint32_t typemask, uint32_t nverts, uint32_t nindices, VkBuffer vertex_buffer, VkDeviceSize vertex_offset,
+                                      VkBuffer index_buffer, VkDeviceSize index_offset, VkIndexType index_type)
+{
+    mExternal = true;
+    mTypeMask = typemask;
+    mNumVerts = nverts;
+    mNumIndices = nindices;
+    mSize = calcOffsets(typemask, mOffsets, nverts);
+    // Source: vulkan_core.h VkIndexType: VK_INDEX_TYPE_UINT16 = 0 (2 bytes an index), VK_INDEX_TYPE_UINT32 = 1 (4 bytes)
+    mIndicesSize = nindices * (index_type == VK_INDEX_TYPE_UINT32 ? 4u : 2u);
+    mExternalVertices = vertex_buffer;
+    mExternalVertexOffset = vertex_offset;
+    mExternalIndices = index_buffer;
+    mExternalIndexOffset = index_offset;
+    mExternalIndexType = index_type;
+}
+
 void WolfVkVertexBuffer::bind(VkCommandBuffer cmd, uint32_t attrib_mask) const
 {
+    if (mExternal)
+    {
+        // as below, with every binding in the store's buffer at the range's own offset
+        VkBuffer ext_buffers[TYPE_MAX];
+        VkDeviceSize ext_offsets[TYPE_MAX];
+        uint32_t ext_n = 0;
+        for (uint32_t i = 0; i < TYPE_MAX; ++i)
+        {
+            if (!(attrib_mask & (1u << i))) continue;
+            uint32_t type = i;
+            if (i == TYPE_COLOR && (attrib_mask & (1u << TYPE_EMISSIVE))) type = TYPE_EMISSIVE;
+            ext_buffers[ext_n] = mExternalVertices;
+            ext_offsets[ext_n] = mExternalVertexOffset + mOffsets[type];
+            ext_n++;
+        }
+        if (ext_n && mExternalVertices != VK_NULL_HANDLE) gVk.vkCmdBindVertexBuffers(cmd, 0, ext_n, ext_buffers, ext_offsets);
+        if (mExternalIndices != VK_NULL_HANDLE) gVk.vkCmdBindIndexBuffer(cmd, mExternalIndices, mExternalIndexOffset, mExternalIndexType);
+        return;
+    }
     VkBuffer buffers[TYPE_MAX];
     VkDeviceSize offsets[TYPE_MAX];
     uint32_t n = 0;

@@ -2049,10 +2049,11 @@
         </menu_item_call>
         <!-- [COFFEE 2026-11-25] Paul: "add the buy me a coffee link to the viewers". The grid's virtual coffee shop
              (wolf-grid.com ?f=coffee, a Stripe purchase) in the system browser (Wolf.BuyCoffee, llviewermenu.cpp). Also
-             Help > Buy us a coffee. For a Wolf Territories login wherever they are, as Flea Report; gone for other grids. -->
+             Help > Buy us a coffee and the top-bar coffee cup icon. Shown on every grid: coffee.php includes Create a free
+             account so Second Life and other-grid users can create a free Wolf Territories avatar to receive their virtual
+             coffee cup and cake. -->
         <menu_item_call label="Buy us a coffee" name="WolfBuyCoffee">
             <menu_item_call.on_click function="Wolf.BuyCoffee" />
-            <menu_item_call.on_visible function="WolfGrid.IsWolfTerritories" />
         </menu_item_call>
         <menu_item_separator />
         <menu create_jump_keys="true" label="Games &amp; Stories" name="WolfGroupGames" tear_off="true">
@@ -3902,14 +3903,12 @@
              name="wolf_support_url"
              parameter="WebLaunchExternalTarget,https://discord.gg/S3wj882aQH" />
         </menu_item_call>
-        <!-- [COFFEE 2026-11-25] As Wolf World > Buy us a coffee: the system browser, Wolf Territories logins only. -->
+        <!-- [COFFEE 2026-11-25] As Wolf World > Buy us a coffee: the system browser, every grid (coffee.php offers Create a free account). -->
         <menu_item_call
          label="Buy us a coffee"
          name="WolfBuyCoffeeHelp">
             <menu_item_call.on_click
              function="Wolf.BuyCoffee" />
-            <menu_item_call.on_visible
-             function="WolfGrid.IsWolfTerritories" />
         </menu_item_call>
         <!-- [BETA CHANNEL 2026-11-12] Check now: there is always an answer, and an earlier "Not now" is forgotten -->
         <menu_item_call

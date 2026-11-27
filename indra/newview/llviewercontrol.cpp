@@ -547,7 +547,7 @@ static bool handleJoystickChanged(const LLSD& newvalue)
 static bool handleUseOcclusionChanged(const LLSD& newvalue)
 {
     LLPipeline::sUseOcclusion = (newvalue.asBoolean()
-        && LLFeatureManager::getInstance()->isFeatureAvailable("UseOcclusion") && !gUseWireframe) ? 2 : 0;
+        && LLFeatureManager::getInstance()->isFeatureAvailable("UseOcclusion") && !gUseWireframe) ? (gGLManager.mIsNativeVulkan ? 1 : 2) : 0;
     return true;
 }
 

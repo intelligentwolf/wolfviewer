@@ -225,7 +225,7 @@ LLWindowMacOSX::LLWindowMacOSX(LLWindowCallbacks* callbacks,
             makeWindowOrderFront(mWindow);
         }
 
-        if (!gGLManager.initGL())
+        if (!LLWindow::sWolfNativeVulkan && !gGLManager.initGL())
         {
             setupFailure(
                 "Second Life is unable to run because your video card drivers\n"
@@ -246,7 +246,10 @@ LLWindowMacOSX::LLWindowMacOSX(LLWindowCallbacks* callbacks,
     }
 
     mCallbacks = callbacks;
-    stop_glerror();
+    if (!LLWindow::sWolfNativeVulkan)
+    {
+        stop_glerror();
+    }
 
 
 }
@@ -749,6 +752,26 @@ bool LLWindowMacOSX::createContext(int x, int y, int width, int height, int bits
         mWindow = getMainAppWindow();
     }
 
+    if (LLWindow::sWolfNativeVulkan)
+    {
+        // [NATIVE VULKAN 2026-11-27] Create the Cocoa input/IME view with no NSOpenGLContext or CGL pixel format;
+        // WolfVkSurface attaches a CAMetalLayer subview (WolfVkMetalView) for MoltenVK.
+        if (mGLView == NULL)
+        {
+            mGLView = createOpenGLView(mWindow, mFSAASamples, enable_vsync, false);
+        }
+        mContext = NULL;
+        mPixelFormat = NULL;
+        setupInputWindow(mWindow, mGLView);
+        mRefreshRate = CGDisplayModeGetRefreshRate(CGDisplayCopyDisplayMode(mDisplay));
+        if (mRefreshRate == 0)
+        {
+            mRefreshRate = DEFAULT_REFRESH_RATE;
+        }
+        makeFirstResponder(mWindow, mGLView);
+        return true;
+    }
+
     if(mContext == NULL)
     {
         // Our OpenGL view is already defined within SecondLife.xib.
@@ -826,25 +849,41 @@ bool LLWindowMacOSX::createContext(int x, int y, int width, int height, int bits
 // This makes this method obsolete.
 bool LLWindowMacOSX::switchContext(bool fullscreen, const LLCoordScreen &size, bool enable_vsync, const LLCoordScreen * const posp)
 {
+    // If Native Vulkan failed at startup and fell back to OpenGL, build the OpenGL view/context on the existing NSWindow.
+    if (!LLWindow::sWolfNativeVulkan && mContext == NULL && mWindow != NULL)
+    {
+        if (mGLView != NULL)
+        {
+            removeGLView(mGLView);
+            mGLView = NULL;
+        }
+        if (!createContext(0, 0, size.mX, size.mY, 32, fullscreen, enable_vsync))
+        {
+            return false;
+        }
+        return gGLManager.initGL();
+    }
     return false;
 }
 
 void LLWindowMacOSX::destroyContext()
 {
-    if (!mContext)
+    if (!mContext && !mGLView && !mWindow)
     {
-        // We don't have a context
         return;
     }
     // Unhook the GL context from any drawable it may have
-    if(mContext != NULL)
+    if(!LLWindow::sWolfNativeVulkan && mContext != NULL)
     {
         LL_DEBUGS("Window") << "destroyContext: unhooking drawable " << LL_ENDL;
         CGLSetCurrentContext(NULL);
     }
 
     // Clean up remaining GL state before blowing away window
-    gGLManager.shutdownGL();
+    if (!LLWindow::sWolfNativeVulkan && gGLManager.mInited)
+    {
+        gGLManager.shutdownGL();
+    }
 
     // Clean up the pixel format
     if(mPixelFormat != NULL)
@@ -857,6 +896,7 @@ void LLWindowMacOSX::destroyContext()
     if(mContext != NULL)
     {
         CGLDestroyContext(mContext);
+        mContext = NULL;
     }
 
     // Destroy our LLOpenGLView
@@ -1128,7 +1168,10 @@ bool LLWindowMacOSX::setSizeImpl(const LLCoordWindow size)
 
 void LLWindowMacOSX::swapBuffers()
 {
-    CGLFlushDrawable(mContext);
+    if (!LLWindow::sWolfNativeVulkan && mContext)
+    {
+        CGLFlushDrawable(mContext);
+    }
 }
 
 // [VR KEYBOARD 2026-11-05] (llwindow.h). makeKeyAndOrderFront (llwindowmacosx-objc.mm makeWindowOrderFront, as the
@@ -1144,7 +1187,10 @@ void LLWindowMacOSX::requestKeyboardFocus()
 
 void LLWindowMacOSX::restoreGLContext()
 {
-    CGLSetCurrentContext(mContext);
+    if (!LLWindow::sWolfNativeVulkan && mContext)
+    {
+        CGLSetCurrentContext(mContext);
+    }
 }
 
 F32 LLWindowMacOSX::getGamma()
@@ -2645,6 +2691,10 @@ public:
 
 void* LLWindowMacOSX::createSharedContext()
 {
+    if (LLWindow::sWolfNativeVulkan || !mPixelFormat || !mContext)
+    {
+        return nullptr;
+    }
     sharedContext* sc = new sharedContext();
     CGLCreateContext(mPixelFormat, mContext, &(sc->mContext));
 
@@ -2658,6 +2708,10 @@ void* LLWindowMacOSX::createSharedContext()
 
 void LLWindowMacOSX::makeContextCurrent(void* context)
 {
+    if (LLWindow::sWolfNativeVulkan || !context)
+    {
+        return;
+    }
     CGLSetCurrentContext(((sharedContext*)context)->mContext);
 
     //enable multi-threaded OpenGL
@@ -2682,6 +2736,10 @@ void LLWindowMacOSX::makeContextCurrent(void* context)
 
 void LLWindowMacOSX::destroySharedContext(void* context)
 {
+    if (LLWindow::sWolfNativeVulkan || !context)
+    {
+        return;
+    }
     sharedContext* sc = (sharedContext*)context;
 
     CGLDestroyContext(sc->mContext);
@@ -2691,6 +2749,10 @@ void LLWindowMacOSX::destroySharedContext(void* context)
 
 void LLWindowMacOSX::toggleVSync(bool enable_vsync)
 {
+    if (LLWindow::sWolfNativeVulkan || !mContext)
+    {
+        return;
+    }
     GLint frames_per_swap = 0;
     if (!enable_vsync)
     {

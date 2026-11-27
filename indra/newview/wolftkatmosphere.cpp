@@ -24,8 +24,14 @@
 
 #include <array>
 #include <cmath>
+#include <cstring>
 
+#include "lldir.h"
+#include "llfile.h"
 #include "llgl.h"
+#include "llimagegl.h"   // [VK S6 2026-11-26] wolfVkCreateStorage
+#include "wolfvknative.h"
+#include "vk/wolfvkstate.h"
 #include "llrender.h"
 #include "llvertexbuffer.h"
 #include "pipeline.h"
@@ -402,10 +408,22 @@ namespace
     {
         // Source: three-geospatial PrecomputedTexturesGenerator.ts:70-87 createRenderTarget (RGBA, float, linear,
         // clamp to edge, no depth); FloatType when float linear filtering is supported (:384) - core in desktop GL.
-        GLuint t = 0;
-        glGenTextures(1, &t);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (OpenGL renders the table into it and
+        // samples it by this name as before; the Vulkan passes find the image by the name); else OpenGL's own
+        GLuint t = LLImageGL::wolfVkCreateStorage(GL_TEXTURE_2D, 1, GL_RGBA32F, w, h, 1, true);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                LLImageGL::sWolfVkNativeStore->setSamplerOptions(t, LLTexUnit::TFO_BILINEAR, LLTexUnit::TAM_CLAMP);
+            }
+            WolfVkNative::clearTextureZero(t);
+            return t;
+        }
+        const bool owned = t != 0;
+        if (!owned) glGenTextures(1, &t);
         gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, t);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr);
+        if (!owned) glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -417,10 +435,21 @@ namespace
     GLuint newTexture3d(S32 w, S32 h, S32 d)
     {
         // Source: three-geospatial PrecomputedTexturesGenerator.ts:89-108 create3DRenderTarget
-        GLuint t = 0;
-        glGenTextures(1, &t);
+        // [VK S6 2026-11-26] as newTexture2d
+        GLuint t = LLImageGL::wolfVkCreateStorage(GL_TEXTURE_3D, 1, GL_RGBA32F, w, h, d, true);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                LLImageGL::sWolfVkNativeStore->setSamplerOptions(t, LLTexUnit::TFO_BILINEAR, LLTexUnit::TAM_CLAMP);
+            }
+            WolfVkNative::clearTextureZero(t);
+            return t;
+        }
+        const bool owned = t != 0;
+        if (!owned) glGenTextures(1, &t);
         gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE_3D, t);
-        glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, w, h, d, 0, GL_RGBA, GL_FLOAT, nullptr);
+        if (!owned) glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, w, h, d, 0, GL_RGBA, GL_FLOAT, nullptr);
         glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -432,7 +461,7 @@ namespace
 
     void deleteTexture(GLuint& t)
     {
-        if (t) glDeleteTextures(1, &t);
+        if (t && !LLImageGL::wolfVkDestroyStorage(t)) glDeleteTextures(1, &t);   // [VK S6 2026-11-26/] the owner deletes its own
         t = 0;
     }
 
@@ -451,17 +480,32 @@ namespace
         LLGLDisable scissor{ GL_SCISSOR_TEST };
         PassScope()
         {
-            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo);
-            glGetIntegerv(GL_VIEWPORT, prevViewport);
-            glGetBooleanv(GL_COLOR_WRITEMASK, prevMask);
+            if (gGLManager.mIsNativeVulkan)
+            {
+                const bool* cm = gGL.wolfVkColorMask();
+                for (int i = 0; i < 4; ++i) prevMask[i] = cm[i] ? GL_TRUE : GL_FALSE;
+            }
+            else
+            {
+                glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo);
+                glGetIntegerv(GL_VIEWPORT, prevViewport);
+                glGetBooleanv(GL_COLOR_WRITEMASK, prevMask);
+            }
             prevShader = LLGLSLShader::sCurBoundShaderPtr;
             gGL.setColorMask(true, true);
         }
         ~PassScope()
         {
             gGL.setColorMask(prevMask[0] == GL_TRUE, prevMask[1] == GL_TRUE, prevMask[2] == GL_TRUE, prevMask[3] == GL_TRUE);
-            glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
-            glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+            if (gGLManager.mIsNativeVulkan)
+            {
+                WolfVkNative::unbindLayerTarget();
+            }
+            else
+            {
+                glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
+                glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+            }
             if (prevShader && LLGLSLShader::sCurBoundShaderPtr != prevShader) prevShader->bind();
         }
     };
@@ -703,6 +747,7 @@ void Atmosphere::unloadShaders()
 
 GLint Atmosphere::location(GLuint program, const char* name) const
 {
+    if (gGLManager.mIsNativeVulkan) return -1;
     // glGetUniformLocation on the program itself: LLGLSLShader::mapUniform cuts a name at its first "[0]"
     // (llglslshader.cpp), which would fold "ATMOSPHERE.rayleigh_density.layers[0].width" into
     // "ATMOSPHERE.rayleigh_density.layers"; the struct members are looked up here, once per program.
@@ -715,10 +760,24 @@ GLint Atmosphere::location(GLuint program, const char* name) const
 }
 
 // Source: three-geospatial AtmosphereParameters.ts:194-217 toUniform (the struct of definitions.glsl:128-143)
-void Atmosphere::setParams(GLuint program, const Params& p) const
+void Atmosphere::setParams(LLGLSLShader& sh, const Params& p) const
 {
-    auto v3 = [&](const char* n, const F64 v[3]) { const GLint l = location(program, n); if (l >= 0) glUniform3f(l, (F32)v[0], (F32)v[1], (F32)v[2]); };
-    auto f1 = [&](const char* n, F64 v) { const GLint l = location(program, n); if (l >= 0) glUniform1f(l, (F32)v); };
+    const GLuint program = sh.mProgramObject;
+    // [W114-VULKAN S8 2026-11-26] each value also into the program's Vulkan mirror (wolftkgl.h rawUniformToVk), as the F32s GL gets
+    auto v3 = [&](const char* n, const F64 v[3])
+    {
+        const F32 f[3] = { (F32)v[0], (F32)v[1], (F32)v[2] };
+        const GLint l = location(program, n);
+        if (l >= 0) glUniform3f(l, f[0], f[1], f[2]);
+        rawUniformToVk(sh, n, WolfVkShaderMirror::Kind::F3, 1, f);
+    };
+    auto f1 = [&](const char* n, F64 v)
+    {
+        const F32 f = (F32)v;
+        const GLint l = location(program, n);
+        if (l >= 0) glUniform1f(l, f);
+        rawUniformToVk(sh, n, WolfVkShaderMirror::Kind::F1, 1, &f);
+    };
     v3("ATMOSPHERE.solar_irradiance", p.solar_irradiance);
     f1("ATMOSPHERE.sun_angular_radius", p.sun_angular_radius);
     f1("ATMOSPHERE.bottom_radius", p.bottom_radius);
@@ -783,7 +842,7 @@ void Atmosphere::allocateContext()
     if (!mDeltaRayleigh) mDeltaRayleigh = newTexture3d(SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH);
     if (!mDeltaMie) mDeltaMie = newTexture3d(SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH);
     if (!mDeltaDensity) mDeltaDensity = newTexture3d(SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH);
-    if (!mFbo) glGenFramebuffers(1, &mFbo);
+    if (!gGLManager.mIsNativeVulkan && !mFbo) glGenFramebuffers(1, &mFbo);
 }
 
 void Atmosphere::freeContext()
@@ -793,7 +852,7 @@ void Atmosphere::freeContext()
     deleteTexture(mDeltaRayleigh);
     deleteTexture(mDeltaMie);
     deleteTexture(mDeltaDensity);
-    if (mFbo) glDeleteFramebuffers(1, &mFbo);
+    if (!gGLManager.mIsNativeVulkan && mFbo) glDeleteFramebuffers(1, &mFbo);
     mFbo = 0;
 }
 
@@ -829,27 +888,77 @@ bool Atmosphere::beginPrecompute(const AtmosphereSpectrum& spectrum, U32 num_wav
     return true;
 }
 
-void Atmosphere::buildSteps()
+// [W114-VULKAN S8 2026-11-26] The build is a list of BuildStep records (wolftkatmosphere.h) rather than GL closures, so the
+// Vulkan recorder (wolfvksky.cpp) runs exactly the same list with the same programs; runStepGL is what each closure did.
+// static
+void Atmosphere::tableSize(TableTarget t, S32& w, S32& h, S32& d)
 {
-    mSteps.clear();
-    const Set target = mSets[mTarget];
-    const GLuint dIrr = mDeltaIrradiance, dRay = mDeltaRayleigh, dMie = mDeltaMie, dDen = mDeltaDensity;
-    const GLuint dMulti = dRay;   // PrecomputedTexturesGenerator.ts:198
-    const GLuint fbo = mFbo;
+    switch (t)
+    {
+    case TT_TRANSMITTANCE: w = TRANSMITTANCE_TEXTURE_WIDTH; h = TRANSMITTANCE_TEXTURE_HEIGHT; d = 1; return;
+    case TT_IRRADIANCE:
+    case TT_DELTA_IRRADIANCE: w = IRRADIANCE_TEXTURE_WIDTH; h = IRRADIANCE_TEXTURE_HEIGHT; d = 1; return;
+    default: w = SCATTERING_TEXTURE_WIDTH; h = SCATTERING_TEXTURE_HEIGHT; d = SCATTERING_TEXTURE_DEPTH; return;
+    }
+}
 
+GLuint Atmosphere::glTable(TableTarget t) const
+{
+    const Set& target = mSets[mTarget];
+    switch (t)
+    {
+    case TT_TRANSMITTANCE: return target.transmittance;
+    case TT_IRRADIANCE: return target.irradiance;
+    case TT_SCATTERING: return target.scattering;
+    case TT_HIGHER: return target.higher;
+    case TT_DELTA_IRRADIANCE: return mDeltaIrradiance;
+    case TT_DELTA_RAYLEIGH: return mDeltaRayleigh;   // also deltaMultipleScattering (PrecomputedTexturesGenerator.ts:198)
+    case TT_DELTA_MIE: return mDeltaMie;
+    case TT_DELTA_DENSITY: return mDeltaDensity;
+    default: return 0;
+    }
+}
+
+void Atmosphere::runStepGL(const BuildStep& step)
+{
+    PassScope scope;
+    const GLuint fbo = mFbo;
+    const GLuint tex = glTable(step.target);
+    if (step.kind == BuildStep::CLEAR_3D)
+    {
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (step.first == 0) WolfVkNative::clearTextureZero(tex);
+            return;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        const F32 zero[4] = { 0.f, 0.f, 0.f, 0.f };
+        for (S32 layer = step.first; layer < step.last; ++layer)
+        {
+            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, 0, layer);
+            glDrawBuffer(GL_COLOR_ATTACHMENT0);
+            glClearBufferfv(GL_COLOR, 0, zero);
+        }
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 0, 0, 0);
+        return;
+    }
     // the textures and luminanceFromRadiance of PrecomputeMaterial.setUniforms (:242-266) and the transmittance
     // (:486-488, :512-514, :535-537, :583-585)
-    auto bindCommon = [=](LLGLSLShader& sh, const F32 lfr[9])
+    auto bindCommon = [this](LLGLSLShader& sh, const F32 lfr[9])
     {
-        bindNamed(sh, "transmittanceTexture", 8, GL_TEXTURE_2D, target.transmittance);
-        bindNamed(sh, "singleRayleighScatteringTexture", 9, GL_TEXTURE_3D, dRay);
-        bindNamed(sh, "singleMieScatteringTexture", 10, GL_TEXTURE_3D, dMie);
-        bindNamed(sh, "multipleScatteringTexture", 11, GL_TEXTURE_3D, dMulti);
-        bindNamed(sh, "scatteringDensityTexture", 12, GL_TEXTURE_3D, dDen);
-        bindNamed(sh, "irradianceTexture", 13, GL_TEXTURE_2D, dIrr);
-        const GLint l = glGetUniformLocation(sh.mProgramObject, "luminanceFromRadiance");
-        // model.cc:349-353 BindMat3 uploads its row-major mat3 with transpose = true
-        if (l >= 0) glUniformMatrix3fv(l, 1, GL_TRUE, lfr);
+        bindNamed(sh, "transmittanceTexture", 8, GL_TEXTURE_2D, glTable(TT_TRANSMITTANCE));
+        bindNamed(sh, "singleRayleighScatteringTexture", 9, GL_TEXTURE_3D, glTable(TT_DELTA_RAYLEIGH));
+        bindNamed(sh, "singleMieScatteringTexture", 10, GL_TEXTURE_3D, glTable(TT_DELTA_MIE));
+        bindNamed(sh, "multipleScatteringTexture", 11, GL_TEXTURE_3D, glTable(TT_DELTA_RAYLEIGH));   // dMulti = dRay (:198)
+        bindNamed(sh, "scatteringDensityTexture", 12, GL_TEXTURE_3D, glTable(TT_DELTA_DENSITY));
+        bindNamed(sh, "irradianceTexture", 13, GL_TEXTURE_2D, glTable(TT_DELTA_IRRADIANCE));
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            const GLint l = glGetUniformLocation(sh.mProgramObject, "luminanceFromRadiance");
+            // model.cc:349-353 BindMat3 uploads its row-major mat3 with transpose = true
+            if (l >= 0) glUniformMatrix3fv(l, 1, GL_TRUE, lfr);
+        }
+        rawUniformToVk(sh, "luminanceFromRadiance", WolfVkShaderMirror::Kind::M3, 1, lfr, true);   // [W114-VULKAN S8 2026-11-26]
     };
     auto unbindCommon = []()
     {
@@ -857,79 +966,125 @@ void Atmosphere::buildSteps()
         for (S32 u = 9; u <= 12; ++u) unbindUnit(u, GL_TEXTURE_3D);
         unbindUnit(13, GL_TEXTURE_2D);
     };
-    // a 2D pass into `tex`
-    auto pass2d = [=, this](Pass pass, GLuint tex, S32 w, S32 h, bool additive, Params params, std::array<F32, 9> lfr, S32 order)
+    LLGLSLShader& sh = mPrograms[step.pass];
+    const S32 order = step.order;
+    if (step.kind == BuildStep::PASS_2D)
     {
-        return [=, this]()
+        // a 2D pass into the target
+        S32 w = 0, h = 0, d = 0;
+        tableSize(step.target, w, h, d);
+        if (gGLManager.mIsNativeVulkan)
         {
-            PassScope scope;
-            LLGLSLShader& sh = mPrograms[pass];
+            WolfVkNative::LayerAttachment att{ tex, 0 };
+            if (!WolfVkNative::bindLayerTarget(&att, 1)) return;
+            WolfVkState::viewport(0, 0, w, h);
+        }
+        else
+        {
             glBindFramebuffer(GL_FRAMEBUFFER, fbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
             glDrawBuffer(GL_COLOR_ATTACHMENT0);
             glViewport(0, 0, w, h);
-            sh.bind();
-            setParams(sh.mProgramObject, params);
-            bindCommon(sh, lfr.data());
-            const GLint lo = glGetUniformLocation(sh.mProgramObject, "scatteringOrder");
-            if (lo >= 0) glUniform1i(lo, order);
-            drawScreen(additive);
-            unbindCommon();
-            sh.unbind();
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
-        };
-    };
-    // layers [first, last) of a 3D pass into `tex` (render3DRenderTarget :434-443: uniform `layer`, one draw each)
-    auto pass3d = [=, this](Pass pass, GLuint tex, S32 first, S32 last, bool additive, Params params, std::array<F32, 9> lfr, S32 order)
-    {
-        return [=, this]()
+        }
+        sh.bind();
+        setParams(sh, step.params);
+        bindCommon(sh, step.lfr.data());
+        if (!gGLManager.mIsNativeVulkan)
         {
-            PassScope scope;
-            LLGLSLShader& sh = mPrograms[pass];
-            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-            glViewport(0, 0, SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT);
-            sh.bind();
-            setParams(sh.mProgramObject, params);
-            bindCommon(sh, lfr.data());
             const GLint lo = glGetUniformLocation(sh.mProgramObject, "scatteringOrder");
             if (lo >= 0) glUniform1i(lo, order);
-            const GLint ll = glGetUniformLocation(sh.mProgramObject, "layer");
-            for (S32 layer = first; layer < last; ++layer)
-            {
-                glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, 0, layer);
-                glDrawBuffer(GL_COLOR_ATTACHMENT0);
-                if (ll >= 0) glUniform1i(ll, layer);
-                drawScreen(additive);
-            }
-            unbindCommon();
-            sh.unbind();
-            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 0, 0, 0);
-        };
+        }
+        rawUniformToVk(sh, "scatteringOrder", WolfVkShaderMirror::Kind::I1, 1, &order);   // [W114-VULKAN S8 2026-11-26]
+        drawScreen(step.additive);
+        unbindCommon();
+        sh.unbind();
+        if (gGLManager.mIsNativeVulkan) WolfVkNative::unbindLayerTarget();
+        else glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+        return;
+    }
+    // layers [first, last) of a 3D pass into the target (render3DRenderTarget :434-443: uniform `layer`, one draw each)
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glViewport(0, 0, SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT);
+    }
+    sh.bind();
+    setParams(sh, step.params);
+    bindCommon(sh, step.lfr.data());
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        const GLint lo = glGetUniformLocation(sh.mProgramObject, "scatteringOrder");
+        if (lo >= 0) glUniform1i(lo, order);
+    }
+    rawUniformToVk(sh, "scatteringOrder", WolfVkShaderMirror::Kind::I1, 1, &order);   // [W114-VULKAN S8 2026-11-26]
+    const GLint ll = gGLManager.mIsNativeVulkan ? -1 : glGetUniformLocation(sh.mProgramObject, "layer");
+    for (S32 layer = step.first; layer < step.last; ++layer)
+    {
+        if (gGLManager.mIsNativeVulkan)
+        {
+            WolfVkNative::LayerAttachment att{ tex, layer };
+            if (!WolfVkNative::bindLayerTarget(&att, 1)) break;
+            WolfVkState::viewport(0, 0, SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT);
+        }
+        else
+        {
+            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, 0, layer);
+            glDrawBuffer(GL_COLOR_ATTACHMENT0);
+            if (ll >= 0) glUniform1i(ll, layer);
+        }
+        rawUniformToVk(sh, "layer", WolfVkShaderMirror::Kind::I1, 1, &layer);   // [W114-VULKAN S8 2026-11-26]
+        drawScreen(step.additive);
+    }
+    unbindCommon();
+    sh.unbind();
+    if (gGLManager.mIsNativeVulkan) WolfVkNative::unbindLayerTarget();
+    else glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 0, 0, 0);
+}
+
+void Atmosphere::buildSteps()
+{
+    mSteps.clear();
+    auto pass2d = [this](Pass pass, TableTarget target, bool additive, const Params& params, const std::array<F32, 9>& lfr, S32 order)
+    {
+        BuildStep st;
+        st.kind = BuildStep::PASS_2D;
+        st.pass = pass;
+        st.target = target;
+        st.additive = additive;
+        st.params = params;
+        st.lfr = lfr;
+        st.order = order;
+        mSteps.push_back(st);
     };
-    const S32 CHUNK = 8;   // layers per step
-    auto add3d = [&](Pass pass, GLuint tex, bool additive, const Params& params, const std::array<F32, 9>& lfr, S32 order)
+    constexpr S32 CHUNK = 8;   // layers per step
+    auto add3d = [this](Pass pass, TableTarget target, bool additive, const Params& params, const std::array<F32, 9>& lfr, S32 order)
     {
         for (S32 first = 0; first < SCATTERING_TEXTURE_DEPTH; first += CHUNK)
         {
-            mSteps.push_back(pass3d(pass, tex, first, llmin(first + CHUNK, SCATTERING_TEXTURE_DEPTH), additive, params, lfr, order));
+            BuildStep st;
+            st.kind = BuildStep::PASS_3D;
+            st.pass = pass;
+            st.target = target;
+            st.first = first;
+            st.last = llmin(first + CHUNK, SCATTERING_TEXTURE_DEPTH);
+            st.additive = additive;
+            st.params = params;
+            st.lfr = lfr;
+            st.order = order;
+            mSteps.push_back(st);
         }
     };
 
     // [WolfViewer] OpenGL leaves a new texture's contents undefined (WebGL, which takram targets, zero-fills it):
     // the higher-order table is only ever ADDED to (:705-711), so it starts cleared, as WebGL would give it.
-    mSteps.push_back([=]()
     {
-        PassScope scope;
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        const F32 zero[4] = { 0.f, 0.f, 0.f, 0.f };
-        for (S32 layer = 0; layer < SCATTERING_TEXTURE_DEPTH; ++layer)
-        {
-            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target.higher, 0, layer);
-            glDrawBuffer(GL_COLOR_ATTACHMENT0);
-            glClearBufferfv(GL_COLOR, 0, zero);
-        }
-        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 0, 0, 0);
-    });
+        BuildStep st;
+        st.kind = BuildStep::CLEAR_3D;
+        st.target = TT_HIGHER;
+        st.first = 0;
+        st.last = SCATTERING_TEXTURE_DEPTH;
+        mSteps.push_back(st);
+    }
 
     // Source: ebruneton atmosphere/model.cc:907-949 Init: the batches of 3 wavelengths and their
     // luminance_from_radiance matrices (row-major, model.h:312 mat3)
@@ -972,30 +1127,30 @@ void Atmosphere::buildSteps()
         const bool additive = i > 0;   // model.cc:947 blend = i > 0
         // Source: three-geospatial PrecomputedTexturesGenerator.ts:592-717 precompute(context, additive)
         // :597-600 the transmittance
-        mSteps.push_back(pass2d(TRANS, target.transmittance, TRANSMITTANCE_TEXTURE_WIDTH, TRANSMITTANCE_TEXTURE_HEIGHT, false, params, b.lfr, 0));
+        pass2d(TRANS, TT_TRANSMITTANCE, false, params, b.lfr, 0);
         // :611-626 direct irradiance into deltaIrradiance, and zeros (or nothing, additive) into irradiance
-        mSteps.push_back(pass2d(DIRECT_DELTA, dIrr, IRRADIANCE_TEXTURE_WIDTH, IRRADIANCE_TEXTURE_HEIGHT, false, params, b.lfr, 0));
-        mSteps.push_back(pass2d(DIRECT_IRR, target.irradiance, IRRADIANCE_TEXTURE_WIDTH, IRRADIANCE_TEXTURE_HEIGHT, additive, params, b.lfr, 0));
+        pass2d(DIRECT_DELTA, TT_DELTA_IRRADIANCE, false, params, b.lfr, 0);
+        pass2d(DIRECT_IRR, TT_IRRADIANCE, additive, params, b.lfr, 0);
         // :635-652 single scattering into deltaRayleigh, deltaMie and (stored or accumulated) scattering
-        add3d(SINGLE_RAY, dRay, false, params, b.lfr, 0);
-        add3d(SINGLE_MIE, dMie, false, params, b.lfr, 0);
-        add3d(SINGLE_SCAT, target.scattering, additive, params, b.lfr, 0);
+        add3d(SINGLE_RAY, TT_DELTA_RAYLEIGH, false, params, b.lfr, 0);
+        add3d(SINGLE_MIE, TT_DELTA_MIE, false, params, b.lfr, 0);
+        add3d(SINGLE_SCAT, TT_SCATTERING, additive, params, b.lfr, 0);
         // :665-716 the 2nd, 3rd and 4th orders
         for (S32 order = 2; order <= 4; ++order)
         {
-            add3d(DENSITY, dDen, false, params, b.lfr, order);                       // :668-672 scatteringOrder = order
-            mSteps.push_back(pass2d(INDIRECT_DELTA, dIrr, IRRADIANCE_TEXTURE_WIDTH, IRRADIANCE_TEXTURE_HEIGHT, false, params, b.lfr, order - 1));   // :676-682, :558
-            mSteps.push_back(pass2d(INDIRECT_IRR, target.irradiance, IRRADIANCE_TEXTURE_WIDTH, IRRADIANCE_TEXTURE_HEIGHT, true, params, b.lfr, order - 1));   // :683-689
-            add3d(MULTI_DELTA, dMulti, false, params, b.lfr, 0);                     // :693-698
-            add3d(MULTI_SCAT, target.scattering, true, params, b.lfr, 0);            // :699-704
-            add3d(MULTI_SCAT, target.higher, true, params, b.lfr, 0);                // :705-711
+            add3d(DENSITY, TT_DELTA_DENSITY, false, params, b.lfr, order);                       // :668-672 scatteringOrder = order
+            pass2d(INDIRECT_DELTA, TT_DELTA_IRRADIANCE, false, params, b.lfr, order - 1);   // :676-682, :558
+            pass2d(INDIRECT_IRR, TT_IRRADIANCE, true, params, b.lfr, order - 1);   // :683-689
+            add3d(MULTI_DELTA, TT_DELTA_RAYLEIGH, false, params, b.lfr, 0);                     // :693-698
+            add3d(MULTI_SCAT, TT_SCATTERING, true, params, b.lfr, 0);            // :699-704
+            add3d(MULTI_SCAT, TT_HIGHER, true, params, b.lfr, 0);                // :705-711
         }
     }
     if (mNumWavelengths > 3)
     {
         // Source: ebruneton atmosphere/model.cc:951-963: the transmittance again, at kLambdaR, kLambdaG, kLambdaB
         const std::array<F32, 9> id = { 1.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f };
-        mSteps.push_back(pass2d(TRANS, target.transmittance, TRANSMITTANCE_TEXTURE_WIDTH, TRANSMITTANCE_TEXTURE_HEIGHT, false, mBuildRuntime, id, 0));
+        pass2d(TRANS, TT_TRANSMITTANCE, false, mBuildRuntime, id, 0);
     }
 }
 
@@ -1006,12 +1161,14 @@ bool Atmosphere::precomputeStep()
     if (!mShadersLoaded || !gPipeline.mScreenTriangleVB) return false;
     if (mNextStep < mSteps.size())
     {
-        mSteps[mNextStep++]();
+        runStepGL(mSteps[mNextStep++]);
         if (mNextStep < mSteps.size()) return false;
     }
     // finished: read back what the CPU needs (PrecomputedTexturesGenerator.ts:742-752), then swap the sets in
     readBack();
     mComplete = mTarget;
+    mCompleteWavelengths = mNumWavelengths;                 // [W114-VULKAN S8 2026-11-26] for the texel-compare dump
+    mCompleteSpectrumHash = (U64)hashOf(mSpectrum);
     mRuntime = mBuildRuntime;
     mSunK = mBuildSunK;
     mSkyK = mBuildSkyK;
@@ -1027,11 +1184,122 @@ void Atmosphere::readBack()
     const Set& s = mSets[mTarget];
     mTransmittanceData.assign((size_t)TRANSMITTANCE_TEXTURE_WIDTH * TRANSMITTANCE_TEXTURE_HEIGHT * 4, 0.f);
     mIrradianceData.assign((size_t)IRRADIANCE_TEXTURE_WIDTH * IRRADIANCE_TEXTURE_HEIGHT * 4, 0.f);
+    if (gGLManager.mIsNativeVulkan)
+    {
+        WolfVkNative::readBackTextureFloatSync(s.transmittance, 0, 4, mTransmittanceData.data(), mTransmittanceData.size());
+        WolfVkNative::readBackTextureFloatSync(s.irradiance, 0, 4, mIrradianceData.data(), mIrradianceData.size());
+        return;
+    }
     gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, s.transmittance);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, mTransmittanceData.data());
     gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, s.irradiance);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, mIrradianceData.data());
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+}
+
+// [W114-VULKAN S8 2026-11-26] The texel-compare dump: the same file for both renderers (wolftkatmosphere.h writeTableDump).
+// static
+const char* Atmosphere::dumpName(S32 i)
+{
+    static const char* names[DUMP_TABLES] = { "transmittance", "irradiance", "scattering", "higher_order_scattering" };
+    return (i >= 0 && i < DUMP_TABLES) ? names[i] : "";
+}
+
+// static
+Atmosphere::TableTarget Atmosphere::dumpTarget(S32 i)
+{
+    static const TableTarget targets[DUMP_TABLES] = { TT_TRANSMITTANCE, TT_IRRADIANCE, TT_SCATTERING, TT_HIGHER };
+    return (i >= 0 && i < DUMP_TABLES) ? targets[i] : TT_COUNT;
+}
+
+// static
+bool Atmosphere::writeTableDump(const std::string& path, S32 w, S32 h, S32 d, U32 wavelengths, U64 spectrum_hash,
+                                const std::vector<F32>& rgba, std::string& error)
+{
+    const size_t texels = (size_t)w * (size_t)h * (size_t)d;
+    if (w <= 0 || h <= 0 || d <= 0 || rgba.size() != texels * 4)
+    {
+        error = llformat("%s: %d x %d x %d needs %zu floats, have %zu", path.c_str(), w, h, d, texels * 4, rgba.size());
+        return false;
+    }
+    llofstream out(path.c_str(), std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out.is_open())
+    {
+        error = "cannot write " + path;
+        return false;
+    }
+    // little-endian fields, written byte by byte so the file is the same on every platform
+    auto put32 = [&out](U32 v) { for (S32 b = 0; b < 4; ++b) out.put((char)((v >> (8 * b)) & 0xffu)); };
+    out.write("WOLFTBL1", 8);
+    put32((U32)w); put32((U32)h); put32((U32)d); put32(4u); put32(wavelengths);
+    put32((U32)(spectrum_hash & 0xffffffffull)); put32((U32)(spectrum_hash >> 32));
+    for (F32 f : rgba)
+    {
+        U32 bits = 0;
+        std::memcpy(&bits, &f, sizeof(bits));
+        put32(bits);
+    }
+    out.close();
+    if (out.fail())
+    {
+        error = "write failed: " + path;
+        return false;
+    }
+    return true;
+}
+
+bool Atmosphere::dumpTablesGL(const std::string& dir, std::string& error) const
+{
+    if (mComplete < 0)
+    {
+        error = "no complete set of tables";
+        return false;
+    }
+    LLFile::mkdir(dir);
+    const Set& s = mSets[mComplete];
+    const GLuint names[DUMP_TABLES] = { s.transmittance, s.irradiance, s.scattering, s.higher };
+    // a pack buffer left bound (the fenced read-back rings) would turn glGetTexImage's pointer into an offset in it
+    if (gGLManager.mIsNativeVulkan)
+    {
+        bool ok = true;
+        for (S32 i = 0; i < DUMP_TABLES && ok; ++i)
+        {
+            S32 w = 0, h = 0, d = 0;
+            tableSize(dumpTarget(i), w, h, d);
+            std::vector<F32> data((size_t)w * (size_t)h * (size_t)d * 4, 0.f);
+            ok = WolfVkNative::readBackTextureFloatSync(names[i], 0, 4, data.data(), data.size())
+              && writeTableDump(gDirUtilp->add(dir, std::string(dumpName(i)) + ".wtbl"), w, h, d, mCompleteWavelengths,
+                                mCompleteSpectrumHash, data, error);
+        }
+        return ok;
+    }
+    GLint pack = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &pack);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    bool ok = true;
+    for (S32 i = 0; i < DUMP_TABLES && ok; ++i)
+    {
+        S32 w = 0, h = 0, d = 0;
+        tableSize(dumpTarget(i), w, h, d);
+        std::vector<F32> data((size_t)w * (size_t)h * (size_t)d * 4, 0.f);
+        // the tables are RGBA32F (newTexture2d / newTexture3d): read back as RGBA float, every layer of a 3D table at once
+        if (d > 1)
+        {
+            gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE_3D, names[i]);
+            glGetTexImage(GL_TEXTURE_3D, 0, GL_RGBA, GL_FLOAT, data.data());
+            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE_3D);
+        }
+        else
+        {
+            gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, names[i]);
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, data.data());
+            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        }
+        ok = writeTableDump(gDirUtilp->add(dir, std::string(dumpName(i)) + ".wtbl"), w, h, d, mCompleteWavelengths,
+                            mCompleteSpectrumHash, data, error);
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)pack);
+    return ok;
 }
 
 // [WolfViewer 2026-10-25] the WolfEepGains uniform block (brunetonRuntime.glsl): std140 vec4 arrays - wolfEepGain and
@@ -1049,10 +1317,19 @@ void Atmosphere::bindEepBlock() const
 {
     if (!mEepBlock)
     {
-        glGenBuffers(1, &mEepBlock);
-        glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
         std::vector<F32> zero(EEP_BLOCK_BYTES / sizeof(F32), 0.f);
-        glBufferData(GL_UNIFORM_BUFFER, EEP_BLOCK_BYTES, zero.data(), GL_DYNAMIC_DRAW);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            static GLuint sNativeEepUbo = 0x20000;
+            mEepBlock = sNativeEepUbo++;
+        }
+        else
+        {
+            glGenBuffers(1, &mEepBlock);
+            glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
+            glBufferData(GL_UNIFORM_BUFFER, EEP_BLOCK_BYTES, zero.data(), GL_DYNAMIC_DRAW);
+        }
+        LLGLSLShader::wolfVkUniformBufferData(mEepBlock, 0, (U32)EEP_BLOCK_BYTES, zero.data(), true);   // [VULKAN G-BUFFER S2 2026-11-26/] llglslshader.h
         mEepBlockDirty = true;
     }
     if (mEepBlockDirty)
@@ -1068,19 +1345,28 @@ void Atmosphere::bindEepBlock() const
             data[i * 4 + 3] = 1.f;
             data[(EEP_GAINS + i) * 4 + 3] = 1.f;
         }
-        glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
-        glBufferSubData(GL_UNIFORM_BUFFER, 0, 2 * EEP_ARRAY_BYTES, data);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
+            glBufferSubData(GL_UNIFORM_BUFFER, 0, 2 * EEP_ARRAY_BYTES, data);
+        }
+        LLGLSLShader::wolfVkUniformBufferData(mEepBlock, 0, (U32)(2 * EEP_ARRAY_BYTES), data, false);   // [VULKAN G-BUFFER S2 2026-11-26/]
         mEepBlockDirty = false;
     }
-    glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_WOLF_EEP_GAINS, mEepBlock);
+    if (!gGLManager.mIsNativeVulkan) glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_WOLF_EEP_GAINS, mEepBlock);
+    LLGLSLShader::wolfVkUniformBufferBind(LLGLSLShader::UB_WOLF_EEP_GAINS, mEepBlock);   // [VULKAN G-BUFFER S2 2026-11-26/]
 }
 
 void Atmosphere::refreshEepGains(LLGLSLShader& sh) const
 {
     bindEepBlock();   // uploads the gains if they changed, binds the block
     // as setRuntimeUniforms sets it
-    const GLint lgr = location(sh.mProgramObject, "wolfEepGainRef");
-    if (lgr >= 0) glUniform3fv(lgr, 1, mEepGainRef.mV);
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        const GLint lgr = location(sh.mProgramObject, "wolfEepGainRef");
+        if (lgr >= 0) glUniform3fv(lgr, 1, mEepGainRef.mV);
+    }
+    rawUniformToVk(sh, "wolfEepGainRef", WolfVkShaderMirror::Kind::F3, 1, mEepGainRef.mV);   // [W114-VULKAN S8 2026-11-26]
 }
 
 void Atmosphere::setEepProbeDirs(const LLVector3 dirs[EEP_PROBES])
@@ -1091,8 +1377,12 @@ void Atmosphere::setEepProbeDirs(const LLVector3 dirs[EEP_PROBES])
     {
         data[i * 4 + 0] = dirs[i].mV[0]; data[i * 4 + 1] = dirs[i].mV[1]; data[i * 4 + 2] = dirs[i].mV[2]; data[i * 4 + 3] = 0.f;
     }
-    glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
-    glBufferSubData(GL_UNIFORM_BUFFER, 2 * EEP_ARRAY_BYTES, EEP_PROBE_BYTES, data);
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
+        glBufferSubData(GL_UNIFORM_BUFFER, 2 * EEP_ARRAY_BYTES, EEP_PROBE_BYTES, data);
+    }
+    LLGLSLShader::wolfVkUniformBufferData(mEepBlock, (U32)(2 * EEP_ARRAY_BYTES), (U32)EEP_PROBE_BYTES, data, false);   // [VULKAN G-BUFFER S2 2026-11-26/]
 }
 
 void Atmosphere::setRuntimeUniforms(LLGLSLShader& sh, F32 pre_exposure, bool uniforms) const
@@ -1101,36 +1391,69 @@ void Atmosphere::setRuntimeUniforms(LLGLSLShader& sh, F32 pre_exposure, bool uni
     const Set& s = mSets[mComplete];
     if (uniforms)
     {
-    setParams(sh.mProgramObject, mRuntime);
+    setParams(sh, mRuntime);
     // [WolfViewer] Bruneton's absolute k (model.cc:668-686) x the pre-exposure (Filament "pre-exposed lighting",
     // Filament.md.html:1723), in place of takram's relative k (AtmosphereParameters.ts:182-191)
     const GLint ls = location(sh.mProgramObject, "SUN_SPECTRAL_RADIANCE_TO_LUMINANCE");
     if (ls >= 0) glUniform3f(ls, mSunK.mV[0] * pre_exposure, mSunK.mV[1] * pre_exposure, mSunK.mV[2] * pre_exposure);
+    {
+        const F32 v[3] = { mSunK.mV[0] * pre_exposure, mSunK.mV[1] * pre_exposure, mSunK.mV[2] * pre_exposure };
+        rawUniformToVk(sh, "SUN_SPECTRAL_RADIANCE_TO_LUMINANCE", WolfVkShaderMirror::Kind::F3, 1, v);   // [W114-VULKAN S8 2026-11-26]
+    }
     const GLint lk = location(sh.mProgramObject, "SKY_SPECTRAL_RADIANCE_TO_LUMINANCE");
     if (lk >= 0) glUniform3f(lk, mSkyK.mV[0] * pre_exposure, mSkyK.mV[1] * pre_exposure, mSkyK.mV[2] * pre_exposure);
+    {
+        const F32 v[3] = { mSkyK.mV[0] * pre_exposure, mSkyK.mV[1] * pre_exposure, mSkyK.mV[2] * pre_exposure };
+        rawUniformToVk(sh, "SKY_SPECTRAL_RADIANCE_TO_LUMINANCE", WolfVkShaderMirror::Kind::F3, 1, v);   // [W114-VULKAN S8 2026-11-26]
+    }
     // [WolfViewer 2026-10-13] the EEP's colours (setEepColours); a program that never gets them reads 0: untouched
     const GLint lo = location(sh.mProgramObject, "wolfEepGainOn");
     if (lo >= 0) glUniform1f(lo, mEepGainOn ? 1.f : 0.f);
+    {
+        const F32 v = mEepGainOn ? 1.f : 0.f;
+        rawUniformToVk(sh, "wolfEepGainOn", WolfVkShaderMirror::Kind::F1, 1, &v);   // [W114-VULKAN S8 2026-11-26]
+    }
     const GLint lco = location(sh.mProgramObject, "wolfEepCloudGainOn");
     if (lco >= 0) glUniform1f(lco, mEepCloudGainOn ? 1.f : 0.f);
+    {
+        const F32 v = mEepCloudGainOn ? 1.f : 0.f;
+        rawUniformToVk(sh, "wolfEepCloudGainOn", WolfVkShaderMirror::Kind::F1, 1, &v);   // [W114-VULKAN S8 2026-11-26]
+    }
     const GLint lcsg = location(sh.mProgramObject, "wolfEepCloudSkyGain");   // [2026-10-27] setEepCloudSkyGain
     if (lcsg >= 0) glUniform1f(lcsg, mEepCloudSkyGain ? 1.f : 0.f);
+    {
+        const F32 v = mEepCloudSkyGain ? 1.f : 0.f;
+        rawUniformToVk(sh, "wolfEepCloudSkyGain", WolfVkShaderMirror::Kind::F1, 1, &v);   // [W114-VULKAN S8 2026-11-26]
+    }
     // [WolfViewer 2026-10-25] the azimuths' reference: the stock sky's light (wolfenvironmentrender.cpp eepLightWorld)
     const GLint lgr = location(sh.mProgramObject, "wolfEepGainRef");
     if (lgr >= 0) glUniform3fv(lgr, 1, mEepGainRef.mV);
+    rawUniformToVk(sh, "wolfEepGainRef", WolfVkShaderMirror::Kind::F3, 1, mEepGainRef.mV);   // [W114-VULKAN S8 2026-11-26]
     const GLint lcgr = location(sh.mProgramObject, "wolfEepCloudGainRef");
     if (lcgr >= 0) glUniform3fv(lcgr, 1, mEepCloudGainRef.mV);
+    rawUniformToVk(sh, "wolfEepCloudGainRef", WolfVkShaderMirror::Kind::F3, 1, mEepCloudGainRef.mV);   // [W114-VULKAN S8 2026-11-26]
     const GLint lc = location(sh.mProgramObject, "wolfEepCloudTint");
     if (lc >= 0) glUniform3f(lc, mEepCloud.mV[0] - 1.f, mEepCloud.mV[1] - 1.f, mEepCloud.mV[2] - 1.f);
+    {
+        const F32 v[3] = { mEepCloud.mV[0] - 1.f, mEepCloud.mV[1] - 1.f, mEepCloud.mV[2] - 1.f };
+        rawUniformToVk(sh, "wolfEepCloudTint", WolfVkShaderMirror::Kind::F3, 1, v);   // [W114-VULKAN S8 2026-11-26]
+    }
     const GLint lth = location(sh.mProgramObject, "wolfEepCloudThin");
     if (lth >= 0) glUniform1f(lth, mEepCloudThin);
+    rawUniformToVk(sh, "wolfEepCloudThin", WolfVkShaderMirror::Kind::F1, 1, &mEepCloudThin);   // [W114-VULKAN S8 2026-11-26]
     const GLint lm = location(sh.mProgramObject, "wolfEepMieScale");
     if (lm >= 0) glUniform1f(lm, mEepMie - 1.f);
+    {
+        const F32 v = mEepMie - 1.f;
+        rawUniformToVk(sh, "wolfEepMieScale", WolfVkShaderMirror::Kind::F1, 1, &v);   // [W114-VULKAN S8 2026-11-26]
+    }
     // [WolfViewer 2026-10-25] wolftk/nightLight.glsl (WolfEnvironmentRender: the night's light as the eye sees it)
     const GLint ln = location(sh.mProgramObject, "wolfNight");
     if (ln >= 0) glUniform1f(ln, mNight);
+    rawUniformToVk(sh, "wolfNight", WolfVkShaderMirror::Kind::F1, 1, &mNight);   // [W114-VULKAN S8 2026-11-26]
     const GLint lns = location(sh.mProgramObject, "wolfNightS");
     if (lns >= 0) glUniform1f(lns, mNightS);
+    rawUniformToVk(sh, "wolfNightS", WolfVkShaderMirror::Kind::F1, 1, &mNightS);   // [W114-VULKAN S8 2026-11-26]
     }
     bindEepBlock();   // [WolfViewer 2026-10-25] the gain grids' uniform block, for every program this is given to
     // AtmosphereMaterialBase.ts:140-144 the tables (single Mie: none, combined)
@@ -1248,7 +1571,7 @@ void Atmosphere::release()
     mTransmittanceData.clear();
     mIrradianceData.clear();
     mLocations.clear();
-    if (mEepBlock) { glDeleteBuffers(1, &mEepBlock); mEepBlock = 0; }
+    if (mEepBlock) { if (!gGLManager.mIsNativeVulkan) glDeleteBuffers(1, &mEepBlock); mEepBlock = 0; }
     mEepBlockDirty = true;
 }
 

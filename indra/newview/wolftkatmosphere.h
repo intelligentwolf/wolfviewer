@@ -27,6 +27,7 @@
 #ifndef WOLF_TK_ATMOSPHERE_H
 #define WOLF_TK_ATMOSPHERE_H
 
+#include <array>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -191,6 +192,61 @@ namespace WolfTk
             DensityProfileLayer rayleigh_density[2], mie_density[2], absorption_density[2];
         };
 
+        // ---- [W114-VULKAN S8 2026-11-26] the build as data, for the Vulkan recorder (wolfvksky.cpp) ----------------------
+        /** The precompute programs (loadShaders: one per pass and OUTPUT). */
+        enum Pass { TRANS = 0, DIRECT_DELTA, DIRECT_IRR, SINGLE_RAY, SINGLE_MIE, SINGLE_SCAT, DENSITY,
+                    INDIRECT_DELTA, INDIRECT_IRR, MULTI_DELTA, MULTI_SCAT, PASS_COUNT };
+        /** The tables a build writes: the four of the set being built (mTarget) and the build context's four
+         *  (PrecomputedTexturesGenerator.ts:152-199; deltaMultipleScattering IS TT_DELTA_RAYLEIGH, :193-198). */
+        enum TableTarget { TT_TRANSMITTANCE = 0, TT_IRRADIANCE, TT_SCATTERING, TT_HIGHER,
+                           TT_DELTA_IRRADIANCE, TT_DELTA_RAYLEIGH, TT_DELTA_MIE, TT_DELTA_DENSITY, TT_COUNT };
+        /** One step of a build, as buildSteps lists them and either renderer runs them (runStepGL / WolfVkSky):
+         *    CLEAR_3D  layers [first, last) of target cleared to 0
+         *    PASS_2D   program `pass` drawn over the whole 2D target (one screen triangle)
+         *    PASS_3D   program `pass` drawn once per layer [first, last) of the 3D target, uniform `layer` = the layer
+         *  additive: blend One/One onto the target (drawScreen), else blending off. Every pass sets ATMOSPHERE from
+         *  params, luminanceFromRadiance from lfr (row-major, uploaded with transpose) and scatteringOrder = order, and
+         *  samples transmittanceTexture = TT_TRANSMITTANCE, singleRayleighScatteringTexture and multipleScatteringTexture
+         *  = TT_DELTA_RAYLEIGH, singleMieScatteringTexture = TT_DELTA_MIE, scatteringDensityTexture = TT_DELTA_DENSITY,
+         *  irradianceTexture = TT_DELTA_IRRADIANCE (runStepGL bindCommon). */
+        struct BuildStep
+        {
+            enum Kind { CLEAR_3D, PASS_2D, PASS_3D };
+            Kind kind = PASS_2D;
+            Pass pass = TRANS;
+            TableTarget target = TT_TRANSMITTANCE;
+            S32 first = 0, last = 0;
+            bool additive = false;
+            Params params;
+            std::array<F32, 9> lfr = {};
+            S32 order = 0;
+        };
+        /** Width, height and depth (1 for 2D) of a table. */
+        static void tableSize(TableTarget t, S32& w, S32& h, S32& d);
+        /** The build in progress: its steps, the next one to run, and the program of a pass. */
+        const std::vector<BuildStep>& buildStepList() const { return mSteps; }
+        size_t nextBuildStep() const { return mNextStep; }
+        LLGLSLShader& program(Pass pass) { return mPrograms[pass]; }
+        /** OpenGL's texture for a build table (the set being built, or the build context); 0 when not allocated. */
+        GLuint glTable(TableTarget t) const;
+
+        // ---- [W114-VULKAN S8 2026-11-26] the texel-compare dump (scripts/wolf_sky_table_compare.py) ------------------------
+        /** The four final tables in file order, and their file names (<name>.wtbl). */
+        static constexpr S32 DUMP_TABLES = 4;
+        static const char* dumpName(S32 i);   // transmittance, irradiance, scattering, higher_order_scattering
+        static TableTarget dumpTarget(S32 i);  // TT_TRANSMITTANCE, TT_IRRADIANCE, TT_SCATTERING, TT_HIGHER
+        /** Writes one table: "WOLFTBL1", then little-endian u32 width, height, depth, channels (4), u32 wavelengths,
+         *  u64 spectrum hash (hashOf), then width x height x depth x 4 float32, x fastest, then y, then z (OpenGL's
+         *  glGetTexImage order and the order of a tightly packed vkCmdCopyImageToBuffer). False with error. */
+        static bool writeTableDump(const std::string& path, S32 w, S32 h, S32 d, U32 wavelengths, U64 spectrum_hash,
+                                   const std::vector<F32>& rgba, std::string& error);
+        /** OpenGL's four tables of the set in use into dir (made if missing), read with glGetTexImage: synchronous, for
+         *  the debug dump only (WolfVulkanDebugSkyTablesDump). False with error when no set is complete. */
+        bool dumpTablesGL(const std::string& dir, std::string& error) const;
+        /** What the set in use was built from (for the dump header). */
+        U32 completeWavelengths() const { return mCompleteWavelengths; }
+        U64 completeSpectrumHash() const { return mCompleteSpectrumHash; }
+
     private:
         struct Set { GLuint transmittance = 0, scattering = 0, irradiance = 0, higher = 0; };
         void allocateSet(Set& s);
@@ -199,11 +255,10 @@ namespace WolfTk
         void freeContext();
         void buildSteps();
         void readBack();
-        void setParams(GLuint program, const Params& p) const;
+        void setParams(LLGLSLShader& sh, const Params& p) const;   // [W114-VULKAN S8 2026-11-26] the program, for its Vulkan mirror
         GLint location(GLuint program, const char* name) const;
 
-        enum Pass { TRANS = 0, DIRECT_DELTA, DIRECT_IRR, SINGLE_RAY, SINGLE_MIE, SINGLE_SCAT, DENSITY,
-                    INDIRECT_DELTA, INDIRECT_IRR, MULTI_DELTA, MULTI_SCAT, PASS_COUNT };
+        void runStepGL(const BuildStep& step);   // [W114-VULKAN S8 2026-11-26] one step, by OpenGL
         LLGLSLShader mPrograms[PASS_COUNT];
         LLColor3 mEepCloud = LLColor3::white;
         LLColor3 mEepGain[EEP_GAINS];   // read by the shaders only while mEepGainOn (setEepGains fills them first)
@@ -232,10 +287,12 @@ namespace WolfTk
         AtmosphereSpectrum mSpectrum;
         U32 mNumWavelengths = 3;
         bool mBuilding = false;
-        std::vector<std::function<void()>> mSteps;
+        std::vector<BuildStep> mSteps;   // [W114-VULKAN S8 2026-11-26] was GL closures; runStepGL runs one
         size_t mNextStep = 0;
 
         Params mRuntime;                       // at kLambdaR/G/B (complete set)
+        U32 mCompleteWavelengths = 0;          // [W114-VULKAN S8 2026-11-26] the complete set's build: wavelengths ...
+        U64 mCompleteSpectrumHash = 0;         // ... and hashOf(spectrum)
         Params mBuildRuntime;                  // for the set being built
         LLVector3 mSunK, mSkyK, mBuildSunK, mBuildSkyK;
         LLColor3 mWhitePoint = LLColor3::white, mBuildWhitePoint = LLColor3::white;

@@ -42,6 +42,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolftkclouds.h"
+#include "vk/wolfcoreloader.h"
 #include "wolfcloudgenus.h"   // ICE_G_SCALE (the shader's WOLF_ICE_G_SCALE)
 
 #include <algorithm>
@@ -54,6 +55,9 @@
 
 #include "llgl.h"
 #include "llglstates.h"
+#include "llimagegl.h"         // [VK S6 2026-11-26] wolfVkCreateStorage
+#include "wolfvknative.h"
+#include "vk/wolfvkstate.h"
 #include "llrender.h"
 #include "llshadermgr.h"
 #include "pipeline.h"
@@ -323,7 +327,8 @@ namespace
         GLenum target = GL_TEXTURE_2D;
         S32 w = 0, h = 0, d = 0;
         GLenum fmt = GL_RGBA16F;
-        void release() { if (id) { glDeleteTextures(1, &id); id = 0; } w = h = d = 0; }
+        // [VK S6 2026-11-26] a texture in Vulkan-owned memory is deleted by its owner
+        void release() { if (id) { if (!LLImageGL::wolfVkDestroyStorage(id)) glDeleteTextures(1, &id); id = 0; } w = h = d = 0; }
     };
 
     GLenum baseFormat(GLenum fmt) { return (fmt == GL_R16F || fmt == GL_R8 || fmt == GL_R32F) ? GL_RED : GL_RGBA; }
@@ -336,7 +341,26 @@ namespace
         if (t.id && t.target == target && t.fmt == fmt && t.w == w && t.h == h && t.d == d) return;
         t.release();
         t.target = target; t.fmt = fmt; t.w = w; t.h = h; t.d = d;
-        glGenTextures(1, &t.id);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (the cloud maps, the cloud shadow
+        // cascades and their history: OpenGL renders into them and samples them by this name as before, the Vulkan
+        // passes find the image by the name); else OpenGL's own. Levels: the full chain where the min filter reads
+        // mips (the caller then runs glGenerateMipmap), one otherwise - what glTexImage level 0 gave.
+        const S32 levels = (min_filter == GL_LINEAR_MIPMAP_LINEAR) ? LLImageGL::wolfVkFullMipLevels(w, h, target == GL_TEXTURE_3D ? d : 1) : 1;
+        t.id = LLImageGL::wolfVkCreateStorage(target, levels, fmt, w, h, d, true);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                const S32 vk_filter = (min_filter == GL_NEAREST) ? LLTexUnit::TFO_POINT
+                                    : (min_filter == GL_LINEAR_MIPMAP_LINEAR ? LLTexUnit::TFO_TRILINEAR : LLTexUnit::TFO_BILINEAR);
+                const S32 vk_addr = (wrap == GL_REPEAT) ? LLTexUnit::TAM_WRAP : LLTexUnit::TAM_CLAMP;
+                LLImageGL::sWolfVkNativeStore->setSamplerOptions(t.id, vk_filter, vk_addr);
+            }
+            WolfVkNative::clearTextureZero(t.id);
+            return;
+        }
+        const bool owned = t.id != 0;
+        if (!owned) glGenTextures(1, &t.id);
         // through LL's texture-unit cache (a raw glBindTexture would leave LLTexUnit believing its old texture is
         // still bound there, and a later bind of that texture would be skipped)
         LLTexUnit* unit = gGL.getTexUnit(0);
@@ -344,8 +368,11 @@ namespace
         unit->activate();
         glBindTexture(target, t.id);
         const GLenum type = fmt == GL_R8 || fmt == GL_RGBA8 ? GL_UNSIGNED_BYTE : GL_HALF_FLOAT;
-        if (target == GL_TEXTURE_2D) glTexImage2D(target, 0, fmt, w, h, 0, baseFormat(fmt), type, nullptr);
-        else glTexImage3D(target, 0, fmt, w, h, d, 0, baseFormat(fmt), type, nullptr);
+        if (!owned)   // an owned texture has its (immutable) storage already
+        {
+            if (target == GL_TEXTURE_2D) glTexImage2D(target, 0, fmt, w, h, 0, baseFormat(fmt), type, nullptr);
+            else glTexImage3D(target, 0, fmt, w, h, d, 0, baseFormat(fmt), type, nullptr);
+        }
         glTexParameteri(target, GL_TEXTURE_MIN_FILTER, min_filter);
         glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(target, GL_TEXTURE_WRAP_S, wrap);
@@ -377,9 +404,24 @@ namespace
     {
     public:
         ~Fbo() { release(); }
-        void release() { if (mId) { glDeleteFramebuffers(1, &mId); mId = 0; } }
+        void release()
+        {
+            if (gGLManager.mIsNativeVulkan) WolfVkNative::unbindLayerTarget();
+            else if (mId) { glDeleteFramebuffers(1, &mId); mId = 0; }
+        }
         bool bind(const std::vector<Att>& atts)
         {
+            if (gGLManager.mIsNativeVulkan)
+            {
+                if (atts.empty() || atts.size() > 8) return false;
+                WolfVkNative::LayerAttachment vk_atts[8];
+                for (size_t i = 0; i < atts.size(); ++i)
+                {
+                    if (!atts[i].tex || !atts[i].tex->id) return false;
+                    vk_atts[i] = { atts[i].tex->id, atts[i].layer };
+                }
+                return WolfVkNative::bindLayerTarget(vk_atts, static_cast<U32>(atts.size()));
+            }
             if (!mId) glGenFramebuffers(1, &mId);
             glBindFramebuffer(GL_FRAMEBUFFER, mId);
             GLenum bufs[8];
@@ -407,7 +449,7 @@ namespace
     /** The full-screen draw (three's ShaderPass / Mesh(PlaneGeometry(2, 2)) -> LL's screen triangle). */
     void drawScreen(S32 w, S32 h)
     {
-        glViewport(0, 0, w, h);
+        WolfVkState::viewport(0, 0, w, h);
         gPipeline.mScreenTriangleVB->setBuffer();
         gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
     }
@@ -766,6 +808,7 @@ struct Clouds::Impl
                 drawScreen(size, size);
             }
             sh.unbind();
+            if (gGLManager.mIsNativeVulkan) WolfVkNative::unbindLayerTarget();
             return ok;
         };
         // 2D: RGBA (RGBA8), mipmapped LinearMipMapLinear / Linear, Repeat (ProceduralTexture.ts:59-70)
@@ -777,19 +820,28 @@ struct Clouds::Impl
             const bool ok = fbo.bind({ { &t, 0 } });
             if (ok) drawScreen(size, size);
             sh.unbind();
-            LLTexUnit* unit = gGL.getTexUnit(0);
-            unit->unbind(LLTexUnit::TT_TEXTURE);
-            unit->activate();
-            glBindTexture(GL_TEXTURE_2D, t.id);
-            glGenerateMipmap(GL_TEXTURE_2D);   // texture.generateMipmaps = true (:64)
-            glBindTexture(GL_TEXTURE_2D, 0);
+            if (gGLManager.mIsNativeVulkan)
+            {
+                WolfVkNative::unbindLayerTarget();
+                if (LLImageGL::sWolfVkNativeStore) LLImageGL::sWolfVkNativeStore->generateMipmaps(t.id);
+            }
+            else
+            {
+                LLTexUnit* unit = gGL.getTexUnit(0);
+                unit->unbind(LLTexUnit::TT_TEXTURE);
+                unit->activate();
+                glBindTexture(GL_TEXTURE_2D, t.id);
+                glGenerateMipmap(GL_TEXTURE_2D);   // texture.generateMipmaps = true (:64)
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
             return ok;
         };
         const bool ok = render3D(*procShape, shapeTex, CLOUD_SHAPE_TEXTURE_SIZE)
                      && render3D(*procShapeDetail, shapeDetailTex, CLOUD_SHAPE_DETAIL_TEXTURE_SIZE)
                      && render2D(*procLocalWeather, localWeatherTex, LOCAL_WEATHER_SIZE)
                      && render2D(*procTurbulence, turbulenceTex, TURBULENCE_SIZE);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        if (gGLManager.mIsNativeVulkan) WolfVkNative::unbindLayerTarget();
+        else glBindFramebuffer(GL_FRAMEBUFFER, 0);
         if (!ok)
         {
             LL_WARNS("WolfEnv") << "the clouds' noise textures could not be rendered (incomplete framebuffer); no clouds" << LL_ENDL;
@@ -809,11 +861,18 @@ struct Clouds::Impl
     {
         const S32 n = CLOUD_SHAPE_DETAIL_TEXTURE_SIZE;
         std::vector<F32> v((size_t)n * n * n, 0.f);
-        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
-        gGL.getTexUnit(0)->activate();
-        glBindTexture(GL_TEXTURE_3D, shapeDetailTex.id);
-        glGetTexImage(GL_TEXTURE_3D, 0, GL_RED, GL_FLOAT, v.data());
-        glBindTexture(GL_TEXTURE_3D, 0);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            WolfVkNative::readBackTextureFloatSync(shapeDetailTex.id, 0, 1, v.data(), v.size());
+        }
+        else
+        {
+            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+            gGL.getTexUnit(0)->activate();
+            glBindTexture(GL_TEXTURE_3D, shapeDetailTex.id);
+            glGetTexImage(GL_TEXTURE_3D, 0, GL_RED, GL_FLOAT, v.data());
+            glBindTexture(GL_TEXTURE_3D, 0);
+        }
         F64 sum = 0.0, sum2 = 0.0;
         for (F32 x : v) { sum += x; sum2 += (F64)x * x; }
         const F64 mu = sum / (F64)v.size();
@@ -854,12 +913,22 @@ struct Clouds::Impl
             value[(size_t)i] = ((F32)llmin(rank, 4095u) + 0.5f) / 4096.f;
         }
         alloc(blueNoiseTex, GL_TEXTURE_2D, GL_R32F, N, N, 1, GL_REPEAT, GL_NEAREST);
-        LLTexUnit* unit = gGL.getTexUnit(0);
-        unit->unbind(LLTexUnit::TT_TEXTURE);
-        unit->activate();
-        glBindTexture(GL_TEXTURE_2D, blueNoiseTex.id);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, N, N, GL_RED, GL_FLOAT, value.data());
-        glBindTexture(GL_TEXTURE_2D, 0);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (LLImageGL::sWolfVkNativeStore)
+            {
+                LLImageGL::sWolfVkNativeStore->uploadSubImage2D(blueNoiseTex.id, 0, 0, 0, N, N, N, GL_R32F, GL_RED, GL_FLOAT, value.data(), false);
+            }
+        }
+        else
+        {
+            LLTexUnit* unit = gGL.getTexUnit(0);
+            unit->unbind(LLTexUnit::TT_TEXTURE);
+            unit->activate();
+            glBindTexture(GL_TEXTURE_2D, blueNoiseTex.id);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, N, N, GL_RED, GL_FLOAT, value.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
         LL_INFOS("WolfEnv") << "clouds blue noise loaded from " << path << LL_ENDL;
         return true;
     }
@@ -965,14 +1034,16 @@ struct Clouds::Impl
             const F32 m[4] = { inv * ca, sa, -inv * sa, ca };   // columns: (S R)[.,0], (S R)[.,1] with S = diag(1/stretch, 1)
             static LLStaticHashedString s_rot("wolfWeatherRotation");
             const S32 loc = sh.getUniformLocation(s_rot);
-            if (loc >= 0) glUniformMatrix2fv(loc, 1, GL_FALSE, m);
+            if (!gGLManager.mIsNativeVulkan && loc >= 0) glUniformMatrix2fv(loc, 1, GL_FALSE, m);
+            WolfTk::rawUniformToVk(sh, "wolfWeatherRotation", WolfVkShaderMirror::Kind::M2, 1, m);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
             u2f(sh, "wolfWeatherPivot", f.weather_pivot.mV[0], f.weather_pivot.mV[1]);   // [WolfViewer round 13]
             // [WolfViewer 2026-10-14] the stretch only for the layers that have that shape (cirrus, streets); the others are
             // read through the turn R alone (cloudsCommon.glsl sampleWeather), so the cumulus under a cirrus veil keeps its shape
             const F32 turn[4] = { ca, sa, -sa, ca };            // columns of R
             static LLStaticHashedString s_turn("wolfWeatherTurn");
             const S32 tloc = sh.getUniformLocation(s_turn);
-            if (tloc >= 0) glUniformMatrix2fv(tloc, 1, GL_FALSE, turn);
+            if (!gGLManager.mIsNativeVulkan && tloc >= 0) glUniformMatrix2fv(tloc, 1, GL_FALSE, turn);
+            WolfTk::rawUniformToVk(sh, "wolfWeatherTurn", WolfVkShaderMirror::Kind::M2, 1, turn);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
             u4f(sh, "wolfLayerStretched", f.weather_layer_stretched[0], f.weather_layer_stretched[1],
                 f.weather_layer_stretched[2], f.weather_layer_stretched[3]);
             u2f(sh, "wolfWeatherOffsetTurned", localWeatherOffsetTurned.x, localWeatherOffsetTurned.y);
@@ -982,7 +1053,8 @@ struct Clouds::Impl
             const F32 mu[4] = { inv * cu, su, -inv * su, cu };
             static LLStaticHashedString s_rotUp("wolfWeatherRotationUpper");
             const S32 uloc = sh.getUniformLocation(s_rotUp);
-            if (uloc >= 0) glUniformMatrix2fv(uloc, 1, GL_FALSE, mu);
+            if (!gGLManager.mIsNativeVulkan && uloc >= 0) glUniformMatrix2fv(uloc, 1, GL_FALSE, mu);
+            WolfTk::rawUniformToVk(sh, "wolfWeatherRotationUpper", WolfVkShaderMirror::Kind::M2, 1, mu);   // [W114-VULKAN S8 2026-11-26] wolftkgl.h rawUniformToVk
             u2f(sh, "wolfWeatherOffsetUpper", localWeatherOffsetUpper.x, localWeatherOffsetUpper.y);
             // [10-26 third pass] the cirrus lookup's own repeat: its measured dimensions, not the EEP's cloud_scale
             const WolfCloudGenus::Table& ct = WolfCloudGenus::table();   // [2026-10-26] the cloud table
@@ -1224,8 +1296,15 @@ struct Clouds::Impl
             s_warned = true;
         }
         for (S32 u = 8; u <= 12; ++u) { WolfTk::unbindUnit(u, GL_TEXTURE_2D); WolfTk::unbindUnit(u, GL_TEXTURE_3D); WolfTk::unbindUnit(u, GL_TEXTURE_2D_ARRAY); }
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(vp[0], vp[1], vp[2], vp[3]);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            WolfVkNative::unbindLayerTarget();
+        }
+        else
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(vp[0], vp[1], vp[2], vp[3]);
+        }
         return false;
     }   // ShadowPass.ts:164-171 (temporalPass: history after the swap)
 };
@@ -1287,8 +1366,8 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
     LLGLSLShader& shadowSh = *m.shadow[q];
     LLGLSLShader& shadowResolveSh = *m.shadowResolve[q];
 
-    GLint vp[4];
-    glGetIntegerv(GL_VIEWPORT, vp);
+    GLint vp[4] = { gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3] };
+    if (!gGLManager.mIsNativeVulkan) glGetIntegerv(GL_VIEWPORT, vp);
     LLGLDepthTest depth(GL_FALSE, GL_FALSE);
     LLGLDisable blend(GL_BLEND);
     LLGLDisable cull(GL_CULL_FACE);
@@ -1296,7 +1375,8 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
 
     if (!m.renderProcedural())
     {
-        glViewport(vp[0], vp[1], vp[2], vp[3]);
+        if (gGLManager.mIsNativeVulkan) WolfVkNative::unbindLayerTarget();
+        else glViewport(vp[0], vp[1], vp[2], vp[3]);
         return false;
     }
     // [VR CLOUDS 2026-11-05] this eye's own history (Impl::useEye); the right eye uses the shadow maps the left eye made this
@@ -1578,8 +1658,15 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         m.resolveIndex = 1 - m.resolveIndex;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    if (gGLManager.mIsNativeVulkan)
+    {
+        WolfVkNative::unbindLayerTarget();
+    }
+    else
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(vp[0], vp[1], vp[2], vp[3]);
+    }
     return true;
 }
 
@@ -1587,17 +1674,36 @@ bool Clouds::renderProbe(const Atmosphere& atmosphere, const CloudsFrame& f)
 {
     Impl& m = *mImpl;
     if (!m.loaded || !m.ensureQuality(f.quality) || !m.proceduralDone || !m.shadowOutput().id) return false;
-    GLint vp[4];
-    glGetIntegerv(GL_VIEWPORT, vp);
+    GLint vp[4] = { gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3] };
+    if (!gGLManager.mIsNativeVulkan) glGetIntegerv(GL_VIEWPORT, vp);
     LLGLDepthTest depth(GL_FALSE, GL_FALSE);
     LLGLDisable blend(GL_BLEND);
     LLGLDisable cull(GL_CULL_FACE);
     LLGLDisable scissor(GL_SCISSOR_TEST);
     // its output used directly: a probe face has no history to resolve against. The cascades are selected with the
     // main view's camera, whose frustum they were fitted to (CloudsPass.copyShadow :159-168).
-    if (!marchFullResolution(atmosphere, f, m.mainView, vp)) return false;
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    CloudsFrame pf = f;
+    U32 div = 1u;
+    if (const WolfCoreApi* wc = WolfCoreLoader::api())
+    {
+        WolfCoreFrameInputs in{};
+        in.is_native_vulkan = gGLManager.mIsNativeVulkan ? 1u : 0u;
+        WolfCoreFramePlan plan{};
+        wc->plan_frame_pacing(&in, &plan);
+        div = llmax(1u, static_cast<U32>(plan.probe_cloud_divisor));
+    }
+    pf.width = llmax(1u, f.width / div);
+    pf.height = llmax(1u, f.height / div);
+    if (!marchFullResolution(atmosphere, pf, m.mainView, vp)) return false;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        WolfVkNative::unbindLayerTarget();
+    }
+    else
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(vp[0], vp[1], vp[2], vp[3]);
+    }
     return true;
 }
 
@@ -1633,6 +1739,7 @@ bool Clouds::marchFullResolution(const Atmosphere& atmosphere, const CloudsFrame
     if (!m.fbo.bind(atts)) { sh.unbind(); return m.incomplete(vp); }
     drawScreen((S32)f.width, (S32)f.height);
     sh.unbind();
+    if (gGLManager.mIsNativeVulkan) WolfVkNative::unbindLayerTarget();
     for (S32 u = 8; u <= 12; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
     WolfTk::unbindUnit(sh.getTextureChannel(LLShaderMgr::WOLF_TK_SHADOW_BUFFER), GL_TEXTURE_2D_ARRAY);
     WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]

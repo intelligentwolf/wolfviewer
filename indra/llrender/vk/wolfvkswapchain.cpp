@@ -195,8 +195,8 @@ bool WolfVkSwapchain::build(uint32_t width, uint32_t height, bool vsync, VkSwapc
         return false;
     }
 
-    // Image count: minImageCount + 1 for one spare, within maxImageCount (0 = no limit).
-    uint32_t image_count = caps.minImageCount + 1;
+    // Image count: at least framesInFlight + 1 (and minImageCount + 1) for zero acquire stalls, within maxImageCount (0 = no limit).
+    uint32_t image_count = std::max(caps.minImageCount + 1u, mDevice->framesInFlight() + 1u);
     if (caps.maxImageCount > 0 && image_count > caps.maxImageCount)
     {
         image_count = caps.maxImageCount;

@@ -42,6 +42,7 @@
 #include "llwindow.h"
 #include "llframetimer.h"
 #include <unordered_set>
+#include <algorithm>   // [VK S6 2026-11-26/] std::remove_if (updateClass)
 
 extern LL_COMMON_API bool on_main_thread();
 
@@ -61,6 +62,8 @@ U32 wpo2(U32 i);
 U32 LLImageGL::sFrameCount = 0;
 void (*LLImageGL::sWolfVkOnTexelsChanged)(LLGLuint) = nullptr;   // [VULKAN BACKEND 2026-11-08/]
 void (*LLImageGL::sWolfVkOnDelete)(LLGLuint) = nullptr;          // [VULKAN BACKEND 2026-11-08/]
+LLImageGL::WolfVkTextureOwner* LLImageGL::sWolfVkTextureOwner = nullptr;
+LLImageGL::WolfVkNativeTextureStore* LLImageGL::sWolfVkNativeStore = nullptr;   // [NATIVE VULKAN 2026-11-26/]   // [VK S6 2026-11-26/]
 
 
 // texture memory accounting (for macOS)
@@ -258,6 +261,12 @@ void LLImageGL::initClass(LLWindow* window, S32 num_catagories, bool skip_analyz
     LL_PROFILE_ZONE_SCOPED_CATEGORY_TEXTURE;
     sSkipAnalyzeAlpha = skip_analyze_alpha;
 
+    if (gGLManager.mIsNativeVulkan)
+    {
+        LL_INFOS("Vulkan") << "LLImageGL: native Vulkan mode (no GL PBO or GL texture threads)" << LL_ENDL;
+        return;
+    }
+
     if (sScratchPBO == 0)
     {
         glGenBuffers(1, &sScratchPBO);
@@ -294,7 +303,7 @@ void LLImageGL::cleanupClass()
     LLImageGLThread::deleteSingleton();
     if (sScratchPBO != 0)
     {
-        glDeleteBuffers(1, &sScratchPBO);
+        if (!gGLManager.mIsNativeVulkan) glDeleteBuffers(1, &sScratchPBO);
         sScratchPBO = 0;
         sScratchPBOSize = 0;
     }
@@ -765,7 +774,10 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
     if (mUseMipMaps)
     {
         //set has mip maps to true before binding image so tex parameters get set properly
-        gGL.getTexUnit(0)->unbind(mBindTarget);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            gGL.getTexUnit(0)->unbind(mBindTarget);
+        }
 
         mHasMipMaps = true;
         mTexOptionsDirty = true;
@@ -776,19 +788,45 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
         mHasMipMaps = false;
     }
 
-    gGL.getTexUnit(0)->bind(this, false, false, usename);
+    const U32 target_name = usename ? static_cast<U32>(usename) : mTexName;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (target_name && sWolfVkNativeStore)
+        {
+            sWolfVkNativeStore->setSamplerOptions(target_name, mFilterOption, mAddressMode);
+        }
+    }
+    else
+    {
+        gGL.getTexUnit(0)->bind(this, false, false, usename);
+        gGL.getTexUnit(0)->activate();
+    }
 
     if (data_in == nullptr)
     {
         S32 w = getWidth();
         S32 h = getHeight();
-        LLImageGL::setManualImage(mTarget, 0, mFormatInternal, w, h,
-            mFormatPrimary, mFormatType, (GLvoid*)data_in, mAllowCompression);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (target_name && sWolfVkNativeStore)
+            {
+                sWolfVkNativeStore->uploadImage2D(target_name, 0, mFormatInternal, w, h,
+                                                  mFormatPrimary, mFormatType, nullptr, mFormatSwapBytes, mUseMipMaps);
+            }
+            free_cur_tex_image();
+            alloc_tex_image(w, h, mFormatInternal, 1);
+        }
+        else
+        {
+            LLImageGL::setManualImage(mTarget, 0, mFormatInternal, w, h,
+                mFormatPrimary, mFormatType, (GLvoid*)data_in, mAllowCompression);
+        }
     }
     else if (mUseMipMaps)
     {
         if (data_hasmips)
         {
+            const S32 nummips = llmax(1, mMaxDiscardLevel - mCurrentDiscardLevel + 1);
             // NOTE: data_in points to largest image; smaller images
             // are stored BEFORE the largest image
             for (S32 d=mCurrentDiscardLevel; d<=mMaxDiscardLevel; d++)
@@ -806,26 +844,46 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
                 }
                 if (is_compressed)
                 {
-                    GLsizei tex_size = (GLsizei)dataFormatBytes(mFormatPrimary, w, h);
-                    glCompressedTexImage2D(mTarget, gl_level, mFormatPrimary, w, h, 0, tex_size, (GLvoid *)data_in);
-                    stop_glerror();
+                    if (gGLManager.mIsNativeVulkan)
+                    {
+                        if (target_name && sWolfVkNativeStore)
+                        {
+                            sWolfVkNativeStore->uploadImage2D(target_name, gl_level, mFormatPrimary, w, h, mFormatPrimary, GL_UNSIGNED_BYTE, data_in, false, gl_level == 0 && nummips > 1, gl_level == 0 ? nummips : 0);
+                        }
+                    }
+                    else
+                    {
+                        GLsizei tex_size = (GLsizei)dataFormatBytes(mFormatPrimary, w, h);
+                        glCompressedTexImage2D(mTarget, gl_level, mFormatPrimary, w, h, 0, tex_size, (GLvoid *)data_in);
+                        stop_glerror();
+                    }
                 }
                 else
                 {
-                    if(mFormatSwapBytes)
+                    if(mFormatSwapBytes && !gGLManager.mIsNativeVulkan)
                     {
                         glPixelStorei(GL_UNPACK_SWAP_BYTES, 1);
                         stop_glerror();
                     }
 
-                    LLImageGL::setManualImage(mTarget, gl_level, mFormatInternal, w, h, mFormatPrimary, GL_UNSIGNED_BYTE, (GLvoid*)data_in, mAllowCompression);
+                    if (gGLManager.mIsNativeVulkan)
+                    {
+                        if (target_name && sWolfVkNativeStore)
+                        {
+                            sWolfVkNativeStore->uploadImage2D(target_name, gl_level, mFormatInternal, w, h, mFormatPrimary, GL_UNSIGNED_BYTE, data_in, mFormatSwapBytes, gl_level == 0 && nummips > 1, gl_level == 0 ? nummips : 0);
+                        }
+                    }
+                    else
+                    {
+                        LLImageGL::setManualImage(mTarget, gl_level, mFormatInternal, w, h, mFormatPrimary, GL_UNSIGNED_BYTE, (GLvoid*)data_in, mAllowCompression);
+                    }
                     if (gl_level == 0)
                     {
                         analyzeAlpha(data_in, w, h);
                     }
                     updatePickMask(w, h, data_in);
 
-                    if(mFormatSwapBytes)
+                    if(mFormatSwapBytes && !gGLManager.mIsNativeVulkan)
                     {
                         glPixelStorei(GL_UNPACK_SWAP_BYTES, 0);
                         stop_glerror();
@@ -842,7 +900,7 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
             {
                 stop_glerror();
                 {
-                    if(mFormatSwapBytes)
+                    if(mFormatSwapBytes && !gGLManager.mIsNativeVulkan)
                     {
                         glPixelStorei(GL_UNPACK_SWAP_BYTES, 1);
                         stop_glerror();
@@ -856,27 +914,43 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
                     //use legacy mipmap generation mode (note: making this condional can cause rendering issues)
                     // -- but making it not conditional triggers deprecation warnings when core profile is enabled
                     //      (some rendering issues while core profile is enabled are acceptable at this point in time)
-                    if (!LLRender::sGLCoreProfile)
+                    if (!LLRender::sGLCoreProfile && !gGLManager.mIsNativeVulkan)
                     {
                         glTexParameteri(mTarget, GL_GENERATE_MIPMAP, GL_TRUE);
                     }
 
-                    LLImageGL::setManualImage(mTarget, 0, mFormatInternal,
-                                 w, h,
-                                 mFormatPrimary, mFormatType,
-                                 data_in, mAllowCompression);
+                    if (gGLManager.mIsNativeVulkan)
+                    {
+                        if (target_name && sWolfVkNativeStore)
+                        {
+                            sWolfVkNativeStore->uploadImage2D(target_name, 0, mFormatInternal, w, h, mFormatPrimary, mFormatType, data_in, mFormatSwapBytes, true);
+                        }
+                        free_cur_tex_image();
+                        alloc_tex_image(w, h, mFormatInternal, 1);
+                    }
+                    else
+                    {
+                        LLImageGL::setManualImage(mTarget, 0, mFormatInternal,
+                                     w, h,
+                                     mFormatPrimary, mFormatType,
+                                     data_in, mAllowCompression);
+                    }
                     analyzeAlpha(data_in, w, h);
                     stop_glerror();
 
                     updatePickMask(w, h, data_in);
 
-                    if(mFormatSwapBytes)
+                    if(mFormatSwapBytes && !gGLManager.mIsNativeVulkan)
                     {
                         glPixelStorei(GL_UNPACK_SWAP_BYTES, 0);
                         stop_glerror();
                     }
 
-                    if (LLRender::sGLCoreProfile)
+                    if (gGLManager.mIsNativeVulkan)
+                    {
+                        if (target_name && sWolfVkNativeStore) sWolfVkNativeStore->generateMipmaps(target_name);
+                    }
+                    else if (LLRender::sGLCoreProfile)
                     {
                         LL_PROFILE_GPU_ZONE("generate mip map");
                         glGenerateMipmap(mTarget);
@@ -959,13 +1033,28 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
                     llassert(w > 0 && h > 0 && cur_mip_data);
                     (void)cur_mip_data;
                     {
-                        if(mFormatSwapBytes)
+                        if(mFormatSwapBytes && !gGLManager.mIsNativeVulkan)
                         {
                             glPixelStorei(GL_UNPACK_SWAP_BYTES, 1);
                             stop_glerror();
                         }
 
-                        LLImageGL::setManualImage(mTarget, m, mFormatInternal, w, h, mFormatPrimary, mFormatType, cur_mip_data, mAllowCompression);
+                        if (gGLManager.mIsNativeVulkan)
+                        {
+                            if (target_name && sWolfVkNativeStore)
+                            {
+                                sWolfVkNativeStore->uploadImage2D(target_name, m, mFormatInternal, w, h, mFormatPrimary, mFormatType, cur_mip_data, mFormatSwapBytes, m == 0 && nummips > 1, m == 0 ? nummips : 0);
+                            }
+                            if (m == 0)
+                            {
+                                free_cur_tex_image();
+                                alloc_tex_image(w, h, mFormatInternal, 1);
+                            }
+                        }
+                        else
+                        {
+                            LLImageGL::setManualImage(mTarget, m, mFormatInternal, w, h, mFormatPrimary, mFormatType, cur_mip_data, mAllowCompression);
+                        }
                         if (m == 0)
                         {
                             analyzeAlpha(data_in, w, h);
@@ -976,7 +1065,7 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
                             updatePickMask(w, h, cur_mip_data);
                         }
 
-                        if(mFormatSwapBytes)
+                        if(mFormatSwapBytes && !gGLManager.mIsNativeVulkan)
                         {
                             glPixelStorei(GL_UNPACK_SWAP_BYTES, 0);
                             stop_glerror();
@@ -1009,27 +1098,49 @@ bool LLImageGL::setImage(const U8* data_in, bool data_hasmips /* = false */, S32
         S32 h = getHeight();
         if (is_compressed)
         {
-            GLsizei tex_size = (GLsizei)dataFormatBytes(mFormatPrimary, w, h);
-            glCompressedTexImage2D(mTarget, 0, mFormatPrimary, w, h, 0, tex_size, (GLvoid *)data_in);
-            stop_glerror();
+            if (gGLManager.mIsNativeVulkan)
+            {
+                if (target_name && sWolfVkNativeStore)
+                {
+                    sWolfVkNativeStore->uploadImage2D(target_name, 0, mFormatPrimary, w, h, mFormatPrimary, GL_UNSIGNED_BYTE, data_in, false, false);
+                }
+            }
+            else
+            {
+                GLsizei tex_size = (GLsizei)dataFormatBytes(mFormatPrimary, w, h);
+                glCompressedTexImage2D(mTarget, 0, mFormatPrimary, w, h, 0, tex_size, (GLvoid *)data_in);
+                stop_glerror();
+            }
         }
         else
         {
-            if(mFormatSwapBytes)
+            if(mFormatSwapBytes && !gGLManager.mIsNativeVulkan)
             {
                 glPixelStorei(GL_UNPACK_SWAP_BYTES, 1);
                 stop_glerror();
             }
 
-            LLImageGL::setManualImage(mTarget, 0, mFormatInternal, w, h,
-                         mFormatPrimary, mFormatType, (GLvoid *)data_in, mAllowCompression);
+            if (gGLManager.mIsNativeVulkan)
+            {
+                if (target_name && sWolfVkNativeStore)
+                {
+                    sWolfVkNativeStore->uploadImage2D(target_name, 0, mFormatInternal, w, h, mFormatPrimary, mFormatType, data_in, mFormatSwapBytes, false);
+                }
+                free_cur_tex_image();
+                alloc_tex_image(w, h, mFormatInternal, 1);
+            }
+            else
+            {
+                LLImageGL::setManualImage(mTarget, 0, mFormatInternal, w, h,
+                             mFormatPrimary, mFormatType, (GLvoid *)data_in, mAllowCompression);
+            }
             analyzeAlpha(data_in, w, h);
 
             updatePickMask(w, h, data_in);
 
             stop_glerror();
 
-            if(mFormatSwapBytes)
+            if(mFormatSwapBytes && !gGLManager.mIsNativeVulkan)
             {
                 glPixelStorei(GL_UNPACK_SWAP_BYTES, 0);
                 stop_glerror();
@@ -1198,6 +1309,19 @@ bool LLImageGL::setSubImage(const U8* datap, S32 data_width, S32 data_height, S3
         }
 
 
+        if (gGLManager.mIsNativeVulkan)
+        {
+            // [NATIVE VULKAN 2026-11-26] Dirty-rectangle upload directly into the Vulkan image (fonts, CEF media, etc.)
+            const U8* sub_datap = datap + (y_pos * data_width + x_pos) * getComponents();
+            if (sWolfVkNativeStore)
+            {
+                sWolfVkNativeStore->uploadSubImage2D(tex_name, 0, x_pos, y_pos, width, height, data_width,
+                                                     mFormatInternal, mFormatPrimary, mFormatType, sub_datap, mFormatSwapBytes);
+            }
+            mGLTextureCreated = true;
+            return true;
+        }
+
         glPixelStorei(GL_UNPACK_ROW_LENGTH, data_width);
         stop_glerror();
 
@@ -1251,6 +1375,10 @@ bool LLImageGL::setSubImage(const LLImageRaw* imageraw, S32 x_pos, S32 y_pos, S3
 // Copy sub image from frame buffer
 bool LLImageGL::setSubImageFromFrameBuffer(S32 fb_x, S32 fb_y, S32 x_pos, S32 y_pos, S32 width, S32 height)
 {
+    if (gGLManager.mIsNativeVulkan)
+    {
+        return false;
+    }
     if (gGL.getTexUnit(0)->bind(this, false, true))
     {
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, fb_x, fb_y, x_pos, y_pos, width, height);
@@ -1268,6 +1396,14 @@ bool LLImageGL::setSubImageFromFrameBuffer(S32 fb_x, S32 fb_y, S32 x_pos, S32 y_
 void LLImageGL::generateTextures(S32 numTextures, U32 *textures)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_TEXTURE;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        for (S32 i = 0; i < numTextures; ++i)
+        {
+            textures[i] = sWolfVkNativeStore ? sWolfVkNativeStore->generateName() : 0;
+        }
+        return;
+    }
     static constexpr U32 pool_size = 1024;
     static thread_local U32 name_pool[pool_size]; // pool of texture names
     static thread_local U32 name_count = 0; // number of available names in the pool
@@ -1308,7 +1444,26 @@ void LLImageGL::updateClass()
     if (!sFreeList[idx].empty())
     {
         free_tex_images((GLsizei) sFreeList[idx].size(), sFreeList[idx].data());
-        glDeleteTextures((GLsizei)sFreeList[idx].size(), sFreeList[idx].data());
+        if (gGLManager.mIsNativeVulkan)
+        {
+            if (sWolfVkNativeStore)
+            {
+                sWolfVkNativeStore->destroyNames((S32)sFreeList[idx].size(), sFreeList[idx].data());
+            }
+            sFreeList[idx].resize(0);
+            return;
+        }
+        // [VK S6 2026-11-26] a texture in Vulkan-owned memory is deleted by its owner (after the same delay); the
+        // others by OpenGL in one call, as before
+        if (sWolfVkTextureOwner)
+        {
+            sFreeList[idx].erase(std::remove_if(sFreeList[idx].begin(), sFreeList[idx].end(), [](U32 name) { return wolfVkDestroyStorage(name); }),
+                                 sFreeList[idx].end());
+        }
+        if (!sFreeList[idx].empty())
+        {
+            glDeleteTextures((GLsizei)sFreeList[idx].size(), sFreeList[idx].data());
+        }
         sFreeList[idx].resize(0);
     }
 }
@@ -1328,10 +1483,69 @@ void LLImageGL::deleteTextures(S32 numTextures, const U32 *textures)
     }
 }
 
+// [VK S6 2026-11-26] see llimagegl.h
+// static
+void LLImageGL::wolfVkManualImage2D(U32& name, U32 intformat, S32 width, S32 height, U32 pixformat, U32 pixtype, const void* pixels)
+{
+    LLTexUnit* unit = gGL.getTexUnit(0);
+    if (name && sWolfVkTextureOwner)
+    {
+        U32 has_format = 0;
+        S32 has_width = 0, has_height = 0, has_depth = 0, has_levels = 0;
+        if (sWolfVkTextureOwner->describe(name, has_format, has_width, has_height, has_depth, has_levels))
+        {
+            if (has_format == intformat && has_width == width && has_height == height)
+            {
+                // immutable storage of the right shape: the whole level is replaced, as glTexImage2D did
+                unit->bindManual(LLTexUnit::TT_TEXTURE, name);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, pixformat, pixtype, pixels);
+                // the memory count setManualImage keeps (free, then alloc of the same size)
+                free_cur_tex_image();
+                alloc_tex_image(width, height, intformat, 1);
+                return;
+            }
+            // immutable storage cannot change shape: this name goes the way every texture name goes (after
+            // DELETE_DELAY frames) and a new texture takes its place
+            deleteTextures(1, &name);
+            name = 0;
+        }
+    }
+    if (!name)
+    {
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            name = wolfVkCreateStorage(GL_TEXTURE_2D, 1, intformat, width, height, 1, false);
+            if (name)
+            {
+                unit->bindManual(LLTexUnit::TT_TEXTURE, name);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, pixformat, pixtype, pixels);
+                free_cur_tex_image();
+                alloc_tex_image(width, height, intformat, 1);
+                return;
+            }
+        }
+        generateTextures(1, &name);
+    }
+    unit->bindManual(LLTexUnit::TT_TEXTURE, name);
+    setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, intformat, width, height, pixformat, pixtype, pixels, false);
+}
+
 // static
 void LLImageGL::setManualImage(U32 target, S32 miplevel, S32 intformat, S32 width, S32 height, U32 pixformat, U32 pixtype, const void* pixels, bool allow_compression)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_TEXTURE;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        U32 bound_name = gGL.getTexUnit(gGL.getCurrentTexUnitIndex())->getCurrTexture();
+        if (bound_name && sWolfVkNativeStore)
+        {
+            sWolfVkNativeStore->uploadImage2D(bound_name, miplevel, static_cast<U32>(intformat), width, height,
+                                              pixformat, pixtype, pixels, false, false);
+        }
+        free_cur_tex_image();
+        alloc_tex_image(width, height, intformat, 1);
+        return;
+    }
     if (LLRender::sGLCoreProfile)
     {
         LL_PROFILE_ZONE_SCOPED_CATEGORY_TEXTURE;
@@ -1692,6 +1906,7 @@ bool LLImageGL::createGLTexture(S32 discard_level, const U8* data_in, bool data_
     else
     {
         LLImageGL::generateTextures(1, &new_texname);
+        if (!gGLManager.mIsNativeVulkan)
         {
             gGL.getTexUnit(0)->bind(this, false, false, new_texname);
             glTexParameteri(LLTexUnit::getInternalType(mBindTarget), GL_TEXTURE_BASE_LEVEL, 0);
@@ -1720,12 +1935,23 @@ bool LLImageGL::createGLTexture(S32 discard_level, const U8* data_in, bool data_
     }
 
     // Set texture options to our defaults.
-    gGL.getTexUnit(0)->setHasMipMaps(mHasMipMaps);
-    gGL.getTexUnit(0)->setTextureAddressMode(mAddressMode);
-    gGL.getTexUnit(0)->setTextureFilteringOption(mFilterOption);
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (new_texname && sWolfVkNativeStore)
+        {
+            sWolfVkNativeStore->setSamplerOptions(new_texname, mFilterOption, mAddressMode);
+        }
+        mTexOptionsDirty = false;
+    }
+    else
+    {
+        gGL.getTexUnit(0)->setHasMipMaps(mHasMipMaps);
+        gGL.getTexUnit(0)->setTextureAddressMode(mAddressMode);
+        gGL.getTexUnit(0)->setTextureFilteringOption(mFilterOption);
 
-    // things will break if we don't unbind after creation
-    gGL.getTexUnit(0)->unbind(mBindTarget);
+        // things will break if we don't unbind after creation
+        gGL.getTexUnit(0)->unbind(mBindTarget);
+    }
 
     //if we're on the image loading thread, be sure to delete old_texname and update mTexName on the main thread
     if (!defer_copy)
@@ -1760,6 +1986,7 @@ void LLImageGL::syncToMainThread(LLGLuint new_tex_name)
     LL_PROFILE_ZONE_SCOPED;
     llassert(!on_main_thread());
 
+    if (!gGLManager.mIsNativeVulkan)
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_TEXTURE("cglt - sync");
         if (gGLManager.mIsNVIDIA)
@@ -1825,6 +2052,37 @@ void LLImageGL::syncTexName(LLGLuint texname)
 bool LLImageGL::readBackRaw(S32 discard_level, LLImageRaw* imageraw, bool compressed_ok) const
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_TEXTURE;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (discard_level < 0)
+        {
+            discard_level = mCurrentDiscardLevel;
+        }
+        if (mTexName == 0 || !imageraw || !sWolfVkNativeStore ||
+            discard_level < mCurrentDiscardLevel || discard_level > mMaxDiscardLevel)
+        {
+            return false;
+        }
+        const S32 gl_discard = discard_level - mCurrentDiscardLevel;
+        const S32 width = getWidth(discard_level);
+        const S32 height = getHeight(discard_level);
+        const S32 ncomponents = getComponents();
+        if (width <= 0 || width > 2048 || height <= 0 || height > 2048 || ncomponents < 1 || ncomponents > 4)
+        {
+            return false;
+        }
+        LLImageDataLock lock(imageraw);
+        if (!imageraw->allocateDataSize(width, height, ncomponents))
+        {
+            return false;
+        }
+        if (!sWolfVkNativeStore->readBackImage2D(mTexName, gl_discard, width, height, ncomponents, imageraw->getData()))
+        {
+            imageraw->deleteData();
+            return false;
+        }
+        return true;
+    }
 
     if (discard_level < 0)
     {
@@ -2075,6 +2333,11 @@ void LLImageGL::setAddressMode(LLTexUnit::eTextureAddressMode mode)
         mAddressMode = mode;
     }
 
+    if (gGLManager.mIsNativeVulkan && mTexName != 0 && sWolfVkNativeStore)
+    {
+        sWolfVkNativeStore->setSamplerOptions(mTexName, mFilterOption, mAddressMode);
+    }
+
     if (gGL.getTexUnit(gGL.getCurrentTexUnitIndex())->getCurrTexture() == mTexName)
     {
         gGL.getTexUnit(gGL.getCurrentTexUnitIndex())->setTextureAddressMode(mode);
@@ -2088,6 +2351,11 @@ void LLImageGL::setFilteringOption(LLTexUnit::eTextureFilterOptions option)
     {
         mTexOptionsDirty = true;
         mFilterOption = option;
+    }
+
+    if (gGLManager.mIsNativeVulkan && mTexName != 0 && sWolfVkNativeStore)
+    {
+        sWolfVkNativeStore->setSamplerOptions(mTexName, mFilterOption, mAddressMode);
     }
 
     if (mTexName != 0 && gGL.getTexUnit(gGL.getCurrentTexUnitIndex())->getCurrTexture() == mTexName)
@@ -2104,7 +2372,14 @@ bool LLImageGL::getIsResident(bool test_now)
     {
         if (mTexName != 0)
         {
-            glAreTexturesResident(1, (GLuint*)&mTexName, &mIsResident);
+            if (gGLManager.mIsNativeVulkan)
+            {
+                mIsResident = GL_TRUE;
+            }
+            else
+            {
+                glAreTexturesResident(1, (GLuint*)&mTexName, &mIsResident);
+            }
         }
         else
         {
@@ -2561,6 +2836,10 @@ void LLImageGL::resetCurTexSizebar()
 bool LLImageGL::scaleDown(S32 desired_discard)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_TEXTURE;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        return false;
+    }
 
     if (mTarget != GL_TEXTURE_2D
         || mFormatInternal == -1 // not initialized

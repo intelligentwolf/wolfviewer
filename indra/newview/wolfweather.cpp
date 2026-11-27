@@ -127,6 +127,9 @@ void WolfRoofGrid::clear()
     mAnchored = false;
     mNext = 0;
     mCameraCell = -1;
+    mStillValid = false;   // [W114 2026-11-26/] a cleared grid sweeps at once
+    mStillRays = 0;
+    mRestUntil = 0.0;
 }
 
 LLVector3 WolfRoofGrid::originAgent() const
@@ -194,10 +197,51 @@ void WolfRoofGrid::update(const LLVector3& cam, S32 rays)
     const S32 ccx = (S32)floorf((cam.mV[VX] - o.mV[VX]) / mCell);
     const S32 ccy = (S32)floorf((cam.mV[VY] - o.mV[VY]) / mCell);
     mCameraCell = (ccx >= 0 && ccy >= 0 && ccx < mN && ccy < mN) ? ccy * mN + ccx : -1;
-    if (mCameraCell >= 0) rayCell(mCameraCell, cam.mV[VZ]);
+    // [W114 FRAME RATE 2026-11-26] (the Aurora review, 26 Nov: the indoors ray every frame on every grid, and 24 + 1 roof rays a
+    // frame in rain, whether or not anything had moved.) While the camera stands still (within STILL_M, global metres, height
+    // too: every ray starts from the camera's height) the grid rays until it has swept every cell once since it stopped, then
+    // rests REST_SECS (no rays at all, the camera's cell included), then sweeps again. The sweep is counted in round-robin rays
+    // only: the camera's own cell ray and the rays to unanswered (UNKNOWN) cells do not count, so `cells` round-robin rays have
+    // visited every cell. Unanswered cells are rayed before any round-robin ray of the same frame, so none is left when a rest
+    // begins; new ones appear only from a slide (the camera moved, which ends the stillness) or configure()/clear() (which
+    // reset it). A grid with no round-robin (rays == 0: the one-cell indoors grid) rays only the camera's cell, so that one ray
+    // is its whole sweep. When update() has not run for longer than REST_SECS (the weather was dry and now rains, a teleport,
+    // a grid that was not needed) the answers may be stale, so the stillness starts again and the grid sweeps at once.
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now - mLastUpdate > REST_SECS)
+    {
+        mStillValid = false;
+    }
+    mLastUpdate = now;
+    const S32 cells = mN * mN;
+    const S32 sweep_rays = rays > 0 ? cells : 1;
+    if (!mStillValid || (cam_g - mStillAt).lengthSquared() > (F64)(STILL_M * STILL_M))
+    {
+        mStillAt = cam_g;
+        mStillValid = true;
+        mStillRays = 0;
+        mRestUntil = 0.0;
+    }
+    else if (mStillRays >= sweep_rays)
+    {
+        if (mRestUntil <= 0.0)
+        {
+            mRestUntil = now + REST_SECS;
+        }
+        if (now < mRestUntil)
+        {
+            return;   // the answers stand: nothing has moved since every cell was last rayed
+        }
+        mStillRays = 0;
+        mRestUntil = 0.0;
+    }
+    if (mCameraCell >= 0)
+    {
+        rayCell(mCameraCell, cam.mV[VZ]);
+        if (rays <= 0) ++mStillRays;   // the one-cell grid's whole sweep (see above)
+    }
     // Unanswered cells first (a slide just exposed a strip of them, where nothing may fall until
     // a ray has looked), then the oldest answers round-robin.
-    const S32 cells = mN * mN;
     S32 r = 0;
     for (S32 k = 0; k < cells && r < rays; ++k)
     {
@@ -208,6 +252,7 @@ void WolfRoofGrid::update(const LLVector3& cam, S32 rays)
         const S32 k = mNext;
         mNext = (mNext + 1) % cells;
         rayCell(k, cam.mV[VZ]);
+        ++mStillRays;
     }
 }
 
@@ -977,10 +1022,8 @@ void WolfWeather::bindSnowCover(LLGLSLShader* shader, LLViewerRegion* regionp)
     }
     if (!mShelterTex || mShelterDirty)
     {
-        if (!mShelterTex) LLImageGL::generateTextures(1, &mShelterTex);
-        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mShelterTex);
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_R8,
-                                  SHELTER_N, SHELTER_N, GL_RED, GL_UNSIGNED_BYTE, mShelterData.data(), false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+        LLImageGL::wolfVkManualImage2D(mShelterTex, GL_R8, SHELTER_N, SHELTER_N, GL_RED, GL_UNSIGNED_BYTE, mShelterData.data());
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
         gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
         gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);

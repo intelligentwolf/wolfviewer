@@ -13,8 +13,9 @@
  * ([WIN32 CHILD 2026-11-10], the Win32 twin of T724's X11 child: the viewer's HWND carries WGL's pixel format and
  * context; the child has neither, class "WolfVulkanSurface", made/moved/destroyed on the window thread through
  * NativeHandles::mPostToWindowThread, mouse input passed down by HTTRANSPARENT).  UNTESTED here (no Windows machine).
- * macOS (LLWindowMacOSX): vkCreateMetalSurfaceEXT on a CAMetalLayer that wolfvksurface_macosx.mm attaches to the GL
- * content view; MoltenVK then presents through Metal.                          UNTESTED here (no Mac).
+ * macOS (LLWindowMacOSX): vkCreateMetalSurfaceEXT on the CAMetalLayer of a child NSView that wolfvksurface_macosx.mm
+ * puts over the GL content view ([W114-VULKAN MAC 2026-11-26], the twin of the X11/Win32 children; the GL view itself is
+ * left alone); MoltenVK then presents through Metal.                          UNTESTED here (no Mac).
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer Source Code
@@ -56,13 +57,14 @@ namespace WolfVkSurface
     // Healthy device, every swapchain on the surface destroyed: the surface, then its child window / Metal layer.
     void destroy(VkInstance instance, VkSurfaceKHR surface);
     // [V2 2026-11-11] The surface cannot be destroyed (hung device, or a swapchain still alive): it is left, but the
-    // child window is unmapped (X11) / hidden (Win32) and the Metal layer taken off the view (macOS), so that the
+    // child window is unmapped (X11) / hidden (Win32) / the Metal child view hidden (macOS), so that the
     // viewer's own window - where OpenGL carries on - is never covered. Needs no device. Wayland has no child.
     void abandon();
 
     // [T724] X11 child window: moved to (0,0) and resized to width x height (the viewer's window's drawable size), then
     // XSync, so that vkGetPhysicalDeviceSurfaceCapabilitiesKHR's currentExtent is the new size. Called before every
-    // swapchain build. No-op on the other surfaces.
+    // swapchain build. [W114-VULKAN MAC 2026-11-26] macOS: the Metal child view's frame and contentsScale (the size comes
+    // from the GL view, whose backing size is width x height). No-op on Wayland.
     void resize(uint32_t width, uint32_t height);
 
     // [T724] One line about the native window(s) behind the surface for the log when a swapchain cannot be made: X11
@@ -73,10 +75,15 @@ namespace WolfVkSurface
     const std::string& kind();
 
 #if LL_DARWIN
-    // Implemented in wolfvksurface_macosx.mm: makes the NSView layer-backed with a CAMetalLayer and returns it
-    // (the view keeps its own OpenGL drawing; the layer is what MoltenVK presents into). Null on failure.
+    // Implemented in wolfvksurface_macosx.mm ([W114-VULKAN MAC 2026-11-26] child view):
+    // adds a child view with a CAMetalLayer over the GL view nsview and returns the layer (what MoltenVK presents into;
+    // the GL view and its OpenGL drawable are not touched). Null on failure. A second call returns the same layer.
     void* metalLayerForView(void* nsview, std::string& error);
-    // [V2 2026-11-11] gives the view back the layer state it had before metalLayerForView (no-op if nothing was attached)
+    // the child takes the GL view's bounds again and its layer's contentsScale the backing scale (before a swapchain build)
+    void metalLayerResize();
+    // abandon(): the child is hidden and forgotten, never removed (MoltenVK's live swapchain keeps its layer)
+    void metalLayerHide();
+    // destroy(): the child is removed from the GL view and released (no-op if none)
     void metalLayerDetach();
 #endif
 }

@@ -17,11 +17,13 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "wolfvkshare.h"
+#include <unordered_map>   // [VK S6] WolfVkSharedImage::find
 #include "wolfvkbridge.h"   // [W106 VKRETRY 2026-11-13] noteLayerSelfTestStarting
 #include "llgl.h"
 #include "llglheaders.h"
 #include "vk/wolfvkbuffer.h"   // [IMPORT SELF-TEST 2026-11-10] the host buffer of the round trip
 #include <cstring>
+#include <vector>
 #include <algorithm>
 #include <cmath>
 
@@ -45,6 +47,8 @@ namespace
         PFNGLDELETESEMAPHORESEXTPROC DeleteSemaphoresEXT = nullptr;
         PFNGLWAITSEMAPHOREEXTPROC WaitSemaphoreEXT = nullptr;
         PFNGLSIGNALSEMAPHOREEXTPROC SignalSemaphoreEXT = nullptr;
+        PFNGLBUFFERSTORAGEMEMEXTPROC BufferStorageMemEXT = nullptr;   // [VK S6a] GL/glext.h:7750; not part of mComplete
+        PFNGLTEXSTORAGEMEM3DEXTPROC TexStorageMem3DEXT = nullptr;     // [VK S6] GL/glext.h:7748; not part of mComplete
 #if LL_WINDOWS
         PFNGLIMPORTMEMORYWIN32HANDLEEXTPROC ImportMemoryWin32HandleEXT = nullptr;
         PFNGLIMPORTSEMAPHOREWIN32HANDLEEXTPROC ImportSemaphoreWin32HandleEXT = nullptr;
@@ -56,6 +60,13 @@ namespace
         bool mComplete = false;
     };
     GLShareFunctions sGL;
+
+    // [VK S6 2026-11-26] WolfVkSharedImage::find: the live shared images by their OpenGL texture name
+    std::unordered_map<GLuint, WolfVkSharedImage*>& sharedByName()
+    {
+        static std::unordered_map<GLuint, WolfVkSharedImage*> map;
+        return map;
+    }
 
     void* glProc(const char* name)
     {
@@ -112,6 +123,8 @@ namespace
 #endif
 #undef WOLF_GL_LOAD
         sGL.mComplete = complete;
+        sGL.BufferStorageMemEXT = reinterpret_cast<PFNGLBUFFERSTORAGEMEMEXTPROC>(glProc("glBufferStorageMemEXT"));   // [VK S6a]
+        sGL.TexStorageMem3DEXT = reinterpret_cast<PFNGLTEXSTORAGEMEM3DEXTPROC>(glProc("glTexStorageMem3DEXT"));     // [VK S6]
     }
 
     // GL/glext.h tokens (lines in wolfvkshare.h)
@@ -412,8 +425,19 @@ bool WolfVkSharedImage::create(WolfVkDevice& device, const WolfVkImage::Format& 
     sGL.ImportMemoryFdEXT(mGlMemory, static_cast<GLuint64>(mImage->allocationSize()), WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, handle.mFd);
 #endif
     e = glErrors();
+#if LL_WINDOWS
+    // [VK S6 2026-11-26] EXT_external_objects_win32: "Importing a Windows handle does not transfer ownership of the handle
+    // to the GL implementation. For handle types defined as NT handles, the application must release the handle using an
+    // appropriate system call when it is no longer needed." OPAQUE_WIN32 is an NT handle, GL holds its own reference to
+    // the memory after the import, so the handle is closed here either way (it was never closed before: one leaked
+    // handle per shared image, and again at every resize).
+    device.closeExternalHandle(handle);
+    if (!e.empty()) { error = "glImportMemoryWin32HandleEXT: " + e; destroy(); return false; }
+#else
+    // EXT_external_objects_fd: "A successful import operation transfers ownership of <fd> to the GL implementation"
     if (!e.empty()) { error = "glImportMemoryFdEXT: " + e; device.closeExternalHandle(handle); destroy(); return false; }
-    // GL owns the handle now
+    // GL owns the fd now
+#endif
 
     GLint saved_tex = 0;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &saved_tex);
@@ -428,6 +452,7 @@ bool WolfVkSharedImage::create(WolfVkDevice& device, const WolfVkImage::Format& 
     e = glErrors();
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(saved_tex));
     if (!e.empty()) { error = llformat("glTexStorageMem2DEXT(0x%x): ", gl_internal_format) + e; destroy(); return false; }
+    sharedByName()[mGlTexture] = this;   // [VK S6 2026-11-26] WolfVkSharedImage::find
     // [BLACK WORLD 2026-11-10] every import on record (W102 Windows: a black world with the UI fine; no Windows log yet)
     LL_INFOS("Vulkan") << "Shared image imported into OpenGL: texture " << mGlTexture << " over memory object " << mGlMemory
                        << llformat(" (GL format 0x%x, %ux%u, %llu KiB, ", gl_internal_format, width, height, static_cast<unsigned long long>(mImage->allocationSize() / 1024))
@@ -495,6 +520,14 @@ namespace
         case VK_FORMAT_D32_SFLOAT:
             memcpy(&out[0], at, 4); out[1] = out[2] = out[3] = 0.f;
             channels = 1; tolerance = 0.0001f; return true;
+        case VK_FORMAT_X8_D24_UNORM_PACK32:
+        {
+            // [VK S6 2026-11-26] WolfVkImage::sharedDepthFormat: one 32-bit word, the depth in the low 24 bits (UNORM 24 =
+            // value / (2^24 - 1)); the upper 8 bits are not depth and not zero (probe 2026-11-26 nvidia-E-d24-run1)
+            uint32_t v; memcpy(&v, at, 4);
+            out[0] = static_cast<float>(v & 0xFFFFFFu) / 16777215.f; out[1] = out[2] = out[3] = 0.f;
+            channels = 1; tolerance = 0.0001f; return true;
+        }
         default:
             return false;
         }
@@ -739,14 +772,62 @@ void WolfVkShare::logExtensions(const WolfVkDevice& device)
 
 void WolfVkSharedImage::destroy()
 {
+    if (mGlTexture) sharedByName().erase(mGlTexture);   // [VK S6 2026-11-26]
     if (gGLManager.mInited)
     {
         if (mGlTexture) glDeleteTextures(1, &mGlTexture);
         if (mGlMemory && sGL.mComplete) sGL.DeleteMemoryObjectsEXT(1, &mGlMemory);
+        if (mGlHandSemaphore && sGL.mComplete) sGL.DeleteSemaphoresEXT(1, &mGlHandSemaphore);   // [VK S6 2026-11-26] handToGL
     }
-    mGlTexture = mGlMemory = 0;
+    mGlTexture = mGlMemory = mGlHandSemaphore = 0;
+    releaseVulkanHalf();
+}
+
+// [VK S6 2026-11-26] see wolfvkshare.h
+void WolfVkSharedImage::releaseVulkanHalf()
+{
+    if (mGlTexture)
+    {
+        auto& map = sharedByName();
+        auto it = map.find(mGlTexture);
+        if (it != map.end() && it->second == this) map.erase(it);
+    }
+    if (mHandSemaphore != VK_NULL_HANDLE && mDevice && mDevice->hasDevice() && !mDevice->hung())
+    {
+        // its one signal was consumed by a submit this code waited for (handToGL); frames in flight never name it,
+        // but the release goes the deferred way all the same
+        WolfVkDevice* device = mDevice;
+        const VkSemaphore semaphore = mHandSemaphore;
+        mDevice->deferDestroy([device, semaphore]() { gVk.vkDestroySemaphore(device->device(), semaphore, nullptr); });
+    }
+    mHandSemaphore = VK_NULL_HANDLE;   // on a hung device it stays with the device
     mImage.reset();   // its destroy() defers the Vulkan release
     mDevice = nullptr;
+}
+
+// [VK S6 2026-11-26] see wolfvkshare.h
+bool WolfVkSharedImage::handToGL(VkImageLayout gl_layout, std::string& error)
+{
+    if (!isValid() || !mDevice) { error = "no shared image"; return false; }
+    if (mHandSemaphore != VK_NULL_HANDLE) { error = "the image was already handed to OpenGL"; return false; }
+    const uint32_t layout_token = glLayout(gl_layout);
+    if (!layout_token) { error = "OpenGL has no name for this Vulkan layout"; return false; }
+    if (!WolfVkShare::glCreateSemaphore(*mDevice, mHandSemaphore, mGlHandSemaphore, error)) return false;
+    VkCommandBuffer cmd = mDevice->beginOneTime();
+    if (cmd == VK_NULL_HANDLE) { error = "no one-time command buffer"; return false; }
+    releaseToGL(cmd, gl_layout);
+    WolfVkDevice::ExtraSync sync;
+    sync.mSignals.push_back(mHandSemaphore);
+    // waited for here (bounded by the device's own limit): the signal has happened before OpenGL's wait is issued
+    if (!mDevice->submitSync(cmd, sync, true, error)) return false;
+    glErrors();
+    GLuint texture = mGlTexture;
+    GLenum layout = layout_token;
+    sGL.WaitSemaphoreEXT(mGlHandSemaphore, 0, nullptr, 1, &texture, &layout);
+    const std::string e = glErrors();
+    if (!e.empty()) { error = "glWaitSemaphoreEXT (first hand-over): " + e; return false; }
+    mGlHandLayout = gl_layout;
+    return true;
 }
 
 bool WolfVkShare::loadGL()
@@ -824,6 +905,17 @@ bool WolfVkShare::createSemaphores(std::string& error)
     sGL.ImportSemaphoreFdEXT(mGlSemVkDone, WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, h2.mFd);
 #endif
     const std::string e = glErrors();
+#if LL_WINDOWS
+    // [VK S6 2026-11-26] not transferred on Windows (EXT_external_objects_win32, as for the memory handle above): closed
+    // whether the import worked or not
+    mDevice->closeExternalHandle(h1);
+    mDevice->closeExternalHandle(h2);
+    if (!e.empty())
+    {
+        error = "glImportSemaphoreWin32HandleEXT: " + e;
+        return false;
+    }
+#else
     if (!e.empty())
     {
         error = "glImportSemaphoreFdEXT: " + e;
@@ -831,6 +923,7 @@ bool WolfVkShare::createSemaphores(std::string& error)
         mDevice->closeExternalHandle(h2);
         return false;
     }
+#endif
     return true;
 }
 
@@ -1120,4 +1213,343 @@ const LLRect& WolfVkShare::worldRect() const
 {
     static const LLRect empty;
     return mWorldRect ? *mWorldRect : empty;
+}
+
+// ---- [VK S6a 2026-11-26] the OpenGL half of the resource store ----------------------------------------------------------
+
+uint32_t WolfVkShare::glImportMemory(WolfVkDevice& device, VkDeviceMemory memory, VkDeviceSize size, bool dedicated, std::string& error)
+{
+#if LL_DARWIN
+    (void)device; (void)memory; (void)size; (void)dedicated;
+    error = "Apple's OpenGL has no GL_EXT_memory_object";
+    return 0;
+#else
+    if (!loadGL()) { error = "the OpenGL memory-object entry points are missing"; return 0; }
+    WolfVkDevice::ExternalHandle handle;
+    if (!device.exportMemory(memory, handle, error)) return 0;
+    glErrors();
+    GLuint gl_memory = 0;
+    sGL.CreateMemoryObjectsEXT(1, &gl_memory);
+    // "Memory object parameters become immutable once the object is associated with external memory": set first.
+    // DEDICATED_MEMORY_OBJECT_EXT (legal values FALSE, TRUE) "must be set to TRUE when the external memory handle ... was
+    // created as a dedicated allocation": set either way, so nothing rests on its initial value.
+    {
+        const GLint is_dedicated = dedicated ? GL_TRUE : GL_FALSE;
+        sGL.MemoryObjectParameterivEXT(gl_memory, WOLF_GL_DEDICATED_MEMORY_OBJECT_EXT, &is_dedicated);
+    }
+#if LL_WINDOWS
+    sGL.ImportMemoryWin32HandleEXT(gl_memory, static_cast<GLuint64>(size), WOLF_GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, handle.mWin32);
+    const std::string e = glErrors();
+    // EXT_external_objects_win32: "Importing a Windows handle does not transfer ownership of the handle to the GL
+    // implementation. For handle types defined as NT handles, the application must release the handle" - so it is
+    // closed here whether the import worked or not (OPAQUE_WIN32 is an NT handle, Vulkan spec
+    // VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT); GL keeps its own reference to the memory.
+    device.closeExternalHandle(handle);
+#else
+    sGL.ImportMemoryFdEXT(gl_memory, static_cast<GLuint64>(size), WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, handle.mFd);
+    const std::string e = glErrors();
+    // EXT_external_objects_fd: "A successful import operation transfers ownership of <fd> to the GL implementation";
+    // a failed one leaves it ours
+    if (!e.empty()) device.closeExternalHandle(handle);
+#endif
+    if (!e.empty())
+    {
+        error = "glImportMemory: " + e;
+        sGL.DeleteMemoryObjectsEXT(1, &gl_memory);
+        glErrors();
+        return 0;
+    }
+    return gl_memory;
+#endif
+}
+
+void WolfVkShare::glDeleteMemory(uint32_t gl_memory)
+{
+    if (gl_memory && sGL.DeleteMemoryObjectsEXT && gGLManager.mInited)
+    {
+        const GLuint name = gl_memory;
+        sGL.DeleteMemoryObjectsEXT(1, &name);
+    }
+}
+
+bool WolfVkShare::glBufferImportAvailable()
+{
+    loadGLFunctions();
+    return sGL.mComplete && sGL.BufferStorageMemEXT != nullptr;
+}
+
+uint32_t WolfVkShare::glBufferOverMemory(uint32_t gl_memory, VkDeviceSize offset, VkDeviceSize size, std::string& error)
+{
+    if (!glBufferImportAvailable()) { error = "glBufferStorageMemEXT is missing"; return 0; }
+    glErrors();
+    GLuint buffer = 0;
+    glGenBuffers(1, &buffer);
+    glBindBuffer(GL_COPY_WRITE_BUFFER, buffer);
+    // EXT_external_objects: BufferStorageMemEXT(target, size, memory, offset) - "<memory> and <offset> define a region
+    // of abstract memory that will be used as the data store"
+    sGL.BufferStorageMemEXT(GL_COPY_WRITE_BUFFER, static_cast<GLsizeiptr>(size), gl_memory, static_cast<GLuint64>(offset));
+    const std::string e = glErrors();
+    glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+    if (!e.empty())
+    {
+        error = llformat("glBufferStorageMemEXT(%llu bytes at %llu): ", static_cast<unsigned long long>(size), static_cast<unsigned long long>(offset)) + e;
+        glDeleteBuffers(1, &buffer);
+        glErrors();
+        return 0;
+    }
+    return buffer;
+}
+
+bool WolfVkShare::glCreateSemaphore(WolfVkDevice& device, VkSemaphore& vk_semaphore, uint32_t& gl_semaphore, std::string& error)
+{
+#if LL_DARWIN
+    (void)device; (void)vk_semaphore; (void)gl_semaphore;
+    error = "Apple's OpenGL has no GL_EXT_semaphore";
+    return false;
+#else
+    if (!loadGL()) { error = "the OpenGL semaphore entry points are missing"; return false; }
+    WolfVkDevice::ExternalHandle handle;
+    if (!device.createExportedSemaphore(vk_semaphore, handle, error)) return false;
+    glErrors();
+    GLuint sem = 0;
+    sGL.GenSemaphoresEXT(1, &sem);
+#if LL_WINDOWS
+    sGL.ImportSemaphoreWin32HandleEXT(sem, WOLF_GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, handle.mWin32);
+    const std::string e = glErrors();
+    device.closeExternalHandle(handle);   // not transferred on Windows (see glImportMemory)
+#else
+    sGL.ImportSemaphoreFdEXT(sem, WOLF_GL_HANDLE_TYPE_OPAQUE_FD_EXT, handle.mFd);
+    const std::string e = glErrors();
+    if (!e.empty()) device.closeExternalHandle(handle);
+#endif
+    if (!e.empty())
+    {
+        error = "glImportSemaphore: " + e;
+        sGL.DeleteSemaphoresEXT(1, &sem);
+        glErrors();
+        // the Vulkan semaphore was never used: destroyed at once
+        gVk.vkDestroySemaphore(device.device(), vk_semaphore, nullptr);
+        vk_semaphore = VK_NULL_HANDLE;
+        return false;
+    }
+    gl_semaphore = sem;
+    return true;
+#endif
+}
+
+void WolfVkShare::glDeleteSemaphore(uint32_t gl_semaphore)
+{
+    if (gl_semaphore && sGL.DeleteSemaphoresEXT && gGLManager.mInited)
+    {
+        const GLuint name = gl_semaphore;
+        sGL.DeleteSemaphoresEXT(1, &name);
+    }
+}
+
+bool WolfVkShare::glSignalBuffers(uint32_t gl_semaphore, uint32_t count, const uint32_t* buffers, std::string& error)
+{
+    glErrors();
+    // SignalSemaphoreEXT(semaphore, numBufferBarriers, buffers, numTextureBarriers, textures, dstLayouts): "will insert
+    // a semaphore signaling operation in the GL command stream, and flush the command stream as if Flush were inserted"
+    sGL.SignalSemaphoreEXT(gl_semaphore, count, count ? buffers : nullptr, 0, nullptr, nullptr);
+    const std::string e = glErrors();
+    if (!e.empty()) { error = "glSignalSemaphoreEXT: " + e; return false; }
+    return true;
+}
+
+bool WolfVkShare::glWaitBuffers(uint32_t gl_semaphore, uint32_t count, const uint32_t* buffers, std::string& error)
+{
+    glErrors();
+    // WaitSemaphoreEXT: "Returns immediately but causes GL server to block until <semaphore> is signaled ... Following
+    // completion of the semaphore wait operation, memory will also be made visible in the specified buffer ... objects"
+    sGL.WaitSemaphoreEXT(gl_semaphore, count, count ? buffers : nullptr, 0, nullptr, nullptr);
+    const std::string e = glErrors();
+    if (!e.empty()) { error = "glWaitSemaphoreEXT: " + e; return false; }
+    return true;
+}
+
+// [VK S6 2026-11-26] see wolfvkshare.h. GL/glext.h:8078-8079: glWaitSemaphoreEXT(semaphore, numBufferBarriers, buffers,
+// numTextureBarriers, textures, srcLayouts) and glSignalSemaphoreEXT(... textures, dstLayouts).
+namespace
+{
+    bool textureLayoutTokens(const char* what, uint32_t gl_semaphore, uint32_t count, const uint32_t* textures, const VkImageLayout* layouts,
+                             std::vector<GLenum>& tokens, std::string& error)
+    {
+        if (!WolfVkShare::loadGL()) { error = "the OpenGL semaphore entry points are missing"; return false; }
+        if (!gl_semaphore || !count || !textures || !layouts) { error = std::string(what) + ": no semaphore or no textures"; return false; }
+        tokens.resize(count);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            tokens[i] = WolfVkSharedImage::glLayout(layouts[i]);
+            if (!textures[i] || !tokens[i]) { error = std::string(what) + ": a texture name is 0 or its layout has no OpenGL token"; return false; }
+        }
+        return true;
+    }
+}
+
+bool WolfVkShare::glSignalTextures(uint32_t gl_semaphore, uint32_t count, const uint32_t* textures, const VkImageLayout* layouts, std::string& error)
+{
+    std::vector<GLenum> tokens;
+    if (!textureLayoutTokens("glSignalTextures", gl_semaphore, count, textures, layouts, tokens, error)) return false;
+    glErrors();
+    sGL.SignalSemaphoreEXT(gl_semaphore, 0, nullptr, count, textures, tokens.data());
+    const std::string e = glErrors();
+    if (!e.empty()) { error = "glSignalSemaphoreEXT (textures): " + e; return false; }
+    return true;
+}
+
+bool WolfVkShare::glWaitTextures(uint32_t gl_semaphore, uint32_t count, const uint32_t* textures, const VkImageLayout* layouts, std::string& error)
+{
+    std::vector<GLenum> tokens;
+    if (!textureLayoutTokens("glWaitTextures", gl_semaphore, count, textures, layouts, tokens, error)) return false;
+    glErrors();
+    sGL.WaitSemaphoreEXT(gl_semaphore, 0, nullptr, count, textures, tokens.data());
+    const std::string e = glErrors();
+    if (!e.empty()) { error = "glWaitSemaphoreEXT (textures): " + e; return false; }
+    return true;
+}
+
+// ---- [VK S6 2026-11-26] shared images of any kind ------------------------------------------------------------------------
+
+bool WolfVkSharedImage::arrayImportAvailable()
+{
+    loadGLFunctions();
+    return sGL.mComplete && sGL.TexStorageMem3DEXT != nullptr;
+}
+
+bool WolfVkSharedImage::createKind(WolfVkDevice& device, WolfVkImage::Kind kind, const WolfVkImage::Format& format, uint32_t width, uint32_t height,
+                                   uint32_t layers, uint32_t mip_levels, VkImageUsageFlags usage, uint32_t gl_internal_format, std::string& error)
+{
+    destroy();
+    if (!WolfVkShare::loadGL()) { error = "the OpenGL memory-object entry points are missing"; return false; }
+    GLenum target = GL_TEXTURE_2D;
+    bool three_d_call = false;   // glTexStorageMem3DEXT
+    switch (kind)
+    {
+    case WolfVkImage::Kind::TEXTURE_2D:         target = GL_TEXTURE_2D; break;
+    case WolfVkImage::Kind::TEXTURE_CUBE:       target = GL_TEXTURE_CUBE_MAP; break;
+    case WolfVkImage::Kind::TEXTURE_2D_ARRAY:   target = GL_TEXTURE_2D_ARRAY; three_d_call = true; break;
+    case WolfVkImage::Kind::TEXTURE_CUBE_ARRAY: target = GL_TEXTURE_CUBE_MAP_ARRAY; three_d_call = true; break;
+    case WolfVkImage::Kind::TEXTURE_3D:         target = GL_TEXTURE_3D; three_d_call = true; break;
+    }
+    if (three_d_call && !arrayImportAvailable()) { error = "OpenGL has no glTexStorageMem3DEXT"; return false; }
+    bool dedicated_only = false;
+    if (!WolfVkImage::externalFormatSupported(device, kind, format, usage, dedicated_only, error)) return false;
+    mDevice = &device;
+    mImage.reset(new WolfVkImage());
+    if (!mImage->createExternal(device, kind, format, width, height, layers, mip_levels, usage, error)) { destroy(); return false; }
+    // the whole allocation is the image's own (WolfVkAllocator gives an exported image its own VkDeviceMemory); GL is
+    // told whether it was made with VkMemoryDedicatedAllocateInfo
+    mGlMemory = WolfVkShare::glImportMemory(device, mImage->allocation().mMemory, mImage->allocationSize(), mImage->dedicatedAllocation(), error);
+    if (!mGlMemory) { destroy(); return false; }
+
+    glErrors();
+    GLint saved_active = 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &saved_active);
+    GLenum binding_query = GL_TEXTURE_BINDING_2D;
+    switch (target)
+    {
+    case GL_TEXTURE_CUBE_MAP:       binding_query = GL_TEXTURE_BINDING_CUBE_MAP; break;
+    case GL_TEXTURE_2D_ARRAY:       binding_query = GL_TEXTURE_BINDING_2D_ARRAY; break;
+    case GL_TEXTURE_CUBE_MAP_ARRAY: binding_query = GL_TEXTURE_BINDING_CUBE_MAP_ARRAY; break;
+    case GL_TEXTURE_3D:             binding_query = GL_TEXTURE_BINDING_3D; break;
+    default: break;
+    }
+    GLint saved_tex = 0;
+    glGetIntegerv(binding_query, &saved_tex);
+    glGenTextures(1, &mGlTexture);
+    glBindTexture(target, mGlTexture);
+    // "TEXTURE_TILING_EXT ... takes effect the next time storage is allocated from a memory object"; the Vulkan image is
+    // optimally tiled (WolfVkImage::createInternal)
+    glTexParameteri(target, WOLF_GL_TEXTURE_TILING_EXT, static_cast<GLint>(WOLF_GL_OPTIMAL_TILING_EXT));
+    const GLsizei levels = static_cast<GLsizei>(mImage->mipLevels());
+    if (three_d_call)
+    {
+        // TexStorage3D's depth: the layer count of a 2D array, the number of layer-faces of a cube map array ("depth
+        // ... must be a multiple of six", OpenGL 4.6 core 8.19), the depth of a 3D texture - WolfVkImage's layers each time
+        sGL.TexStorageMem3DEXT(target, levels, static_cast<GLenum>(gl_internal_format), static_cast<GLsizei>(width), static_cast<GLsizei>(height),
+                               static_cast<GLsizei>(layers), mGlMemory, 0);
+    }
+    else
+    {
+        sGL.TexStorageMem2DEXT(target, levels, static_cast<GLenum>(gl_internal_format), static_cast<GLsizei>(width), static_cast<GLsizei>(height), mGlMemory, 0);
+    }
+    const std::string e = glErrors();
+    glBindTexture(target, static_cast<GLuint>(saved_tex));
+    glActiveTexture(static_cast<GLenum>(saved_active));
+    if (!e.empty())
+    {
+        error = llformat("glTexStorageMem%sEXT(target 0x%x, format 0x%x, %ux%ux%u, %d levels): ", three_d_call ? "3D" : "2D", target, gl_internal_format, width, height, layers, levels) + e;
+        destroy();
+        return false;
+    }
+    mGlTarget = target;
+    sharedByName()[mGlTexture] = this;
+    LL_INFOS("Vulkan") << "Shared image imported into OpenGL: texture " << mGlTexture << llformat(" (target 0x%x, GL format 0x%x, %ux%u, %u layers, %d levels, %llu KiB)",
+                          target, gl_internal_format, width, height, layers, levels, static_cast<unsigned long long>(mImage->allocationSize() / 1024)) << LL_ENDL;
+    return true;
+}
+
+WolfVkSharedImage* WolfVkSharedImage::find(uint32_t gl_texture)
+{
+    if (!gl_texture) return nullptr;
+    auto& map = sharedByName();
+    auto it = map.find(gl_texture);
+    return it == map.end() ? nullptr : it->second;
+}
+
+uint32_t WolfVkSharedImage::glLayout(VkImageLayout layout)
+{
+    // EXT_external_objects table 4.4 "Texture layouts and corresponding Vulkan Image Layouts"; values GL/glext.h:8064-8072
+    switch (layout)
+    {
+    case VK_IMAGE_LAYOUT_GENERAL:                                    return 0x958D;   // GL_LAYOUT_GENERAL_EXT
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:                   return 0x958E;   // GL_LAYOUT_COLOR_ATTACHMENT_EXT
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:           return 0x958F;   // GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:            return 0x9590;   // GL_LAYOUT_DEPTH_STENCIL_READ_ONLY_EXT
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:                   return 0x9591;   // GL_LAYOUT_SHADER_READ_ONLY_EXT
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:                       return 0x9592;   // GL_LAYOUT_TRANSFER_SRC_EXT
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:                       return 0x9593;   // GL_LAYOUT_TRANSFER_DST_EXT
+    case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL: return 0x9530;   // GL_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_EXT
+    case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL: return 0x9531;   // GL_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_EXT
+    default:                                                         return 0;        // GL_NONE = VK_IMAGE_LAYOUT_UNDEFINED
+    }
+}
+
+namespace
+{
+    // Source: vulkan_core.h:4025 VkImageMemoryBarrier; :5477 VK_QUEUE_FAMILY_EXTERNAL. Every level and every layer
+    // (a 3D image has one array layer; its slices belong to the level).
+    void sharedBarrier(VkCommandBuffer cmd, WolfVkImage& image, VkImageLayout old_layout, VkImageLayout new_layout, VkAccessFlags src_access, VkAccessFlags dst_access,
+                       VkPipelineStageFlags src_stages, VkPipelineStageFlags dst_stages, uint32_t src_family, uint32_t dst_family)
+    {
+        VkImageMemoryBarrier b{};
+        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        b.srcAccessMask = src_access;
+        b.dstAccessMask = dst_access;
+        b.oldLayout = old_layout;
+        b.newLayout = new_layout;
+        b.srcQueueFamilyIndex = src_family;
+        b.dstQueueFamilyIndex = dst_family;
+        b.image = image.image();
+        b.subresourceRange = { image.aspect(), 0, image.mipLevels(), 0, image.kind() == WolfVkImage::Kind::TEXTURE_3D ? 1u : image.layers() };
+        gVk.vkCmdPipelineBarrier(cmd, src_stages, dst_stages, 0, 0, nullptr, 0, nullptr, 1, &b);
+        image.noteLayout(new_layout, dst_stages, dst_access);
+    }
+}
+
+void WolfVkSharedImage::acquireFromGL(VkCommandBuffer cmd, VkImageLayout gl_layout, VkImageLayout vk_layout, VkPipelineStageFlags dst_stages, VkAccessFlags dst_access)
+{
+    if (!mImage || !mImage->isValid() || !mDevice) return;
+    // what OpenGL did to it is not Vulkan's to name: no source access, from the top of the pipe; the semaphore the
+    // submit waits on orders it after OpenGL's work
+    sharedBarrier(cmd, *mImage, gl_layout, vk_layout, 0, dst_access, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, dst_stages, VK_QUEUE_FAMILY_EXTERNAL, mDevice->queueFamily());
+}
+
+void WolfVkSharedImage::releaseToGL(VkCommandBuffer cmd, VkImageLayout gl_layout)
+{
+    if (!mImage || !mImage->isValid() || !mDevice) return;
+    // every kind of write Vulkan may have done to it finishes first (all commands), nothing of Vulkan's reads it after
+    sharedBarrier(cmd, *mImage, mImage->layout(), gl_layout, VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT, 0,
+                  VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, mDevice->queueFamily(), VK_QUEUE_FAMILY_EXTERNAL);
 }

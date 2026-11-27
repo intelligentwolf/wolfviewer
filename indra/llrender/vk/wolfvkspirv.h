@@ -64,6 +64,10 @@ namespace WolfVkSpirv
         uint32_t mBinding = 0;
         uint32_t mSize = 0;           // bytes: last member's offset + size, rounded to 16
         bool mPushConstant = false;
+        // [VULKAN G-BUFFER S2 2026-11-26] the module reads it: some instruction (load, access chain, copy, call argument) names
+        // the block's variable. glslang drops functions main never calls, so this is the static use of Vulkan spec 15.1
+        // ("statically used"); an unused block or sampler needs no real resource behind its descriptor.
+        bool mUsed = false;
         std::vector<BlockMember> mMembers;
     };
 
@@ -77,6 +81,7 @@ namespace WolfVkSpirv
         bool mArrayed = false;        // 2D array / cube array
         bool mShadow = false;         // depth comparison sampler (OpTypeImage Depth = 1)
         bool mMultisampled = false;
+        bool mUsed = false;           // [S2] statically used (UniformBlock::mUsed)
     };
 
     struct Input

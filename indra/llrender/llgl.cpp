@@ -1319,6 +1319,13 @@ void LLGLManager::getGLInfo(LLSD& info)
         info["GLInfo"]["GLVersion"] = HEADLESS_VERSION_STRING;
         return;
     }
+    else if (gGLManager.mIsNativeVulkan)
+    {
+        info["GLInfo"]["GLVendor"] = mGLVendor;
+        info["GLInfo"]["GLRenderer"] = mGLRenderer;
+        info["GLInfo"]["GLVersion"] = mGLVersionString;
+        return;
+    }
     else
     {
         info["GLInfo"]["GLVendor"] = ll_safe_string((const char *)glGetString(GL_VENDOR));
@@ -2346,13 +2353,14 @@ void rotate_quat(LLQuaternion& rotation)
 
 void flush_glerror()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     glGetError();
 }
 
 //this function outputs gl error to the log file, does not crash the code.
 void log_glerror()
 {
-    if (LL_UNLIKELY(!gGLManager.mInited))
+    if (LL_UNLIKELY(!gGLManager.mInited) || gGLManager.mIsNativeVulkan)
     {
         return ;
     }
@@ -2378,6 +2386,7 @@ void log_glerror()
 
 void do_assert_glerror()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     //  Create or update texture to be used with this data
     GLenum error;
     error = glGetError();
@@ -2448,6 +2457,7 @@ void assert_glerror()
 
 void clear_glerror()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     glGetError();
     glGetError();
 }
@@ -2459,6 +2469,43 @@ void clear_glerror()
 
 // Static members
 std::unordered_map<LLGLenum, LLGLboolean> LLGLState::sStateMap;
+S32 LLGLState::sWolfScissor[4] = { 0, 0, 0, 0 };
+void (*LLGLState::sWolfVkClear)(U32 mask, const F32 rgba[4], F32 depth) = nullptr;
+F32 LLGLState::sWolfClearColor[4] = { 0.f, 0.f, 0.f, 1.f };
+
+void LLGLState::wolfSetScissor(S32 x, S32 y, S32 w, S32 h)
+{
+    sWolfScissor[0] = x;
+    sWolfScissor[1] = y;
+    sWolfScissor[2] = w;
+    sWolfScissor[3] = h;
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        glScissor(x, y, w, h);
+    }
+}
+
+void LLGLState::wolfClearColor(F32 r, F32 g, F32 b, F32 a)
+{
+    sWolfClearColor[0] = r;
+    sWolfClearColor[1] = g;
+    sWolfClearColor[2] = b;
+    sWolfClearColor[3] = a;
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        glClearColor(r, g, b, a);
+    }
+}
+
+void LLGLState::wolfClear(U32 mask)
+{
+    if (gGLManager.mIsNativeVulkan)
+    {
+        if (sWolfVkClear) sWolfVkClear(mask, sWolfClearColor, 1.0f);
+        return;
+    }
+    glClear(mask);
+}
 
 GLboolean LLGLDepthTest::sDepthEnabled = GL_FALSE; // OpenGL default
 GLenum LLGLDepthTest::sDepthFunc = GL_LESS; // OpenGL default
@@ -2472,7 +2519,10 @@ void LLGLState::initClass()
 
     //make sure multisample defaults to disabled
     sStateMap[GL_MULTISAMPLE] = GL_FALSE;
-    glDisable(GL_MULTISAMPLE);
+    if (!gGLManager.mIsNativeVulkan)
+    {
+        glDisable(GL_MULTISAMPLE);
+    }
 }
 
 //static
@@ -2487,6 +2537,15 @@ void LLGLState::restoreGL()
 void LLGLState::resetTextureStates()
 {
     gGL.flush();
+    if (gGLManager.mIsNativeVulkan)
+    {
+        for (S32 j = LL_NUM_TEXTURE_LAYERS - 1; j >= 0; j--)
+        {
+            gGL.getTexUnit(j)->activate();
+            j == 0 ? gGL.getTexUnit(j)->enable(LLTexUnit::TT_TEXTURE) : gGL.getTexUnit(j)->disable();
+        }
+        return;
+    }
     GLint maxTextureUnits;
 
     glGetIntegerv(GL_MAX_TEXTURE_UNITS_ARB, &maxTextureUnits);
@@ -2510,7 +2569,7 @@ void LLGLState::dumpStates()
 
 void LLGLState::checkStates(GLboolean writeAlpha)
 {
-    if (!gDebugGL)
+    if (!gDebugGL || gGLManager.mIsNativeVulkan)
     {
         return;
     }
@@ -2574,13 +2633,13 @@ void LLGLState::setEnabled(S32 enabled)
     else if (enabled == ENABLED_STATE && sStateMap[mState] != GL_TRUE)
     {
         gGL.flush();
-        glEnable(mState);
+        if (!gGLManager.mIsNativeVulkan) glEnable(mState);
         sStateMap[mState] = GL_TRUE;
     }
     else if (enabled == DISABLED_STATE && sStateMap[mState] != GL_FALSE)
     {
         gGL.flush();
-        glDisable(mState);
+        if (!gGLManager.mIsNativeVulkan) glDisable(mState);
         sStateMap[mState] = GL_FALSE;
     }
     mIsEnabled = enabled;
@@ -2591,7 +2650,7 @@ LLGLState::~LLGLState()
     LL_PROFILE_ZONE_SCOPED_CATEGORY_PIPELINE;
     if (mState)
     {
-        if (gDebugGL)
+        if (gDebugGL && !gGLManager.mIsNativeVulkan)
         {
             if (!gDebugSession)
             {
@@ -2611,12 +2670,12 @@ LLGLState::~LLGLState()
             gGL.flush();
             if (mWasEnabled)
             {
-                glEnable(mState);
+                if (!gGLManager.mIsNativeVulkan) glEnable(mState);
                 sStateMap[mState] = GL_TRUE;
             }
             else
             {
-                glDisable(mState);
+                if (!gGLManager.mIsNativeVulkan) glDisable(mState);
                 sStateMap[mState] = GL_FALSE;
             }
         }
@@ -2836,20 +2895,23 @@ LLGLDepthTest::LLGLDepthTest(GLboolean depth_enabled, GLboolean write_enabled, G
     if (depth_enabled != sDepthEnabled)
     {
         gGL.flush();
-        if (depth_enabled) glEnable(GL_DEPTH_TEST);
-        else glDisable(GL_DEPTH_TEST);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            if (depth_enabled) glEnable(GL_DEPTH_TEST);
+            else glDisable(GL_DEPTH_TEST);
+        }
         sDepthEnabled = depth_enabled;
     }
     if (depth_func != sDepthFunc)
     {
         gGL.flush();
-        glDepthFunc(depth_func);
+        if (!gGLManager.mIsNativeVulkan) glDepthFunc(depth_func);
         sDepthFunc = depth_func;
     }
     if (write_enabled != sWriteEnabled)
     {
         gGL.flush();
-        glDepthMask(write_enabled);
+        if (!gGLManager.mIsNativeVulkan) glDepthMask(write_enabled);
         sWriteEnabled = write_enabled;
     }
 }
@@ -2861,27 +2923,30 @@ LLGLDepthTest::~LLGLDepthTest()
     if (sDepthEnabled != mPrevDepthEnabled )
     {
         gGL.flush();
-        if (mPrevDepthEnabled) glEnable(GL_DEPTH_TEST);
-        else glDisable(GL_DEPTH_TEST);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            if (mPrevDepthEnabled) glEnable(GL_DEPTH_TEST);
+            else glDisable(GL_DEPTH_TEST);
+        }
         sDepthEnabled = mPrevDepthEnabled;
     }
     if (sDepthFunc != mPrevDepthFunc)
     {
         gGL.flush();
-        glDepthFunc(mPrevDepthFunc);
+        if (!gGLManager.mIsNativeVulkan) glDepthFunc(mPrevDepthFunc);
         sDepthFunc = mPrevDepthFunc;
     }
     if (sWriteEnabled != mPrevWriteEnabled )
     {
         gGL.flush();
-        glDepthMask(mPrevWriteEnabled);
+        if (!gGLManager.mIsNativeVulkan) glDepthMask(mPrevWriteEnabled);
         sWriteEnabled = mPrevWriteEnabled;
     }
 }
 
 void LLGLDepthTest::checkState()
 {
-    if (gDebugGL)
+    if (gDebugGL && !gGLManager.mIsNativeVulkan)
     {
         GLint func = 0;
         GLboolean mask = GL_FALSE;

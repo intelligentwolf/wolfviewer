@@ -689,10 +689,12 @@ void GLTFSceneManager::render(Asset& asset, U8 variant)
 
                 if (!rigged)
                 {
-                    glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_GLTF_NODES, asset.mNodesUBO);
+                    if (!gGLManager.mIsNativeVulkan) glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_GLTF_NODES, asset.mNodesUBO);
+                    LLGLSLShader::wolfVkUniformBufferBind(LLGLSLShader::UB_GLTF_NODES, asset.mNodesUBO);
                 }
 
-                glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_GLTF_MATERIALS, asset.mMaterialsUBO);
+                if (!gGLManager.mIsNativeVulkan) glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_GLTF_MATERIALS, asset.mMaterialsUBO);
+                LLGLSLShader::wolfVkUniformBufferBind(LLGLSLShader::UB_GLTF_MATERIALS, asset.mMaterialsUBO);
 
                 for (U32 i = 0; i < TEXTURE_TYPE_COUNT; ++i)
                 {
@@ -732,7 +734,8 @@ void GLTFSceneManager::render(Asset& asset, U8 variant)
                     LL_PROFILE_ZONE_NAMED_CATEGORY_GLTF("gltfdc - bind skin");
                     llassert(node.mSkin != INVALID_INDEX);
                     Skin& skin = asset.mSkins[node.mSkin];
-                    glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_GLTF_JOINTS, skin.mUBO);
+                    if (!gGLManager.mIsNativeVulkan) glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_GLTF_JOINTS, skin.mUBO);
+                    LLGLSLShader::wolfVkUniformBufferBind(LLGLSLShader::UB_GLTF_JOINTS, skin.mUBO);
                 }
                 else
                 {
@@ -771,6 +774,42 @@ void GLTFSceneManager::bindTexture(Asset& asset, TextureType texture_type, Textu
 
     if (channel > -1)
     {
+        if (gGLManager.mIsNativeVulkan)
+        {
+            LLTexUnit* unit = gGL.getTexUnit(channel);
+            if (info.mIndex != INVALID_INDEX)
+            {
+                Texture& texture = asset.mTextures[info.mIndex];
+                LLViewerTexture* tex = asset.mImages[texture.mSource].mTexture;
+                if (tex)
+                {
+                    unit->bind(tex);
+                    if (texture.mSampler != -1)
+                    {
+                        Sampler& sampler = asset.mSamplers[texture.mSampler];
+                        LLTexUnit::eTextureAddressMode addr = LLTexUnit::TAM_WRAP;
+                        if (sampler.mWrapS == GL_CLAMP_TO_EDGE) addr = LLTexUnit::TAM_CLAMP;
+                        else if (sampler.mWrapS == GL_MIRRORED_REPEAT) addr = LLTexUnit::TAM_MIRROR;
+                        unit->setTextureAddressMode(addr);
+                        unit->setTextureFilteringOption(sampler.mMagFilter == GL_NEAREST ? LLTexUnit::TFO_POINT : LLTexUnit::TFO_ANISOTROPIC);
+                    }
+                    else
+                    {
+                        unit->setTextureAddressMode(LLTexUnit::TAM_WRAP);
+                        unit->setTextureFilteringOption(LLTexUnit::TFO_ANISOTROPIC);
+                    }
+                }
+                else if (fallback)
+                {
+                    unit->bind(fallback);
+                }
+            }
+            else if (fallback)
+            {
+                unit->bind(fallback);
+            }
+            return;
+        }
         glActiveTexture(GL_TEXTURE0 + channel);
 
         if (info.mIndex != INVALID_INDEX)

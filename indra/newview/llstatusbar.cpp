@@ -467,6 +467,12 @@ bool LLStatusBar::postBuild()
     {
         mWolfBugBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_bug_report"); });
     }
+    // [COFFEE 2026-11-27] Paul: "next to the flea for flea report add a coffee cup icon that links to our buy me a coffee page"
+    mWolfCoffeeBtn = findChild<LLButton>("wolf_coffee_btn");
+    if (mWolfCoffeeBtn)
+    {
+        mWolfCoffeeBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { LLWeb::loadURLExternal("https://www.wolf-grid.com/index.php?f=coffee"); });
+    }
 
     updateBalancePanelPosition();
 
@@ -1375,18 +1381,24 @@ void LLStatusBar::updateWolfGridButtonPosition()
     const bool search_allowed = mSearchPanel && menu_search && !mouselook;
     const bool grid_allowed = !mouselook;
     const bool bug_allowed = mWolfBugBtn && WolfGrid::isWolfTerritories() && !mouselook;
+    // [COFFEE 2026-11-27] Shown on every grid (Second Life and other OpenSim grids included), as the Wolf Grid button and
+    // the login-screen coffee button: coffee.php offers "Create a free account" alongside Log in so anyone can get a free
+    // Wolf Territories inventory for their virtual coffee cup and cake.
+    const bool coffee_allowed = mWolfCoffeeBtn && !mouselook;
     const S32 menu_right = gMenuBarView ? gMenuBarView->getRightmostMenuEdge() : 0;
     const LLRect balance = mBalancePanel->getRect();
 
     LLRect search_r = mSearchPanel ? mSearchPanel->getRect() : LLRect();
     LLRect grid_r = mWolfGridBtn->getRect();
     LLRect bug_r = mWolfBugBtn ? mWolfBugBtn->getRect() : LLRect();
-    bool show_search = search_allowed, show_grid = grid_allowed, show_bug = bug_allowed;
-    for (S32 level = 0; level < 4; ++level)
+    LLRect coffee_r = mWolfCoffeeBtn ? mWolfCoffeeBtn->getRect() : LLRect();
+    bool show_search = search_allowed, show_grid = grid_allowed, show_bug = bug_allowed, show_coffee = coffee_allowed;
+    for (S32 level = 0; level < 5; ++level)
     {
         show_search = search_allowed && level < 1;
         show_grid = grid_allowed && level < 2;
-        show_bug = bug_allowed && level < 3;
+        show_coffee = coffee_allowed && level < 3;
+        show_bug = bug_allowed && level < 4;
         S32 left = balance.mLeft;
         if (show_search)   // updateMenuSearchPosition's rule: 12 px left of the balance
         {
@@ -1409,9 +1421,16 @@ void LLStatusBar::updateWolfGridButtonPosition()
             bug_r.mLeft = bug_r.mRight - bw;
             left = bug_r.mLeft;
         }
+        if (show_coffee)   // [COFFEE 2026-11-27] the coffee cup icon just left of the bug icon
+        {
+            const S32 cw = coffee_r.getWidth();
+            coffee_r.mRight = left - ((show_bug || show_grid) ? HPAD / 2 : HPAD);
+            coffee_r.mLeft = coffee_r.mRight - cw;
+            left = coffee_r.mLeft;
+        }
         if (left >= menu_right + HPAD)
         {
-            break;   // fits; at level 3 nothing is left to hide
+            break;   // fits; at level 4 nothing is left to hide
         }
     }
     if (mSearchPanel)
@@ -1436,6 +1455,14 @@ void LLStatusBar::updateWolfGridButtonPosition()
         if (mWolfBugBtn->getVisible() != show_bug)
         {
             mWolfBugBtn->setVisible(show_bug);
+        }
+    }
+    if (mWolfCoffeeBtn)
+    {
+        mWolfCoffeeBtn->setShape(coffee_r);
+        if (mWolfCoffeeBtn->getVisible() != show_coffee)
+        {
+            mWolfCoffeeBtn->setVisible(show_coffee);
         }
     }
     mWolfLastMenuRight = menu_right;
@@ -1685,6 +1712,9 @@ void LLStatusBar::setParcelInfoText(const std::string& new_text)
     // [WOLF BUG REPORT 2026-10-24] and the bug icon left of that
     if (mWolfBugBtn && mWolfBugBtn->getVisible())
         panelBalanceRect = mWolfBugBtn->getRect();
+    // [COFFEE 2026-11-27] and the coffee cup icon left of that
+    if (mWolfCoffeeBtn && mWolfCoffeeBtn->getVisible())
+        panelBalanceRect = mWolfCoffeeBtn->getRect();
 
     if (mOmnifilterPanel && mOmnifilterPanel->getVisible())
         panelBalanceRect = mOmnifilterPanel->getRect();

@@ -25,12 +25,16 @@
  */
 
 #include "llviewerprecompiledheaders.h"
+#include "vk/wolfvkstate.h"
 
 #include "pipeline.h"
+#include "wolfvkbridge.h"   // [VULKAN G-BUFFER S2 2026-11-26] the draw interceptor's phase
+#include "wolfvkavatar.h"   // [W114-VULKAN S4 2026-11-26/] poolInPhase
 
 #include <algorithm>   // [W107 PIPELINE 2026-11-14/] std::is_sorted, std::sort, std::inplace_merge, std::unique, std::lower_bound (the nearby lights)
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] roleplay desaturate / blur
 #include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] no sun shafts inside a sea tunnel
+#include "wolfvknative.h"
 
 // library includes
 #include "llimagepng.h"
@@ -105,6 +109,7 @@
 #include "llviewerstats.h"
 #include "llviewerjoystick.h"
 #include "llviewerdisplay.h"
+#include <optional>
 #include "wolfvrscreen.h"        // [VR SHADOWS FIX 2026-11-04/] WolfVRScreen::stereoEye
 #include "llspatialpartition.h"
 #include "llmutelist.h"
@@ -823,7 +828,7 @@ void LLPipeline::destroyGL()
 
     if (mMeshDirtyQueryObject)
     {
-        glDeleteQueries(1, &mMeshDirtyQueryObject);
+        if (!gGLManager.mIsNativeVulkan) glDeleteQueries(1, &mMeshDirtyQueryObject);
         mMeshDirtyQueryObject = 0;
     }
 }
@@ -1174,8 +1179,11 @@ bool LLPipeline::allocateShadowBuffer(U32 resX, U32 resY)
                 gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_ANISOTROPIC);
                 gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
 
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_R_TO_TEXTURE);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+                if (!gGLManager.mIsNativeVulkan)
+                {
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_R_TO_TEXTURE);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+                }
             }
         }
     }
@@ -1191,8 +1199,11 @@ bool LLPipeline::allocateShadowBuffer(U32 resX, U32 resY)
                 gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_ANISOTROPIC);
                 gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
 
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_R_TO_TEXTURE);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+                if (!gGLManager.mIsNativeVulkan)
+                {
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_R_TO_TEXTURE);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+                }
             }
         }
     }
@@ -1237,7 +1248,7 @@ void LLPipeline::refreshCachedSettings()
     LLPipeline::sUseOcclusion =
             (!gUseWireframe
             && LLFeatureManager::getInstance()->isFeatureAvailable("UseOcclusion")
-            && gSavedSettings.getBOOL("UseOcclusion")) ? 2 : 0;
+            && gSavedSettings.getBOOL("UseOcclusion")) ? ((!gGLManager.mIsNativeVulkan || WolfVkNative::occlusionSupported()) ? 2 : 1) : 0;
 
     WindLightUseAtmosShaders = true; // DEPRECATED -- gSavedSettings.getBOOL("WindLightUseAtmosShaders");
     RenderDeferred = true; // DEPRECATED -- gSavedSettings.getBOOL("RenderDeferred");
@@ -1515,10 +1526,8 @@ void LLPipeline::createGLBuffers()
             noise[i].mV[2] = ll_frand()*scaler+1.f-scaler/2.f;
         }
 
-        LLImageGL::generateTextures(1, &mNoiseMap);
-
-        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mNoiseMap);
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGB16F, noiseRes, noiseRes, GL_RGB, GL_FLOAT, noise, false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+        LLImageGL::wolfVkManualImage2D(mNoiseMap, GL_RGB16F, noiseRes, noiseRes, GL_RGB, GL_FLOAT, noise);
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_POINT);
     }
 
@@ -1531,9 +1540,8 @@ void LLPipeline::createGLBuffers()
             noise[i] = ll_frand()*2.0f-1.0f;
         }
 
-        LLImageGL::generateTextures(1, &mTrueNoiseMap);
-        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mTrueNoiseMap);
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGB16F, noiseRes, noiseRes, GL_RGB,GL_FLOAT, noise, false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+        LLImageGL::wolfVkManualImage2D(mTrueNoiseMap, GL_RGB16F, noiseRes, noiseRes, GL_RGB,GL_FLOAT, noise);
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_POINT);
     }
 
@@ -1547,10 +1555,8 @@ void LLPipeline::createGLBuffers()
             memcpy(&tempBuffer[y * AREATEX_PITCH], areaTexBytes + srcY * AREATEX_PITCH, AREATEX_PITCH);
         }
 
-        LLImageGL::generateTextures(1, &mSMAAAreaMap);
-        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mSMAAAreaMap);
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RG8, AREATEX_WIDTH, AREATEX_HEIGHT, GL_RG,
-            GL_UNSIGNED_BYTE, tempBuffer.data(), false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+        LLImageGL::wolfVkManualImage2D(mSMAAAreaMap, GL_RG8, AREATEX_WIDTH, AREATEX_HEIGHT, GL_RG, GL_UNSIGNED_BYTE, tempBuffer.data());
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
         gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
     }
@@ -1565,10 +1571,8 @@ void LLPipeline::createGLBuffers()
             memcpy(&tempBuffer[y * SEARCHTEX_PITCH], searchTexBytes + srcY * SEARCHTEX_PITCH, SEARCHTEX_PITCH);
         }
 
-        LLImageGL::generateTextures(1, &mSMAASearchMap);
-        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mSMAASearchMap);
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_R8, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT,
-            GL_RED, GL_UNSIGNED_BYTE, tempBuffer.data(), false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+        LLImageGL::wolfVkManualImage2D(mSMAASearchMap, GL_R8, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, GL_RED, GL_UNSIGNED_BYTE, tempBuffer.data());
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
         gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
     }
@@ -1598,10 +1602,8 @@ void LLPipeline::createGLBuffers()
             default:
                 return;
             };
-            LLImageGL::generateTextures(1, &mSMAASampleMap);
-            gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mSMAASampleMap);
-            LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGB, raw_image->getWidth(),
-                raw_image->getHeight(), format, GL_UNSIGNED_BYTE, raw_image->getData(), false);
+            // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+            LLImageGL::wolfVkManualImage2D(mSMAASampleMap, GL_RGB, raw_image->getWidth(), raw_image->getHeight(), format, GL_UNSIGNED_BYTE, raw_image->getData());
             stop_glerror();
             gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
             gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
@@ -1670,13 +1672,15 @@ void LLPipeline::createLUTBuffers()
             pix_format = GL_R32F;
         }
 #endif
-        LLImageGL::generateTextures(1, &mLightFunc);
-        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mLightFunc);
-        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, pix_format, lightResX, lightResY, GL_RED, GL_FLOAT, ls, false);
+        // [VK S6 2026-11-26] in Vulkan-owned memory when the Vulkan renderer runs (LLImageGL::wolfVkManualImage2D), else as before
+        LLImageGL::wolfVkManualImage2D(mLightFunc, pix_format, lightResX, lightResY, GL_RED, GL_FLOAT, ls);
         gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
         gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_TRILINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        if (!gGLManager.mIsNativeVulkan)
+        {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        }
 
         delete [] ls;
     }
@@ -1707,9 +1711,9 @@ void LLPipeline::createLUTBuffers()
 
     mExposureMap.allocate(1, 1, GL_R16F);
     mExposureMap.bindTarget();
-    glClearColor(1, 1, 1, 0);
+    LLGLState::wolfClearColor(1, 1, 1, 0);
     mExposureMap.clear();
-    glClearColor(0, 0, 0, 0);
+    LLGLState::wolfClearColor(0, 0, 0, 0);
     mExposureMap.flush();
 
     mLuminanceMap.allocate(256, 256, GL_R16F, false, LLTexUnit::TT_TEXTURE, LLTexUnit::TMG_AUTO);
@@ -2881,8 +2885,10 @@ void LLPipeline::doOcclusion(LLCamera& camera)
     }
 
     if (LLPipeline::sUseOcclusion > 1 &&
-        (sCull->hasOcclusionGroups() || LLVOCachePartition::sNeedsOcclusionCheck))
+        (sCull->hasOcclusionGroups() || (!LLPipeline::sShadowRender && LLVOCachePartition::sNeedsOcclusionCheck)))
     {
+        const bool* prev_cm = gGL.wolfVkColorMask();
+        const bool saved_cm[4] = { prev_cm[0], prev_cm[1], prev_cm[2], prev_cm[3] };
         LLVertexBuffer::unbind();
 
         gGL.setColorMask(false, false);
@@ -2911,18 +2917,21 @@ void LLPipeline::doOcclusion(LLCamera& camera)
             }
         }
 
-        //apply occlusion culling to object cache tree
-        for (LLWorld::region_list_t::const_iterator iter = LLWorld::getInstance()->getRegionList().begin();
-            iter != LLWorld::getInstance()->getRegionList().end(); ++iter)
+        if (!LLPipeline::sShadowRender)
         {
-            LLVOCachePartition* vo_part = (*iter)->getVOCachePartition();
-            if(vo_part)
+            //apply occlusion culling to object cache tree
+            for (LLWorld::region_list_t::const_iterator iter = LLWorld::getInstance()->getRegionList().begin();
+                iter != LLWorld::getInstance()->getRegionList().end(); ++iter)
             {
-                vo_part->processOccluders(&camera);
+                LLVOCachePartition* vo_part = (*iter)->getVOCachePartition();
+                if(vo_part)
+                {
+                    vo_part->processOccluders(&camera);
+                }
             }
         }
 
-        gGL.setColorMask(true, true);
+        gGL.setColorMask(saved_cm[0], saved_cm[1], saved_cm[2], saved_cm[3]);
     }
 }
 
@@ -3271,7 +3280,7 @@ void LLPipeline::shiftObjects(const LLVector3 &offset)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_PIPELINE;
     assertInitialized();
 
-    glClear(GL_DEPTH_BUFFER_BIT);
+    LLGLState::wolfClear(GL_DEPTH_BUFFER_BIT);
     gDepthDirty = true;
 
     LLVector4a offseta;
@@ -4351,7 +4360,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
 
     if (gUseWireframe)
     {
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_LINE);
     }
 
     if (&camera == LLViewerCamera::getInstance())
@@ -4411,12 +4420,23 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
 
             cur_type = poolp->getType();
 
+            // [VULKAN G-BUFFER S2 2026-11-26] Vulkan records the draw calls of the opaque deferred pools before terrain
+            // (simple, fullbright, bump, materials, GLTF PBR: lldrawpool.h pool order) into the shared G-buffer; from
+            // terrain on, and before the occlusion pass below, OpenGL draws (the phase's end closes the bracket)
+            // [W114-VULKAN S4 2026-11-26] and the avatar pools and the alpha-mask pools with a deferred pass (POOL_AVATAR,
+            // POOL_CONTROL_AV, POOL_ALPHA_MASK, POOL_GLTF_PBR_ALPHA_MASK: wolfvkavatar.h poolInPhase)
+            WolfVkBridge::setGBufferPhase(&camera == LLViewerCamera::getInstance() && !gCubeSnapshot
+                                          && ((cur_type >= LLDrawPool::POOL_SIMPLE && cur_type <= LLDrawPool::POOL_GLTF_PBR) || WolfVkAvatar::poolInPhase(cur_type)));
+
             if (occlude && cur_type >= LLDrawPool::POOL_GRASS)
             {
                 llassert(!gCubeSnapshot); // never do occlusion culling on cube snapshots
                 occlude = false;
                 gGLLastMatrix = NULL;
                 gGL.loadMatrix(gGLModelView);
+                // [W114-VULKAN S4 2026-11-26/] the occlusion queries count OpenGL's own draws: never recorded, also when the
+                // first pool at or after POOL_GRASS is one the phase covers (an avatar pool with no grass pool before it)
+                WolfVkBridge::ScopedGLOnly occlusion_on_gl;
                 doOcclusion(camera);
             }
 
@@ -4427,6 +4447,16 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
 
                 gGLLastMatrix = NULL;
                 gGL.loadMatrix(gGLModelView);
+
+                // [W114-VULKAN 2026-11-27] frame pieces: each pool's deferred passes in a reflection-probe face, apart
+                static const char* const PROBE_POOL_NAMES[LLDrawPool::NUM_POOL_TYPES + 1] = { "probe pool ?", "probe pool sky",
+                    "probe pool waterexcl", "probe pool wlsky", "probe pool simple", "probe pool fullbright", "probe pool bump",
+                    "probe pool materials", "probe pool pbr", "probe pool terrain", "probe pool grass", "probe pool pbr alphamask",
+                    "probe pool tree", "probe pool alphamask", "probe pool fullbright alphamask", "probe pool avatar",
+                    "probe pool animesh", "probe pool glow", "probe pool alpha prewater", "probe pool voidwater", "probe pool water",
+                    "probe pool alpha postwater", "probe pool alpha", "probe pool ?" };
+                std::optional<WolfVRScreen::SubPart> probe_pool_part;
+                if (gCubeSnapshot) probe_pool_part.emplace(PROBE_POOL_NAMES[llclamp((S32)cur_type, 0, (S32)LLDrawPool::NUM_POOL_TYPES)]);
 
                 for( S32 i = 0; i < poolp->getNumDeferredPasses(); i++ )
                 {
@@ -4463,6 +4493,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
             iter1 = iter2;
             stop_glerror();
         }
+        WolfVkBridge::setGBufferPhase(false);   // [VULKAN G-BUFFER S2 2026-11-26/] every pool done: no bracket stays open
 
         // <WolfViewer 2026-10-07> the map tiles standing in for regions not connected (wolffarground.h)
         if (&camera == LLViewerCamera::getInstance() && !gCubeSnapshot)
@@ -4491,7 +4522,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
 
     if (gUseWireframe)
     {
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
 }
 
@@ -4514,16 +4545,10 @@ static void wolf_env_post_pass()
     // and writes it back, as it did before the forward pools
     LLRenderTarget& screen = gPipeline.mRT->screen;
     screen.flush();
-    if (gUseWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);   // its full-screen passes, filled (renderGeomPostDeferred draws lines)
-    // [WolfViewer 2026-10-30 ticket 367] BOTH colour masks on for the composite's own passes. renderDeferredLighting leaves alpha
-    // writes off for the forward pools (gGL.setColorMask(true, false) at the end of its deferred block, above), and since ticket 349
-    // (W87) moved the composite in here the clouds' march, temporal resolve and shadow targets were drawn with alpha masked: every
-    // cloud texel kept alpha 0, so compositeF.glsl laid the clouds over the frame with no occlusion (rgb added, nothing hidden) -
-    // pale, see-through clouds and storms on every region, and measureCloudCover's "marched opacity -1". Proved in the viewer
-    // 2026-10-30 ~16:09Z: with cloudsResolveF.glsl forced to alpha 1 the composite still read overlay alpha 0 everywhere.
+    if (gUseWireframe) WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_FILL);   // its full-screen passes, filled (renderGeomPostDeferred draws lines)
     gGL.setColorMask(true, true);
     WolfEnvironmentRender::postPass();
-    if (gUseWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    if (gUseWireframe) WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_LINE);
     screen.bindTarget();
     // renderGeomPostDeferred's own state for the pools that follow (the composite ends with both masks on)
     gGL.setColorMask(true, false);
@@ -4537,7 +4562,7 @@ void LLPipeline::renderGeomPostDeferred(LLCamera& camera)
 
     if (gUseWireframe)
     {
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_LINE);
     }
 
     U32 cur_type = 0;
@@ -4619,6 +4644,19 @@ void LLPipeline::renderGeomPostDeferred(LLCamera& camera)
             gGLLastMatrix = NULL;
             gGL.loadMatrix(gGLModelView);
 
+            // [W114-VULKAN 2026-11-27] frame pieces: each post-deferred pool apart (main view: "post", probe faces: "probe post")
+            static const char* const POST_POOL_NAMES[2][LLDrawPool::NUM_POOL_TYPES + 1] = {
+                { "post ?", "post sky", "post waterexcl", "post wlsky", "post simple", "post fullbright", "post bump", "post materials",
+                  "post pbr", "post terrain", "post grass", "post pbr alphamask", "post tree", "post alphamask", "post fullbright alphamask",
+                  "post avatar", "post animesh", "post glow", "post alpha prewater", "post voidwater", "post water", "post alpha postwater",
+                  "post alpha", "post ?" },
+                { "probe post ?", "probe post sky", "probe post waterexcl", "probe post wlsky", "probe post simple", "probe post fullbright",
+                  "probe post bump", "probe post materials", "probe post pbr", "probe post terrain", "probe post grass",
+                  "probe post pbr alphamask", "probe post tree", "probe post alphamask", "probe post fullbright alphamask",
+                  "probe post avatar", "probe post animesh", "probe post glow", "probe post alpha prewater", "probe post voidwater",
+                  "probe post water", "probe post alpha postwater", "probe post alpha", "probe post ?" } };
+            WolfVRScreen::SubPart post_pool_part(POST_POOL_NAMES[gCubeSnapshot ? 1 : 0][llclamp((S32)cur_type, 0, (S32)LLDrawPool::NUM_POOL_TYPES)]);
+
             for( S32 i = 0; i < poolp->getNumPostDeferredPasses(); i++ )
             {
                 LLVertexBuffer::unbind();
@@ -4675,7 +4713,7 @@ void LLPipeline::renderGeomPostDeferred(LLCamera& camera)
 
     if (gUseWireframe)
     {
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
 }
 
@@ -5161,7 +5199,7 @@ void LLPipeline::renderPhysicsDisplay()
     gDebugProgram.bind();
 
     LLGLEnable polygon_offset_line(GL_POLYGON_OFFSET_LINE);
-    glPolygonOffset(3.f, 3.f);
+    WolfVkState::polygonOffset(3.f, 3.f);
     gGL.setLineWidth(3.f);
     LLGLEnable blend(GL_BLEND);
     gGL.setSceneBlendType(LLRender::BT_ALPHA);
@@ -5178,7 +5216,7 @@ void LLPipeline::renderPhysicsDisplay()
 
         if (wireframe)
         {
-            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_LINE);
         }
 
         for (LLWorld::region_list_t::const_iterator iter = LLWorld::getInstance()->getRegionList().begin();
@@ -5201,7 +5239,7 @@ void LLPipeline::renderPhysicsDisplay()
 
         if (wireframe)
         {
-            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
     }
     gGL.setLineWidth(1.f);
@@ -5279,10 +5317,10 @@ void LLPipeline::renderDebug()
                     {
                         const LLColor4 clearColor = gSavedSettings.getColor4("PathfindingNavMeshClear");
                         gGL.setColorMask(true, true);
-                        glClearColor(clearColor.mV[0],clearColor.mV[1],clearColor.mV[2],0);
-                        glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT); // no stencil -- deprecated | GL_STENCIL_BUFFER_BIT);
+                        LLGLState::wolfClearColor(clearColor.mV[0],clearColor.mV[1],clearColor.mV[2],0);
+                        LLGLState::wolfClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT); // no stencil -- deprecated | GL_STENCIL_BUFFER_BIT);
                         gGL.setColorMask(true, false);
-                        glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+                        WolfVkState::polygonMode( GL_FRONT_AND_BACK, GL_FILL );
                     }
 
                     //NavMesh
@@ -5312,7 +5350,7 @@ void LLPipeline::renderDebug()
                         gPathfindingProgram.bind();
 
                         gGL.flush();
-                        glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+                        WolfVkState::polygonMode( GL_FRONT_AND_BACK, GL_FILL );
                         gGL.setLineWidth(1.0f); // <FS> Line width OGL core profile fix by Rye Mutt
                         gGL.flush();
                     }
@@ -5369,11 +5407,11 @@ void LLPipeline::renderDebug()
                             LLGLDisable cull(i >= 2 ? GL_CULL_FACE : 0);
 
                             gGL.flush();
-                            glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+                            WolfVkState::polygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
                             //get rid of some z-fighting
                             LLGLEnable polyOffset(GL_POLYGON_OFFSET_FILL);
-                            glPolygonOffset(1.0f, 1.0f);
+                            WolfVkState::polygonOffset(1.0f, 1.0f);
 
                             //render to depth first to avoid blending artifacts
                             gGL.setColorMask(false, false);
@@ -5381,7 +5419,7 @@ void LLPipeline::renderDebug()
                             gGL.setColorMask(true, false);
 
                             //get rid of some z-fighting
-                            glPolygonOffset(0.f, 0.f);
+                            WolfVkState::polygonOffset(0.f, 0.f);
 
                             LLGLEnable blend(GL_BLEND);
 
@@ -5395,7 +5433,7 @@ void LLPipeline::renderDebug()
                                 }
 
                                 LLGLEnable lineOffset(GL_POLYGON_OFFSET_LINE);
-                                glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
+                                WolfVkState::polygonMode( GL_FRONT_AND_BACK, GL_LINE );
 
                                 F32 offset = gSavedSettings.getF32("PathfindingLineOffset");
 
@@ -5406,7 +5444,7 @@ void LLPipeline::renderDebug()
                                     LLGLEnable blend(GL_BLEND);
                                     LLGLDepthTest depth(GL_TRUE, GL_FALSE, GL_GREATER);
 
-                                    glPolygonOffset(offset, -offset);
+                                    WolfVkState::polygonOffset(offset, -offset);
 
                                     if (gSavedSettings.getBOOL("PathfindingXRayWireframe"))
                                     { //draw hidden wireframe as darker and less opaque
@@ -5415,15 +5453,15 @@ void LLPipeline::renderDebug()
                                     }
                                     else
                                     {
-                                        glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+                                        WolfVkState::polygonMode( GL_FRONT_AND_BACK, GL_FILL );
                                         gPathfindingProgram.uniform1f(sAmbiance, ambiance);
                                         llPathingLibInstance->renderNavMeshShapesVBO( render_order[i] );
-                                        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                                        WolfVkState::polygonMode(GL_FRONT_AND_BACK, GL_LINE);
                                     }
                                 }
 
                                 { //draw visible wireframe as brighter, thicker and more opaque
-                                    glPolygonOffset(offset, offset);
+                                    WolfVkState::polygonOffset(offset, offset);
                                     gPathfindingProgram.uniform1f(sAmbiance, 1.f);
                                     gPathfindingProgram.uniform1f(sTint, 1.f);
                                     gPathfindingProgram.uniform1f(sAlphaScale, 1.f);
@@ -5435,12 +5473,12 @@ void LLPipeline::renderDebug()
                                     gGL.setLineWidth(1.f); // <FS> Line width OGL core profile fix by Rye Mutt
                                 }
 
-                                glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+                                WolfVkState::polygonMode( GL_FRONT_AND_BACK, GL_FILL );
                             }
                         }
                     }
 
-                    glPolygonOffset(0.f, 0.f);
+                    WolfVkState::polygonOffset(0.f, 0.f);
 
                     if ( pathfindingConsole->isRenderNavMesh() && pathfindingConsole->isRenderXRay() )
                     {   //render navmesh xray
@@ -5450,7 +5488,7 @@ void LLPipeline::renderDebug()
                         LLGLEnable polyOffset(GL_POLYGON_OFFSET_FILL);
 
                         F32 offset = gSavedSettings.getF32("PathfindingLineOffset");
-                        glPolygonOffset(offset, -offset);
+                        WolfVkState::polygonOffset(offset, -offset);
 
                         LLGLEnable blend(GL_BLEND);
                         LLGLDepthTest depth(GL_TRUE, GL_FALSE, GL_GREATER);
@@ -5463,10 +5501,10 @@ void LLPipeline::renderDebug()
 
                         if (gSavedSettings.getBOOL("PathfindingXRayWireframe"))
                         { //draw hidden wireframe as darker and less opaque
-                            glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
+                            WolfVkState::polygonMode( GL_FRONT_AND_BACK, GL_LINE );
                             gPathfindingProgram.uniform1f(sAmbiance, 1.f);
                             llPathingLibInstance->renderNavMesh();
-                            glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+                            WolfVkState::polygonMode( GL_FRONT_AND_BACK, GL_FILL );
                         }
                         else
                         {
@@ -5485,7 +5523,7 @@ void LLPipeline::renderDebug()
                         gGL.setLineWidth(1.0f); // <FS> Line width OGL core profile fix by Rye Mutt
                     }
 
-                    glPolygonOffset(0.f, 0.f);
+                    WolfVkState::polygonOffset(0.f, 0.f);
 
                     gGL.flush();
                     gPathfindingProgram.unbind();
@@ -5506,7 +5544,7 @@ void LLPipeline::renderDebug()
 
         gGL.getTexUnit(0)->bind(LLViewerFetchedTexture::sWhiteImagep, true);
 
-        glPointSize(8.f);
+        WolfVkState::pointSize(8.f);
         LLGLDepthTest depth(GL_TRUE, GL_TRUE, GL_ALWAYS);
 
         gGL.begin(LLRender::POINTS);
@@ -5531,7 +5569,7 @@ void LLPipeline::renderDebug()
         }
         gGL.end();
         gGL.flush();
-        glPointSize(1.f);
+        WolfVkState::pointSize(1.f);
     }
 
     // Debug stuff.
@@ -5735,7 +5773,7 @@ void LLPipeline::renderDebug()
                 {
                     //render visible point cloud
                     gGL.flush();
-                    glPointSize(8.f);
+                    WolfVkState::pointSize(8.f);
                     gGL.begin(LLRender::POINTS);
 
                     F32* c = col+i*4;
@@ -5749,7 +5787,7 @@ void LLPipeline::renderDebug()
                     gGL.end();
 
                     gGL.flush();
-                    glPointSize(1.f);
+                    WolfVkState::pointSize(1.f);
 
                     LLVector3* ext = mShadowExtents[i];
                     LLVector3 pos = (ext[0]+ext[1])*0.5f;
@@ -8113,6 +8151,7 @@ void apply_cube_face_rotation(U32 face)
 
 void validate_framebuffer_object()
 {
+    if (gGLManager.mIsNativeVulkan) return;
     GLenum status;
     status = glCheckFramebufferStatus(GL_FRAMEBUFFER_EXT);
     switch(status)
@@ -8920,7 +8959,7 @@ void LLPipeline::applyFXAA(LLRenderTarget* src, LLRenderTarget* dst)
             gGLViewport[2] = gViewerWindow->getWorldViewRectRaw().getWidth();
             gGLViewport[3] = gViewerWindow->getWorldViewRectRaw().getHeight();
 
-            glViewport(gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3]);
+            WolfVkState::viewport(gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3]);
 
             F32 scale_x = (F32)width / mFXAAMap.getWidth();
             F32 scale_y = (F32)height / mFXAAMap.getHeight();
@@ -9646,7 +9685,7 @@ void LLPipeline::renderDoF(LLRenderTarget* src, LLRenderTarget* dst)
 
             { // perform DoF sampling at half-res (preserve alpha channel)
                 src->bindTarget();
-                glViewport(0, 0, dof_width, dof_height);
+                WolfVkState::viewport(0, 0, dof_width, dof_height);
 
                 gGL.setColorMask(true, false);
 
@@ -9672,7 +9711,7 @@ void LLPipeline::renderDoF(LLRenderTarget* src, LLRenderTarget* dst)
             { // combine result based on alpha
 
                 dst->bindTarget();
-                glViewport(0, 0, dst->getWidth(), dst->getHeight());
+                WolfVkState::viewport(0, 0, dst->getWidth(), dst->getHeight());
 
                 gDeferredDoFCombineProgram.bind();
                 gDeferredDoFCombineProgram.bindTexture(LLShaderMgr::DEFERRED_DIFFUSE, src, LLTexUnit::TFO_POINT);
@@ -9721,7 +9760,7 @@ void LLPipeline::renderFinalize()
     enableLightsFullbright();
 
     gGL.setColorMask(true, true);
-    glClearColor(0, 0, 0, 0);
+    LLGLState::wolfClearColor(0, 0, 0, 0);
 
     wolfCloudDeck();   // <WolfViewer 2026-10-07/> into the lit HDR frame, before the tone mapping
     WolfEnvironmentRender::zonePass();   // [WOLF ENV 2026-10-12/] a zone's light over the finished frame (the clouds and fog: renderDeferredLighting)
@@ -9778,7 +9817,7 @@ void LLPipeline::renderFinalize()
     gGLViewport[1] = gViewerWindow->getWorldViewRectRaw().mBottom;
     gGLViewport[2] = gViewerWindow->getWorldViewRectRaw().getWidth();
     gGLViewport[3] = gViewerWindow->getWorldViewRectRaw().getHeight();
-    glViewport(gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3]);
+    WolfVkState::viewport(gGLViewport[0], gGLViewport[1], gGLViewport[2], gGLViewport[3]);
 
     if((RenderDepthOfFieldInEditMode || !LLToolMgr::getInstance()->inBuildMode()) &&
         RenderDepthOfField &&
@@ -10282,9 +10321,9 @@ void LLPipeline::renderDeferredLighting()
                 LLGLSLShader& sun_shader = gCubeSnapshot ? gDeferredSunProbeProgram : gDeferredSunProgram;
                 bindDeferredShader(sun_shader, deferred_light_target);
                 mScreenTriangleVB->setBuffer();
-                glClearColor(1, 1, 1, 1);
+                LLGLState::wolfClearColor(1, 1, 1, 1);
                 deferred_light_target->clear(GL_COLOR_BUFFER_BIT);
-                glClearColor(0, 0, 0, 0);
+                LLGLState::wolfClearColor(0, 0, 0, 0);
 
                 sun_shader.uniform2f(LLShaderMgr::DEFERRED_SCREEN_RES,
                                               (GLfloat)deferred_light_target->getWidth(),
@@ -10309,9 +10348,9 @@ void LLPipeline::renderDeferredLighting()
             LL_PROFILE_GPU_ZONE("soften shadow");
             // blur lightmap
             screen_target->bindTarget();
-            glClearColor(1, 1, 1, 1);
+            LLGLState::wolfClearColor(1, 1, 1, 1);
             screen_target->clear(GL_COLOR_BUFFER_BIT);
-            glClearColor(0, 0, 0, 0);
+            LLGLState::wolfClearColor(0, 0, 0, 0);
 
             bindDeferredShader(gDeferredBlurLightProgram);
 
@@ -10366,7 +10405,7 @@ void LLPipeline::renderDeferredLighting()
 
         screen_target->bindTarget();
         // clear color buffer here - zeroing alpha (glow) is important or it will accumulate against sky
-        glClearColor(0, 0, 0, 0);
+        LLGLState::wolfClearColor(0, 0, 0, 0);
         screen_target->clear(GL_COLOR_BUFFER_BIT);
 
         if (RenderDeferredAtmospheric)
@@ -10898,12 +10937,12 @@ void LLPipeline::doWaterHaze()
 void LLPipeline::doWaterExclusionMask()
 {
     mWaterExclusionMask.bindTarget();
-    glClearColor(1, 1, 1, 1);
+    LLGLState::wolfClearColor(1, 1, 1, 1);
     mWaterExclusionMask.clear();
     mWaterExclusionPool->render();
 
     mWaterExclusionMask.flush();
-    glClearColor(0, 0, 0, 0);
+    LLGLState::wolfClearColor(0, 0, 0, 0);
 }
 
 void LLPipeline::setupSpotLight(LLGLSLShader& shader, LLDrawable* drawablep)
@@ -11177,7 +11216,14 @@ void LLPipeline::bindReflectionProbes(LLGLSLShader& shader)
     channel = shader.enableTexture(LLShaderMgr::SCENE_MAP);
     if (channel > -1)
     {
-        gGL.getTexUnit(channel)->bind(&mSceneMap);
+        if (mSceneMap.isComplete())
+        {
+            gGL.getTexUnit(channel)->bind(&mSceneMap);
+        }
+        else
+        {
+            gGL.getTexUnit(channel)->unbind(LLTexUnit::TT_TEXTURE);
+        }
     }
 
 
@@ -11197,7 +11243,14 @@ void LLPipeline::bindReflectionProbes(LLGLSLShader& shader)
     channel = shader.enableTexture(LLShaderMgr::SCENE_DEPTH);
     if (channel > -1)
     {
-        gGL.getTexUnit(channel)->bind(&mSceneMap, true);
+        if (mSceneMap.isComplete())
+        {
+            gGL.getTexUnit(channel)->bind(&mSceneMap, true);
+        }
+        else
+        {
+            gGL.getTexUnit(channel)->unbind(LLTexUnit::TT_TEXTURE);
+        }
     }
 
 
@@ -11309,9 +11362,13 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
 
     LLPipeline::sShadowRender = true;
 
-    // disable occlusion culling during shadow render
+    // On Native Vulkan (main view, not probe snapshot), keep per-cascade hardware occlusion active
+    // (CAMERA_SUN_SHADOW0..3 & CAMERA_SPOT_SHADOW0..1 have dedicated mOcclusionState/mOcclusionQuery slots).
     U32 saved_occlusion = sUseOcclusion;
-    sUseOcclusion = 0;
+    if (!gGLManager.mIsNativeVulkan || gCubeSnapshot)
+    {
+        sUseOcclusion = 0;
+    }
 
     // List of render pass types that use the prim volume as the shadow,
     // ignoring textures.
@@ -11338,14 +11395,22 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
 
     LLGLDepthTest depth_test(GL_TRUE, GL_TRUE, GL_LESS);
 
-    updateCull(shadow_cam, result);
+    // [W114-VULKAN 2026-11-27] frame pieces: a shadow map's cull, sort and draws apart (main view and probe faces apart)
+    { WolfVRScreen::SubPart wsp_(gCubeSnapshot ? "probe shadow cull" : "shadow cull"); updateCull(shadow_cam, result); }
+
+    // [W114-VULKAN S5 2026-11-26] the shadow map is bound and cleared (generateSunShadow / the spot loop): from here to
+    // the end of this function every LLVertexBuffer draw call is offered to Vulkan, which records it into the map
+    // (wolfvkbridge.h setShadowPhase; off when the map is not a shared one). Before beginPass: the static batch asks.
+    WolfVkBridge::setShadowPhase(true);
 
     // [W107 STATIC BATCH 2026-11-14] from here to endPass() below, postSort (in stateSort) hands the static volume groups
     // whose opaque casters are in the shared buffers to WolfStaticShadowBatch instead of the render maps
     WolfStaticShadowBatch::beginPass();
     WolfStaticShadowBatch::PassCounts wolf_batch;
 
-    stateSort(shadow_cam, result);
+    { WolfVRScreen::SubPart wsp_(gCubeSnapshot ? "probe shadow stateSort" : "shadow stateSort"); stateSort(shadow_cam, result); }
+    std::optional<WolfVRScreen::SubPart> shadow_draw_part;
+    shadow_draw_part.emplace(gCubeSnapshot ? "probe shadow draw" : "shadow draw");
 
     //generate shadow map
     gGL.matrixMode(LLRender::MM_PROJECTION);
@@ -11382,6 +11447,8 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
     for (int j = 0; j < 2; ++j) // 0 -- static, 1 -- rigged
     {
         bool rigged = j == 1;
+        // [W114-VULKAN 2026-11-27] frame pieces: the shadow map's draw groups apart
+        WolfVRScreen::SubPart wsp_(gCubeSnapshot ? (rigged ? "probe shadow opaque rigged" : "probe shadow opaque") : (rigged ? "shadow opaque rigged" : "shadow opaque"));
         gDeferredShadowProgram.bind(rigged);
 
         gGL.diffuseColor4f(1, 1, 1, 1);
@@ -11448,15 +11515,15 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
         gGL.getTexUnit(0)->enable(LLTexUnit::TT_TEXTURE);
     }
 
-    if (LLPipeline::sUseOcclusion > 1)
-    { // do occlusion culling against non-masked only to take advantage of hierarchical Z
-        doOcclusion(shadow_cam);
-    }
-
-
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("shadow geom");
+        WolfVRScreen::SubPart wsp_(gCubeSnapshot ? "probe shadow geom (terrain/trees)" : "shadow geom (terrain/trees)");
         renderGeomShadow(shadow_cam);
+    }
+
+    if (LLPipeline::sUseOcclusion > 1)
+    { // do occlusion culling against opaque world + terrain shadow casters before masked/alpha
+        doOcclusion(shadow_cam);
     }
 
     {
@@ -11472,6 +11539,7 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("shadow alpha masked");
                 LL_PROFILE_GPU_ZONE("shadow alpha masked");
+                WolfVRScreen::SubPart wsp_(gCubeSnapshot ? "probe shadow alpha masked" : "shadow alpha masked");
                 gDeferredShadowAlphaMaskProgram.bind(rigged);
                 LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
                 LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
@@ -11481,12 +11549,14 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("shadow alpha blend");
                 LL_PROFILE_GPU_ZONE("shadow alpha blend");
+                WolfVRScreen::SubPart wsp_(gCubeSnapshot ? "probe shadow alpha blend" : "shadow alpha blend");
                 renderAlphaObjects(rigged);
             }
 
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("shadow fullbright alpha masked");
                 LL_PROFILE_GPU_ZONE("shadow alpha masked");
+                WolfVRScreen::SubPart wsp_(gCubeSnapshot ? "probe shadow fullbright masked" : "shadow fullbright masked");
                 gDeferredShadowFullbrightAlphaMaskProgram.bind(rigged);
                 LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
                 LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
@@ -11496,6 +11566,7 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("shadow alpha grass");
                 LL_PROFILE_GPU_ZONE("shadow alpha grass");
+                WolfVRScreen::SubPart wsp_(gCubeSnapshot ? "probe shadow grass+material masks" : "shadow grass+material masks");
                 gDeferredTreeShadowProgram.bind(rigged);
                 LLGLSLShader::sCurBoundShaderPtr->setMinimumAlpha(ALPHA_BLEND_CUTOFF);
 
@@ -11522,6 +11593,7 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
         for (int i = 0; i < 2; ++i)
         {
             bool rigged = i == 1;
+            WolfVRScreen::SubPart wsp_(gCubeSnapshot ? "probe shadow gltf masked" : "shadow gltf masked");
             gDeferredShadowGLTFAlphaMaskProgram.bind(rigged);
             LLGLSLShader::sCurBoundShaderPtr->uniform1i(LLShaderMgr::SUN_UP_FACTOR, sun_up);
             LLGLSLShader::sCurBoundShaderPtr->uniform1f(LLShaderMgr::DEFERRED_SHADOW_TARGET_WIDTH, (float)target_width);
@@ -11561,7 +11633,7 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
     // the reflection probes' passes run with gCubeSnapshot, the projector shadows with CAMERA_SPOT_SHADOW0 + i)
     static LLCachedControl<bool> wolf_log_rate(gSavedSettings, "WolfLogFrameRate", false);
     const S32 wolf_cascade = (S32)LLViewerCamera::sCurCameraID - (S32)LLViewerCamera::CAMERA_SUN_SHADOW0;
-    if (wolf_log_rate && !gCubeSnapshot && wolf_cascade >= 0 && wolf_cascade < WOLF_SUN_CASCADES)
+    if ((wolf_log_rate || gGLManager.mIsNativeVulkan) && !gCubeSnapshot && wolf_cascade >= 0 && wolf_cascade < WOLF_SUN_CASCADES)
     {
         WolfShadowCascadeCounts& c = sWolfShadowCounts[wolf_cascade];
         ++c.mMaps;
@@ -11579,6 +11651,7 @@ void LLPipeline::renderShadow(const glm::mat4& view, const glm::mat4& proj, LLCa
         c.mBatchStockGroups += wolf_batch.mStockGroups;
     }
     WolfStaticShadowBatch::endPass();   // [W107 STATIC BATCH 2026-11-14/]
+    WolfVkBridge::setShadowPhase(false);   // [W114-VULKAN S5 2026-11-26/] submitted and OpenGL's again before the caller's flush() or read-back
 
     // reset occlusion culling flag
     sUseOcclusion = saved_occlusion;
@@ -11857,7 +11930,25 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
     LL_PROFILE_ZONE_SCOPED_CATEGORY_PIPELINE; //LL_RECORD_BLOCK_TIME(FTM_GEN_SUN_SHADOW);
     LL_PROFILE_GPU_ZONE("generateSunShadow");
 
-    LLDisableOcclusionCulling no_occlusion;
+    struct ShadowOcclusionAndCameraScope
+    {
+        U32 mSavedOcclusion;
+        LLViewerCamera::eCameraID mSavedCam;
+        ShadowOcclusionAndCameraScope()
+            : mSavedOcclusion(LLPipeline::sUseOcclusion)
+            , mSavedCam(LLViewerCamera::sCurCameraID)
+        {
+            if (!gGLManager.mIsNativeVulkan || gCubeSnapshot)
+            {
+                LLPipeline::sUseOcclusion = 0;
+            }
+        }
+        ~ShadowOcclusionAndCameraScope()
+        {
+            LLPipeline::sUseOcclusion = mSavedOcclusion;
+            LLViewerCamera::sCurCameraID = mSavedCam;
+        }
+    } shadow_occ_scope;
 
     bool skip_avatar_update = false;
     if (!isAgentAvatarValid() || gAgentCamera.getCameraAnimating() || gAgentCamera.getCameraMode() != CAMERA_MODE_MOUSELOOK || !LLVOAvatar::sVisibleInFirstPerson)
@@ -12478,17 +12569,22 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
         {
             WolfStaticShadowBatch::selfTestFrameDone();   // [W107 STATIC BATCH 2026-11-14/]
         }
+        if (gGLManager.mIsNativeVulkan && !gCubeSnapshot)
+        {
+            WolfVkNative::markPhaseShadowsDone();
+        }
     }
 
     // [W107 SHADOW BATCH 2026-11-14] the cascade counts renderShadow summed (sWolfShadowCounts), every 10 s while
     // WolfLogFrameRate is on, as means per rendered map; no cull or map is cached between frames (see the commit)
     {
         static LLCachedControl<bool> log_rate(gSavedSettings, "WolfLogFrameRate", false);
+        const bool want_shadow_log = log_rate || gGLManager.mIsNativeVulkan;
         static F64 next_log = 0.0;
         static bool was_logging = false;
-        if (!log_rate || gCubeSnapshot)
+        if (!want_shadow_log || gCubeSnapshot)
         {
-            was_logging = was_logging && log_rate;
+            was_logging = was_logging && want_shadow_log;
         }
         else if (!was_logging)
         {   // switched on: start a fresh 10 s window (counts left from an earlier window are dropped)
@@ -13060,7 +13156,7 @@ void LLPipeline::generateImpostor(LLVOAvatar* avatar, bool preview_avatar, bool 
         gGL.loadMatrix(glm::value_ptr(mat));
         set_current_modelview(mat);
 
-        glClearColor(0.0f,0.0f,0.0f,0.0f);
+        LLGLState::wolfClearColor(0.0f,0.0f,0.0f,0.0f);
         gGL.setColorMask(true, true);
 
         // get the number of pixels per angle
@@ -13136,7 +13232,7 @@ void LLPipeline::generateImpostor(LLVOAvatar* avatar, bool preview_avatar, bool 
 
     if (!for_profile)
     { //create alpha mask based on depth buffer (grey out if muted)
-        if (LLPipeline::sRenderDeferred)
+        if (LLPipeline::sRenderDeferred && !gGLManager.mIsNativeVulkan)
         {
             GLuint buff = GL_COLOR_ATTACHMENT0;
             glDrawBuffers(1, &buff);

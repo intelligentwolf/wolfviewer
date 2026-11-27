@@ -18,7 +18,6 @@
 #include "llviewerprecompiledheaders.h"
 #include "wolfvkmirror.h"
 #include "vk/wolfvkdevice.h"
-#include "llvertexbuffer.h"
 #include "llimagegl.h"
 #include "llgl.h"
 #include "llthread.h"   // on_main_thread (llthread.h:162)
@@ -34,13 +33,6 @@ namespace
     WolfVkDevice* sDevice = nullptr;
     WolfVkSamplerCache* sSamplers = nullptr;
 
-    struct BufferEntry
-    {
-        WolfVkVertexBuffer* mBuffer = nullptr;
-    };
-    std::unordered_map<LLVertexBuffer*, BufferEntry> sBuffers;
-    std::unordered_set<LLVertexBuffer*> sDirtyBuffers;
-
     struct TextureEntry
     {
         WolfVkImage* mImage = nullptr;
@@ -52,7 +44,6 @@ namespace
     uint64_t sTextureBytes = 0;
     std::unordered_set<LLGLuint> sWarnedTextures;
     WolfVkMirror::Stats sStats;
-    WolfVkStagingRing* sStagingRing = nullptr;
 
     // [TEXTURE PURGE 2026-11-08 8.2k] LLImageGL's hooks can fire on the texture threads too: createGLTexture/setImage run
     // there when RenderGLMultiThreadedTextures / RenderGLMultiThreadedMedia are on (llimagegl.cpp:1667-1745 "not on main
@@ -67,50 +58,7 @@ namespace
     // that frame (each try is a GL read-back of every level plus one-time submits, and every batch using the texture
     // asked again). Entries go when the GL name is deleted or the copy succeeds.
     std::unordered_map<LLGLuint, uint64_t> sFailedInFrame;
-    // [POSE CHECK 2026-11-08] buffers the Vulkan pass drew this frame, and GL flushes into them afterwards (same frame)
-    std::unordered_set<const LLVertexBuffer*> sPoseDrawn;
-    uint64_t sPoseLateFlushes = 0;
-    uint32_t sPoseLateLogged = 0;
-
     // ---- hooks from llrender ------------------------------------------------------------------------------------
-    void onBufferFlush(LLVertexBuffer* buffer, bool indices, U32 start, U32 end, const U8* data)
-    {
-        if (!sPoseDrawn.empty() && sPoseDrawn.count(buffer))
-        {
-            // a buffer the Vulkan pass has already drawn from this frame gets new bytes now: GL's later passes of this
-            // frame draw them, Vulkan drew the old ones (the evidence the pose check is after)
-            sPoseLateFlushes++;
-            if (sPoseLateLogged < 10)
-            {
-                sPoseLateLogged++;
-                LL_WARNS("WolfVulkanPose") << "GL flush into vertex buffer " << (const void*)buffer << (indices ? " (indices)" : " (vertices)")
-                                           << " bytes " << start << "-" << end << " after the Vulkan pass drew from it this frame" << LL_ENDL;
-            }
-        }
-        auto it = sBuffers.find(buffer);
-        if (it == sBuffers.end() || !it->second.mBuffer) return;
-        WolfVkVertexBuffer* vb = it->second.mBuffer;
-        WolfVkBuffer& target = indices ? vb->indices() : vb->vertices();
-        if (!target.isValid()) return;
-        // flush_vbo's end is inclusive (llvertexbuffer.cpp:1391-1395); the Apple path passes the whole buffer with end 0
-        // (its glBufferData of mSize), so "end 0" means the lot.
-        const VkDeviceSize size = (end >= start && end != 0) ? static_cast<VkDeviceSize>(end - start + 1) : target.size() - start;
-        if (static_cast<VkDeviceSize>(start) + size > target.size()) return;
-        target.write(start, data, size);
-        sStats.mBufferBytesWritten += size;
-        sDirtyBuffers.insert(buffer);
-    }
-
-    void onBufferDestroy(LLVertexBuffer* buffer)
-    {
-        sPoseDrawn.erase(buffer);
-        auto it = sBuffers.find(buffer);
-        if (it == sBuffers.end()) return;
-        delete it->second.mBuffer;   // its destroy() defers the Vulkan release
-        sBuffers.erase(it);
-        sDirtyBuffers.erase(buffer);
-    }
-
     void onTexelsChanged(LLGLuint name)
     {
         if (!on_main_thread())
@@ -170,69 +118,6 @@ namespace
             if (it != sTextures.end()) it->second.mStale = true;
         }
         for (LLGLuint name : deleted) dropTexture(name);
-    }
-
-    // ---- GL state save/restore for the read-backs (as wolfvrscreen.cpp captureInto saves the bindings it touches)
-    struct GLBufferBindings
-    {
-        GLint mArray = 0, mElement = 0;
-        GLBufferBindings()
-        {
-            glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &mArray);
-            glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &mElement);
-        }
-        ~GLBufferBindings()
-        {
-            glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(mArray));
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLuint>(mElement));
-        }
-    };
-
-    bool mirrorBuffer(LLVertexBuffer* buffer, WolfVkVertexBuffer*& out)
-    {
-        out = nullptr;
-        const U32 gl_vbo = buffer->getGLBuffer();
-        const U32 gl_ibo = buffer->getGLIndices();
-        if (gl_vbo == 0 && gl_ibo == 0) return false;
-        std::string error;
-        WolfVkVertexBuffer* vb = new WolfVkVertexBuffer();
-        vb->init(*sDevice, buffer->getTypeMask());
-        if (!vb->allocateBuffer(buffer->getNumVerts(), buffer->getNumIndices(), error))
-        {
-            LL_WARNS_ONCE("Vulkan") << "vertex buffer mirror: " << error << LL_ENDL;
-            delete vb;
-            return false;
-        }
-        // The GL buffer holds what GL draws: copy it (glGetBufferSubData, OpenGL 4.6 spec 6.3 "Buffer Object Queries") into the
-        // Vulkan copy's host bytes and mark the whole range for upload. LLVertexBuffer's own bind bookkeeping (sGLRenderBuffer)
-        // is left as it was: the previous bindings are restored on return.
-        GLBufferBindings saved;
-        // the copy must have exactly GL's shape, or its contents would be guesses: a mismatch is a failure, not a copy
-        if ((gl_vbo != 0 && buffer->getSize() != vb->getSize()) || (gl_ibo != 0 && buffer->getIndicesSize() != vb->getIndicesSize()))
-        {
-            LL_WARNS_ONCE("Vulkan") << "vertex buffer mirror: size differs from GL's (" << buffer->getSize() << "/" << vb->getSize() << " bytes, indices "
-                                    << buffer->getIndicesSize() << "/" << vb->getIndicesSize() << "); not mirrored" << LL_ENDL;
-            delete vb;
-            return false;
-        }
-        if (gl_vbo != 0 && vb->vertices().isValid())
-        {
-            glBindBuffer(GL_ARRAY_BUFFER, gl_vbo);
-            glGetBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vb->getSize()), vb->vertices().hostData());
-            vb->vertices().markDirty(0, vb->getSize());
-        }
-        if (gl_ibo != 0 && vb->indices().isValid())
-        {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gl_ibo);
-            glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vb->getIndicesSize()), vb->indices().hostData());
-            vb->indices().markDirty(0, vb->getIndicesSize());
-        }
-        if (glGetError() != GL_NO_ERROR)
-        {
-            LL_WARNS_ONCE("Vulkan") << "vertex buffer mirror: glGetBufferSubData failed" << LL_ENDL;
-        }
-        out = vb;
-        return true;
     }
 
     uint32_t glPixelFormatForChannels(uint32_t channels)
@@ -466,21 +351,14 @@ void init(WolfVkDevice& device, WolfVkSamplerCache& samplers)
 {
     sDevice = &device;
     sSamplers = &samplers;
-    LLVertexBuffer::sWolfVkOnFlush = onBufferFlush;
-    LLVertexBuffer::sWolfVkOnDestroy = onBufferDestroy;
     LLImageGL::sWolfVkOnTexelsChanged = onTexelsChanged;
     LLImageGL::sWolfVkOnDelete = onTextureDelete;
 }
 
 void shutdown()
 {
-    LLVertexBuffer::sWolfVkOnFlush = nullptr;
-    LLVertexBuffer::sWolfVkOnDestroy = nullptr;
     LLImageGL::sWolfVkOnTexelsChanged = nullptr;
     LLImageGL::sWolfVkOnDelete = nullptr;
-    for (auto& kv : sBuffers) delete kv.second.mBuffer;
-    sBuffers.clear();
-    sDirtyBuffers.clear();
     for (auto& kv : sTextures) delete kv.second.mImage;
     sTextures.clear();
     sTextureBytes = 0;
@@ -491,78 +369,14 @@ void shutdown()
         sOffThreadPending = false;
     }
     sFailedInFrame.clear();
-    sPoseDrawn.clear();
     sWarnedTextures.clear();
     sDevice = nullptr;
     sSamplers = nullptr;
 }
 
-WolfVkVertexBuffer* vertexBuffer(LLVertexBuffer* buffer)
-{
-    if (!sDevice || !buffer) return nullptr;
-    auto it = sBuffers.find(buffer);
-    if (it != sBuffers.end())
-    {
-        // [DEVICE LOST 2026-11-08 16:27Z] LLVertexBuffer::allocateBuffer re-sizes a buffer in place (new GL buffer object,
-        // new vertex/index counts, same LLVertexBuffer); a copy made for the old size then has fewer vertices and
-        // indices than the draws ask for, and an out-of-range fetch on the card is a device loss. A copy whose
-        // shape no longer matches is remade here; the old one goes when the frames using it are done.
-        WolfVkVertexBuffer* vb = it->second.mBuffer;
-        if (vb && (vb->getNumVerts() != buffer->getNumVerts() || vb->getNumIndices() != buffer->getNumIndices()
-                   || vb->getSize() != buffer->getSize() || vb->getIndicesSize() != buffer->getIndicesSize()))
-        {
-            delete vb;
-            sBuffers.erase(it);
-            sDirtyBuffers.erase(buffer);
-            sStats.mBuffersRemade++;
-        }
-        else
-        {
-            return vb;
-        }
-    }
-    WolfVkVertexBuffer* vb = nullptr;
-    if (!mirrorBuffer(buffer, vb))
-    {
-        return nullptr;
-    }
-    sBuffers[buffer].mBuffer = vb;
-    sDirtyBuffers.insert(buffer);
-    sStats.mBuffersMade++;
-    return vb;
-}
-
-WolfVkVertexBuffer* existingVertexBuffer(LLVertexBuffer* buffer)
-{
-    auto it = sBuffers.find(buffer);
-    return it == sBuffers.end() ? nullptr : it->second.mBuffer;
-}
-
-void poseNoteDrawn(LLVertexBuffer* buffer) { sPoseDrawn.insert(buffer); }
-void poseFrameEnd() { sPoseDrawn.clear(); }
-uint64_t poseLateFlushes() { return sPoseLateFlushes; }
-
 const Stats& stats()
 {
     return sStats;
-}
-
-void recordUploads(VkCommandBuffer cmd)
-{
-    for (LLVertexBuffer* b : sDirtyBuffers)
-    {
-        auto it = sBuffers.find(b);
-        if (it != sBuffers.end() && it->second.mBuffer)
-        {
-            it->second.mBuffer->recordUploads(cmd, sStagingRing);
-        }
-    }
-    sDirtyBuffers.clear();
-}
-
-void setStagingRing(WolfVkStagingRing* ring)
-{
-    sStagingRing = ring;
 }
 
 Texture texture(LLImageGL* image, VkCommandBuffer /*cmd*/)
@@ -599,7 +413,6 @@ Texture texture(LLImageGL* image, VkCommandBuffer /*cmd*/)
     return t;
 }
 
-uint32_t vertexBufferCount() { return static_cast<uint32_t>(sBuffers.size()); }
 uint32_t textureCount() { return static_cast<uint32_t>(sTextures.size()); }
 uint64_t textureBytes() { return sTextureBytes; }
 

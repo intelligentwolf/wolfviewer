@@ -41,6 +41,20 @@ macro (wolfvk_compile_shaders _target)
     else ()
       set(WOLFVK_SHADERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/app_settings/shaders")
       set(WOLFVK_SPV_DIR "${WOLFVK_SHADERS_DIR}/spv")
+      # The running viewer compares this fingerprint with stamp.json before it accepts the
+      # generated store. Keep it derived from shader_vulkan.py itself so its input list and
+      # line-ending normalisation exactly match the store writer.
+      execute_process(
+          COMMAND "${PYTHON_EXECUTABLE}" "${SCRIPTS_DIR}/shader_vulkan.py" --transform-md5
+          RESULT_VARIABLE WOLFVK_TRANSFORM_MD5_RESULT
+          OUTPUT_VARIABLE WOLFVK_TRANSFORM_MD5
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+          )
+      string(LENGTH "${WOLFVK_TRANSFORM_MD5}" WOLFVK_TRANSFORM_MD5_LENGTH)
+      if (NOT WOLFVK_TRANSFORM_MD5_RESULT EQUAL 0 OR NOT WOLFVK_TRANSFORM_MD5_LENGTH EQUAL 32 OR NOT WOLFVK_TRANSFORM_MD5 MATCHES "^[0-9a-f]+$")
+        message(FATAL_ERROR "Cannot calculate the Vulkan shader-transform fingerprint: ${WOLFVK_TRANSFORM_MD5}")
+      endif ()
+      target_compile_definitions(llrender PRIVATE WOLFVK_TRANSFORM_MD5=\"${WOLFVK_TRANSFORM_MD5}\")
       file(GLOB_RECURSE WOLFVK_GLSL_INPUTS CONFIGURE_DEPENDS "${WOLFVK_SHADERS_DIR}/*.glsl")
       set(WOLFVK_STAMP "${CMAKE_CURRENT_BINARY_DIR}/wolfvk_shaders.stamp")
       # --no-fail: GL compile failures are the check_shaders target's to report (ShaderCheck.cmake, which fails the build on
@@ -59,7 +73,7 @@ macro (wolfvk_compile_shaders _target)
           COMMAND ${GLSLANG_VALIDATOR} -V -S vert -o "${WOLFVK_SPV_DIR}/wolfvk_composite.vert.spv" "${WOLFVK_SHADERS_DIR}/class1/wolfvk/compositeV.glsl"
           COMMAND ${GLSLANG_VALIDATOR} -V -S frag -o "${WOLFVK_SPV_DIR}/wolfvk_composite.frag.spv" "${WOLFVK_SHADERS_DIR}/class1/wolfvk/compositeF.glsl"
           COMMAND ${CMAKE_COMMAND} -E touch "${WOLFVK_STAMP}"
-          DEPENDS "${SCRIPTS_DIR}/shader_check.py" "${SCRIPTS_DIR}/shader_vulkan.py" ${WOLFVK_GLSL_INPUTS}
+          DEPENDS "${SCRIPTS_DIR}/shader_check.py" "${SCRIPTS_DIR}/shader_vulkan.py" "${SCRIPTS_DIR}/spv_reflect.py" ${WOLFVK_GLSL_INPUTS}
           COMMENT "Compiling every shader program variant to Vulkan SPIR-V (scripts/shader_check.py --vulkan-out)"
           VERBATIM
           )

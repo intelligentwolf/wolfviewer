@@ -20643,6 +20643,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<string></string>
 		</map>
+		<key>WolfBackgroundFrameLimit</key>
+		<map>
+			<key>Comment</key>
+			<string>[W114 2026-11-26] Frames a second at most while the viewer is behind other windows (not focused, or minimised), on top of BackgroundYieldTime. 0 = no limit beyond that yield. Not while a VR headset is in use or a video is being recorded, and not on the login screen, while teleporting or logging out.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>U32</string>
+			<key>Value</key>
+			<integer>15</integer>
+		</map>
 		<key>WolfLogFrameRate</key>
 		<map>
 			<key>Comment</key>
@@ -20710,6 +20721,110 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<map>
 			<key>Comment</key>
 			<string>[VULKAN BACKEND 2026-11-08] Debugging: do not share the G-buffer with Vulkan; the deferred geometry passes stay on OpenGL and Vulkan draws only its own layer.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugGLSimple</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN G-BUFFER S2 2026-11-26] Debugging (A/B): OpenGL draws the G-buffer draw calls of the deferred simple pool's program (gDeferredDiffuseProgram) while Vulkan records the other families; off (default) = Vulkan records them. Read every draw, no restart needed.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugGLBump</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN G-BUFFER S2 2026-11-26] Debugging (A/B): OpenGL draws the G-buffer draw calls of the bump pool's deferred program (gDeferredBumpProgram) while Vulkan records the other families; off (default) = Vulkan records them. Read every draw, no restart needed.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugGLMaterials</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN G-BUFFER S2 2026-11-26] Debugging (A/B): OpenGL draws the G-buffer draw calls of the materials pool's deferred programs (all gDeferredMaterialProgram variants) while Vulkan records the other families; off (default) = Vulkan records them. Read every draw, no restart needed.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugGLAvatar</key>
+		<map>
+			<key>Comment</key>
+			<string>[W114-VULKAN S4 2026-11-26] Debugging (A/B): OpenGL draws the G-buffer draw calls of the avatar pool's own deferred programs (system body gDeferredAvatarProgram, eyes gDeferredNonIndexedDiffuseAlphaMaskNoColorProgram, impostors gDeferredImpostorProgram) while Vulkan records the other families; off (default) = Vulkan records them. Read every draw, no restart needed.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugGLShadow</key>
+		<map>
+			<key>Comment</key>
+			<string>[W114-VULKAN S5 2026-11-26] Debugging (A/B): OpenGL draws every draw call of the shadow passes (sun cascades, projector and probe shadow maps) into the shared shadow maps, and the static shadow batch runs as in OpenGL mode; off (default) = Vulkan records them. Read every pass, no restart needed.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugGLRigged</key>
+		<map>
+			<key>Comment</key>
+			<string>[W114-VULKAN S4 2026-11-26] Debugging (A/B): OpenGL draws the draw calls of every rigged-mesh program (the skinned variants: matrixPalette skinning) while Vulkan records the other families; off (default) = Vulkan records them. Read every draw, no restart needed.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugNoShadowMaps</key>
+		<map>
+			<key>Comment</key>
+			<string>[W114-VULKAN S5 2026-11-26] Debugging (A/B reference): in Vulkan mode the shadow maps stay OpenGL's own textures (GL_DEPTH_COMPONENT24) and OpenGL draws every shadow pass; off (default) = the maps are Vulkan-owned depth images that Vulkan draws into. Read when Vulkan starts: restart to change.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugGLPBR</key>
+		<map>
+			<key>Comment</key>
+			<string>[VULKAN G-BUFFER S2 2026-11-26] Debugging (A/B): OpenGL draws the G-buffer draw calls of the GLTF PBR pool's deferred program (gDeferredPBROpaqueProgram) while Vulkan records the other families; off (default) = Vulkan records them. Read every draw, no restart needed.</string>
 			<key>HideFromEditor</key>
 			<integer>1</integer>
 			<key>Persist</key>
@@ -20816,6 +20931,19 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<integer>1</integer>
 			<key>Persist</key>
 			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugSkyTablesDump</key>
+		<map>
+			<key>Comment</key>
+			<string>[W114-VULKAN S8 2026-11-26] Debugging: once set, the Wolf sky's four atmosphere tables in use are written (float32, logs/wolf_sky_tables/gl, and logs/wolf_sky_tables/vk when Vulkan builds them) for scripts/wolf_sky_table_compare.py; turns itself off after the dump.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>0</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
@@ -21033,6 +21161,19 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<integer>1</integer>
 			<key>Type</key>
 			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVulkanDebugStoreFailAfterFrames</key>
+		<map>
+			<key>Comment</key>
+			<string>[VK S6a 2026-11-26] Debugging: the Vulkan-owned vertex buffer store fails by itself this many frames after it started (0 = never), to test that every buffer moves back to OpenGL and the picture stays right.</string>
+			<key>HideFromEditor</key>
+			<integer>1</integer>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>S32</string>
 			<key>Value</key>
 			<integer>0</integer>
 		</map>
@@ -23023,7 +23164,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerFarClipFollowsHeight</key>
 		<map>
 			<key>Comment</key>
-			<string>The camera's far clip grows by its height above the water (up to 30 km), so the ground within the draw distance stays in view from the air. Wolf Territories only.</string>
+			<string>The camera's far clip grows by its height above the water (up to 30 km), so the ground within the draw distance stays in view from the air: while flying or under open sky, not under a roof (a skybox or an interior). Wolf Territories only.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

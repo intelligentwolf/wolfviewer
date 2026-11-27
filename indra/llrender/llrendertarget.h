@@ -82,8 +82,47 @@ public:
         virtual void released(LLRenderTarget& target) = 0;
     };
     static WolfVkProvider* sWolfVkProvider;
+    // [VULKAN G-BUFFER S2 2026-11-26] called first by bindTarget / clear / flush while Vulkan holds the shared G-buffer
+    // (null otherwise): Vulkan hands the images back to OpenGL before OpenGL changes or touches a target
+    static void (*sWolfVkBeforeTargetChange)();
+    // [NATIVE VULKAN 2026-11-26] Native Vulkan owner for LLRenderTarget when gGLManager.mIsNativeVulkan is true.
+    struct WolfVkNativeOwner
+    {
+        virtual ~WolfVkNativeOwner() = default;
+        virtual void onTargetChanged(LLRenderTarget& target) = 0;
+        virtual void onShareDepth(LLRenderTarget& src, LLRenderTarget& dst) = 0;
+        virtual void onBindTarget(LLRenderTarget& target) = 0;
+        virtual void onFlushTarget(LLRenderTarget& target, LLRenderTarget* previous) = 0;
+        virtual void onReleaseTarget(LLRenderTarget& target) = 0;
+    };
+    static WolfVkNativeOwner* sWolfVkNativeOwner;
     void setWolfVkShared(bool shared) { mWolfVkShared = shared; }
     bool isWolfVkShared() const { return mWolfVkShared; }
+
+    // [VK S6 REGISTRY 2026-11-26] Any number of targets, each with its own provider (the G-buffer, the shadow maps, the
+    // lighting and post targets ...). The single pointer above stays as the provider of targets marked with
+    // setWolfVkShared(true) that have none of their own, so the G-buffer code is unchanged.
+    //   wolfVkRegister(target, provider)   target takes its textures from provider at its NEXT allocation (a target
+    //                                      already allocated keeps what it has until release()/allocate(); the caller
+    //                                      re-allocates it, as for setWolfVkShared). provider null = the target has
+    //                                      no provider of its own any more (same rule: from its next allocation).
+    //   wolfVkUnregisterProvider(provider) the provider is going away: every target forgets it at once. Textures it
+    //                                      had provided stay the provider's to delete (the target never deletes
+    //                                      them and no longer calls released()), so the provider must make sure the
+    //                                      targets are released or re-allocated before OpenGL draws to them again.
+    //                                      A provider registered here MUST call it before it is destroyed; one that
+    //                                      was registered and then replaced by another on a target is not told of
+    //                                      that target's release() either (re-allocate the target before replacing).
+    //   wolfVkProvider()                   the provider this target would ask now: its own, else sWolfVkProvider when
+    //                                      marked shared, else null.
+    // A provider sees the target it is asked for (size via getWidth/getHeight, wolfVkMipLevels(), the attachment index
+    // and format), so one provider object can serve several targets or one each. Main thread only.
+    static void wolfVkRegister(LLRenderTarget& target, WolfVkProvider* provider);
+    static void wolfVkUnregisterProvider(WolfVkProvider* provider);
+    WolfVkProvider* wolfVkProvider() const { return mWolfVkProvider ? mWolfVkProvider : (mWolfVkShared ? sWolfVkProvider : nullptr); }
+    // Levels a provided colour texture must have: 1, or the full chain when the target generates mipmaps
+    // (allocate(): 1 + floor(log2(max(width, height)))).
+    U32 wolfVkMipLevels() const { return mGenerateMipMaps != LLTexUnit::TMG_NONE ? mMipLevels : 1; }
     static U32 sCurResX;
     static U32 sCurResY;
 
@@ -209,6 +248,8 @@ protected:
     // rest. [G8 2026-11-11] Per texture, not one flag: a target the provider shared only in part (a colour format it
     // cannot share, or no shared depth) has textures of its own as well, which one flag left undeleted (leaked).
     std::vector<U32> mWolfVkProvidedNames;
+    WolfVkProvider* mWolfVkProvider = nullptr;     // [VK S6 REGISTRY 2026-11-26] this target's own provider (wolfVkRegister)
+    WolfVkProvider* mWolfVkProvidedBy = nullptr;   // ... and the provider mWolfVkProvidedNames came from (told at release())
     LLTexUnit::eTextureMipGeneration mGenerateMipMaps;
     U32 mMipLevels;
 

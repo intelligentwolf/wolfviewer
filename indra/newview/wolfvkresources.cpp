@@ -701,6 +701,7 @@ namespace
         return true;
     }
 
+#if !LL_DARWIN
     // The first bytes of an OpenGL buffer as a draw fetches them: each vertex is 4 unsigned bytes read as an integer
     // attribute (glVertexAttribIPointer) and captured unchanged by transform feedback (OpenGL 4.6 core 13.3 "Transform
     // Feedback"; GLSL 3.30: the viewer's context is a 3.3+ core profile). bytes must be a multiple of 4. Every binding
@@ -842,6 +843,7 @@ namespace
         for (int i = 0; i < 3; ++i) if (handles[i]) store.free(handles[i]);
         return ok;
     }
+#endif
 
     void destroyVulkanObjects(bool hung)
     {

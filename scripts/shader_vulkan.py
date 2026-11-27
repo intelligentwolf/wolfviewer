@@ -57,6 +57,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 
 import spv_reflect   # [W114-VULKAN spv2 2026-11-26] static use of samplers and blocks per stage module; the unused-resource strip
 
@@ -264,6 +265,59 @@ class Transformed:
         self.error = ""
 
 
+_PREPROCESS_LOCK = threading.Lock()
+_PREPROCESS_KEY_LOCKS = {}
+_PREPROCESS_CACHE = {}
+
+
+def _preprocess_unit(glslang, cache_dir, u, unit_path):
+    """Per-unit specialization-constant strip + glslang -E, locked and memoized per unit file.
+    Avoids concurrent ThreadPoolExecutor workers overwriting vulkan-spec/<unit> while glslang.exe holds it open on
+    Windows (PermissionError / ERROR_SHARING_VIOLATION), and runs glslang -E once per distinct stitched unit (~2,200)
+    rather than once per attached unit across all ~7,270 linked programs."""
+    orig_path = unit_path(cache_dir, u)
+    st_mtime = os.stat(orig_path).st_mtime_ns
+    cache_key = (glslang, orig_path, u.stage, st_mtime)
+    with _PREPROCESS_LOCK:
+        if cache_key in _PREPROCESS_CACHE:
+            return _PREPROCESS_CACHE[cache_key]
+        key_lock = _PREPROCESS_KEY_LOCKS.setdefault(cache_key, threading.Lock())
+    with key_lock:
+        with _PREPROCESS_LOCK:
+            if cache_key in _PREPROCESS_CACHE:
+                return _PREPROCESS_CACHE[cache_key]
+        with open(orig_path, encoding="utf-8") as fh:
+            stitched = fh.read().split("\n")
+        found = {}
+        for i, line in enumerate(stitched):
+            m = DEFINE_LINE_RE.match(line)
+            if m and m.group(1) in SPEC_CONSTANTS:
+                found[m.group(1)] = m.group(2)
+                stitched[i] = ""   # the name stays in the text unexpanded and names the specialization constant
+        path = orig_path
+        if found:
+            for line in stitched:
+                st = line.strip()
+                if st.startswith("#") and re.match(r"#\s*(if|ifdef|ifndef|elif)\b", st) and any(re.search(r"\b%s\b" % n, st) for n in found):
+                    res = (None, None, "%s: specialization-constant define used in a preprocessor condition (%s)" % (u.filename, st))
+                    with _PREPROCESS_LOCK:
+                        _PREPROCESS_CACHE[cache_key] = res
+                    return res
+            spec_dir = os.path.join(cache_dir, "vulkan-spec")
+            os.makedirs(spec_dir, exist_ok=True)
+            path = os.path.join(spec_dir, os.path.basename(orig_path))
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("\n".join(stitched))
+        text, err = preprocess(glslang, path, u.stage)
+        if text is None:
+            res = (None, None, "preprocess %s: %s" % (u.filename, err.strip()))
+        else:
+            res = (dict(found), text, "")
+        with _PREPROCESS_LOCK:
+            _PREPROCESS_CACHE[cache_key] = res
+        return res
+
+
 def transform(glslang, cache_dir, job, unit_path):
     """Turns a shader_check LinkJob (units in attach order) into Vulkan GLSL. Returns a Transformed (error set on failure)."""
     out = Transformed()
@@ -275,31 +329,11 @@ def transform(glslang, cache_dir, job, unit_path):
     pre = []   # [(unit, preprocessed text)]
     spec_values = []   # per unit: {spec name: default value text}
     for u in job.units:
-        path = unit_path(cache_dir, u)
-        with open(path, encoding="utf-8") as fh:
-            stitched = fh.read().split("\n")
-        found = {}
-        for i, line in enumerate(stitched):
-            m = DEFINE_LINE_RE.match(line)
-            if m and m.group(1) in SPEC_CONSTANTS:
-                found[m.group(1)] = m.group(2)
-                stitched[i] = ""   # the name stays in the text unexpanded and names the specialization constant
-        if found:
-            for line in stitched:
-                st = line.strip()
-                if st.startswith("#") and re.match(r"#\s*(if|ifdef|ifndef|elif)\b", st) and any(re.search(r"\b%s\b" % n, st) for n in found):
-                    out.error = "%s: specialization-constant define used in a preprocessor condition (%s)" % (u.filename, st)
-                    return out
-            spec_dir = os.path.join(cache_dir, "vulkan-spec")
-            os.makedirs(spec_dir, exist_ok=True)
-            path = os.path.join(spec_dir, os.path.basename(path))
-            with open(path, "w", encoding="utf-8", newline="\n") as fh:
-                fh.write("\n".join(stitched))
-        spec_values.append(found)
-        text, err = preprocess(glslang, path, u.stage)
+        found, text, err = _preprocess_unit(glslang, cache_dir, u, unit_path)
         if text is None:
-            out.error = "preprocess %s: %s" % (u.filename, err.strip())
+            out.error = err
             return out
+        spec_values.append(found)
         pre.append((u, text))
 
     # ---- gather: loose uniforms per stage, samplers per program, io per stage

@@ -141,6 +141,7 @@ UninstallText $(UninstallTextMsg)
 DirText $(DirectoryChooseTitle) $(DirectoryChooseSetup)
 # <FS:TJ> Keep Vivox only for OpenSim viewers
 !if ${ISOPENSIM} == "1"
+!define MUI_PAGE_CUSTOMFUNCTION_PRE licPre
 !insertmacro MUI_PAGE_LICENSE "VivoxAUP.txt"
 !endif
 # </FS:TJ>
@@ -249,8 +250,13 @@ Function StrStr
 FunctionEnd
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Pre-directory page callback
+;; Pre-license & pre-directory page callbacks
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+Function licPre
+    StrCmp $SKIP_DIALOGS "true" 0 +2
+	Abort
+FunctionEnd
+
 Function dirPre
     StrCmp $SKIP_DIALOGS "true" 0 +2
 	Abort
@@ -309,8 +315,11 @@ FunctionEnd
 Function CheckCPUFlagsAVX2_Prompt
     Push $1
     Push $3
+    StrCmp $IS_UPDATE "true" ContinueInstall
+    StrCmp $SKIP_DIALOGS "true" ContinueInstall
     System::Call 'kernel32::IsProcessorFeaturePresent(i 40) i .r1'  ; 40 is PF_AVX2_INSTRUCTIONS_AVAILABLE
     IntCmp $1 1 OK_AVX2 
+    Pop $3
     Pop $1
     Return
   OK_AVX2:
@@ -396,13 +405,28 @@ ${EndIf}
 
 after_instdir:
 
+# Parse /SKIP_DIALOGS and /UPDATE early so version and CPU prompts skip dialogs on auto-updates
+${GetParameters} $COMMANDLINE
+StrCpy $IS_UPDATE ""
+ClearErrors
+${GetOptions} $COMMANDLINE "/UPDATE" $0
+IfErrors +2 0
+  StrCpy $IS_UPDATE "true"
+ClearErrors
+${GetOptions} $COMMANDLINE "/SKIP_DIALOGS" $0
+IfErrors +3 0
+  StrCpy $SKIP_DIALOGS "true"
+  SetAutoClose true
+ClearErrors
+
 # <WolfViewer 2026-11-06> Ticket 574: every release's installer has the same file name, so a
 # Downloads folder fills with "...Setup.exe", "...Setup (1).exe", and opening an old one quietly put
 # the old version back over the new one. The install section writes the version it installed
 # (WriteRegStr ... "Version" "${VERSION_LONG}", e.g. "7.2.4.96"); when that is newer than this
-# installer, say so and offer the download page. A silent run is the viewer's own updater, which
-# only ever offers a newer release (wolfupdate.cpp), so it is never stopped here.
+# installer, say so and offer the download page. An updater run (/UPDATE or /S) is the viewer's own
+# updater, which only ever offers a newer release (wolfupdate.cpp), so it is never stopped here.
 ${IfNot} ${Silent}
+${AndIf} $IS_UPDATE != "true"
   ReadRegStr $0 SHELL_CONTEXT "${INSTNAME_KEY}" "Version"
   ${If} $0 != ""
     ${VersionCompare} "$0" "${VERSION_LONG}" $1   # 1 = the installed one is newer
@@ -756,9 +780,13 @@ WriteRegDWORD SHELL_CONTEXT "${MSUNINSTALL_KEY}" "NoModify" 1
 WriteRegDWORD SHELL_CONTEXT "${MSUNINSTALL_KEY}" "NoRepair" 1
 
 # <FS:Ansariel> Ask before creating protocol registry entries
-# <WolfViewer 2026-10-02> Not asked on a silent update: the links are re-pointed at this folder only
-# if they were registered before (a per-release install they pointed into may just have gone).
-IfSilent 0 url_registry_ask
+# <WolfViewer 2026-10-02> Not asked on an update (/UPDATE, /SKIP_DIALOGS, or /S): the links are
+# re-pointed at this folder only if they were registered before (a per-release install they pointed
+# into may just have gone).
+IfSilent url_registry_auto 0
+StrCmp $IS_UPDATE "true" url_registry_auto 0
+StrCmp $SKIP_DIALOGS "true" url_registry_auto url_registry_ask
+url_registry_auto:
   ClearErrors
   ReadRegStr $0 HKEY_CLASSES_ROOT "secondlife\shell\open\command" ""
   IfErrors 0 url_registry_write

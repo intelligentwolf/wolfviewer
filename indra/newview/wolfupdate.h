@@ -33,8 +33,8 @@
  * ~/wolfviewer-releases/publish_downloads.sh.
  *
  * WHAT HAPPENS, by how this copy was installed:
- *  - Windows: the signed NSIS installer runs silently into the same folder (/S /SKIP_DIALOGS
- *    /UPDATE — one Windows permission prompt) and starts the viewer again.
+ *  - Windows: the signed NSIS installer runs with its progress window into the same folder
+ *    (/SKIP_DIALOGS /UPDATE — one Windows permission prompt) and starts the viewer again.
  *  - Linux, installed from the tarball into a folder the user can write: the new tarball is
  *    unpacked beside this one and swapped in by etc/wolfviewer-update.sh; the old folder is kept
  *    as <dir>-<timestamp>, as install.sh keeps them.

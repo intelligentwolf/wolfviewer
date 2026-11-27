@@ -69,6 +69,7 @@ public:
 
     bool initGL();
     void shutdownGL();
+    void initNativeVulkanNoopGLPointers();
 
 #if LL_WINDOWS
     void initWGL(); // Initializes stupid WGL extensions

@@ -1054,12 +1054,18 @@ void LLRender::initVertexBuffer()
 
 void LLRender::resetVertexBuffer()
 {
-    mBuffer = NULL;
+    if (mBuffer.notNull())
+    {
+        // sVBCache belongs exclusively to the main rendering thread (the only thread with mBuffer != nullptr).
+        // Background threads (LLImageGLThread, LLGLWorkerThread, and TLS destructors LLRender::~LLRender on
+        // short-lived threads) have mBuffer == nullptr and must never touch sVBCache.
+        sVBCache.clear();
+        mBuffer = NULL;
+    }
 }
 
 void LLRender::shutdown()
 {
-    sVBCache.clear();
     resetVertexBuffer();
 }
 
@@ -1894,7 +1900,7 @@ LLVertexBuffer* LLRender::bufferfromCache(U32 attribute_mask, U32 count)
     // cache just before creating a vertex buffer in VRAM
     std::unordered_map<U64, LLVBCache>::iterator cache = sVBCache.find(vhash);
 
-    if (cache != sVBCache.end())
+    if (cache != sVBCache.end() && cache->second.vb.notNull())
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_VERTEX("vb cache hit");
         // cache hit, just use the cached buffer

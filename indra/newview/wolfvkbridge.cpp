@@ -2768,6 +2768,7 @@ void shutdown()
             gSavedSettings.setBOOL("WolfVulkanStartOK", true);
             gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
         }
+        gGL.resetVertexBuffer();
         WolfVkNative::shutdown();
         sState = State::OPENGL;
         sWindow = nullptr;

@@ -3655,6 +3655,7 @@ namespace
         const WolfVkPhysicalDeviceInfo& info = sDevice.chosen();
         gGLManager.mInited = true;
         gGLManager.mIsNativeVulkan = true;
+        gGLManager.initNativeVulkanNoopGLPointers();
         gGLManager.mHasRequirements = true;
         gGLManager.mGLVersion = 4.6f;
         gGLManager.mGLSLVersionMajor = 4;
@@ -5083,6 +5084,7 @@ U32 drawShadowBatchPage(LLGLSLShader* batch_shader, S32 page_id, U64 matrix_toke
 
 void shutdown()
 {
+    const bool was_active = sActive;
     if (sFrameOpen)
     {
         endUnshownFrame();
@@ -5183,7 +5185,13 @@ void shutdown()
     sFrameOpen = false;
     sFrameCmd = VK_NULL_HANDLE;
     sActiveTarget = nullptr;
-    gGLManager.mIsNativeVulkan = false;
+    // When tearing down an active Native Vulkan run (LLViewerWindow::shutdownGL), no OpenGL context exists
+    // in this process: keep mIsNativeVulkan true so subsequent subsystem cleanup (LLFontGL, gPipeline,
+    // LLImageGL::cleanupClass, stopGL shader unload, LLVertexBuffer::cleanupClass) skips raw OpenGL calls.
+    if (!was_active)
+    {
+        gGLManager.mIsNativeVulkan = false;
+    }
     gGLManager.mInited = false;
 }
 

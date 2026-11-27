@@ -7239,7 +7239,7 @@ Downloading WolfViewer [NAME] ([SIZE] MB) in the background. You will be asked b
    type="alertmodal">
 WolfViewer [NAME] (w[LATEST]) is downloaded and checked.
 
-Restart and update closes WolfViewer, installs the new version and starts it again. Your settings, saved logins and chat logs are kept. On Windows, Windows will ask for permission to install.
+Restart and update closes WolfViewer, installs the new version and starts it again. Your settings, saved logins and chat logs are kept. On Windows, Windows will ask for permission and show the install progress.
     <form name="form">
       <button
        default="true"

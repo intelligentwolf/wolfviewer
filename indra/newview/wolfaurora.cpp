@@ -535,11 +535,18 @@ void WolfAurora::frameUpdate()
     {
         // a new table, or the aurora back after a gap: start from nothing rather than march the whole
         // table in one frame (~10 ms at the top levels on an integrated GPU); it fills in `parts` frames
-        GLfloat prev[4];
-        glGetFloatv(GL_COLOR_CLEAR_VALUE, prev);
-        glClearColor(0.f, 0.f, 0.f, 0.f);
-        sLut.clear();
-        glClearColor(prev[0], prev[1], prev[2], prev[3]);
+        if (gGLManager.mIsNativeVulkan)
+        {
+            sLut.clear();
+        }
+        else
+        {
+            GLfloat prev[4];
+            glGetFloatv(GL_COLOR_CLEAR_VALUE, prev);
+            glClearColor(0.f, 0.f, 0.f, 0.f);
+            sLut.clear();
+            glClearColor(prev[0], prev[1], prev[2], prev[3]);
+        }
         sState.part = 0;
         sState.sweep = 0;
     }
@@ -559,7 +566,7 @@ void WolfAurora::frameUpdate()
 #else
     static decltype(&glBlendColor) s_blendColor = &glBlendColor;
 #endif
-    const bool accumulate = sState.sweep > 0 && s_blendColor;   // the first sweep writes the table, the later ones blend
+    const bool accumulate = !gGLManager.mIsNativeVulkan && sState.sweep > 0 && s_blendColor;   // the first sweep writes the table, the later ones blend
     if (++sState.part % parts == 0) ++sState.sweep;
     const U32 y0 = part * h / parts, y1 = (part + 1) * h / parts;
     glViewport(0, (GLint)y0, (GLsizei)w, (GLsizei)(y1 - y0));

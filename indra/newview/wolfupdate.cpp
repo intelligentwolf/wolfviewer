@@ -1282,10 +1282,11 @@ void WolfUpdate::installCoro()
 #if LL_WINDOWS
     // The installer asks Windows for administrator rights itself (installer_template.nsi
     // RequestExecutionLevel admin), so ShellExecuteEx shows the permission prompt and returns once
-    // it is answered. Then the viewer quits; the installer waits for its window to close
-    // (CloseSecondLife), installs into the same folder and starts it again (.onInstSuccess).
+    // it is answered. Then the viewer quits; the installer shows its progress window while waiting
+    // for the viewer window to close (CloseSecondLife) and replacing files in the same folder,
+    // auto-closes when finished, and starts the new viewer (.onInstSuccess).
     std::wstring file = ll_convert_string_to_wide(path);
-    std::wstring params = L"/S /SKIP_DIALOGS /UPDATE";
+    std::wstring params = L"/SKIP_DIALOGS /UPDATE";
     SHELLEXECUTEINFOW sei = { sizeof(sei) };
     sei.fMask = SEE_MASK_NOASYNC;
     sei.lpVerb = L"open";

@@ -937,13 +937,20 @@ void LLVOTree::updateMesh()
         LL_WARNS() << "Failed to allocate Vertex Buffer on mesh update to "
             << vert_count << " vertices and "
             << index_count << " indices" << LL_ENDL;
-        buff->allocateBuffer(1, 3);
-        memset((U8*)buff->getMappedData(), 0, buff->getSize());
-        memset((U8*)buff->getMappedIndices(), 0, buff->getIndicesSize());
-        facep->setSize(1, 3);
-        facep->setVertexBuffer(buff);
+        if (buff->allocateBuffer(1, 3) && buff->getMappedData() && buff->getMappedIndices())
+        {
+            memset((U8*)buff->getMappedData(), 0, buff->getSize());
+            memset((U8*)buff->getMappedIndices(), 0, buff->getIndicesSize());
+            facep->setSize(1, 3);
+            facep->setVertexBuffer(buff);
+        }
+        else
+        {
+            facep->setSize(0, 0);
+            facep->setVertexBuffer(NULL);
+        }
         mReferenceBuffer->unmapBuffer();
-        buff->unmapBuffer();
+        if (facep->getVertexBuffer()) buff->unmapBuffer();
         return;
     }
 

@@ -47,6 +47,7 @@
 #include "llsky.h"
 #include "llagent.h"
 #include "llagentcamera.h"   // <WolfViewer 2026-09-23/> selection outline clip
+#include "wolfvknative.h"    // [NATIVE VULKAN 2026-11-28/] hardware bandwidth estimate without GL timer queries
 #include "lltoolmgr.h"
 #include "llselectmgr.h"
 #include "llhudmanager.h"
@@ -1065,11 +1066,16 @@ F32 shader_timer_benchmark(std::vector<LLRenderTarget> & dest, TextureHolder & t
 
     F32 ms = gBenchmarkProgram.mTimeElapsed / 1000000.f;
     seconds = ms / 1000.f;
+    if (seconds <= 0.f || gBenchmarkProgram.mSamplesDrawn == 0)
+    {
+        return -1.f;
+    }
 
     F64 samples_drawn = (F64)gBenchmarkProgram.mSamplesDrawn;
     F64 gpixels_drawn = samples_drawn / 1000000000.0;
     F32 samples_sec = (F32)(gpixels_drawn / seconds);
-    return samples_sec * 4;  // 4 bytes per sample
+    const F32 gbps = samples_sec * 4;  // 4 bytes per sample
+    return llfinite(gbps) ? gbps : -1.f;
 }
 
 //-----------------------------------------------------------------------------
@@ -1078,6 +1084,12 @@ F32 shader_timer_benchmark(std::vector<LLRenderTarget> & dest, TextureHolder & t
 //-----------------------------------------------------------------------------
 F32 gpu_benchmark()
 {
+    if (gGLManager.mIsNativeVulkan)
+    {
+        const F32 gbps = WolfVkNative::estimatedMemoryBandwidthGBps();
+        LL_INFOS("Benchmark") << "Native Vulkan hardware bandwidth estimate: " << llformat("%.1f", gbps) << " GB/sec" << LL_ENDL;
+        return gbps;
+    }
     if (gGLManager.mGLVersion < 3.3f)
     { // don't bother benchmarking venerable drivers which don't support accurate timing anyway
         return -1.f;

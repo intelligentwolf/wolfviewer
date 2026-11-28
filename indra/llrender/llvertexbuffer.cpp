@@ -1503,6 +1503,10 @@ U8* LLVertexBuffer::mapVertexBuffer(LLVertexBuffer::AttributeType type, U32 inde
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_VERTEX;
     _mapBuffer();
+    if (!mMappedData)
+    {
+        return nullptr;
+    }
 
     if (count == -1)
     {
@@ -1540,6 +1544,10 @@ U8* LLVertexBuffer::mapIndexBuffer(U32 index, S32 count)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_VERTEX;
     _mapBuffer();
+    if (!mMappedIndexData)
+    {
+        return nullptr;
+    }
 
     if (count == -1)
     {
@@ -1581,6 +1589,10 @@ U8* LLVertexBuffer::mapIndexBuffer(U32 index, S32 count)
 //  dst -- mMappedData or mMappedIndexData
 void LLVertexBuffer::flush_vbo(GLenum target, U32 start, U32 end, void* data, U8* dst)
 {
+    if (!dst || !data)
+    {
+        return;
+    }
     // [VULKAN G-BUFFER S2 2026-11-26] llvertexbuffer.h sWolfVkBeforeWrite: before the bytes change. [W114-VULKAN merge
     // 2026-11-26] This also holds for a buffer in the S6a store: the store's copy is its own queue submit (batchEnd), so
     // the bracket that recorded draws from the old bytes must be submitted first.

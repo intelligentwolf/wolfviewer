@@ -175,6 +175,21 @@ const char* WolfVkPhysicalDeviceInfo::typeString() const
     }
 }
 
+bool WolfVkPhysicalDeviceInfo::isLegacyIntelIntegrated() const
+{
+    if (mProperties.deviceType != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
+        mProperties.vendorID != WolfVkDevice::VENDOR_INTEL)
+    {
+        return false;
+    }
+    std::string lower = mProperties.deviceName;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    // Core Ultra Meteor Lake / Lunar Lake integrated GPUs carry "Arc" branding; pre-Arc Intel HD / UHD / Iris
+    // integrated GPUs share system DDR4/LPDDR4 RAM and use Intel's legacy graphics architecture.
+    return lower.find("arc") == std::string::npos;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // WolfVkDevice
 

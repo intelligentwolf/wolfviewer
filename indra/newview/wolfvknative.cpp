@@ -44,6 +44,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -66,6 +67,7 @@ namespace
     // Native Vulkan state
     // -------------------------------------------------------------------------
     bool sActive = false;
+    bool sIsIntegratedGPU = false;
     LLWindow* sWindow = nullptr;
     WolfVkDevice sDevice;
     VkSurfaceKHR sSurface = VK_NULL_HANDLE;
@@ -357,7 +359,7 @@ namespace
         {
             gl_name = 0;
             handle = nullptr;
-            if (!sDevice.hasDevice() || size == 0) return false;
+            if (!sDevice.hasDevice() || sDevice.hung() || size == 0) return false;
 
             auto entry = std::make_unique<NativeBufferEntry>();
             entry->mIsIndex = is_index;
@@ -382,7 +384,7 @@ namespace
 
         void write(void* handle, U32 offset, U32 size, const U8* data) override
         {
-            if (!handle || !data || size == 0) return;
+            if (!handle || !data || size == 0 || !sDevice.hasDevice() || sDevice.hung()) return;
             auto* entry = static_cast<NativeBufferEntry*>(handle);
             const size_t end_off = static_cast<size_t>(offset) + static_cast<size_t>(size);
             if (entry->mShadow.size() < end_off)
@@ -410,6 +412,9 @@ namespace
 
             auto maybeQueuePromote = [&]()
             {
+                // Unified-memory integrated GPUs already store HOST_VISIBLE buffers in system RAM; promoting to a
+                // second DEVICE_LOCAL allocation in the same unified RAM duplicates ~300 MB and wastes bandwidth.
+                if (sIsIntegratedGPU) return;
                 if (!entry->mQueuedPromote && entry->mValidBytes >= 256 && entry->mWriteCount <= 8)
                 {
                     std::lock_guard<std::mutex> lock(mMutex);
@@ -456,7 +461,7 @@ namespace
         // at the top of the frame command buffer (zero render-pass breaks, zero CPU memcpy).
         void promoteSettledToVRAM(VkCommandBuffer cmd, uint64_t cur_epoch)
         {
-            if (cmd == VK_NULL_HANDLE || !sDevice.hasDevice() || sDevice.hung()) return;
+            if (sIsIntegratedGPU || cmd == VK_NULL_HANDLE || !sDevice.hasDevice() || sDevice.hung()) return;
             static constexpr VkDeviceSize MAX_PROMOTE_PER_FRAME = 32ull * 1024ull * 1024ull;
             VkDeviceSize promoted_bytes = 0;
             bool any_copied = false;
@@ -1046,7 +1051,7 @@ namespace
                            U32 pixformat, U32 pixtype, const void* pixels, bool swap_bytes,
                            bool generate_mips, S32 exact_mips = 0) override
         {
-            if (!sDevice.hasDevice() || name == 0 || width <= 0 || height <= 0) return false;
+            if (!sDevice.hasDevice() || sDevice.hung() || name == 0 || width <= 0 || height <= 0) return false;
             Slot* slot = ensureSlot(name);
             if (!slot) return false;
 
@@ -1268,7 +1273,7 @@ namespace
                               S32 row_pixels, U32 intformat, U32 pixformat, U32 pixtype,
                               const void* pixels, bool swap_bytes) override
         {
-            if (!sDevice.hasDevice() || name == 0 || !pixels || width <= 0 || height <= 0) return false;
+            if (!sDevice.hasDevice() || sDevice.hung() || name == 0 || !pixels || width <= 0 || height <= 0) return false;
             WolfVkImage* img = find(name);
             if (!img || !img->isValid())
             {
@@ -3675,7 +3680,9 @@ namespace
                                   : gGLManager.mIsIntel  ? "INTEL"
                                   : gGLManager.mIsApple  ? "APPLE" : "VULKAN";
 
-        // Compute VRAM in MB from device-local heaps
+        // Compute VRAM in MB from device-local heaps. On unified-memory integrated GPUs (VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU),
+        // VK_MEMORY_HEAP_DEVICE_LOCAL_BIT is backed by shared system RAM (e.g. 8 GB of a 16 GB laptop); cap the reported
+        // VRAM budget so LLViewerTextureList and LLFeatureManager do not treat shared system RAM as an 8 GB discrete card.
         VkDeviceSize vram_bytes = 0;
         for (uint32_t i = 0; i < info.mMemory.memoryHeapCount; ++i)
         {
@@ -3684,7 +3691,13 @@ namespace
                 vram_bytes += info.mMemory.memoryHeaps[i].size;
             }
         }
-        gGLManager.mVRAM = static_cast<U32>(std::max<VkDeviceSize>(512, vram_bytes / (1024ull * 1024ull)));
+        U32 detected_mb = static_cast<U32>(std::max<VkDeviceSize>(512, vram_bytes / (1024ull * 1024ull)));
+        if (info.isIntegrated())
+        {
+            const U32 cap_mb = info.isLegacyIntelIntegrated() ? 1024u : 2048u;
+            detected_mb = std::min<U32>(cap_mb, std::max<U32>(512u, detected_mb / 4u));
+        }
+        gGLManager.mVRAM = detected_mb;
         gGLManager.mVRAMDetected = static_cast<S32>(gGLManager.mVRAM);
 
         // Capability limits from VkPhysicalDeviceLimits
@@ -3743,6 +3756,20 @@ bool init(LLWindow* window, std::string& error)
         return false;
     }
 
+    if (!sDevice.chooseOnly(sSurface, error))
+    {
+        WolfVkSurface::destroy(sDevice.instance(), sSurface);
+        sSurface = VK_NULL_HANDLE;
+        sDevice.destroy();
+        return false;
+    }
+    sIsIntegratedGPU = sDevice.chosen().isIntegrated();
+    if (sIsIntegratedGPU)
+    {
+        // Keep unified-memory integrated GPUs at 2 frames in flight (lower input latency and 1/3 less ring RAM).
+        sDevice.setFramesInFlight(2);
+    }
+
     if (!sDevice.createDevice(sSurface, error))
     {
         WolfVkSurface::destroy(sDevice.instance(), sSurface);
@@ -3765,20 +3792,27 @@ bool init(LLWindow* window, std::string& error)
         return false;
     }
 
-    if (!sUniforms.init(sDevice, 64u * 1024u * 1024u, error))
+    // Per-frame ring sizes. Integrated GPUs shrink only the rings whose overflow is harmless: the staging ring falls back to
+    // reading the shadow copy directly (WolfVkStagingRing::allocate). The uniform ring is kept generous (an overflow skips
+    // the frame's remaining draws, and Native Vulkan has no OpenGL to draw them) and the indirect ring keeps the desktop size.
+    const VkDeviceSize ubo_ring_bytes      = (sIsIntegratedGPU ? 32ull : 64ull)  * 1024ull * 1024ull;
+    const VkDeviceSize staging_ring_bytes  = (sIsIntegratedGPU ? 32ull : 128ull) * 1024ull * 1024ull;
+    const VkDeviceSize indirect_ring_bytes = 16ull * 1024ull * 1024ull;
+
+    if (!sUniforms.init(sDevice, ubo_ring_bytes, error))
     {
         shutdown();
         return false;
     }
 
-    if (!sStagingRing.init(sDevice, 128u * 1024u * 1024u, error))
+    if (!sStagingRing.init(sDevice, staging_ring_bytes, error))
     {
         shutdown();
         return false;
     }
     sDevice.setStagingRing(&sStagingRing);
 
-    if (!sIndirectRing.init(sDevice, 16u * 1024u * 1024u, error))
+    if (!sIndirectRing.init(sDevice, indirect_ring_bytes, error))
     {
         shutdown();
         return false;
@@ -3857,9 +3891,57 @@ bool isActive()
     return sActive;
 }
 
+bool isIntegratedGPU()
+{
+    return sActive && sIsIntegratedGPU;
+}
+
+bool isHung()
+{
+    return sActive && sDevice.hung();
+}
+
+std::string hungReason()
+{
+    return sDevice.hungReason();
+}
+
+F32 estimatedMemoryBandwidthGBps()
+{
+    if (!sDevice.hasDevice())
+    {
+        return 48.0f;
+    }
+    const WolfVkPhysicalDeviceInfo& info = sDevice.chosen();
+    if (info.isLegacyIntelIntegrated())
+    {
+        std::string lower = info.name();
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lower.find("iris") != std::string::npos && lower.find("xe") != std::string::npos)
+        {
+            return 96.0f;   // Class 2 (Mid)
+        }
+        return 36.0f;       // Class 1 (LowMid: reflection probe level 0 on HD/UHD, featuretable.txt Class1)
+    }
+    // LLFeatureManager::loadGPUClass multiplies this by a CPU bias in [0.5, 1] and bins it against RenderClass1MemoryBandwidth
+    // (48): <=48 C1, <=96 C2, <=192 C3, <=384 C4, else C5. Each value is the top of its class, so a full-speed CPU lands on the
+    // intended class and a slow CPU one class lower, as with the measured OpenGL benchmark. >=8 GB cards use 1000 so they
+    // stay Ultra at any CPU bias (the OpenGL benchmark measures thousands of GB/s on them).
+    if (info.isIntegrated())
+    {
+        return 96.0f;       // Class 2 (Mid) on modern AMD Radeon / Intel Arc integrated GPUs
+    }
+    if (gGLManager.mVRAM >= 8192) return 1000.0f;  // Class 5 (Ultra)
+    if (gGLManager.mVRAM >= 4096) return 384.0f;   // Class 4 (High)
+    if (gGLManager.mVRAM >= 2048) return 192.0f;   // Class 3 (MidHigh)
+    return 96.0f;                                  // Class 2 (Mid)
+}
+
 bool present()
 {
     if (!sActive) return false;
+    if (sDevice.hung()) return true;
     const auto t_pres0 = std::chrono::steady_clock::now();
 
     if (!sFrameOpen)
@@ -4150,6 +4232,71 @@ void endUnshownFrame()
     sDrawsLastFrame = sDrawsThisFrame;
     sDrawsThisFrame = 0;
     sUniforms.forgetBound();
+}
+
+bool readSnapshotTarget(bool depth, std::vector<U8>& out_bytes, U32& out_width, U32& out_height, bool& out_bgra)
+{
+    out_bytes.clear();
+    out_width = 0;
+    out_height = 0;
+    out_bgra = false;
+    if (!sActive || !sDevice.hasDevice() || sDevice.hung()) return false;
+
+    if (sFrameOpen)
+    {
+        endUnshownFrame();
+    }
+    if (sDevice.hung()) return false;
+
+    WolfVkRenderTarget* rt = LLRenderTarget::sBoundTarget
+        ? sRenderTargetOwner.getOrBuild(*LLRenderTarget::sBoundTarget)
+        : &sWindowTarget;
+    if (!rt || !rt->isComplete()) return false;
+
+    const uint32_t w = rt->getWidth();
+    const uint32_t h = rt->getHeight();
+    if (w == 0 || h == 0) return false;
+
+    std::string err;
+    if (depth)
+    {
+        WolfVkImage* dimg = rt->depthImage();
+        if (!dimg || !dimg->isValid() || dimg->format().mStencil || dimg->format().mTexelBytes != 4u)
+        {
+            LL_WARNS("Vulkan") << "[Native] snapshot depth readback: unsupported or missing depth image" << LL_ENDL;
+            return false;
+        }
+        if (!dimg->readBack(out_bytes, err))
+        {
+            LL_WARNS("Vulkan") << "[Native] snapshot depth readback failed: " << err << LL_ENDL;
+            return false;
+        }
+    }
+    else
+    {
+        WolfVkImage* cimg = rt->image(0);
+        if (!cimg || !cimg->isValid() || cimg->format().mBlockBytes || cimg->format().mTexelBytes != 4u)
+        {
+            LL_WARNS("Vulkan") << "[Native] snapshot color readback: unsupported or missing colour attachment" << LL_ENDL;
+            return false;
+        }
+        if (!rt->readPixels(0, out_bytes, err))
+        {
+            LL_WARNS("Vulkan") << "[Native] snapshot color readback failed: " << err << LL_ENDL;
+            return false;
+        }
+        out_bgra = (cimg->format().mFormat == VK_FORMAT_B8G8R8A8_UNORM);
+    }
+
+    const size_t min_bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4u;
+    if (out_bytes.size() < min_bytes)
+    {
+        out_bytes.clear();
+        return false;
+    }
+    out_width = w;
+    out_height = h;
+    return true;
 }
 
 void onResize()
@@ -5109,11 +5256,11 @@ void shutdown()
     sAttachmentImages.clear();
     sFrameCmdImages.clear();
 
-    if (sDevice.hasDevice())
+    sParallelRecorder.shutdown();
+    if (sDevice.hasDevice() && !sDevice.hung())
     {
         sDevice.waitIdleAndFlushDeferred();
 
-        sParallelRecorder.shutdown();
         shutdownTimestampPool();
 
         for (auto& kv : sShadowBatchPipelines)
@@ -5164,23 +5311,39 @@ void shutdown()
         sIndirectRing.destroy();
         sStagingRing.destroy();
         sUniforms.destroy();
-        sSwapchain.destroy();
+    }
 
+    const bool hung_before_swap = sDevice.hung();
+    const bool swapchains_gone = !hung_before_swap && sSwapchain.destroy();
+    if (hung_before_swap || sDevice.hung())
+    {
+        sSwapchain.forget();
+    }
+    else if (!swapchains_gone)
+    {
+        sDevice.abandon("a swapchain could not be destroyed (its presents did not finish)");
+    }
+    else if (sDevice.hasDevice())
+    {
         // Flush deferred destructions before vkDestroyDevice so 0 child objects leak!
         sDevice.waitIdleAndFlushDeferred();
     }
-    else
-    {
-        sParallelRecorder.shutdown();
-    }
 
-    if (sSurface != VK_NULL_HANDLE && sDevice.hasInstance())
+    if (sSurface != VK_NULL_HANDLE)
     {
-        WolfVkSurface::destroy(sDevice.instance(), sSurface);
+        if (swapchains_gone && !sDevice.hung() && sDevice.hasInstance())
+        {
+            WolfVkSurface::destroy(sDevice.instance(), sSurface);
+        }
+        else
+        {
+            WolfVkSurface::abandon();
+        }
         sSurface = VK_NULL_HANDLE;
     }
 
     sDevice.destroy();
+    sIsIntegratedGPU = false;
     sWindow = nullptr;
     sFrameOpen = false;
     sFrameCmd = VK_NULL_HANDLE;

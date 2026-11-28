@@ -86,6 +86,8 @@ namespace
     std::string sPendingNotice;         // notification name to show at the login screen
     std::string sPendingReason;         // its [REASON]
     std::string sLastError;
+    std::string sNativeInitFailedReason;
+    bool sNativeInitFailed = false;
     bool sLoginShown = false;
     bool sResizePending = false;
     bool sGLRefreshAfterPresent = false;   // [VK RESIZE 2026-11-10] onResize: refresh GL's drawable once more after the next present
@@ -455,7 +457,8 @@ namespace
     // [round 5 2026-11-11] the Vulkan state keys a second instance must leave as the first instance wrote them
     const char* const VULKAN_STATE_KEYS[] = { "WolfRenderBackend", "WolfVulkanStartOK", "WolfVulkanSessionRun", "WolfVulkanAutoFailures",
                                              "WolfVulkanAutoFailStamp", "WolfVulkanStoppedReason", "WolfVulkanLastGLDriver",
-                                             "WolfVulkanW101SpvRetryDone", "WolfVulkanLayerSelfTestRun" };
+                                             "WolfVulkanW101SpvRetryDone", "WolfVulkanLayerSelfTestRun",
+                                             "WolfRenderBackendUserChosen", "WolfNativeVkIGpuClassRepairDone" };
     // Re-reads those keys from the settings file into memory: a key the file holds takes its value, a key it does not
     // hold (saved non-default only, llappviewer.cpp:2237) its default - so the save that follows writes them unchanged.
     void restoreVulkanKeysFromFile(const std::string& filename)
@@ -707,7 +710,15 @@ namespace
         sLastError = reason;
         sState = State::STOPPED;
         if (sLogin.mStage == LoginCheck::RUNNING) sLogin.mStage = LoginCheck::FAILED;
-        tearDown();
+        // [W116 2026-11-28] Native Vulkan only reaches here with a hung/lost device. It is NOT shut down mid-session: the
+        // hooks stay installed and every path already no-ops on a hung device (ensureFrameOpen, the buffer/texture stores,
+        // present, readSnapshotTarget), so the remaining frames until quit draw nothing and allocate nothing. Tearing the
+        // hooks out here would send those frames down raw-GL paths with no GL context. WolfVkBridge::shutdown()
+        // (LLViewerWindow::shutdownGL) runs WolfVkNative::shutdown() at exit, which abandons the hung handles safely.
+        if (!WolfVkNative::isActive())
+        {
+            tearDown();
+        }
         gSavedSettings.setString("WolfRenderBackend", "opengl");
         gSavedSettings.setBOOL("WolfVulkanStartOK", true);
         recordAutomaticFailure(failureKind(retryable));   // [G5 2026-11-11] saved with the rest just below
@@ -1436,6 +1447,65 @@ void decideBackend()
         rememberNotice("WolfVulkanFellBackLastStart", sLastError);
         return;
     }
+    // [W116 2026-11-28] Pre-window Vulkan device check: before opening a GL-free Vulkan window, verify a usable Vulkan GPU
+    // exists, and keep legacy Intel HD/UHD integrated laptops on OpenGL by default unless the resident explicitly chose Vulkan.
+    {
+        WolfVkDevice probe_dev;
+        WolfVkDevice::Config probe_cfg;
+        probe_cfg.mDeviceOverride = gSavedSettings.getString("WolfVulkanDevice");
+        probe_cfg.mApplicationName = "WolfViewer";
+        std::string probe_err;
+        if (!probe_dev.createInstance(probe_cfg, probe_err))
+        {
+            LL_INFOS("Vulkan") << "Vulkan not available before window creation (" << probe_err << "); starting in OpenGL" << LL_ENDL;
+            gSavedSettings.setString("WolfRenderBackend", "opengl");
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            recordAutomaticFailure(WolfVkRetryRule::Failure::DRIVER_CHANGE_ONLY);
+            sState = State::FELL_BACK;
+            sLastError = probe_err.empty() ? std::string("Vulkan is not available on this computer") : probe_err;
+            rememberNotice(nextStartRetries() ? "WolfVulkanFellBack" : "WolfVulkanFellBackFinal", sLastError);
+            if (!LLAppViewer::instance()->isSecondInstance())
+            {
+                gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+            }
+            return;
+        }
+        std::string pick_err;
+        if (!probe_dev.chooseOnly(VK_NULL_HANDLE, pick_err))
+        {
+            const bool no_cands = probe_dev.noCandidates();
+            probe_dev.destroy();
+            LL_INFOS("Vulkan") << "No usable Vulkan graphics card before window creation (" << pick_err << "); starting in OpenGL" << LL_ENDL;
+            gSavedSettings.setString("WolfRenderBackend", "opengl");
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            recordAutomaticFailure(failureKind(!no_cands));
+            sState = State::FELL_BACK;
+            sLastError = pick_err.empty() ? std::string("no Vulkan graphics card can be used") : pick_err;
+            rememberNotice(nextStartRetries() ? "WolfVulkanFellBack" : "WolfVulkanFellBackFinal", sLastError);
+            if (!LLAppViewer::instance()->isSecondInstance())
+            {
+                gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+            }
+            return;
+        }
+        if (!gSavedSettings.getBOOL("WolfRenderBackendUserChosen") && probe_dev.chosen().isLegacyIntelIntegrated())
+        {
+            const std::string igpu_name = probe_dev.chosen().name();
+            probe_dev.destroy();
+            LL_INFOS("Vulkan") << "Legacy Intel integrated GPU (" << igpu_name
+                               << "): defaulting WolfRenderBackend to opengl (resident can still enable Vulkan via the V button)" << LL_ENDL;
+            gSavedSettings.setString("WolfRenderBackend", "opengl");
+            gSavedSettings.setBOOL("WolfVulkanStartOK", true);
+            sRequested = false;
+            sState = State::OPENGL;
+            if (!LLAppViewer::instance()->isSecondInstance())
+            {
+                gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
+            }
+            return;
+        }
+        probe_dev.destroy();
+    }
     sRequested = true;
     sState = State::VULKAN_STARTING;
 #ifdef LL_BUGSPLAT
@@ -1480,6 +1550,12 @@ void noteLayerSelfTestStarting()
     gSavedSettings.saveToFile(gSavedSettings.getString("ClientSettingsFile"), true);
 }
 
+void onNativeInitFailed(const std::string& reason)
+{
+    sNativeInitFailed = true;
+    sNativeInitFailedReason = reason;
+}
+
 void initAfterGL(LLWindow* window)
 {
     sWindow = window;
@@ -1490,6 +1566,11 @@ void initAfterGL(LLWindow* window)
         sVulkanDeviceLine = WolfVkNative::vulkanLine();
         if (!LLAppViewer::instance()->isSecondInstance())
         {
+            if (WolfVkNative::isIntegratedGPU() && !gSavedSettings.getBOOL("WolfNativeVkIGpuClassRepairDone"))
+            {
+                gSavedSettings.setBOOL("WolfNativeVkIGpuClassRepairDone", true);
+                gSavedSettings.setBOOL("ProbeHardwareOnStartup", true);
+            }
             const std::string folder = WolfCrashReport::thisRunFolder();
             gSavedSettings.setString("WolfVulkanSessionRun", folder.empty() ? std::string("no-dump-folder") : folder);
             gSavedSettings.setString("WolfVulkanLayerSelfTestRun", "");
@@ -1499,6 +1580,14 @@ void initAfterGL(LLWindow* window)
     }
     // [G5 2026-11-11] the OpenGL driver of this start, for the retry rule's stamp (decideBackend runs before OpenGL is up)
     gSavedSettings.setString("WolfVulkanLastGLDriver", gGLManager.mGLVendor + " / " + gGLManager.mGLRenderer + " / " + gGLManager.mGLVersionString);
+    if (sNativeInitFailed)
+    {
+        sNativeInitFailed = false;
+        probeInfo(false);
+        fallBack(sNativeInitFailedReason.empty() ? std::string("Native Vulkan failed to start") : sNativeInitFailedReason,
+                 "WolfVulkanFellBack", true);
+        return;
+    }
     if (!sRequested || sState != State::VULKAN_STARTING)
     {
         probeInfo(false);
@@ -2312,6 +2401,10 @@ void endUnshownFrame()
     if (WolfVkNative::isActive())
     {
         WolfVkNative::endUnshownFrame();
+        if (WolfVkNative::isHung())
+        {
+            stopAtRunTime("the graphics card did not finish a Vulkan frame (" + WolfVkNative::hungReason() + ")");
+        }
         return;
     }
     // [VR 3D POOL 2026-11-09] the VR 3D Mode crash (Paul, 2026-11-09; the VR agent's finding, reproduced twice at
@@ -2337,7 +2430,12 @@ bool present()
 {
     if (WolfVkNative::isActive())
     {
-        return WolfVkNative::present();
+        const bool presented = WolfVkNative::present();
+        if (WolfVkNative::isHung())
+        {
+            stopAtRunTime("the graphics card did not finish a Vulkan frame (" + WolfVkNative::hungReason() + ")");
+        }
+        return presented;
     }
     // [RUN-TIME STOP 2026-11-09] after a run-time failure nothing more reaches the window, by Vulkan or by OpenGL's own
     // swap (the caller swaps only on false), until the viewer has quit (stopAtRunTime) - also for the frame in which the
@@ -2890,8 +2988,10 @@ void chooseBackend(const std::string& choice)
     // [V BUTTON 2026-11-08] was WolfFloaterVulkan::onChoice; one path for the floater and the navigation bar's V button
     if (choice == gSavedSettings.getString("WolfRenderBackend"))
     {
+        gSavedSettings.setBOOL("WolfRenderBackendUserChosen", true);
         return;
     }
+    gSavedSettings.setBOOL("WolfRenderBackendUserChosen", true);
     gSavedSettings.setString("WolfRenderBackend", choice);
     // asking again after a failed start: the first-run marker must not stop the next try
     gSavedSettings.setBOOL("WolfVulkanStartOK", true);

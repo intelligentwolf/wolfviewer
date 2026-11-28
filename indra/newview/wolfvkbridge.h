@@ -55,6 +55,10 @@ namespace WolfVkBridge
     // swapchain. On failure in Vulkan mode: falls back to OpenGL for this run and remembers the notice.
     void initAfterGL(LLWindow* window);
 
+    // Called from LLViewerWindow when WolfVkNative::init fails and the window switches back to OpenGL, so initAfterGL
+    // records the fallback cleanly instead of entering the legacy hybrid GL+Vk bridge.
+    void onNativeInitFailed(const std::string& reason);
+
     // Vulkan is presenting the window (device + swapchain live).
     bool isActive();
 

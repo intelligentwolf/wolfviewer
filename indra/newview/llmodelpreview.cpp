@@ -2040,15 +2040,22 @@ void LLModelPreview::genGlodLODs(S32 which_lod, U32 decimation, bool enforce_tri
                 {
                     // This face was eliminated or we failed to allocate buffer,
                     // attempt to create a dummy triangle (one vertex, 3 indices, all 0)
-                    buff->allocateBuffer(1, 3);
-                    memset((U8*)buff->getMappedData(), 0, buff->getSize());
-                    // <FS:ND> Fix when running with opengl core profile
-                    //memset((U8*)buff->getIndicesPointer(), 0, buff->getIndicesSize());
-                    LLStrider< U16 > index_strider;
-                    buff->getIndexStrider( index_strider );
-
-                    memset( (U8*)index_strider.get(), 0, buff->getIndicesSize() );
-                    // </FS:ND>
+                    if (buff->allocateBuffer(1, 3) && buff->getMappedData())
+                    {
+                        memset((U8*)buff->getMappedData(), 0, buff->getSize());
+                        // <FS:ND> Fix when running with opengl core profile
+                        //memset((U8*)buff->getIndicesPointer(), 0, buff->getIndicesSize());
+                        LLStrider< U16 > index_strider;
+                        if (buff->getIndexStrider( index_strider ))
+                        {
+                            memset( (U8*)index_strider.get(), 0, buff->getIndicesSize() );
+                        }
+                        // </FS:ND>
+                    }
+                    else
+                    {
+                        continue;
+                    }
                 }
 
                 buff->validateRange(0, buff->getNumVerts() - 1, buff->getNumIndices(), 0);
@@ -4292,7 +4299,10 @@ void LLModelPreview::addEmptyFace(LLModel* pTarget)
 
     LLPointer<LLVertexBuffer> buff = new LLVertexBuffer(type_mask);
 
-    buff->allocateBuffer(1, 3);
+    if (!buff->allocateBuffer(1, 3) || !buff->getMappedData() || !buff->getMappedIndices())
+    {
+        return;
+    }
     memset((U8*)buff->getMappedData(), 0, buff->getSize());
     memset((U8*)buff->getMappedIndices(), 0, buff->getIndicesSize());
 

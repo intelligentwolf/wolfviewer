@@ -487,7 +487,7 @@ bool LLFeatureManager::loadGPUClass()
         F32 cpu_bias = llclamp(cpu_mhz / cpu_basis_mhz, 0.5f, 1.f);
         gbps *= cpu_bias;
 
-        if (gbps < 0.f)
+        if (!llfinite(gbps) || gbps < 0.f)
         { //couldn't bench, default to Low
     #if LL_DARWIN
         //GLVersion is misleading on OSX, just default to class 3 if we can't bench

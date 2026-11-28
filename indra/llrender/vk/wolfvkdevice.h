@@ -92,6 +92,8 @@ struct WolfVkPhysicalDeviceInfo
     std::string driverString() const;      // "NVIDIA 615.78.08" / "Mesa 26.2.5-arch1.1 (radv)" / vendor's packed version
     std::string apiVersionString() const;  // "1.4.351"
     const char* typeString() const;        // "discrete", "integrated", ...
+    bool isIntegrated() const { return mProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU; }
+    bool isLegacyIntelIntegrated() const;  // pre-Arc Intel HD / UHD / Iris integrated GPU
 };
 
 class WolfVkDevice
@@ -187,6 +189,7 @@ public:
     bool hostQueryReset() const { return mHostQueryReset && mDevice != VK_NULL_HANDLE && gVk.vkResetQueryPool != nullptr; }
     void setStagingRing(WolfVkStagingRing* ring) { mStagingRing = ring; }
     WolfVkStagingRing* stagingRing() const { return mStagingRing; }
+    void setFramesInFlight(uint32_t count) { if (mDevice == VK_NULL_HANDLE) mConfig.mFramesInFlight = count; }
     bool validationEnabled() const { return mValidationEnabled; }
     WolfVkAllocator& allocator() { return mAllocator; }
     uint32_t framesInFlight() const { return static_cast<uint32_t>(mFrames.size()); }

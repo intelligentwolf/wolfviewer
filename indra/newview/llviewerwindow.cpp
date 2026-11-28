@@ -31,6 +31,7 @@
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] Escape for the game's overlay, dialogs, effects
 #include "wolfstarfold.h"   // [STARFOLD 2026-11-25/] the cockpit's letter keys are not "letter keys start chat"
 #include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/> spread across all screens: do not save that size
+#include "wolfvknative.h"   // [NATIVE VULKAN 2026-11-28/] snapshot target readback and unshown frame submit
 
 
 // system library includes
@@ -873,14 +874,17 @@ public:
         if (debug_show_color == 1 && !LLRender::sNsightDebugSupport) // <FS:minerjr> Which causes an exception when in RelWithDebug
         // </FS:minerjr>
         {
-            U8 color[4];
+            U8 color[4] = { 0, 0, 0, 0 };
             LLCoordGL coord = gViewerWindow->getCurrentMouse();
 
             // Convert x,y to raw pixel coords
             S32 x_raw = (S32)llround(coord.mX * gViewerWindow->getWindowWidthRaw() / (F32) gViewerWindow->getWindowWidthScaled());
             S32 y_raw = (S32)llround(coord.mY * gViewerWindow->getWindowHeightRaw() / (F32) gViewerWindow->getWindowHeightScaled());
 
-            glReadPixels(x_raw, y_raw, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, color);
+            if (!gGLManager.mIsNativeVulkan)
+            {
+                glReadPixels(x_raw, y_raw, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, color);
+            }
             addText(xpos, ypos, llformat("Pixel <%1d, %1d> R:%1d G:%1d B:%1d A:%1d", x_raw, y_raw, color[0], color[1], color[2], color[3]));
             ypos += y_inc;
         }
@@ -2080,6 +2084,7 @@ LLViewerWindow::LLViewerWindow(const Params& p)
                 LL_WARNS("Vulkan") << "[Native] Native Vulkan init failed (" << vk_err << "); falling back to OpenGL" << LL_ENDL;
                 LLWindow::sWolfNativeVulkan = false;
                 gGLManager.mIsNativeVulkan = false;
+                WolfVkBridge::onNativeInitFailed(vk_err);
                 LLCoordScreen cur_sz(p.width, p.height);
                 mWindow->getSize(&cur_sz);
                 mWindow->switchContext(p.fullscreen, cur_sz, gSavedSettings.getBOOL("RenderVSyncEnable"));
@@ -6249,6 +6254,21 @@ bool LLViewerWindow::thumbnailSnapshot(LLImageRaw *raw, S32 preview_width, S32 p
     return rawSnapshot(raw, preview_width, preview_height, false, false, show_ui, show_hud, do_rebuild, no_post, gSavedSettings.getBOOL("RenderBalanceInSnapshot"), type);
 }
 
+namespace
+{
+    void copySnapshotRgbaRow(const U8* src_row, U32 count, bool src_bgra, U8* dst_row, S32 dst_comps)
+    {
+        for (U32 i = 0; i < count; ++i)
+        {
+            const U8* px = src_row + i * 4u;
+            dst_row[i * dst_comps + 0] = src_bgra ? px[2] : px[0];
+            if (dst_comps >= 2) dst_row[i * dst_comps + 1] = px[1];
+            if (dst_comps >= 3) dst_row[i * dst_comps + 2] = src_bgra ? px[0] : px[2];
+            if (dst_comps >= 4) dst_row[i * dst_comps + 3] = px[3];
+        }
+    }
+}
+
 // Saves the image from the screen to a raw image
 // Since the required size might be bigger than the available screen, this method rerenders the scene in parts (called subimages) and copy
 // the results over to the final raw image.
@@ -6345,7 +6365,7 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
         {
             // <FS:Ansariel> FIRE-15667: 24bit depth maps
             //U32 color_fmt = type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH ? GL_DEPTH_COMPONENT : GL_RGBA;
-            U32 color_fmt = (type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH || type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH24) ? GL_DEPTH_COMPONENT : GL_RGBA;
+            U32 color_fmt = (!gGLManager.mIsNativeVulkan && (type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH || type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH24)) ? GL_DEPTH_COMPONENT : GL_RGBA;
             // </FS:Ansariel>
             if (scratch_space.allocate(image_width, image_height, color_fmt, true))
             {
@@ -6445,6 +6465,42 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
     F32 depth_conversion_factor_1 = (LLViewerCamera::getInstance()->getFar() + LLViewerCamera::getInstance()->getNear()) / (2.f * LLViewerCamera::getInstance()->getFar() * LLViewerCamera::getInstance()->getNear());
     F32 depth_conversion_factor_2 = (LLViewerCamera::getInstance()->getFar() - LLViewerCamera::getInstance()->getNear()) / (2.f * LLViewerCamera::getInstance()->getFar() * LLViewerCamera::getInstance()->getNear());
 
+    auto write_depth_row = [&](const F32* depth_row, U32 count, U8* out_px)
+    {
+        const S32 comps = raw->getComponents();
+        if (type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH24)
+        {
+            for (U32 i = 0; i < count; ++i)
+            {
+                const F32 linear_depth_float = 1.f / (depth_conversion_factor_1 - (depth_row[i] * depth_conversion_factor_2));
+                const U32 RGB24 = F32_to_U32(linear_depth_float, LLViewerCamera::getInstance()->getNear(), LLViewerCamera::getInstance()->getFar());
+                const U8 depth_byteR = (U8)(llclamp(llfloor(RGB24 / 65536.f), 0, 255));
+                const U8 depth_byteG = (U8)(llclamp(llfloor((RGB24 - depth_byteR * 65536) / 256.f), 0, 255));
+                const U8 depth_byteB = (U8)(llclamp((RGB24 - depth_byteR * 65536 - depth_byteG * 256), 0u, 255u));
+                out_px[i * comps + 0] = depth_byteR;
+                out_px[i * comps + 1] = depth_byteG;
+                out_px[i * comps + 2] = depth_byteB;
+                for (S32 j = 3; j < comps; ++j)
+                {
+                    out_px[i * comps + j] = depth_byteR;
+                }
+            }
+        }
+        else
+        {
+            for (U32 i = 0; i < count; ++i)
+            {
+                const F32 linear_depth_float = 1.f / (depth_conversion_factor_1 - (depth_row[i] * depth_conversion_factor_2));
+                const U8 depth_byte = F32_to_U8(linear_depth_float, LLViewerCamera::getInstance()->getNear(), LLViewerCamera::getInstance()->getFar());
+                for (S32 j = 0; j < comps; ++j)
+                {
+                    out_px[i * comps + j] = depth_byte;
+                }
+            }
+        }
+    };
+
+    bool vk_read_ok = true;
     // Subimages are in fact partial rendering of the final view. This happens when the final view is bigger than the screen.
     // In most common cases, scale_factor is 1 and there's no more than 1 iteration on x and y
     for (int subimage_y = 0; subimage_y < scale_factor; ++subimage_y)
@@ -6479,6 +6535,21 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
                     swap();
                 }
 
+                std::vector<U8> vk_bytes;
+                U32 vk_w = 0;
+                U32 vk_h = 0;
+                bool vk_bgra = false;
+                if (gGLManager.mIsNativeVulkan && !LLRender::sNsightDebugSupport)
+                {
+                    const bool is_depth = (type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH || type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH24);
+                    LLAppViewer::instance()->pingMainloopTimeout("LLViewerWindow::rawSnapshot");
+                    if (!WolfVkNative::readSnapshotTarget(is_depth, vk_bytes, vk_w, vk_h, vk_bgra))
+                    {
+                        vk_read_ok = false;
+                        break;
+                    }
+                }
+
                 for (U32 out_y = 0; out_y < read_height ; out_y++)
                 {
                     S32 output_buffer_offset = (
@@ -6497,7 +6568,25 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
                     // disable use of glReadPixels when doing nVidia nSight graphics debugging
                     if (!LLRender::sNsightDebugSupport)
                     {
-                        if (type == LLSnapshotModel::SNAPSHOT_TYPE_COLOR)
+                        if (gGLManager.mIsNativeVulkan)
+                        {
+                            const U32 src_y = out_y + static_cast<U32>(subimage_y_offset);
+                            if (src_y < vk_h && static_cast<U32>(subimage_x_offset) < vk_w)
+                            {
+                                const U32 copy_w = llmin<U32>(read_width, vk_w - static_cast<U32>(subimage_x_offset));
+                                const U8* src_row = vk_bytes.data() + ((static_cast<size_t>(src_y) * vk_w + static_cast<U32>(subimage_x_offset)) * 4u);
+                                U8* dst_row = raw->getData() + output_buffer_offset;
+                                if (type == LLSnapshotModel::SNAPSHOT_TYPE_COLOR)
+                                {
+                                    copySnapshotRgbaRow(src_row, copy_w, vk_bgra, dst_row, raw->getComponents());
+                                }
+                                else
+                                {
+                                    write_depth_row(reinterpret_cast<const F32*>(src_row), copy_w, dst_row);
+                                }
+                            }
+                        }
+                        else if (type == LLSnapshotModel::SNAPSHOT_TYPE_COLOR)
                         {
                             glReadPixels(
                                      subimage_x_offset, out_y + subimage_y_offset,
@@ -6506,8 +6595,7 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
                                      raw->getData() + output_buffer_offset
                                      );
                         }
-                        // <FS:Ansariel> FIRE-15667: 24bit depth maps
-                        else if (type == LLSnapshotModel::SNAPSHOT_TYPE_DEPTH24)
+                        else
                         {
                             LLPointer<LLImageRaw> depth_line_buffer = new LLImageRaw(read_width, 1, sizeof(GLfloat)); // need to store floating point values
                             glReadPixels(
@@ -6516,59 +6604,17 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
                                          GL_DEPTH_COMPONENT, GL_FLOAT,
                                          depth_line_buffer->getData()// current output pixel is beginning of buffer...
                                          );
-
-                            for (S32 i = 0; i < (S32)read_width; i++)
-                            {
-                                F32 depth_float = *(F32*)(depth_line_buffer->getData() + (i * sizeof(F32)));
-
-                                F32 linear_depth_float = 1.f / (depth_conversion_factor_1 - (depth_float * depth_conversion_factor_2));
-                                U32 RGB24 = F32_to_U32(linear_depth_float, LLViewerCamera::getInstance()->getNear(), LLViewerCamera::getInstance()->getFar());
-                                //A max value of 16777215 for RGB24 evaluates to black when it shold be white.  The clamp assures that the divisions do not somehow become >=256.
-                                U8 depth_byteR = (U8)(llclamp(llfloor(RGB24 / 65536.f), 0, 255));
-                                U8 depth_byteG = (U8)(llclamp(llfloor((RGB24 - depth_byteR * 65536) / 256.f), 0, 255));
-                                U8 depth_byteB = (U8)(llclamp((RGB24 - depth_byteR * 65536 - depth_byteG * 256), 0u, 255u));
-                                // write converted scanline out to result image
-                                *(raw->getData() + output_buffer_offset + (i * raw->getComponents())) = depth_byteR;
-                                *(raw->getData() + output_buffer_offset + (i * raw->getComponents()) + 1) = depth_byteG;
-                                *(raw->getData() + output_buffer_offset + (i * raw->getComponents()) + 2) = depth_byteB;
-                                for (S32 j = 3; j < raw->getComponents(); j++)
-                                {
-                                    *(raw->getData() + output_buffer_offset + (i * raw->getComponents()) + j) = depth_byteR;
-                                }
-                            }
-                        }
-                        // </FS:Ansariel>
-                        else // LLSnapshotModel::SNAPSHOT_TYPE_DEPTH
-                        {
-                            // <FS> Fix buffer creation using the wrong type
-                            //LLPointer<LLImageRaw> depth_line_buffer = new LLImageRaw(read_width, 1, sizeof(GL_FLOAT)); // need to store floating point values
-                            LLPointer<LLImageRaw> depth_line_buffer = new LLImageRaw(read_width, 1, sizeof(GLfloat)); // need to store floating point values
-                            // </FS>
-                            glReadPixels(
-                                         subimage_x_offset, out_y + subimage_y_offset,
-                                         read_width, 1,
-                                         GL_DEPTH_COMPONENT, GL_FLOAT,
-                                         depth_line_buffer->getData()// current output pixel is beginning of buffer...
-                                         );
-
-                            for (S32 i = 0; i < (S32)read_width; i++)
-                            {
-                                F32 depth_float = *(F32*)(depth_line_buffer->getData() + (i * sizeof(F32)));
-
-                                F32 linear_depth_float = 1.f / (depth_conversion_factor_1 - (depth_float * depth_conversion_factor_2));
-                                U8 depth_byte = F32_to_U8(linear_depth_float, LLViewerCamera::getInstance()->getNear(), LLViewerCamera::getInstance()->getFar());
-                                // write converted scanline out to result image
-                                for (S32 j = 0; j < raw->getComponents(); j++)
-                                {
-                                    *(raw->getData() + output_buffer_offset + (i * raw->getComponents()) + j) = depth_byte;
-                                }
-                            }
+                            write_depth_row(reinterpret_cast<const F32*>(depth_line_buffer->getData()), read_width, raw->getData() + output_buffer_offset);
                         }
                     }
                 }
             }
             output_buffer_offset_x += subimage_x_offset;
             stop_glerror();
+        }
+        if (!vk_read_ok)
+        {
+            break;
         }
         output_buffer_offset_y += subimage_y_offset;
     }
@@ -6598,15 +6644,18 @@ bool LLViewerWindow::rawSnapshot(LLImageRaw *raw, S32 image_width, S32 image_hei
     // Note: this formula depends on the number of components being 3.  Not obvious, but it's correct.
     image_width += (image_width * 3) % 4;
 
-    bool ret = true ;
-    // Resize image
-    if(llabs(image_width - image_buffer_x) > 4 || llabs(image_height - image_buffer_y) > 4)
+    bool ret = vk_read_ok ;
+    if (vk_read_ok)
     {
-        ret = raw->scale( image_width, image_height );
-    }
-    else if(image_width != image_buffer_x || image_height != image_buffer_y)
-    {
-        ret = raw->scale( image_width, image_height, false );
+        // Resize image
+        if(llabs(image_width - image_buffer_x) > 4 || llabs(image_height - image_buffer_y) > 4)
+        {
+            ret = raw->scale( image_width, image_height );
+        }
+        else if(image_width != image_buffer_x || image_height != image_buffer_y)
+        {
+            ret = raw->scale( image_width, image_height, false );
+        }
     }
 
     setCursor(UI_CURSOR_ARROW);
@@ -6699,18 +6748,49 @@ bool LLViewerWindow::simpleSnapshot(LLImageRaw* raw, S32 image_width, S32 image_
         const F32 zoom = 1.0;
         const bool for_snapshot = true;
         display(do_rebuild, zoom, subfield, for_snapshot);
+        if (gGLManager.mIsNativeVulkan && i + 1 < num_render_passes)
+        {
+            WolfVkNative::endUnshownFrame();
+        }
     }
 
     LLImageDataSharedLock lock(raw);
 
-    glReadPixels(
-        0, 0,
-        image_width,
-        image_height,
-        GL_RGB, GL_UNSIGNED_BYTE,
-        raw->getData()
-    );
-    stop_glerror();
+    bool ok_read = true;
+    if (gGLManager.mIsNativeVulkan)
+    {
+        std::vector<U8> vk_bytes;
+        U32 vk_w = 0;
+        U32 vk_h = 0;
+        bool vk_bgra = false;
+        if (!WolfVkNative::readSnapshotTarget(false, vk_bytes, vk_w, vk_h, vk_bgra))
+        {
+            ok_read = false;
+        }
+        else
+        {
+            const S32 copy_w = llmin(image_width, static_cast<S32>(vk_w));
+            const S32 copy_h = llmin(image_height, static_cast<S32>(vk_h));
+            const S32 comps = raw->getComponents();
+            for (S32 y = 0; y < copy_h; ++y)
+            {
+                const U8* src_row = vk_bytes.data() + static_cast<size_t>(y) * vk_w * 4u;
+                U8* dst_row = raw->getData() + static_cast<size_t>(y) * image_width * comps;
+                copySnapshotRgbaRow(src_row, static_cast<U32>(copy_w), vk_bgra, dst_row, comps);
+            }
+        }
+    }
+    else
+    {
+        glReadPixels(
+            0, 0,
+            image_width,
+            image_height,
+            GL_RGB, GL_UNSIGNED_BYTE,
+            raw->getData()
+        );
+        stop_glerror();
+    }
 
     gDisplaySwapBuffers = false;
     gDepthDirty = true;
@@ -6736,7 +6816,7 @@ bool LLViewerWindow::simpleSnapshot(LLImageRaw* raw, S32 image_width, S32 image_
     scratch_space.release();
     gPipeline.allocateScreenBuffer(original_width, original_height);
 
-    return true;
+    return ok_read;
 }
 
 void display_cube_face();

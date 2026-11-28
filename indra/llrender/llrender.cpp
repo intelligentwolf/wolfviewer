@@ -1838,22 +1838,28 @@ void LLRender::flush()
             if (sBufferDataList)
             {
                 vb = genBuffer(attribute_mask, count);
-                sBufferDataList->emplace_back(
-                    vb,
-                    mMode,
-                    count,
-                    gGL.getTexUnit(0)->mCurrTexture,
-                    mMatrix[MM_MODELVIEW][mMatIdx[MM_MODELVIEW]],
-                    mMatrix[MM_PROJECTION][mMatIdx[MM_PROJECTION]],
-                    mMatrix[MM_TEXTURE0][mMatIdx[MM_TEXTURE0]]
-                    );
+                if (vb)
+                {
+                    sBufferDataList->emplace_back(
+                        vb,
+                        mMode,
+                        count,
+                        gGL.getTexUnit(0)->mCurrTexture,
+                        mMatrix[MM_MODELVIEW][mMatIdx[MM_MODELVIEW]],
+                        mMatrix[MM_PROJECTION][mMatIdx[MM_PROJECTION]],
+                        mMatrix[MM_TEXTURE0][mMatIdx[MM_TEXTURE0]]
+                        );
+                }
             }
             else
             {
                 vb = bufferfromCache(attribute_mask, count);
             }
 
-            drawBuffer(vb, mMode, count);
+            if (vb)
+            {
+                drawBuffer(vb, mMode, count);
+            }
         }
         else
         {
@@ -1911,6 +1917,10 @@ LLVertexBuffer* LLRender::bufferfromCache(U32 attribute_mask, U32 count)
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_VERTEX("vb cache miss");
         vb = genBuffer(attribute_mask, count);
+        if (!vb)
+        {
+            return nullptr;
+        }
 
         sVBCache[vhash] = { vb , std::chrono::steady_clock::now() };
 
@@ -1944,7 +1954,11 @@ LLVertexBuffer* LLRender::genBuffer(U32 attribute_mask, S32 count)
 {
     LLVertexBuffer * vb = new LLVertexBuffer(attribute_mask);
     vb->setWolfGLOnly();   // [VK S6a 2026-11-26] as mBuffer: LLRender's cached batches are drawn by OpenGL only
-    vb->allocateBuffer(count, 0);
+    if (!vb->allocateBuffer(count, 0))
+    {
+        LLPointer<LLVertexBuffer> cleanup(vb);
+        return nullptr;
+    }
 
     // Non-Apple path uses glBufferSubData inside setXxxData, so the VBO
     // must already be bound. On Apple, the VBO is lazily created in
@@ -1982,6 +1996,7 @@ LLVertexBuffer* LLRender::genBuffer(U32 attribute_mask, S32 count)
 
 void LLRender::drawBuffer(LLVertexBuffer* vb, U32 mode, S32 count)
 {
+    if (!vb) return;
     vb->setBuffer();
     vb->drawArrays(mode, 0, count);
 }

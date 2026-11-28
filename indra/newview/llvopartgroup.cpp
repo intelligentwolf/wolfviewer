@@ -707,10 +707,25 @@ void LLParticlePartition::rebuildGeom(LLSpatialGroup* group)
             group->mVertexBuffer->getNumVerts() < vertex_count || group->mVertexBuffer->getNumIndices() < index_count)
         {
             group->mVertexBuffer = new LLVertexBuffer(LLVOPartGroup::VERTEX_DATA_MASK);
-            group->mVertexBuffer->allocateBuffer(vertex_count, index_count);
+            if (!group->mVertexBuffer->allocateBuffer(vertex_count, index_count))
+            {
+                group->mVertexBuffer = NULL;
+                group->mBufferMap.clear();
+                group->mLastUpdateTime = gFrameTimeSeconds;
+                group->clearState(LLSpatialGroup::GEOM_DIRTY);
+                return;
+            }
 
             // initialize index and texture coordinates only when buffer is reallocated
             U16* indicesp = (U16*)group->mVertexBuffer->mapIndexBuffer(0, index_count);
+            if (!indicesp)
+            {
+                group->mVertexBuffer = NULL;
+                group->mBufferMap.clear();
+                group->mLastUpdateTime = gFrameTimeSeconds;
+                group->clearState(LLSpatialGroup::GEOM_DIRTY);
+                return;
+            }
 
             U16 geom_idx = 0;
             for (U32 i = 0; i < index_count; i += 6)
@@ -728,7 +743,14 @@ void LLParticlePartition::rebuildGeom(LLSpatialGroup* group)
 
             LLStrider<LLVector2> texcoordsp;
 
-            group->mVertexBuffer->getTexCoord0Strider(texcoordsp);
+            if (!group->mVertexBuffer->getTexCoord0Strider(texcoordsp))
+            {
+                group->mVertexBuffer = NULL;
+                group->mBufferMap.clear();
+                group->mLastUpdateTime = gFrameTimeSeconds;
+                group->clearState(LLSpatialGroup::GEOM_DIRTY);
+                return;
+            }
 
             for (U32 i = 0; i < vertex_count; i += 4)
             {

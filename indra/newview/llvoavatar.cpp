@@ -2934,10 +2934,17 @@ void LLVOAvatar::updateMeshData()
                         << num_vertices << " vertices and "
                         << num_indices << " indices" << LL_ENDL;
                     // Attempt to create a dummy triangle (one vertex, 3 indices, all 0)
-                    facep->setSize(1, 3);
-                    buff->allocateBuffer(1, 3);
-                    memset((U8*) buff->getMappedData(), 0, buff->getSize());
-                    memset((U8*) buff->getMappedIndices(), 0, buff->getIndicesSize());
+                    if (buff->allocateBuffer(1, 3) && buff->getMappedData() && buff->getMappedIndices())
+                    {
+                        facep->setSize(1, 3);
+                        memset((U8*) buff->getMappedData(), 0, buff->getSize());
+                        memset((U8*) buff->getMappedIndices(), 0, buff->getIndicesSize());
+                    }
+                    else
+                    {
+                        facep->setSize(0, 0);
+                        buff = NULL;
+                    }
                 }
                 facep->setVertexBuffer(buff);
             }
@@ -2955,10 +2962,16 @@ void LLVOAvatar::updateMeshData()
                     {
                         LL_WARNS() << "Failed to allocate vertex buffer for Mesh, Substituting" << LL_ENDL;
                         // Attempt to create a dummy triangle (one vertex, 3 indices, all 0)
-                        facep->setSize(1, 3);
-                        buff->allocateBuffer(1, 3);
-                        memset((U8*) buff->getMappedData(), 0, buff->getSize());
-                        memset((U8*) buff->getMappedIndices(), 0, buff->getIndicesSize());
+                        if (buff->allocateBuffer(1, 3) && buff->getMappedData() && buff->getMappedIndices())
+                        {
+                            facep->setSize(1, 3);
+                            memset((U8*) buff->getMappedData(), 0, buff->getSize());
+                            memset((U8*) buff->getMappedIndices(), 0, buff->getIndicesSize());
+                        }
+                        else
+                        {
+                            facep->setSize(0, 0);
+                        }
                     }
                 }
             }

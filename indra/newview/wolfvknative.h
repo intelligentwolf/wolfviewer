@@ -28,6 +28,7 @@
 
 #include "llsd.h"
 #include <string>
+#include <vector>
 
 class LLWindow;
 class LLGLSLShader;
@@ -41,12 +42,28 @@ namespace WolfVkNative
     // True once init() succeeded and until shutdown().
     bool isActive();
 
+    // True when the active Native Vulkan device is an integrated (unified-memory) GPU.
+    bool isIntegratedGPU();
+
+    // True when the Vulkan device is hung or lost (e.g. a frame timed out or VK_ERROR_DEVICE_LOST).
+    bool isHung();
+    std::string hungReason();
+
+    // Hardware-derived memory bandwidth estimate (GB/s) for LLFeatureManager GPU class selection in Native Vulkan
+    // (replaces the OpenGL ARB_timer_query benchmark, which produces 0/0 NaN without an OpenGL context).
+    F32 estimatedMemoryBandwidthGBps();
+
     // Called in place of swapBuffers() / WolfVkBridge::present(). Ends any active pass, blits window target
     // to swapchain image, submits, and presents.
     bool present();
 
     // Called at end of main-loop frame when display did not call present() (e.g. minimized / unshown frame).
     void endUnshownFrame();
+
+    // Submit any open snapshot frame and read back the bound LLRenderTarget (or window target if none is bound).
+    // Color readbacks return tightly packed 4-byte RGBA/BGRA pixels in OpenGL bottom-up row order (out_bgra true
+    // when BGRA); depth readbacks return tightly packed 32-bit floats in OpenGL bottom-up row order.
+    bool readSnapshotTarget(bool depth, std::vector<U8>& out_bytes, U32& out_width, U32& out_height, bool& out_bgra);
 
     // Window resize notification from LLViewerWindow::reshape().
     void onResize();

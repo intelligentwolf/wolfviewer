@@ -43,6 +43,8 @@
 #include "llnotificationsutil.h"
 #include "wolfvknative.h"
 #include "vk/wolfcoreloader.h"
+
+extern bool wolf_pipeline_has_rebuild_backlog();
 #include "vk/wolfvkstate.h"
 
 #if LL_WINDOWS
@@ -374,10 +376,37 @@ void LLReflectionMapManager::update()
         refresh_frame = (plan.refresh_complete_probe != 0u);
     }
 
+    // Pace local volume probe faces while geometry is rebuilding or frame time exceeds 25 ms (< 40 FPS) so login and
+    // camera turns do not pay 7 extra unoccluded scene + 28 sun-shadow cascade passes per frame. mDefaultProbe (sky/
+    // terrain ambiance only) always finishes its initial 12 passes at once so PBR sky lighting is ready immediately.
+    const F32 last_frame_s = (F32)gFrameIntervalSeconds.value();
+    const bool frame_pressed = (last_frame_s > 0.025f) || wolf_pipeline_has_rebuild_backlog();
+    const bool frame_stalled = (last_frame_s > 0.045f);
+    auto allow_probe_face = [&](const LLReflectionMap* probe) -> bool
+    {
+        if (!probe)
+        {
+            return false;
+        }
+        if (probe == mDefaultProbe && !probe->mComplete)
+        {
+            return true;
+        }
+        if (frame_stalled && mDefaultProbe->mComplete)
+        {
+            return (s_probe_frame % 6u) == 0u;
+        }
+        if (frame_pressed)
+        {
+            return refresh_frame;
+        }
+        return !probe->mComplete || refresh_frame;
+    };
+
     if (mUpdatingProbe != nullptr)
     {
         did_update = true;   // a probe is in progress: no other starts this frame, refresh frame or not
-        if (!mUpdatingProbe->mComplete || refresh_frame)
+        if (allow_probe_face(mUpdatingProbe))
         {
             doProbeUpdate();
         }
@@ -527,7 +556,7 @@ void LLReflectionMapManager::update()
         // </FS:Beq>
     }
 
-    if (realtime && closestDynamic != nullptr)
+    if (realtime && closestDynamic != nullptr && !frame_pressed && mDefaultProbe->mComplete && closestDynamic->mComplete)
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("rmmu - realtime");
         // update the closest dynamic probe realtime
@@ -562,7 +591,7 @@ void LLReflectionMapManager::update()
     }
 
     // switch to updating the next oldest probe
-    if (!did_update && oldestProbe != nullptr && (!oldestProbe->mComplete || refresh_frame))   // [W114-VULKAN 2026-11-27] WolfProbeUpdateInterval
+    if (!did_update && oldestProbe != nullptr && allow_probe_face(oldestProbe))   // [W114-VULKAN 2026-11-27] WolfProbeUpdateInterval
     {
         LLReflectionMap* probe = oldestProbe;
         llassert(probe->mCubeIndex != -1);

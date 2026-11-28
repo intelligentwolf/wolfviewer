@@ -2033,6 +2033,33 @@ bool LLAppViewer::doFrame()
                 pingMainloopTimeout("Main:Display");
                 gGLActive = true;
 
+                bool ran_probes_pre_display = false;
+                if (gGLManager.mIsNativeVulkan &&
+                    LLStartUp::getStartupState() == STATE_STARTED &&
+                    !gDisconnected &&
+                    !gTeleportDisplay &&
+                    !gRestoreGL &&
+                    !gWindowResized &&
+                    !gResizeScreenTexture &&
+                    !gResizeShadowTexture &&
+                    !logoutRequestSent() &&
+                    gPipeline.mAuxillaryRT.deferredScreen.isComplete() &&
+                    gViewerWindow->getActive() &&
+                    gViewerWindow->getWindow() &&
+                    gViewerWindow->getWindow()->getVisible() &&
+                    !gViewerWindow->getWindow()->getMinimized())
+                {
+                    // Record reflection-probe cubemap updates in the same Vulkan command buffer BEFORE displayFrame()
+                    // presents, so one viewer frame consumes one frame-in-flight slot instead of two.
+                    LLPerfStats::RecordSceneTime T(LLPerfStats::StatType_t::RENDER_IDLE);
+                    LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df Probes PreDisplay");
+                    pingMainloopTimeout("Main:Probes");
+                    WolfVRScreen::framePart(WolfVRScreen::FramePart::Probes, true);
+                    gPipeline.mReflectionMapManager.update();
+                    WolfVRScreen::framePart(WolfVRScreen::FramePart::Probes, false);
+                    ran_probes_pre_display = true;
+                }
+
                 WolfVRScreen::displayFrame();   // [VR STEREO 2026-11-04/] display(), or one display() per eye in VR 3D Mode
                 WolfVkBridge::endUnshownFrame();   // [VR 3D POOL 2026-11-09/] a Vulkan frame slot not closed by a present (paused desktop)
 
@@ -2041,9 +2068,12 @@ bool LLAppViewer::doFrame()
                     LLPerfStats::RecordSceneTime T(LLPerfStats::StatType_t::RENDER_IDLE);
                     LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df Snapshot");
                     pingMainloopTimeout("Main:Snapshot");
-                    WolfVRScreen::framePart(WolfVRScreen::FramePart::Probes, true);   // [VR FRAME PARTS 2026-11-05/]
-                    gPipeline.mReflectionMapManager.update();
-                    WolfVRScreen::framePart(WolfVRScreen::FramePart::Probes, false);
+                    if (!ran_probes_pre_display)
+                    {
+                        WolfVRScreen::framePart(WolfVRScreen::FramePart::Probes, true);   // [VR FRAME PARTS 2026-11-05/]
+                        gPipeline.mReflectionMapManager.update();
+                        WolfVRScreen::framePart(WolfVRScreen::FramePart::Probes, false);
+                    }
                     LLFloaterSnapshot::update(); // take snapshots
                     LLFloaterSimpleSnapshot::update();
                     LLFloaterFlickr::update(); // <FS:Beq/> FIRE-35002 - Flickr preview not updating whne opened directly from tool tray icon

@@ -1049,7 +1049,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         if (!WolfVRScreen::secondEye())   // [VR FPS 2026-11-04/] once a frame (see above)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Update Geom");
-            const F32 max_geom_update_time = 0.005f*10.f*gFrameIntervalSeconds.value(); // 50 ms/second update time
+            const F32 max_geom_update_time = llclamp(0.050f * (F32)gFrameIntervalSeconds.value(), 0.001f, 0.004f);
             { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "createObjects R" : "createObjects L"); gPipeline.createObjects(max_geom_update_time); }
             { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "processPartitionQ R" : "processPartitionQ L"); gPipeline.processPartitionQ(); }
             { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "updateGeom R" : "updateGeom L"); gPipeline.updateGeom(max_geom_update_time); }

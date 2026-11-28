@@ -202,6 +202,9 @@ namespace
         VkBuffer mDeviceBuf = VK_NULL_HANDLE;
         WolfVkAllocation mDeviceAlloc{};
         VkDeviceSize mDeviceSize = 0;
+        const U8* mClientBacking = nullptr;
+        size_t mClientSize = 0;
+        size_t mLogicalSize = 0;
         std::vector<uint8_t> mShadow;
         size_t mValidBytes = 0;
         uint64_t mAllocGen = 0;
@@ -363,14 +366,9 @@ namespace
 
             auto entry = std::make_unique<NativeBufferEntry>();
             entry->mIsIndex = is_index;
+            entry->mLogicalSize = size;
             entry->mBuf = acquireBuffer(is_index, size);
             if (!entry->mBuf) return false;
-            if (uint8_t* h = entry->mBuf->hostData())
-            {
-                memset(h, 0, size);
-                entry->mBuf->markDirty(0, size);
-            }
-            entry->mShadow.assign(size, 0);
             entry->mValidBytes = 0;
             NativeBufferEntry* raw = entry.get();
             {
@@ -382,16 +380,33 @@ namespace
             return true;
         }
 
+        void setClientBacking(void* handle, const U8* data, U32 size) override
+        {
+            if (!handle) return;
+            auto* entry = static_cast<NativeBufferEntry*>(handle);
+            entry->mClientBacking = data;
+            entry->mClientSize = static_cast<size_t>(size);
+            if (data)
+            {
+                entry->mShadow.clear();
+                entry->mShadow.shrink_to_fit();
+            }
+        }
+
         void write(void* handle, U32 offset, U32 size, const U8* data) override
         {
             if (!handle || !data || size == 0 || !sDevice.hasDevice() || sDevice.hung()) return;
             auto* entry = static_cast<NativeBufferEntry*>(handle);
             const size_t end_off = static_cast<size_t>(offset) + static_cast<size_t>(size);
-            if (entry->mShadow.size() < end_off)
+            const size_t prev_valid = entry->mValidBytes;
+            if (!entry->mClientBacking)
             {
-                entry->mShadow.resize(end_off, 0);
+                if (entry->mShadow.size() < end_off)
+                {
+                    entry->mShadow.resize(end_off, 0);
+                }
+                memcpy(entry->mShadow.data() + offset, data, size);
             }
-            memcpy(entry->mShadow.data() + offset, data, size);
             entry->mValidBytes = std::max(entry->mValidBytes, end_off);
 
             const uint64_t cur_epoch = sUniforms.epoch();
@@ -433,11 +448,31 @@ namespace
             const bool in_flight = (entry->mLastDrawnEpoch != UINT64_MAX && cur_epoch <= entry->mLastDrawnEpoch + fif);
             if (need_grow || in_flight)
             {
-                const VkDeviceSize want_sz = std::max<VkDeviceSize>(end_off, entry->mShadow.size());
+                const size_t backing_sz = entry->mClientBacking ? entry->mClientSize : entry->mShadow.size();
+                const VkDeviceSize want_sz = std::max<VkDeviceSize>(end_off, std::max<size_t>(backing_sz, entry->mLogicalSize));
                 auto new_buf = acquireBuffer(entry->mIsIndex, want_sz);
                 if (new_buf)
                 {
-                    if (!entry->mShadow.empty())
+                    if (entry->mClientBacking)
+                    {
+                        const size_t full_valid = std::min(entry->mClientSize, std::max(entry->mValidBytes, prev_valid));
+                        if (offset == 0 && size >= full_valid)
+                        {
+                            new_buf->write(0, data, size);
+                        }
+                        else
+                        {
+                            if (full_valid > 0)
+                            {
+                                new_buf->write(0, entry->mClientBacking, full_valid);
+                            }
+                            if (end_off > full_valid)
+                            {
+                                new_buf->write(offset, data, size);
+                            }
+                        }
+                    }
+                    else if (!entry->mShadow.empty())
                     {
                         new_buf->write(0, entry->mShadow.data(), entry->mShadow.size());
                     }
@@ -504,8 +539,9 @@ namespace
                     continue;
                 }
 
+                const size_t backing_sz = entry->mClientBacking ? entry->mClientSize : entry->mShadow.size();
                 const VkDeviceSize span_sz = std::max<VkDeviceSize>(static_cast<VkDeviceSize>(entry->mValidBytes),
-                                                                    static_cast<VkDeviceSize>(entry->mShadow.size()));
+                                                                    static_cast<VkDeviceSize>(backing_sz));
                 const VkDeviceSize dev_sz = std::max<VkDeviceSize>(16, span_sz);
                 const VkDeviceSize copy_sz = std::min<VkDeviceSize>(entry->mBuf->size(), dev_sz);
                 VkBuffer dev_buf = VK_NULL_HANDLE;
@@ -551,6 +587,16 @@ namespace
         {
             if (!handle) return;
             auto* entry = static_cast<NativeBufferEntry*>(handle);
+            if (entry->mValidBytes == 0 && entry->mDeviceBuf == VK_NULL_HANDLE && entry->mBuf && entry->mBuf->isValid())
+            {
+                const VkDeviceSize zero_sz = std::min<VkDeviceSize>(entry->mBuf->size(), std::max<size_t>(entry->mLogicalSize, 1u));
+                if (uint8_t* h = entry->mBuf->hostData())
+                {
+                    memset(h, 0, static_cast<size_t>(zero_sz));
+                    entry->mBuf->markDirty(0, zero_sz);
+                }
+                entry->mValidBytes = static_cast<size_t>(zero_sz);
+            }
             entry->mLastDrawnEpoch = epoch;
         }
 
@@ -1529,6 +1575,10 @@ namespace
 
     VkCommandBuffer pickTransferCmdForImage(WolfVkImage* img)
     {
+        if (!sFrameOpen && sActive)
+        {
+            ensureFrameOpen();
+        }
         if (!sFrameOpen || sFrameCmd == VK_NULL_HANDLE) return VK_NULL_HANDLE;
         if (img && img->isValid() &&
             sAttachmentImages.find(img->image()) == sAttachmentImages.end() &&
@@ -4213,6 +4263,9 @@ void endUnshownFrame()
     if (!sActive || !sFrameOpen) return;
     endActivePass();
     const uint32_t slot = sDevice.frameIndex();
+    const double frame_uniform_kb = static_cast<double>(sUniforms.used()) / 1024.0;
+    const double frame_staging_kb = static_cast<double>(sStagingRing.used()) / 1024.0;
+    const uint32_t frame_occ_issued = static_cast<uint32_t>(sRecordedQueriesThisFrame.size());
     if (VkCommandBuffer pre_cmd = sDevice.prePassTransferCmd())
     {
         writeTimestamp(pre_cmd, slot, TS_UPLOADS_DONE, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
@@ -4225,6 +4278,22 @@ void endUnshownFrame()
     if (slot < MAX_TS_FRAME_SLOTS)
     {
         sTsSubmittedMask[slot] = ok_end ? sTsRecordedMask[slot] : 0;
+    }
+    if (sPerf.mHasLastPresent)
+    {
+        sPerf.mWinCpuFenceMs += sPerf.mFenceWaitMsThisFrame;
+        sPerf.mWinCpuDrawMs += sPerf.mVkDrawMsThisFrame;
+        sPerf.mWinDraws += sDrawsThisFrame;
+        sPerf.mWinPushConstDraws += sPerf.mPushConstDrawsThisFrame;
+        sPerf.mWinIndirectBatches += sPerf.mIndirectBatchesThisFrame;
+        sPerf.mWinPasses += sPerf.mPassesThisFrame;
+        sPerf.mWinMtPasses += sPerf.mMtPassesThisFrame;
+        sPerf.mWinMtDraws += sPerf.mMtDrawsThisFrame;
+        sPerf.mWinOccIssued += frame_occ_issued;
+        sPerf.mWinOccRead += sPerf.mOccReadThisFrame;
+        sPerf.mWinOccCulled += sPerf.mOccCulledThisFrame;
+        sPerf.mWinUniformKb += frame_uniform_kb;
+        sPerf.mWinStagingKb += frame_staging_kb;
     }
     sFrameOpen = false;
     sFrameCmd = VK_NULL_HANDLE;

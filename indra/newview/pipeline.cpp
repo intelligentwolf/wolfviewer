@@ -726,10 +726,62 @@ LLPipeline::~LLPipeline()
 {
 }
 
+namespace
+{
+    bool sWolfGeometryRebuildBacklog = false;
+    U32  sWolfGroupRebuildFrame = 0;
+    F32  sWolfGroupRebuildSeconds = 0.f;
+
+    void wolf_reset_group_rebuild_budget_if_new_frame()
+    {
+        const U32 f = LLFrameTimer::getFrameCount();
+        if (f != sWolfGroupRebuildFrame)
+        {
+            sWolfGroupRebuildFrame = f;
+            sWolfGroupRebuildSeconds = 0.f;
+        }
+    }
+
+    F32 wolf_group_surface_dist_sq(const LLSpatialGroup* group, const LLVector3& cam)
+    {
+        const LLVector4a* bounds = group->getBounds();
+        const F32* c = bounds[0].getF32ptr();
+        const F32* r = bounds[1].getF32ptr();
+        const F32 dx = llmax(0.f, fabsf(cam.mV[VX] - c[0]) - r[0]);
+        const F32 dy = llmax(0.f, fabsf(cam.mV[VY] - c[1]) - r[1]);
+        const F32 dz = llmax(0.f, fabsf(cam.mV[VZ] - c[2]) - r[2]);
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    bool wolf_is_immediate_priority_group(LLSpatialGroup* group)
+    {
+        if (!group || group->isDead())
+        {
+            return true;
+        }
+        if (group->isHUDGroup())
+        {
+            return true;
+        }
+        LLSpatialPartition* part = group->getSpatialPartition();
+        if (!part || part->isBridge() || part->mPartitionType != LLViewerRegion::PARTITION_VOLUME)
+        {
+            return true;
+        }
+        return false;
+    }
+}
+
+bool wolf_pipeline_has_rebuild_backlog()
+{
+    return sWolfGeometryRebuildBacklog;
+}
+
 void LLPipeline::cleanup()
 {
     assertInitialized();
 
+    sWolfGeometryRebuildBacklog = false;
     mGroupQ1.clear() ;
 
     for(pool_set_t::iterator iter = mPools.begin();
@@ -3041,25 +3093,92 @@ void LLPipeline::rebuildPriorityGroups()
     LL_PROFILE_ZONE_SCOPED_CATEGORY_PIPELINE;
     LL_PROFILE_GPU_ZONE("rebuildPriorityGroups");
 
-    LLTimer update_timer;
     assertInitialized();
+    wolf_reset_group_rebuild_budget_if_new_frame();
 
-    gMeshRepo.notifyLoadedMeshes();
+    if (!sShadowRender && !sReflectionRender && !gCubeSnapshot)
+    {
+        gMeshRepo.notifyLoadedMeshes();
+    }
+
+    if (mGroupQ1.empty())
+    {
+        sWolfGeometryRebuildBacklog = !mCreateQ.empty() || !mBuildQ1.empty();
+        return;
+    }
 
     mGroupQ1Locked = true;
-    // Iterate through all drawables on the priority build queue,
+
+    const LLVector3 wolf_cam = LLViewerCamera::getInstance()->getOrigin();
+    static constexpr F32 NEAR_GROUP_M = 16.f;
+    static constexpr F32 FRAME_GROUP_BUDGET_S = 0.004f;
+    static constexpr F32 NEAR_GROUP_BUDGET_S  = 0.006f;
+    static constexpr size_t MIN_GROUPS_PER_CALL = 4;
+
+    std::vector<std::pair<F32, LLSpatialGroup*>> volume_groups;
+    volume_groups.reserve(mGroupQ1.size());
+    LLSpatialGroup::sg_vector_t deferred_groups;
+
     for (LLSpatialGroup::sg_vector_t::iterator iter = mGroupQ1.begin();
          iter != mGroupQ1.end(); ++iter)
     {
         LLSpatialGroup* group = *iter;
-        group->rebuildGeom();
-        group->clearState(LLSpatialGroup::IN_BUILD_Q1);
+        if (!group || group->isDead())
+        {
+            if (group)
+            {
+                group->clearState(LLSpatialGroup::IN_BUILD_Q1);
+                mGroupSaveQ1.push_back(group);
+            }
+            continue;
+        }
+        if (wolf_is_immediate_priority_group(group))
+        {
+            LLTimer t;
+            group->rebuildGeom();
+            sWolfGroupRebuildSeconds += t.getElapsedTimeF32();
+            group->clearState(LLSpatialGroup::IN_BUILD_Q1);
+            mGroupSaveQ1.push_back(group);
+            continue;
+        }
+        volume_groups.emplace_back(wolf_group_surface_dist_sq(group, wolf_cam), group);
     }
 
-    mGroupSaveQ1 = mGroupQ1;
-    mGroupQ1.clear();
-    mGroupQ1Locked = false;
+    if (!volume_groups.empty())
+    {
+        std::sort(volume_groups.begin(), volume_groups.end(),
+                  [](const std::pair<F32, LLSpatialGroup*>& a, const std::pair<F32, LLSpatialGroup*>& b)
+                  {
+                      return a.first < b.first;
+                  });
 
+        size_t built_this_call = 0;
+        for (size_t i = 0; i < volume_groups.size(); ++i)
+        {
+            const F32 d2 = volume_groups[i].first;
+            LLSpatialGroup* group = volume_groups[i].second;
+            const F32 budget = (d2 <= NEAR_GROUP_M * NEAR_GROUP_M) ? NEAR_GROUP_BUDGET_S : FRAME_GROUP_BUDGET_S;
+            // In shadow passes, never stall beyond the shared frame budget; in the main camera pass, always build at
+            // least MIN_GROUPS_PER_CALL nearest groups so mGroupQ1 drains steadily even for heavy multi-mesh groups.
+            const bool force_progress = (!sShadowRender && built_this_call < MIN_GROUPS_PER_CALL && sWolfGroupRebuildSeconds < NEAR_GROUP_BUDGET_S * 1.5f)
+                                     || (sWolfGroupRebuildSeconds == 0.f && built_this_call == 0);
+            if (!force_progress && sWolfGroupRebuildSeconds >= budget)
+            {
+                deferred_groups.push_back(group);
+                continue;
+            }
+            LLTimer t;
+            group->rebuildGeom();
+            sWolfGroupRebuildSeconds += t.getElapsedTimeF32();
+            ++built_this_call;
+            group->clearState(LLSpatialGroup::IN_BUILD_Q1);
+            mGroupSaveQ1.push_back(group);
+        }
+    }
+
+    mGroupQ1.swap(deferred_groups);
+    mGroupQ1Locked = false;
+    sWolfGeometryRebuildBacklog = !mCreateQ.empty() || !mBuildQ1.empty() || !mGroupQ1.empty();
 }
 
 void LLPipeline::updateGeom(F32 max_dtime)
@@ -3079,20 +3198,21 @@ void LLPipeline::updateGeom(F32 max_dtime)
     // for now, only LLVOVolume does this to throttle LOD changes
     LLVOVolume::preUpdateGeom();
 
-    // <WolfViewer 2026-10-08> PACED FAR REBUILDS. Paul: with regions 4 km away in view "the water was
-    // jerky and bad". Every queued drawable was rebuilt in the frame it was queued, whatever that cost
-    // (max_dtime was never used here), so a burst of objects arriving from far away stalled frames.
-    // Now in-world prims and mesh farther than WOLF_NEAR_REBUILD_M from the camera are set aside and
-    // rebuilt after the rest, NEAREST FIRST, for at most WolfViewerFarRebuildMs a frame (at least one a
-    // frame, so the queue always drains); what is left waits for the next frame. Everything else -
-    // near prims, attachments (HUDs included), avatars, terrain, water, sky - is rebuilt at once as
-    // before. WolfViewerFarRebuildMs 0 = the old behaviour.
+    // <WolfViewer 2026-10-08 / W116> PACED NEAREST-FIRST REBUILDS. Rebuilding every volume within 256 m in a single
+    // frame stalled display() for 100-270 ms on login/camera turn in dense indoor/castle builds. Now only attachments,
+    // avatars, terrain, sky, water, and immediate-room volumes (<= 16 m within a 4 ms cap) rebuild in the unpaced pass;
+    // all remaining in-world volumes are sorted nearest-first and rebuilt within the per-frame budget.
     static LLCachedControl<F32> wolf_far_ms(gSavedSettings, "WolfViewerFarRebuildMs", 2.f);
-    static const F32 WOLF_NEAR_REBUILD_M = 256.f;
-    static const size_t WOLF_FAR_SORTED = 256;   // more than fit in one frame's budget
+    static const F32 WOLF_NEAR_REBUILD_M = 16.f;
+    static const F32 WOLF_NEAR_BUDGET_S  = 0.004f;
+    static const size_t WOLF_NEAR_MIN    = 8;
+    static const size_t WOLF_FAR_MIN     = 4;
+    static const size_t WOLF_FAR_SORTED  = 256;   // more than fit in one frame's budget
     const bool wolf_pace = wolf_far_ms() > 0.f;
     const LLVector3 wolf_cam = LLViewerCamera::getInstance()->getOrigin();
     std::vector<std::pair<F32, LLDrawable::drawable_list_t::iterator>> wolf_far;
+    LLTimer near_timer;
+    size_t near_volumes_built = 0;
     // the original loop body: rebuild one queued drawable, off the queue once built
     auto wolf_rebuild = [this](LLDrawable::drawable_list_t::iterator curiter)
     {
@@ -3122,7 +3242,7 @@ void LLPipeline::updateGeom(F32 max_dtime)
          iter != mBuildQ1.end();)
     {
         LLDrawable::drawable_list_t::iterator curiter = iter++;
-        // <WolfViewer 2026-10-08> a far in-world prim waits for the far pass below
+        // <WolfViewer 2026-10-08> a far (or over-budget near) in-world prim waits for the nearest-first pass below
         LLDrawable* drawablep = *curiter;
         if (wolf_pace && drawablep && !drawablep->isDead())
         {
@@ -3130,11 +3250,13 @@ void LLPipeline::updateGeom(F32 max_dtime)
             if (vol && !vol->getRootEdit()->isAttachment())
             {
                 const F32 d2 = dist_vec_squared(drawablep->getPositionAgent(), wolf_cam);
-                if (d2 > WOLF_NEAR_REBUILD_M * WOLF_NEAR_REBUILD_M)
+                if (d2 > WOLF_NEAR_REBUILD_M * WOLF_NEAR_REBUILD_M ||
+                    (near_volumes_built >= WOLF_NEAR_MIN && near_timer.getElapsedTimeF32() > WOLF_NEAR_BUDGET_S))
                 {
                     wolf_far.emplace_back(d2, curiter);
                     continue;
                 }
+                ++near_volumes_built;
             }
         }
         wolf_rebuild(curiter);
@@ -3153,10 +3275,10 @@ void LLPipeline::updateGeom(F32 max_dtime)
         }
         std::sort(wolf_far.begin(), wolf_far.begin() + n, nearer);
         LLTimer far_timer;
-        const F32 far_budget = wolf_far_ms() * 0.001f;
+        const F32 far_budget = llmax(wolf_far_ms(), 3.f) * 0.001f;
         for (size_t i = 0; i < n; ++i)
         {
-            if (i > 0 && far_timer.getElapsedTimeF32() > far_budget)
+            if (i >= WOLF_FAR_MIN && far_timer.getElapsedTimeF32() > far_budget)
             {
                 break;
             }
@@ -3166,6 +3288,7 @@ void LLPipeline::updateGeom(F32 max_dtime)
     // </WolfViewer>
 
     updateMovedList(mMovedBridge);
+    sWolfGeometryRebuildBacklog = !mCreateQ.empty() || !mBuildQ1.empty() || !mGroupQ1.empty();
 }
 
 void LLPipeline::markVisible(LLDrawable *drawablep, LLCamera& camera)
@@ -3925,7 +4048,23 @@ void LLPipeline::postSort(LLCamera &camera)
 
         if (group->hasState(LLSpatialGroup::NEW_DRAWINFO) && group->hasState(LLSpatialGroup::GEOM_DIRTY) && !gCubeSnapshot)
         {  // no way this group is going to be drawable without a rebuild
-            group->rebuildGeom();
+            wolf_reset_group_rebuild_budget_if_new_frame();
+            const LLVector3 wolf_cam = LLViewerCamera::getInstance()->getOrigin();
+            const F32 d2 = wolf_is_immediate_priority_group(group) ? 0.f : wolf_group_surface_dist_sq(group, wolf_cam);
+            const F32 budget = (d2 <= 16.f * 16.f) ? 0.006f : 0.004f;
+            if (wolf_is_immediate_priority_group(group) || sWolfGroupRebuildSeconds < budget)
+            {
+                LLTimer t;
+                group->rebuildGeom();
+                sWolfGroupRebuildSeconds += t.getElapsedTimeF32();
+            }
+            else
+            {
+                // Queue onto mGroupQ1 so rebuildPriorityGroups() builds newly-exposed groups nearest-first across the
+                // next frames instead of stalling the camera turn for 100-270 ms.
+                markRebuild(group);
+                sWolfGeometryRebuildBacklog = true;
+            }
         }
 
         // [W107 STATIC BATCH 2026-11-14] in a shadow pass that uses the shared buffers (wolfstaticshadowbatch.h), a group

@@ -614,6 +614,108 @@ namespace
     LLVertexBuffer::WolfVkStore* sWolfVkStore = nullptr;
     std::unordered_set<LLVertexBuffer*> sWolfVkOwned;
     bool sWolfVkBatchOpen = false;   // a write() went to the store since its last batchEnd()
+
+    // Pools 16-byte-aligned client backing blocks for sWolfVkStore buffers (matching LLVBOPool's 5 s reuse on OpenGL)
+    // so spatial-group geometry rebuilds do not churn OS mmap/munmap page faults on large (>128 KB) buffers.
+    class WolfVkClientPool
+    {
+    public:
+        static constexpr U64 MAX_RESERVED_BYTES = 64ull * 1024ull * 1024ull;
+
+        U8* allocate(U32 size, U32& out_alloc_size)
+        {
+            out_alloc_size = bucketSize(size);
+            auto it = mBins.find(out_alloc_size);
+            if (it != mBins.end() && !it->second.empty())
+            {
+                U8* ptr = it->second.back().mData;
+                it->second.pop_back();
+                if (it->second.empty())
+                {
+                    mBins.erase(it);
+                }
+                mReservedBytes -= std::min<U64>(mReservedBytes, out_alloc_size);
+                maybeClean();
+                return ptr;
+            }
+            maybeClean();
+            return static_cast<U8*>(ll_aligned_malloc_16(out_alloc_size));
+        }
+
+        void release(U8* ptr, U32 size)
+        {
+            if (!ptr) return;
+            const U32 bsz = bucketSize(size);
+            if (bsz > 8u * 1024u * 1024u || mReservedBytes + bsz > MAX_RESERVED_BYTES)
+            {
+                ll_aligned_free_16(ptr);
+                maybeClean();
+                return;
+            }
+            mBins[bsz].push_front({ ptr, std::chrono::steady_clock::now() });
+            mReservedBytes += bsz;
+            maybeClean();
+        }
+
+        void clear()
+        {
+            for (auto& kv : mBins)
+            {
+                for (Entry& e : kv.second)
+                {
+                    ll_aligned_free_16(e.mData);
+                }
+            }
+            mBins.clear();
+            mReservedBytes = 0;
+            mTouches = 0;
+        }
+
+    private:
+        struct Entry
+        {
+            U8* mData = nullptr;
+            std::chrono::steady_clock::time_point mAge{};
+        };
+
+        static U32 bucketSize(U32 sz)
+        {
+            if (sz <= 256u) return 256u;
+            if (sz <= 65536u)
+            {
+                U32 b = 256u;
+                while (b < sz) b <<= 1;
+                return b;
+            }
+            return (sz + 4095u) & ~4095u;
+        }
+
+        void maybeClean()
+        {
+            if (++mTouches < 1024u) return;
+            mTouches = 0;
+            using namespace std::chrono_literals;
+            const auto cutoff = std::chrono::steady_clock::now() - 5s;
+            for (auto it = mBins.begin(); it != mBins.end(); )
+            {
+                auto& list = it->second;
+                while (!list.empty() && list.back().mAge < cutoff)
+                {
+                    ll_aligned_free_16(list.back().mData);
+                    mReservedBytes -= std::min<U64>(mReservedBytes, it->first);
+                    list.pop_back();
+                }
+                if (list.empty()) it = mBins.erase(it);
+                else ++it;
+            }
+        }
+
+        std::unordered_map<U32, std::list<Entry>> mBins;
+        U64 mReservedBytes = 0;
+        U32 mTouches = 0;
+    };
+
+    WolfVkClientPool sWolfVkClientPool;
 }
 
 void LLVertexBufferData::drawWithMatrix()
@@ -1053,6 +1155,7 @@ void LLVertexBuffer::setWolfVkStore(WolfVkStore* store)
     {
         sWolfVkBatchOpen = false;
         sWolfVkOwned.clear();
+        sWolfVkClientPool.clear();
     }
 }
 
@@ -1072,14 +1175,19 @@ void LLVertexBuffer::wolfVkReleaseAllToGL()
         {
             if (buffer->mGLBuffer == sAttribBuffer) { sAttribBuffer = 0; sAttribMask = 0; }
             if (sGLRenderBuffer == buffer->mGLBuffer) { glBindBuffer(GL_ARRAY_BUFFER, 0); sGLRenderBuffer = 0; }
-            if (sWolfVkStore) sWolfVkStore->free(buffer->mWolfVkVertexHandle);
+            if (sWolfVkStore)
+            {
+                sWolfVkStore->setClientBacking(buffer->mWolfVkVertexHandle, nullptr, 0);
+                sWolfVkStore->free(buffer->mWolfVkVertexHandle);
+            }
             buffer->mWolfVkVertexHandle = nullptr;
             U8* client = buffer->mMappedData;
+            const U32 old_sz = buffer->mSize;
             buffer->mGLBuffer = 0;
             buffer->mMappedData = nullptr;
             sVBOPool->allocate(GL_ARRAY_BUFFER, buffer->mSize, buffer->mGLBuffer, buffer->mMappedData);
-            memcpy(buffer->mMappedData, client, buffer->mSize);
-            ll_aligned_free_16(client);
+            if (buffer->mMappedData && client) memcpy(buffer->mMappedData, client, buffer->mSize);
+            sWolfVkClientPool.release(client, old_sz);
             glBindBuffer(GL_ARRAY_BUFFER, buffer->mGLBuffer);
             sGLRenderBuffer = buffer->mGLBuffer;
             if (gGLManager.mIsApple) buffer->_mapBuffer();   // the Apple path sends the client copy at its next unmap
@@ -1089,14 +1197,19 @@ void LLVertexBuffer::wolfVkReleaseAllToGL()
         if (buffer->mWolfVkIndexHandle)
         {
             if (sGLRenderIndices == buffer->mGLIndices) { glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); sGLRenderIndices = 0; }
-            if (sWolfVkStore) sWolfVkStore->free(buffer->mWolfVkIndexHandle);
+            if (sWolfVkStore)
+            {
+                sWolfVkStore->setClientBacking(buffer->mWolfVkIndexHandle, nullptr, 0);
+                sWolfVkStore->free(buffer->mWolfVkIndexHandle);
+            }
             buffer->mWolfVkIndexHandle = nullptr;
             U8* client = buffer->mMappedIndexData;
+            const U32 old_isz = buffer->mIndicesSize;
             buffer->mGLIndices = 0;
             buffer->mMappedIndexData = nullptr;
             sVBOPool->allocate(GL_ELEMENT_ARRAY_BUFFER, buffer->mIndicesSize, buffer->mGLIndices, buffer->mMappedIndexData);
-            memcpy(buffer->mMappedIndexData, client, buffer->mIndicesSize);
-            ll_aligned_free_16(client);
+            if (buffer->mMappedIndexData && client) memcpy(buffer->mMappedIndexData, client, buffer->mIndicesSize);
+            sWolfVkClientPool.release(client, old_isz);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->mGLIndices);
             sGLRenderIndices = buffer->mGLIndices;
             if (gGLManager.mIsApple) buffer->_mapBuffer();
@@ -1104,6 +1217,7 @@ void LLVertexBuffer::wolfVkReleaseAllToGL()
             buffer->mMappedIndexRegions.clear();
         }
     }
+    sWolfVkClientPool.clear();
     sWolfVkStore = nullptr;
     sWolfVkBatchOpen = false;
 }
@@ -1113,6 +1227,7 @@ void LLVertexBuffer::cleanupClass()
 {
     unbind();
 
+    sWolfVkClientPool.clear();
     delete sVBOPool;
     sVBOPool = nullptr;
     sAttribBuffer = 0;   // <WolfViewer 2026-11-07 tickets 589/619/> the pool's names are gone
@@ -1251,7 +1366,17 @@ void LLVertexBuffer::genBuffer(U32 size)
         mSize = size;
         if (sWolfVkStore && sWolfVkStore->allocate(false, mSize, mGLBuffer, mWolfVkVertexHandle))
         {
-            mMappedData = (U8*)ll_aligned_malloc_16(mSize);
+            U32 alloc_sz = 0;
+            mMappedData = sWolfVkClientPool.allocate(mSize, alloc_sz);
+            if (!mMappedData)
+            {
+                sWolfVkStore->free(mWolfVkVertexHandle);
+                mWolfVkVertexHandle = nullptr;
+                mGLBuffer = 0;
+                mSize = 0;
+                return;
+            }
+            sWolfVkStore->setClientBacking(mWolfVkVertexHandle, mMappedData, mSize);
             sWolfVkOwned.insert(this);
         }
         return;
@@ -1268,7 +1393,17 @@ void LLVertexBuffer::genBuffer(U32 size)
         // [VK S6a 2026-11-26] the Vulkan-owned store first; the client copy is this buffer's own, as the pool's is
         if (sWolfVkStore && !mWolfGLOnly && sWolfVkStore->allocate(false, mSize, mGLBuffer, mWolfVkVertexHandle))
         {
-            mMappedData = (U8*)ll_aligned_malloc_16(mSize);
+            U32 alloc_sz = 0;
+            mMappedData = sWolfVkClientPool.allocate(mSize, alloc_sz);
+            if (!mMappedData)
+            {
+                sWolfVkStore->free(mWolfVkVertexHandle);
+                mWolfVkVertexHandle = nullptr;
+                mGLBuffer = 0;
+                mSize = 0;
+                return;
+            }
+            sWolfVkStore->setClientBacking(mWolfVkVertexHandle, mMappedData, mSize);
             sWolfVkOwned.insert(this);
             return;
         }
@@ -1287,7 +1422,17 @@ void LLVertexBuffer::genIndices(U32 size)
         mIndicesSize = size;
         if (sWolfVkStore && sWolfVkStore->allocate(true, mIndicesSize, mGLIndices, mWolfVkIndexHandle))
         {
-            mMappedIndexData = (U8*)ll_aligned_malloc_16(mIndicesSize);
+            U32 alloc_sz = 0;
+            mMappedIndexData = sWolfVkClientPool.allocate(mIndicesSize, alloc_sz);
+            if (!mMappedIndexData)
+            {
+                sWolfVkStore->free(mWolfVkIndexHandle);
+                mWolfVkIndexHandle = nullptr;
+                mGLIndices = 0;
+                mIndicesSize = 0;
+                return;
+            }
+            sWolfVkStore->setClientBacking(mWolfVkIndexHandle, mMappedIndexData, mIndicesSize);
             sWolfVkOwned.insert(this);
         }
         return;
@@ -1303,7 +1448,17 @@ void LLVertexBuffer::genIndices(U32 size)
         // [VK S6a 2026-11-26] as genBuffer
         if (sWolfVkStore && !mWolfGLOnly && sWolfVkStore->allocate(true, mIndicesSize, mGLIndices, mWolfVkIndexHandle))
         {
-            mMappedIndexData = (U8*)ll_aligned_malloc_16(mIndicesSize);
+            U32 alloc_sz = 0;
+            mMappedIndexData = sWolfVkClientPool.allocate(mIndicesSize, alloc_sz);
+            if (!mMappedIndexData)
+            {
+                sWolfVkStore->free(mWolfVkIndexHandle);
+                mWolfVkIndexHandle = nullptr;
+                mGLIndices = 0;
+                mIndicesSize = 0;
+                return;
+            }
+            sWolfVkStore->setClientBacking(mWolfVkIndexHandle, mMappedIndexData, mIndicesSize);
             sWolfVkOwned.insert(this);
             return;
         }
@@ -1379,9 +1534,13 @@ void LLVertexBuffer::destroyGLBuffer()
                 glBindBuffer(GL_ARRAY_BUFFER, 0);
                 sGLRenderBuffer = 0;
             }
-            if (sWolfVkStore) sWolfVkStore->free(mWolfVkVertexHandle);
+            if (sWolfVkStore)
+            {
+                sWolfVkStore->setClientBacking(mWolfVkVertexHandle, nullptr, 0);
+                sWolfVkStore->free(mWolfVkVertexHandle);
+            }
             mWolfVkVertexHandle = nullptr;
-            ll_aligned_free_16(mMappedData);
+            sWolfVkClientPool.release(mMappedData, mSize);
             if (sWolfVkStore && !mWolfVkIndexHandle) sWolfVkOwned.erase(this);
         }
         else
@@ -1410,9 +1569,13 @@ void LLVertexBuffer::destroyGLIndices()
                 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
                 sGLRenderIndices = 0;
             }
-            if (sWolfVkStore) sWolfVkStore->free(mWolfVkIndexHandle);
+            if (sWolfVkStore)
+            {
+                sWolfVkStore->setClientBacking(mWolfVkIndexHandle, nullptr, 0);
+                sWolfVkStore->free(mWolfVkIndexHandle);
+            }
             mWolfVkIndexHandle = nullptr;
-            ll_aligned_free_16(mMappedIndexData);
+            sWolfVkClientPool.release(mMappedIndexData, mIndicesSize);
             if (sWolfVkStore && !mWolfVkVertexHandle) sWolfVkOwned.erase(this);
         }
         else
@@ -1603,11 +1766,11 @@ void LLVertexBuffer::flush_vbo(GLenum target, U32 start, U32 end, void* data, U8
     {
         if (end != 0 && sWolfVkStore)
         {
+            // Update the client mirror first so NativeBufferStore's clientBacking pointer sees the full up-to-date
+            // buffer on copy-on-write or un-promotion without keeping a second heap shadow copy.
+            if ((const U8*)data != dst + start) memcpy(dst + start, data, end - start + 1);
             sWolfVkStore->write(wolf_handle, start, end - start + 1, (const U8*)data);
             sWolfVkBatchOpen = true;
-            // the setXxxData callers pass their own array: the client copy takes it too, so it always holds the whole
-            // buffer (wolfVkReleaseAllToGL refills an OpenGL buffer from it)
-            if ((const U8*)data != dst + start) memcpy(dst + start, data, end - start + 1);
         }
         return;
     }

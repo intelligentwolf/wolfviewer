@@ -133,7 +133,7 @@ namespace
 
     // Copies are made when a shadow pass first wants a group, at most this many bytes of buffer data a frame (a group
     // waiting its turn takes the stock path meanwhile): arriving in a busy region must not add a long frame.
-    const U32 BUILD_BYTES_PER_FRAME = 4 * 1024 * 1024;
+    const U32 BUILD_BYTES_PER_FRAME = 6 * 1024 * 1024;
 
     // First fit over a free list keyed by offset; neighbours are joined when a range comes back.
     class RangeAllocator

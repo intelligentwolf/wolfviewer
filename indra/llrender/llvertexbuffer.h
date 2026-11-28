@@ -371,6 +371,10 @@ public:
         virtual void free(void* handle) = 0;
         // size bytes at data replace the range's bytes from start. The bytes are copied before write() returns.
         virtual void write(void* handle, U32 start, U32 size, const U8* data) = 0;
+        // Optional client-RAM mirror owned by LLVertexBuffer (mMappedData / mMappedIndexData), valid until free(handle).
+        // Lets NativeBufferStore read non-overlapping byte ranges directly from LLVertexBuffer's client buffer on
+        // copy-on-write or un-promotion without keeping a duplicate heap vector per buffer.
+        virtual void setClientBacking(void* /*handle*/, const U8* /*data*/, U32 /*size*/) {}
         // Every write() since the last batchEnd() must be visible to both renderers when this returns
         // (to OpenGL: in command order, as glBufferSubData would have been).
         virtual void batchEnd() = 0;
